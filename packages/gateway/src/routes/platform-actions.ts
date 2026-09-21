@@ -10,7 +10,7 @@ const decide = z.object({ digest: z.string().length(64), approved: z.boolean() }
 export function createPlatformActionRoutes(deps: Omit<CommandContext, 'userId'>): Router {
     const router = Router();
     router.use(authenticate);
-    const service = (req: unknown) => new PlatformActions({ ...deps, userId: (req as AuthenticatedRequest).userId }, createPlatformCommands());
+    const service = (req: unknown) => new PlatformActions({ ...deps, actionOrigin:{kind:'owner_api'}, userId: (req as AuthenticatedRequest).userId }, createPlatformCommands());
     const handler = (fn: (req: import('express').Request) => unknown) => async (req: import('express').Request, res: import('express').Response) => {
         try {
             res.json({ code: 0, data: await fn(req), message: '' });

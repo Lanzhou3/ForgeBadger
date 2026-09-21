@@ -42,6 +42,30 @@ export interface SseResponseLike {
 
 const nonStreamTimeoutMs = 5 * 60 * 1000;
 const streamTimeoutMs = 10 * 60 * 1000;
+// First-byte (time-to-first-token) budget for streaming. A local large model
+// spends most of this on PREFILL, and prefill time scales with input size: a
+// 200K-token context can legitimately take tens of seconds before its first
+// byte, longer still when other sessions share the GPU. A flat deadline (the
+// previous 90s) cut legitimate large-context requests, so the budget grows
+// with the estimated input tokens instead — base + inputTokens / prefillRate —
+// letting a small request still fail fast on a real stall while a large
+// context gets the prefill time it needs. It is capped at the total stream
+// timeout so it can never exceed the request backstop.
+// The base is generous on purpose: a single large model (e.g. a local 27B)
+// that also serves auto mode's per-action safety classifier spends long on
+// prefill even for a small request, and a tight 30s floor kept 502-ing those
+// classifier calls. Raising the base trades faster stall detection for
+// letting a slow model finish its first token.
+const streamFirstByteBaseMs = 120 * 1000;
+// Conservative prefill rate (tokens/sec) that assumes the GPU may be shared
+// with concurrent requests; it sizes the per-token first-byte allowance.
+const streamFirstBytePrefillTokensPerSec = 2000;
+
+/** Time-to-first-byte budget for a streaming request of the given size (ms). */
+export function streamFirstByteBudgetMs(estimatedInputTokens: number): number {
+  const perTokenMs = Math.ceil((estimatedInputTokens / streamFirstBytePrefillTokensPerSec) * 1000);
+  return Math.min(streamTimeoutMs, streamFirstByteBaseMs + perTokenMs);
+}
 
 /** Data-plane auth: route token → enabled user → assignment → provider/credential. */
 export function resolveRouteTarget(
@@ -123,6 +147,8 @@ export interface ForwardDeps {
   resolveHost?: OutboundHostResolver | undefined;
   /** Test seam for the upstream HTTP client. */
   fetchImpl?: typeof fetch | undefined;
+  /** Test seam for the streaming time-to-first-byte deadline (ms). */
+  streamFirstByteTimeoutMs?: number | undefined;
 }
 
 /**
@@ -161,6 +187,10 @@ export async function forwardClaudeMessages(
     ? body
     : anthropicToOpenaiRequest(body);
 
+  // A total cap bounds the whole request (headers + streamed body) so a
+  // slow-trickling upstream that never finishes cannot pin the request forever.
+  // The separate first-byte deadline below is what makes a stalled start fail
+  // fast with a clean 502, without waiting out this total window.
   let upstream: Response;
   try {
     upstream = await fetchImpl(requestPath, {
@@ -210,8 +240,62 @@ export async function forwardClaudeMessages(
     return;
   }
 
-  const sseBody = upstream.body;
-  const decoder = new TextDecoder();
+  // Read the first upstream chunk BEFORE committing the 200. This is the
+  // time-to-first-byte guard: an upstream that returns headers then stalls
+  // (stuck inference, a dead proxy half-connection) is still answerable as a
+  // clean 502 instead of leaving the client hanging on an open SSE response.
+  // The budget grows with input size (see streamFirstByteBudgetMs) so a large
+  // prefill is not mistaken for a stall; the test seam overrides it outright.
+  const firstByteTimeout = deps.streamFirstByteTimeoutMs
+    ?? streamFirstByteBudgetMs(estimateInputTokens(requestBody));
+  const upstreamBody = upstream.body ?? new ReadableStream<Uint8Array>({ start(c) { c.close(); } });
+  const reader = upstreamBody.getReader();
+  let first: ReadableStreamReadResult<Uint8Array>;
+  try {
+    first = await readWithTimeout(reader.read(), firstByteTimeout);
+  } catch (error) {
+    try { await reader.cancel(); } catch { /* best-effort release */ }
+    const detail = isFirstByteTimeout(error)
+      ? `Upstream produced no data within ${Math.round(firstByteTimeout / 1000)}s`
+      : `Upstream stream failed: ${error instanceof Error ? error.message : String(error)}`;
+    const failed = anthropicError(502, "api_error", detail);
+    res.status(failed.status).json(failed.body);
+    return;
+  }
+  if (first.done || first.value === undefined) {
+    const failed = anthropicError(502, "api_error", "Upstream returned no streaming data");
+    res.status(failed.status).json(failed.body);
+    return;
+  }
+
+  // Replay the already-read first chunk, then keep reading the SAME reader
+  // live from the upstream. Reading stops once the upstream closes or signals
+  // [DONE], so a connection that lingers after completion cannot pin the
+  // downstream response (and its socket) open.
+  const upstreamSource: AsyncIterable<Uint8Array> = {
+    async *[Symbol.asyncIterator]() {
+      const decoder = new TextDecoder();
+      yield first.value as Uint8Array;
+      try {
+        if (decoder.decode(first.value as Uint8Array).includes("data: [DONE]")) {
+          await reader.cancel();
+          return;
+        }
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done || value === undefined) return;
+          yield value;
+          if (decoder.decode(value).includes("data: [DONE]")) {
+            await reader.cancel();
+            return;
+          }
+        }
+      } finally {
+        try { reader.releaseLock(); } catch { /* already released */ }
+      }
+    }
+  };
+
   res.status(200);
   res.setHeader("content-type", "text/event-stream; charset=utf-8");
   res.setHeader("cache-control", "no-cache");
@@ -220,12 +304,13 @@ export async function forwardClaudeMessages(
   try {
     if (anthropic) {
       // Passthrough: forward raw SSE bytes unchanged.
-      for await (const chunk of readStream(sseBody)) {
+      const decoder = new TextDecoder();
+      for await (const chunk of upstreamSource) {
         res.write(decoder.decode(chunk, { stream: true }));
       }
       res.write(decoder.decode());
     } else {
-      for await (const event of openaiSseToAnthropicSse(readStream(sseBody), {
+      for await (const event of openaiSseToAnthropicSse(upstreamSource, {
         requestedModel: typeof body.model === "string" ? body.model : ""
       })) {
         res.write(event);
@@ -240,17 +325,26 @@ export async function forwardClaudeMessages(
   res.end();
 }
 
-/** The fetch `body` is a web ReadableStream; bridge it for async iteration. */
-async function* readStream(stream: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
-  const reader = stream.getReader();
+class FirstByteTimeoutError extends Error {}
+
+function isFirstByteTimeout(error: unknown): boolean {
+  return error instanceof FirstByteTimeoutError;
+}
+
+async function readWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done || value === undefined) return;
-      yield value;
-    }
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new FirstByteTimeoutError("First-byte timeout")), timeoutMs);
+      })
+    ]);
   } finally {
-    reader.releaseLock();
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

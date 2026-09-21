@@ -76,6 +76,9 @@ export function createEvidenceDraft(): EvidenceDraft {
 
 export function createEditWorkItemDraft(item: ProjectManagerWorkItem | null): EditWorkItemDraft {
   return {
+    expectedRevision: item?.revision,
+    assigneeId: item?.assigneeId ?? null,
+    reviewerId: item?.reviewerId ?? null,
     title: item?.title ?? "",
     description: item?.description ?? "",
     priority: String(item?.priority ?? 0),
@@ -88,6 +91,8 @@ export function createWorkItemInput(draft: WorkItemDraft, title: string): Projec
 
   return {
     title,
+    ...(draft.assigneeId !== undefined ? {assigneeId: draft.assigneeId} : {}),
+    ...(draft.reviewerId !== undefined ? {reviewerId: draft.reviewerId} : {}),
     description: draft.description.trim() || null,
     priority: Number.isFinite(priority) ? priority : 0,
     acceptanceCriteria: parseProjectManagerTextList(draft.acceptanceCriteriaText),
@@ -97,7 +102,10 @@ export function createWorkItemInput(draft: WorkItemDraft, title: string): Projec
 export function createWorkItemUpdateInput(draft: EditWorkItemDraft, title: string): ProjectManagerWorkItemUpdateInput {
   const priority = Number.parseInt(draft.priority, 10);
   return {
+    expectedRevision: draft.expectedRevision,
     title,
+    ...(draft.assigneeId !== undefined ? {assigneeId: draft.assigneeId} : {}),
+    ...(draft.reviewerId !== undefined ? {reviewerId: draft.reviewerId} : {}),
     description: draft.description.trim() || null,
     priority: Number.isFinite(priority) ? priority : 0,
     acceptanceCriteria: parseProjectManagerTextList(draft.acceptanceCriteriaText),
@@ -108,8 +116,7 @@ export function batchStatusTargets(items: ProjectManagerWorkItem[]): ProjectMana
   if (items.length === 0) return [];
   return WORK_ITEM_STATUSES.filter((candidate) =>
     items.every((item) =>
-      PROJECT_MANAGER_STATUS_TRANSITIONS[item.status].includes(candidate) &&
-      (candidate !== "done" || item.evidenceRefCount > 0)
+      PROJECT_MANAGER_STATUS_TRANSITIONS[item.status].includes(candidate)
     )
   );
 }

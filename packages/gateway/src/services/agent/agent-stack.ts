@@ -1,3 +1,4 @@
+import { createConnectionToolRegistry } from "../extensions/connection-tools.js";
 /**
  * Per-user agent stack factory for the Copilot harness.
  *
@@ -52,7 +53,7 @@ export function buildAgentStack(
     modelProviderRepository: modelRepo,
     ...(deps.llmFetch !== undefined ? { fetchImpl: deps.llmFetch } : {})
   });
-  const toolRegistry = options?.toolRegistry ?? createAgentToolRegistry(createPlatformTools());
+  const toolRegistry = options?.toolRegistry ?? createConnectionToolRegistry(createPlatformTools(), deps.db, userId, deps.masterKey);
   // Owner tool switches: disabled tools vanish from the model schema and are
   // refused at execution time (see orchestrator).
   const toolPreferences = new CopilotToolPreferenceRepository(deps.db, userId);

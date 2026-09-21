@@ -322,6 +322,9 @@ describe("db repositories", () => {
         workingDir: "/tmp/oa"
       });
 
+      // SQLite timestamps have second precision; UUID order is the tie-breaker.
+      // Give the first fixture a distinct timestamp instead of assuming insertion order.
+      db.prepare("UPDATE sessions SET created_at = created_at - 1 WHERE id = ?").run(sessionA1.id);
       const baseline = repo.list().map((session) => session.id);
       assert.equal(baseline.length, 3);
       assert.equal(baseline[0], sessionA1.id);

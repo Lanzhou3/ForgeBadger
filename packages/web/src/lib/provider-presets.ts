@@ -8,7 +8,7 @@ import type {
 import type { CustomProviderForm } from "@/components/models/shared";
 
 /**
- * Static provider presets, cc-switch style: each preset is only a connection
+ * Static provider presets: each preset is only a connection
  * template (endpoints, auth type, API format, supported CLIs) that prefills
  * the add-provider form. Presets never carry model lists — models are always
  * synced live from the configured provider's own endpoint, and a sync failure
@@ -43,7 +43,7 @@ function preset(input: PresetInput): ProviderPreset {
     productType: "payg_api",
     apiFormat: "openai-compatible",
     authType: "api_key",
-    supportedAdapters: ["claude", "opencode", "kimi"],
+    supportedAdapters: ["claude", "opencode", "kimi", "pi"],
     ...input,
   };
 }
@@ -55,7 +55,7 @@ export const providerPresets: ProviderPreset[] = [
     description: "Official OpenAI API endpoint.",
     apiFormat: "openai",
     openaiBaseUrl: "https://api.openai.com/v1",
-    supportedAdapters: ["opencode", "codex", "kimi"],
+    supportedAdapters: ["opencode", "codex", "kimi", "pi"],
   }),
   preset({
     id: "anthropic-api",

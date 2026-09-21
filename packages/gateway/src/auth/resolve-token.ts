@@ -1,3 +1,4 @@
+import { jwtUserIsActive } from "./credential-epoch.js";
 import { verifyJwt } from "./jwt.js";
 import { verifyAuthSession } from "./session-service.js";
 import type { Database } from "../db/types.js";
@@ -19,7 +20,7 @@ export function resolveTokenUserId(
   }
   try {
     const claims = verifyJwt(token, jwtSecret);
-    return userIsActive(db, claims.userId) ? claims.userId : undefined;
+    return jwtUserIsActive(db, claims) ? claims.userId : undefined;
   } catch {
     return undefined;
   }

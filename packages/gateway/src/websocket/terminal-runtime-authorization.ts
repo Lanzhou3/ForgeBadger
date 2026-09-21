@@ -64,7 +64,7 @@ export class TerminalRuntimeAuthorizationRegistry {
     this.revalidate(entry);
 
     return {
-      isAuthorized: () => entry.authorized && !entry.disposed,
+      isAuthorized: () => { this.revalidate(entry); return entry.authorized && !entry.disposed; },
       dispose: () => this.dispose(entry)
     };
   }

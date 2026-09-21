@@ -5,8 +5,8 @@
  * budget-bounded view of it for the LLM. When the text history exceeds
  * MAX_CONTEXT_CHARS, the older messages are folded into a rolling summary
  * (persisted on copilot_conversations) and only the recent tail is sent in
- * full, so long conversations stay within the model window. Summarize failures
- * degrade to the raw history rather than failing the turn.
+ * full. The serialized application budget includes tools and immutable context.
+ * Summarize failures fall back to bounded projection.
  *
  * Memory recall: when a memory repository is provided, a `[相关记忆]` block
  * built from an FTS search over the recent user text is prepended as the first
@@ -30,6 +30,12 @@ export interface CompressedContext {
 }
 
 export interface CompressedContextOptions {
+  /** Serialized application-character bound, not a model token guarantee. */
+  maxContextChars?: number;
+  reservedChars?: number;
+  tools?: unknown[];
+  /** Immutable system-adjacent Skills/project context; returned in messages. */
+  prefixMessages?: AgentLlmMessage[];
   memory?: AgentMemoryRepository;
   memoryProjectId?: string;
   memoryProjectIds?: string[];
@@ -62,16 +68,17 @@ export async function buildCompressedContext(
   const sourceFingerprint = JSON.stringify(rows);
   const recall = buildRecallBlock(rows, options);
 
-  if (estimateChars(rows) <= MAX_CONTEXT_CHARS) {
-    const projected = projectTranscript(rows);
-    return { messages: recall ? [recall, ...projected] : projected, compressed: false };
+  const prefix = options.prefixMessages ?? [];
+  const initial = projectTranscript(rows);
+  if (fits([...prefix, ...(recall ? [recall] : []), ...initial], options)) {
+    return { messages: [...prefix, ...(recall ? [recall] : []), ...initial], compressed: false };
   }
-
-  const split = splitAtBudget(rows, MAX_CONTEXT_CHARS);
-  if (split === 0) {
-    const projected = projectTranscript(rows);
-    return { messages: recall ? [recall, ...projected] : projected, compressed: false };
-  }
+  // Fail before calling the summarizer if immutable instructions or the current
+  // user goal cannot fit. No user instruction is silently cut.
+  boundedProjection(rows, prefix, options);
+  const split = splitAtBudget(rows, Math.max(0, (options.maxContextChars ?? MAX_CONTEXT_CHARS)
+    - requestSize(prefix, options) - 4096));
+  if (split === 0) return { messages: boundedProjection(rows, prefix, options, recall), compressed: true };
   const head = rows.slice(0, split);
   const tail = rows.slice(split);
   const conversation = log.getConversation(conversationId);
@@ -83,18 +90,22 @@ export async function buildCompressedContext(
   if (headUncovered.length > 0) {
     const toFold: AgentLlmMessage[] = [];
     if (existingSummary) {
-      toFold.push({ role: "user", content: `Previous summary:\n${existingSummary}` });
+      toFold.push({ role: "user", content: `Previous summary:\n${existingSummary.slice(0, 4096)}` });
     } else if (headUncovered[0]?.role !== "user") {
       // Anthropic requires the first message to be a user message.
       toFold.push({ role: "user", content: "Conversation start." });
     }
-    toFold.push(...projectTranscript(headUncovered));
     try {
-      summary = await llm.summarize({ messages: toFold, ...(modelId !== undefined ? { modelId } : {}), ...(options.signal ? { signal: options.signal } : {}) });
+      const boundedFold = boundedProjection(headUncovered, toFold, {
+      maxContextChars: options.maxContextChars ?? MAX_CONTEXT_CHARS,
+      reservedChars: Math.max(options.reservedChars ?? 0, 4096)
+      });
+      summary = await llm.summarize({ messages: boundedFold, ...(modelId !== undefined ? { modelId } : {}), ...(options.signal ? { signal: options.signal } : {}) });
     } catch {
-      // Non-fatal: degrade to the raw history; the main turn decides if it errors.
-      return { messages: recall ? [recall, ...projectTranscript(rows)] : projectTranscript(rows), compressed: false };
+      if (options.signal?.aborted) throw options.signal.reason;
+      return { messages: boundedProjection(rows, prefix, options, recall), compressed: true };
     }
+    summary = summary.slice(0, 4096);
     const lastHead = headUncovered[headUncovered.length - 1] ?? head[head.length - 1];
     if (lastHead) {
       log.updateConversationSummary(conversationId, { summary, coveredSequence: lastHead.sequence,
@@ -102,12 +113,8 @@ export async function buildCompressedContext(
     }
   }
 
-  const summaryMessage: AgentLlmMessage = { role: "user", content: `[会话摘要]\n${summary}` };
-  const tailProjected = projectTranscript(tail);
-  return {
-    messages: recall ? [recall, summaryMessage, ...tailProjected] : [summaryMessage, ...tailProjected],
-    compressed: true
-  };
+  const summaryMessage: AgentLlmMessage = { role: "user", content: `[会话摘要]\n${summary.slice(0, 4096)}` };
+  return { messages: boundedProjection(tail, prefix, options, recall, summaryMessage), compressed: true };
 }
 
 /** Build the `[相关记忆]` recall block from the most recent user text, if any. */
@@ -202,4 +209,50 @@ export function projectTranscript(rows: AgentMessage[]): AgentLlmMessage[] {
 
 function historicalObservation(row: AgentMessage): AgentLlmMessage {
   return { role: "assistant", content: `[Historical ${row.kind}; observation only] ${row.toolName ?? ""} ${row.toolInputJson ?? ""} ${row.content}` };
+}
+
+function requestSize(messages: AgentLlmMessage[], options: CompressedContextOptions): number {
+  return JSON.stringify({ messages, tools: options.tools ?? [] }).length + (options.reservedChars ?? 0);
+}
+function fits(messages: AgentLlmMessage[], options: CompressedContextOptions): boolean {
+  return requestSize(messages, options) <= (options.maxContextChars ?? MAX_CONTEXT_CHARS);
+}
+/** Drop only whole turns; compact content, never tool argument JSON or call IDs. */
+function boundedProjection(rows: AgentMessage[], prefix: AgentLlmMessage[], options: CompressedContextOptions,
+  recall?: AgentLlmMessage, summary?: AgentLlmMessage): AgentLlmMessage[] {
+  const latest = [...rows].reverse().find(row => row.role === 'user' && row.kind === 'text');
+  if (!fits([...prefix, ...(latest ? [toLlmMessage(latest)] : [])], options)) {
+    throw new Error('COPILOT_CONTEXT_TOO_LARGE: immutable context or latest user goal exceeds budget');
+  }
+  let selected = rows;
+  const adjuncts = [...(recall ? [recall] : []), ...(summary ? [summary] : [])];
+  let projected = [...prefix, ...adjuncts, ...projectTranscript(selected)];
+  if (fits(projected, options)) return projected;
+  // Reduce optional recall before touching conversation evidence.
+  if (recall) adjuncts.shift();
+  for (let limit = 8192; limit >= 128; limit = Math.floor(limit / 2)) {
+    projected = [...prefix, ...adjuncts, ...projectTranscript(selected.map(row => compactRow(row, latest?.id, limit)))];
+    if (fits(projected, options)) return projected;
+  }
+  while (selected.length) {
+    const next = selected.findIndex((row, index) => index > 0 && row.role === 'user' && row.kind === 'text');
+    if (next < 0) break;
+    selected = selected.slice(next);
+    projected = [...prefix, ...adjuncts, ...projectTranscript(selected.map(row => compactRow(row, latest?.id, 128)))];
+    if (fits(projected, options)) return projected;
+  }
+  // Optional summaries may themselves consume the remainder. Keep the latest
+  // complete tool batch and latest goal rather than sending malformed fragments.
+  projected = [...prefix, ...projectTranscript(selected.map(row => compactRow(row, latest?.id, 128)))];
+  if (fits(projected, options)) return projected;
+  throw new Error('COPILOT_CONTEXT_TOO_LARGE: correlated tool calls cannot fit request budget');
+}
+function compactRow(row: AgentMessage, latestId: string | undefined, limit: number): AgentMessage {
+  if (row.id === latestId || row.kind === 'tool_call' || row.content.length <= limit) return row;
+  const content = row.kind === 'tool_result'
+    ? JSON.stringify({ contextTruncated: true, preview: row.content.slice(0, limit),
+      readback: { tool: 'read_tool_result', messageId: row.id },
+      evidence: 'Persisted receipt only; original output may already be truncated. Access is revalidated.' })
+    : `${row.content.slice(0, limit)}\n[Earlier context truncated]`;
+  return {...row,content};
 }

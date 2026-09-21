@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {mkdtempSync,rmSync,realpathSync,writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {execFileSync} from 'node:child_process';
+import {randomBytes} from 'node:crypto';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import Database from 'better-sqlite3';
+import {drizzle} from 'drizzle-orm/better-sqlite3';
+import {migrate} from 'drizzle-orm/better-sqlite3/migrator';
+import {SessionServer} from '../src/services/session-server/session-server.js';
+import {IpcServer} from '../src/services/session-server/ipc-server.js';
+import {SessionServerClient} from '../src/services/session-server-client.js';
+import {InMemorySessionManager,type SessionRecoveryStore} from '../src/services/session-manager.js';
+import {UserRepository} from '../src/db/repositories/user-repository.js';
+import {ProjectRepository} from '../src/db/repositories/project-repository.js';
+import {SessionRepository} from '../src/db/repositories/session-repository.js';
+import {DeliveryService} from '../src/services/collaboration/delivery-service.js';
+import type {DeliveryRun} from '../src/services/collaboration/types.js';
+
+for(const state of ['error','pending'] as const)test(`stop probes real PTY despite cached ${state} and keeps IPC uncertainty pending`,{skip:process.platform==='win32',timeout:15000},async(t)=>{
+ const root=realpathSync(mkdtempSync(path.join(tmpdir(),'fb-stop-proof-'))),ipcPath=path.join(root,'runtime.sock'),token=randomBytes(32).toString('hex'),daemon=new SessionServer(),ipc=new IpcServer({ipcPath,sessionServer:daemon,token}),db=new Database(':memory:');let client:SessionServerClient|undefined;let release=()=>{};
+ t.after(async()=>{release();await client?.disconnect().catch(()=>{});await daemon.destroy();await ipc.stop();db.close();rmSync(root,{recursive:true,force:true});});
+ const git=(...args:string[])=>execFileSync('git',args,{cwd:root,stdio:'ignore'});git('init','-b','main');git('config','user.email','test@example.invalid');git('config','user.name','Fixture');writeFileSync(path.join(root,'README'),'fixture');git('add','.');git('commit','-m','fixture');
+ migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations',import.meta.url))});await ipc.start();client=new SessionServerClient({ipcPath,token});await client.connect();
+ let reached:()=>void=()=>{};const created=new Promise<void>(r=>{reached=r;}),gate=new Promise<void>(r=>{release=r;});const recovery:SessionRecoveryStore={listSessions:async()=>[],removeSession:async()=>{},upsertSession:async()=>{reached();if(state==='error')throw new Error('fixture persistence failure');await gate;}};
+ const manager=new InMemorySessionManager(client,recovery,undefined,{db}),u=new UserRepository(db).create('stop@test.invalid','hash'),p=new ProjectRepository(db,u.id).create({name:'Stop',path:root,aiTool:'codex'}),session=new SessionRepository(db,u.id).create({projectId:p.id,name:'CLI',aiTool:'codex',workingDir:root,attachToken:randomBytes(16).toString('hex')});db.prepare('INSERT INTO collaboration_projects(user_id,project_id,protected_root) VALUES(?,?,?)').run(u.id,p.id,root);
+ const starting=manager.createSession({userId:u.id,sessionId:session.id,attachToken:session.attachToken,launchPlan:{command:process.execPath,args:['-e','setInterval(()=>{},1000)'],cwd:root,env:{},secretEnvNames:[],credentialMode:'host_environment'}}).catch(error=>error as Error);await created;
+ if(state==='error')assert.ok(await starting instanceof Error);const live=manager.getSession(session.id)!;assert.equal(live.status,state);assert.equal(await manager.hasLiveTerminal(session.id,live.runtimeSessionName),false);assert.equal(await manager.hasRuntimeTerminal(live.runtimeSessionName),true);new SessionRepository(db,u.id).update(session.id,{runtimeSessionName:live.runtimeSessionName,status:'running'});
+ const run={id:'fixture',user_id:u.id,project_id:p.id,actor_id:u.id,session_id:session.id,workspace_path:path.join(root,'workspace')} as DeliveryRun,delivery=new DeliveryService({db,workspacesRoot:root,sessionManager:manager});
+ await ipc.stop();await client.disconnect();assert.equal(await delivery.stop(run),false,'unconfirmed runtime cannot finalize across IPC outage');await ipc.start();await client.connect();
+ assert.equal(await delivery.stop(run),true);assert.equal(await manager.hasRuntimeTerminal(live.runtimeSessionName),false);release();await starting;assert.equal(await delivery.stop(run),true,'confirmed missing historical runtime is already stopped');
+ await ipc.stop();await client.disconnect();await assert.rejects(manager.hasRuntimeTerminal(live.runtimeSessionName));assert.equal(await delivery.stop(run),true,'persisted same-generation receipt proves exit across IPC outage');
+});

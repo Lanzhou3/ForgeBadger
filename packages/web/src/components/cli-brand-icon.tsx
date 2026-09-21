@@ -24,6 +24,8 @@ interface Props {
  *            (Kimi / Moonshot AI mark)
  * - OpenCode: https://unpkg.com/@lobehub/icons-static-svg/icons/opencode.svg
  *            (OpenCode square mark, intentionally monochrome/grayscale)
+ * - PI:      https://pi.dev/logo-auto.svg
+ *            (official PI π mark from pi.dev, three-color)
  *
  * All trademarks belong to their respective owners and are used here solely
  * to identify the corresponding CLI.
@@ -56,6 +58,13 @@ const CLI_ICON_MARKS: Record<CliBrandId, ReactNode> = {
     </>
   ),
   opencode: <path d="M16 6H8v12h8V6zm4 16H4V2h16v20z" fillRule="evenodd" />,
+  pi: (
+    <>
+      <path d="M4.959 4.959H15.521V12H12V8.48H4.959z" fill="#F09082" />
+      <path d="M4.959 8.48H8.48V12H12V15.521H8.48V19.042H4.959z" fill="#4D9ABF" />
+      <path d="M15.521 12H19.042V19.042H15.521z" fill="#F1BE58" />
+    </>
+  ),
 };
 
 /** Marks that follow the surrounding text color instead of a fixed brand color. */

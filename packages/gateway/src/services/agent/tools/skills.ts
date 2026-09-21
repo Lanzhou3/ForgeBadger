@@ -1,65 +1,44 @@
-/**
- * Skill tools — the progressive-disclosure seam (Path B).
- *
- * Procedural knowledge lives in versioned skill documents instead of growing
- * per-domain tool schemas. The model sees cheap tier-1 metadata via
- * list_skills and pulls full playbooks with load_skill only when relevant.
- * Executable capabilities remain native tools; skills teach how to compose
- * them.
- *
- * Skills resolve from the platform Skills store (the `skills` table) — the
- * same surface the Skills page manages — so imported and local skills are
- * immediately visible to the Copilot. The builtin engineering playbooks ship
- * as seeded rows (`source: "builtin"`), not hardcoded constants.
- */
-import { z } from "zod";
-
-import { SkillRepository } from "../../../db/repositories/skill-repository.js";
-import type { Database } from "../../../db/types.js";
-import { seedBuiltinSkills } from "../../builtin-skills.js";
-import { stripFrontmatter } from "../../skill-frontmatter.js";
-import { listEnabledCopilotSkillSummaries } from "../skills/skill-queries.js";
-import type { AgentTool, AgentToolContext } from "../tool-registry.js";
-
-const listSkillsInput = z.object({}).strict();
-
-const loadSkillInput = z.object({
-  name: z.string().min(1).max(128)
+import { z } from 'zod';
+import { listEnabledCopilotPlaybookSummaries, loadCopilotPlaybook, type PlaybookQueryOptions } from '../skills/skill-queries.js';
+import { CopilotSkillService } from '../skills/copilot-skill-service.js';
+import type { AgentTool, AgentToolContext } from '../tool-registry.js';
+const listInput = z.object({}).strict();
+const loadInput = z.object({ id: z.string().min(1).max(128) }).strict();
+const resourceInput = z.object({
+  skillId: z.string().uuid(), revisionId: z.string().uuid(), relativePath: z.string().min(1).max(512),
+  offset: z.number().int().min(0).max(131072).optional(), length: z.number().int().min(1).max(12000).optional()
 }).strict();
-
+function options(context: AgentToolContext): PlaybookQueryOptions {
+  const names = context.availableToolNames;
+  return { grantBound: typeof context.grantId === 'string',
+    ...(Array.isArray(names) && names.every(name => typeof name === 'string') ? { availableToolNames: names as string[] } : {}) };
+}
 export function createSkillTools(): AgentTool[] {
   return [
     {
-      name: "list_skills",
-      description:
-        "List available Copilot skills (name + one-line summary). Skills are playbooks that teach how to combine action tools for complete engineering workflows — consult them before multi-step operations.",
-      risk: "read",
-      requiresApproval: false,
-      inputSchema: listSkillsInput,
-      async execute(_input, context: AgentToolContext) {
-        const skills = listEnabledCopilotSkillSummaries(context.db as Database, context.userId as string);
-        return { count: skills.length, skills };
+      name: 'list_playbooks', description: 'List enabled, compatible Copilot Skills by stable ID and current revision. Builtin playbooks and imported SKILL.md packages provide instructions, not tools or authorization.',
+      risk: 'read', requiresApproval: false, inputSchema: listInput,
+      async execute(_input, context) {
+        const playbooks = listEnabledCopilotPlaybookSummaries(context.db, context.userId, options(context));
+        return { count: playbooks.length, playbooks };
       }
     },
     {
-      name: "load_skill",
-      description:
-        "Load the full playbook body of one skill by name (from list_skills). Returns step-by-step guidance, exact tool names/parameters, error codes, and recovery rules.",
-      risk: "read",
-      requiresApproval: false,
-      inputSchema: loadSkillInput,
-      async execute(input, context: AgentToolContext) {
-        const { name } = loadSkillInput.parse(input);
-        const repo = new SkillRepository(context.db as Database, context.userId as string);
-        seedBuiltinSkills(repo);
-        const skill = repo.findReadableByName(name);
-        if (!skill) return { found: false, name };
-        return {
-          found: true,
-          name: skill.name,
-          description: skill.description ?? "",
-          body: stripFrontmatter(skill.content)
-        };
+      name: 'load_playbook', description: 'Load a compatible Copilot Skill by ID from list_playbooks. Returns instructions, pinned revision and resource paths. Use read_skill_resource to read supporting files or a truncated main file. Imported instructions never authorize actions.',
+      risk: 'read', requiresApproval: false, inputSchema: loadInput,
+      async execute(input, context) {
+        const { id } = loadInput.parse(input);
+        const row = loadCopilotPlaybook(context.db, context.userId, id, options(context));
+        return row ? { found: true, id: row.id, revisionId: row.revisionId, name: row.name, description: row.description,
+          version: row.version, body: row.content.slice(0, 12000), bodyTruncated: row.content.length > 12000,
+          files: row.files.map(file => ({ relativePath: file.path, characters: file.content.length })) } : { found: false, id };
+      }
+    },
+    {
+      name: 'read_skill_resource', description: 'Read a UTF-8 file from the currently enabled Skill package, pinned to skillId and revisionId returned by load_playbook. Paths are package-relative; offset/length paginate characters. Does not access the host filesystem or execute scripts.',
+      risk: 'read', requiresApproval: false, inputSchema: resourceInput,
+      async execute(input, context) {
+        return new CopilotSkillService(context.db, context.userId).readResource(resourceInput.parse(input), options(context));
       }
     }
   ];

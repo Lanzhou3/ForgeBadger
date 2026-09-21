@@ -7,6 +7,7 @@ import { LanguageProvider } from "@/hooks/use-language";
 import { ProjectManagerPanel } from "./ProjectManagerPanel";
 
 const {
+  batchUpdateProjectManagerWorkItemStatusesMock,
   getProjectManagerGoalMock,
   discoverAdaptersMock,
   listProjectManagerWorkItemsMock,
@@ -23,6 +24,7 @@ const {
   addProjectManagerWorkItemDependencyMock,
   removeProjectManagerWorkItemDependencyMock,
 } = vi.hoisted(() => ({
+  batchUpdateProjectManagerWorkItemStatusesMock: vi.fn(),
   getProjectManagerGoalMock: vi.fn(),
   discoverAdaptersMock: vi.fn(),
   listProjectManagerWorkItemsMock: vi.fn(),
@@ -44,6 +46,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
+    batchUpdateProjectManagerWorkItemStatuses: batchUpdateProjectManagerWorkItemStatusesMock,
     getProjectManagerGoal: getProjectManagerGoalMock,
     discoverAdapters: discoverAdaptersMock,
     listProjectManagerWorkItems: listProjectManagerWorkItemsMock,
@@ -88,6 +91,7 @@ const stages = [
 const workItems = [
   {
     id: "item-1",
+    revision: 3,
     projectId: "project-1",
     title: "实现登录",
     description: null,
@@ -96,7 +100,6 @@ const workItems = [
     acceptanceCriteria: [],
     evidenceRefCount: 0,
     evidenceRefs: [],
-    feishuRefCount: 0,
     stageId: "stage-1",
     createdAt: 1,
     updatedAt: 1,
@@ -111,7 +114,6 @@ const workItems = [
     acceptanceCriteria: [],
     evidenceRefCount: 0,
     evidenceRefs: [],
-    feishuRefCount: 0,
     stageId: null,
     createdAt: 2,
     updatedAt: 2,
@@ -197,7 +199,7 @@ function renderPanel() {
   return render(
     <LanguageProvider>
       <QueryClientProvider client={createQueryClient()}>
-        <ProjectManagerPanel projectId="project-1" enabled />
+        <ProjectManagerPanel projectId="project-1" enabled authority={{canEdit:true,canManage:true,legacySessions:true}} />
       </QueryClientProvider>
     </LanguageProvider>
   );
@@ -245,6 +247,33 @@ describe("ProjectManagerPanel stages and dependencies", () => {
     });
   });
 
+  it("requires a batch completion reason and preserves confirmed revisions through refresh and retry", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const items = workItems.map((item, index) => ({ ...item, status: "in_progress", revision: index === 0 ? 3 : 5 }));
+    listProjectManagerWorkItemsMock.mockResolvedValue({ workItems: items });
+    batchUpdateProjectManagerWorkItemStatusesMock.mockRejectedValueOnce(new Error("Network unavailable"));
+    batchUpdateProjectManagerWorkItemStatusesMock.mockResolvedValueOnce({ workItems: items.map(item => ({ ...item, status: "done" })) });
+    const client = createQueryClient();
+    render(<LanguageProvider><QueryClientProvider client={client}><ProjectManagerPanel projectId="project-1" enabled authority={{canEdit:true,canManage:true,legacySessions:false}} /></QueryClientProvider></LanguageProvider>);
+    for (const checkbox of await screen.findAllByRole("checkbox", { name: "选择工作项" })) fireEvent.click(checkbox);
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "批量目标状态" }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "完成" }));
+    fireEvent.click(screen.getByRole("button", { name: "移动已选择" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(batchUpdateProjectManagerWorkItemStatusesMock).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认变更" }));
+    expect(await within(dialog).findByText("请填写手动完成原因。")).toBeTruthy();
+    fireEvent.change(within(dialog).getByLabelText("手动完成原因"), { target: { value: "Manual bookkeeping only" } });
+    client.setQueriesData({ queryKey: ["project-manager", "project-1", "work-items"] }, { workItems: items.map(item => ({ ...item, revision: 99 })) });
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认变更" }));
+    await within(dialog).findByText("无法批量更新工作项状态。");
+    const payload = { updates: items.map(item => ({ workItemId: item.id, status: "done", expectedRevision: item.revision, manualCompletionReason: "Manual bookkeeping only" })) };
+    expect(batchUpdateProjectManagerWorkItemStatusesMock).toHaveBeenNthCalledWith(1, "project-1", payload);
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认变更" }));
+    await waitFor(() => expect(batchUpdateProjectManagerWorkItemStatusesMock).toHaveBeenNthCalledWith(2, "project-1", payload));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
   it("groups work items into stage lanes with dependency badges and session chips", async () => {
     renderPanel();
 
@@ -269,7 +298,7 @@ describe("ProjectManagerPanel stages and dependencies", () => {
     fireEvent.change(select as HTMLSelectElement, { target: { value: "stage-2" } });
 
     await waitFor(() => {
-      expect(updateProjectManagerWorkItemMock).toHaveBeenCalledWith("project-1", "item-1", { stageId: "stage-2" });
+      expect(updateProjectManagerWorkItemMock).toHaveBeenCalledWith("project-1", "item-1", { stageId: "stage-2", expectedRevision: 3 });
     });
   });
 
@@ -290,7 +319,7 @@ describe("ProjectManagerPanel stages and dependencies", () => {
     expect(removeButton).not.toBeNull();
     fireEvent.click(removeButton as HTMLButtonElement);
     await waitFor(() => {
-      expect(removeProjectManagerWorkItemDependencyMock).toHaveBeenCalledWith("project-1", "item-1", "item-2");
+      expect(removeProjectManagerWorkItemDependencyMock).toHaveBeenCalledWith("project-1", "item-1", "item-2", 3);
     });
   });
 
@@ -362,4 +391,38 @@ describe("ProjectManagerPanel stages and dependencies", () => {
     expect(within(runningCard).getByText("打开关联会话")).not.toBeNull();
     expect(within(runningCard).queryByText("创建会话")).toBeNull();
   });
+
+it("keeps shared reviewers read-only and never requests legacy sessions, even on refresh", async () => {
+  const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+  render(<QueryClientProvider client={client}><LanguageProvider><ProjectManagerPanel projectId="project-1" enabled authority={{canEdit: false, canManage: false, legacySessions: false}} /></LanguageProvider></QueryClientProvider>);
+  await screen.findByTestId("project-manager-stages-card");
+  await waitFor(() => expect(listProjectManagerWorkItemsMock).toHaveBeenCalled());
+  expect(listProjectManagerTaskPacketsMock).not.toHaveBeenCalled();
+  const create = screen.getByRole("button", {name: "创建工作项"});
+  expect((create as HTMLButtonElement).disabled).toBe(true);
+  const edit = screen.getAllByRole("button", {name: "编辑工作项"});
+  expect(edit.every(b => (b as HTMLButtonElement).disabled)).toBe(true);
+  const card = screen.getByTestId("project-manager-board-card-item-1");
+  expect(card.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.click(screen.getByRole("button", {name: "刷新开发任务"}));
+  await waitFor(() => expect(listProjectManagerWorkItemsMock).toHaveBeenCalledTimes(2));
+  expect(listProjectManagerTaskPacketsMock).not.toHaveBeenCalled();
+  expect(listSessionsMock).not.toHaveBeenCalled();
+});
+
+
+it("uses the single PM editor for assignments and preserves the captured revision across refresh", async () => {
+  const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+  const collaboration = {project: {id: "project-1", name: "Project", role: "owner" as const, memberCount: 2, revision: 1, verificationRevision: 1, executionEnabled: false, verification: null}, members: [{userId:"dev", email:"dev@test.invalid", role:"developer" as const, state:"active", revision:1}, {userId:"review", email:"review@test.invalid", role:"reviewer" as const, state:"active", revision:1}], tasks:[], events:[]};
+  render(<QueryClientProvider client={client}><LanguageProvider><ProjectManagerPanel projectId="project-1" enabled authority={{canEdit:true,canManage:true,legacySessions:false,collaboration}} /></LanguageProvider></QueryClientProvider>);
+  const card = await screen.findByTestId("project-manager-board-card-item-1");
+  fireEvent.click(within(card).getByRole("button", {name:"编辑工作项"}));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.change(within(dialog).getByLabelText("标题"),{target:{value:"One edited task"}});
+  fireEvent.change(within(dialog).getByLabelText("负责人"),{target:{value:"dev"}});
+  fireEvent.change(within(dialog).getByLabelText("审核人"),{target:{value:"review"}});
+  client.setQueriesData({queryKey:["project-manager","project-1","work-items"]},{workItems: workItems.map(item => ({...item,revision:9}))});
+  fireEvent.click(within(dialog).getByRole("button",{name:"保存工作项"}));
+  await waitFor(()=>expect(updateProjectManagerWorkItemMock).toHaveBeenCalledWith("project-1","item-1",expect.objectContaining({expectedRevision:3,title:"One edited task",assigneeId:"dev",reviewerId:"review"})));
+});
 });

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import http from "node:http";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,7 +12,7 @@ import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
-import { handleClaudeNotificationHook } from "../src/routes/session-hooks.js";
+import { createSessionHookRoutes, handleClaudeNotificationHook } from "../src/routes/session-hooks.js";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -368,4 +370,218 @@ describe("Claude Code session hook route", () => {
       assert.equal(backgroundEvent.notificationType, "task_completed");
     }
   });
+
+  it("accepts PI extension payloads and labels them as PI", async () => {
+    const user = new UserRepository(db).create("pi-hooks@example.com", "hash");
+    const project = new ProjectRepository(db, user.id).create({
+      name: "PI Project",
+      path: "/tmp/pi-project",
+      aiTool: "pi"
+    });
+    const session = new SessionRepository(db, user.id).create({
+      projectId: project.id,
+      name: "PI session",
+      aiTool: "pi",
+      workingDir: project.path,
+      attachToken: "pi-token",
+      runtimeSessionName: "of-pi-session"
+    });
+
+    // agent_settled -> Stop
+    let eventPromise = waitForEvent(eventBus);
+    let res = handleClaudeNotificationHook(
+      db,
+      eventBus,
+      { hook_event_name: "Stop", adapter: "pi" },
+      "pi-token",
+      session.id
+    );
+    assert.equal(res.status, 200);
+    let event = await eventPromise;
+    assert.equal(event.type, "claude_notification");
+    if (event.type === "claude_notification") {
+      assert.equal(event.notificationType, "task_completed");
+      assert.equal(event.adapter, "pi");
+      assert.equal(event.message, "PI task completed");
+    }
+
+    // ui_prompt_start -> PermissionRequest (with the extension's waiting message)
+    eventPromise = waitForEvent(eventBus);
+    res = handleClaudeNotificationHook(
+      db,
+      eventBus,
+      {
+        hook_event_name: "PermissionRequest",
+        message: "PI is waiting for your confirm: Run bash command",
+        adapter: "pi"
+      },
+      "pi-token",
+      session.id
+    );
+    assert.equal(res.status, 200);
+    event = await eventPromise;
+    assert.equal(event.type, "claude_notification");
+    if (event.type === "claude_notification") {
+      assert.equal(event.notificationType, "permission_prompt");
+      assert.equal(event.adapter, "pi");
+      assert.equal(event.message, "PI is waiting for your confirm: Run bash command");
+    }
+
+    // session_shutdown -> SessionEnd
+    eventPromise = waitForEvent(eventBus);
+    res = handleClaudeNotificationHook(
+      db,
+      eventBus,
+      { hook_event_name: "SessionEnd", adapter: "pi" },
+      "pi-token",
+      session.id
+    );
+    assert.equal(res.status, 200);
+    event = await eventPromise;
+    assert.equal(event.type, "claude_notification");
+    if (event.type === "claude_notification") {
+      assert.equal(event.notificationType, "session_ended");
+      assert.equal(event.message, "PI session ended");
+    }
+  });
 });
+
+describe("Claude Code session hook route: session identity precedence", () => {
+  let db: Database;
+  let eventBus: ForgeBadgerEventBus;
+
+  beforeEach(() => {
+    db = createTestDb();
+    eventBus = new ForgeBadgerEventBus();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("trusts the x-forgebadger-session-id header over a stale session in the URL path", async () => {
+    const user = new UserRepository(db).create("hook-precedence@example.com", "hash");
+    const project = new ProjectRepository(db, user.id).create({
+      name: "Precedence Project",
+      path: "/tmp/precedence-project",
+      aiTool: "claude"
+    });
+    const staleSession = new SessionRepository(db, user.id).create({
+      projectId: project.id,
+      name: "Precedence Project",
+      aiTool: "claude",
+      workingDir: project.path,
+      attachToken: "stale-token",
+      runtimeSessionName: "of-stale-session"
+    });
+    const currentSession = new SessionRepository(db, user.id).create({
+      projectId: project.id,
+      name: "Precedence Project",
+      aiTool: "claude",
+      workingDir: project.path,
+      attachToken: "current-token",
+      runtimeSessionName: "of-current-session"
+    });
+    const eventPromise = waitForEvent(eventBus);
+
+    const app = express();
+    app.use(express.json());
+    app.use("/api/v1/session-hooks", createSessionHookRoutes(db, eventBus));
+
+    // A stale project-level settings file still carries the old session id in
+    // the URL path, but the worker sends its own session via the header.
+    const res = await makeRequest(
+      app,
+      `/api/v1/session-hooks/claude-notification/${staleSession.id}`,
+      { hook_event_name: "Stop" },
+      {
+        "x-forgebadger-session-id": currentSession.id,
+        "x-forgebadger-session-token": "current-token"
+      }
+    );
+
+    assert.equal(res.status, 200);
+    const event = await eventPromise;
+    assert.equal(event.type, "claude_notification");
+    if (event.type === "claude_notification") {
+      assert.equal(event.sessionId, currentSession.id);
+    }
+  });
+
+  it("still rejects when the token does not match the session named by the header", async () => {
+    const user = new UserRepository(db).create("hook-precedence-2@example.com", "hash");
+    const project = new ProjectRepository(db, user.id).create({
+      name: "Precedence Project 2",
+      path: "/tmp/precedence-project-2",
+      aiTool: "claude"
+    });
+    new SessionRepository(db, user.id).create({
+      projectId: project.id,
+      name: "Precedence Project 2",
+      aiTool: "claude",
+      workingDir: project.path,
+      attachToken: "current-token",
+      runtimeSessionName: "of-current-session-2"
+    });
+
+    const app = express();
+    app.use(express.json());
+    app.use("/api/v1/session-hooks", createSessionHookRoutes(db, eventBus));
+
+    const res = await makeRequest(
+      app,
+      "/api/v1/session-hooks/claude-notification",
+      { hook_event_name: "Stop" },
+      {
+        "x-forgebadger-session-id": "nonexistent-session",
+        "x-forgebadger-session-token": "current-token"
+      }
+    );
+
+    assert.equal(res.status, 401);
+  });
+});
+
+async function makeRequest(
+  app: express.Express,
+  requestPath: string,
+  body: unknown,
+  headers: Record<string, string> = {}
+): Promise<{ status: number; body: any }> {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close();
+        reject(new Error("Test server did not expose a TCP port"));
+        return;
+      }
+      const payload = JSON.stringify(body);
+      const request = http.request({
+        hostname: "127.0.0.1",
+        port: address.port,
+        path: requestPath,
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(payload),
+          ...headers
+        }
+      }, (response) => {
+        let raw = "";
+        response.on("data", (chunk) => { raw += chunk; });
+        response.on("end", () => {
+          server.close();
+          let parsed: any = raw;
+          try { parsed = raw ? JSON.parse(raw) : {}; } catch { /* keep raw */ }
+          resolve({ status: response.statusCode ?? 0, body: parsed });
+        });
+      });
+      request.on("error", (error) => {
+        server.close();
+        reject(error);
+      });
+      request.end(payload);
+    });
+  });
+}

@@ -24,9 +24,9 @@ const ipcPath = process.platform === "win32"
   : join(stateDir, "session-server.sock");
 
 const isWin = process.platform === "win32";
-const shortSession = isWin
-  ? { command: "cmd.exe", args: ["/c", "echo e2e-ready && exit 0"] }
-  : { command: "bash", args: ["-c", "echo e2e-ready; exit 0"] };
+// Wait for an explicit input before exiting, so management assertions do not
+// race a process that can legitimately finish between consecutive IPC reads.
+const shortSession = { command: process.execPath, args: ["-e", "console.log('e2e-ready');process.stdin.once('data',()=>process.exit(0));setTimeout(()=>process.exit(1),15000);"] };
 const longSession = isWin
   ? { command: "cmd.exe", args: ["/c", "ping -n 60 127.0.0.1"] }
   : { command: "bash", args: ["-c", "sleep 60"] };
@@ -78,8 +78,9 @@ describe("Session Server spawn (e2e)", () => {
     assert.strictEqual(await client.hasSession("e2e-1"), true);
     assert.strictEqual(typeof (await client.capturePane("e2e-1")), "string");
 
-    // The process exits on its own; once the exit is relayed the session
+    // Ask the fixture to exit normally; once the exit is relayed the session
     // must disappear (backend has-session semantics).
+    await client.sendInput("e2e-1", "finish\n");
     await pollUntilTrue(async () => !(await client.hasSession("e2e-1")), 15_000);
   });
 

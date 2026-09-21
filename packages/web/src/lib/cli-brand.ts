@@ -1,7 +1,7 @@
 import type { AdapterDiscovery as RuntimeAdapter } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
 
-export type CliBrandId = "claude" | "codex" | "kimi" | "opencode";
+export type CliBrandId = "claude" | "codex" | "kimi" | "opencode" | "pi";
 
 export interface CliBrand {
   id: CliBrandId | "unknown";
@@ -21,12 +21,14 @@ export interface CliBrand {
  * - Kimi Code: Kimi blue (#1783FF, taken from the official mark)
  * - OpenCode: OpenCode grayscale (#B7B1B1, from the official dark logo variant;
  *   the opencode.ai brand is deliberately monochrome)
+ * - PI: PI blue (#4D9ABF, from the official pi.dev π mark)
  */
 const CLI_BRANDS: Record<CliBrandId, CliBrand> = {
   claude: { id: "claude", label: "Claude Code", shortLabel: "Claude", color: "#d97757" },
   codex: { id: "codex", label: "Codex", shortLabel: "Codex", color: "#e4e4e7" },
   kimi: { id: "kimi", label: "Kimi Code", shortLabel: "Kimi", color: "#1783ff" },
   opencode: { id: "opencode", label: "OpenCode", shortLabel: "OpenCode", color: "#b7b1b1" },
+  pi: { id: "pi", label: "PI", shortLabel: "PI", color: "#4d9abf" },
 };
 
 const UNKNOWN_CLI_BRAND: CliBrand = {

@@ -103,7 +103,10 @@ export interface AppActionNotificationEvent {
   notificationCreatedAt?: Date | undefined;
 }
 
+export interface CopilotDevelopmentUpdatedEvent { type:"copilot_development_updated";userId:string;taskId:string;status:string;revision:number;eventId:string; }
+
 export type ForgeBadgerEvent =
+  | CopilotDevelopmentUpdatedEvent
   | SessionStatusChangedEvent
   | SessionCreatedEvent
   | SessionDeletedEvent

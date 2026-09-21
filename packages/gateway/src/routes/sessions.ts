@@ -1,3 +1,4 @@
+import { hasDeliveryHistory } from '../db/repositories/managed-project-access.js';
 import { PlatformActions } from "../services/platform-commands/actions.js";
 import { createPlatformCommands } from "../services/platform-commands/catalog.js";
 import { Router } from "express";
@@ -36,7 +37,7 @@ export type { LaunchPlanInput } from "../services/session-launch-plan.js";
 
 const createSessionSchema = z.object({
   projectId: z.string().min(1),
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional()
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional()
 }).strict();
 
 const listSessionsQuerySchema = z.object({
@@ -156,7 +157,7 @@ export function createSessionRoutes(
     });
 
     try {
-      const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, project.path, dbSession.id);
+      const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, project.path);
       const launchPlan = createLaunchPlan({
         adapter,
         projectRoot: project.path,
@@ -385,6 +386,9 @@ export function createSessionRoutes(
       return;
     }
 
+    if (hasDeliveryHistory(db,"session",dbSession.id)) {
+      res.status(409).json({code:1,message:"Session has delivery history; close its task workspace",details:{code:"DELIVERY_HISTORY_REQUIRES_ARCHIVE"}}); return;
+    }
     try {
       await sessionManager.runExclusive(req.params.id, async () => {
         // Stop any still-live runtime session regardless of DB status, so a
@@ -393,20 +397,20 @@ export function createSessionRoutes(
         const live = sessionManager.getSession(req.params.id);
         const runtimeSessionName = live?.runtimeSessionName ?? dbSession.runtimeSessionName ?? undefined;
         if (live || runtimeSessionName) {
-          try {
-            await sessionManager.stopSession(req.params.id, runtimeSessionName, userId);
-          } catch {
-            // Deleting the row should still be possible if the runtime session is gone.
-          }
+          await sessionManager.stopSession(req.params.id, runtimeSessionName, userId);
         }
+        // Keep the row and its durable stop proof on every uncertain outcome.
+        db.transaction(() => {
+          recordSessionActivity(db, undefined, userId, dbSession, "session_deleted", "warning", `Session ${dbSession.name} deleted`);
+          sessionRepo.delete(req.params.id);
+        })();
+        sessionManager.removeSessionOutput(req.params.id);
       });
-    } catch (error) {
-      console.error(`[sessions] delete exclusive section failed for ${req.params.id}`, error);
+    } catch {
+      res.status(409).json({ code: 1, message: "Session stop has not been confirmed; retry after the runtime is available", details: { code: "SESSION_RUNTIME_STOP_UNCONFIRMED" } });
+      return;
     }
 
-    recordSessionActivity(db, eventBus, userId, dbSession, "session_deleted", "warning", `Session ${dbSession.name} deleted`);
-    sessionManager.removeSessionOutput(req.params.id);
-    sessionRepo.delete(req.params.id);
     runtimeAuthorizationInvalidator.invalidate({
       scope: "session",
       userId,

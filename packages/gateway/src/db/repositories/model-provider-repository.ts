@@ -6,7 +6,7 @@ import { assertPublicHttpsEndpoint } from "../../services/network-policy.js";
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderAdapter = "claude" | "opencode" | "codex" | "kimi";
+export type ProviderAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 
 export interface ProviderProfile {
@@ -565,7 +565,7 @@ function parseJsonObject(value: string): Record<string, string> {
 }
 
 function isProviderAdapter(value: string): value is ProviderAdapter {
-  return value === "claude" || value === "opencode" || value === "codex" || value === "kimi";
+  return value === "claude" || value === "opencode" || value === "codex" || value === "kimi" || value === "pi";
 }
 
 function normalizeSupportedAdapters(adapters: ProviderAdapter[]): ProviderAdapter[] {

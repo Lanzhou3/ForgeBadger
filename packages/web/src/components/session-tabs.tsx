@@ -3,9 +3,16 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Plus, X } from "lucide-react";
+import { MoreHorizontal, Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { CliBrandIcon } from "@/components/cli-brand-icon";
 import { SessionLaunchDialog } from "@/components/sessions/session-launch-dialog";
 import { useLanguage } from "@/hooks/use-language";
@@ -20,6 +27,7 @@ import {
   removeSessionTab,
   sessionTabGroupColor,
   sessionToTab,
+  splitSessionTabsByVisibility,
   upsertSessionTab,
   type SessionTab,
 } from "@/lib/session-tabs";
@@ -125,6 +133,8 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
     return () => window.removeEventListener(FORGEBADGER_GATEWAY_EVENT, onGatewayEvent);
   }, [closeTab, t]);
 
+  const { visibleIds, hiddenTabs } = splitSessionTabsByVisibility(tabs, activeSessionId);
+
   return (
     <div className="flex h-10 min-w-0 items-end border-b border-border bg-muted/20 pl-2 pt-1.5">
       {/* Only the tab labels scroll; the + and action cluster stay pinned right. */}
@@ -137,6 +147,8 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
         }
       >
         {groupSessionTabs(tabs).map((group, groupIndex, groups) => {
+          const visibleGroupTabs = group.tabs.filter((tab) => visibleIds.has(tab.id));
+          if (visibleGroupTabs.length === 0) return null;
           const groupColor = sessionTabGroupColor(group.projectName ?? "");
           const groupProjectId = group.tabs.find((tab) => tab.projectId)?.projectId;
           return (
@@ -150,7 +162,7 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
                   {group.projectName ?? t("sessions.unknownProject")}
                 </span>
               )}
-              {group.tabs.map((tab) => {
+              {visibleGroupTabs.map((tab) => {
                 const active = tab.id === activeSessionId || pathname === `/sessions/${tab.id}`;
                 return (
                   <SessionTabItem
@@ -173,6 +185,23 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
         })}
       </div>
       <div className="flex shrink-0 items-center gap-1 self-center px-1">
+        {hiddenTabs.length > 0 && (
+          <OverflowTabsMenu
+            hiddenTabs={hiddenTabs}
+            overflowLabel={t("sessions.overflowTabs")}
+            onNavigate={(id) => {
+              // Restore the tab immediately on click so the strip reflects the
+              // switch before the navigation resolves (mirrors the board's
+              // openSession), then navigate.
+              const tab = tabs.find((entry) => entry.id === id);
+              if (tab) {
+                upsertSessionTab(tab);
+                notifySessionTabsChanged();
+              }
+              router.push(`/sessions/${id}`);
+            }}
+          />
+        )}
         <Button
           asChild
           variant="ghost"
@@ -256,6 +285,68 @@ function SessionTabItem({
         <X className="size-3" />
       </button>
     </div>
+  );
+}
+
+/**
+ * Collapsed view for tabs beyond the inline strip: a "…" button whose menu
+ * lists the hidden sessions so a pathological number of running tabs can't
+ * turn the strip into an endless horizontal scroll.
+ */
+function OverflowTabsMenu({
+  hiddenTabs,
+  overflowLabel,
+  onNavigate,
+}: {
+  hiddenTabs: SessionTab[];
+  overflowLabel: string;
+  onNavigate: (id: string) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 shrink-0 self-center text-muted-foreground"
+          title={overflowLabel}
+          aria-label={`${overflowLabel} (${hiddenTabs.length})`}
+        >
+          <MoreHorizontal className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72">
+        <DropdownMenuLabel>{overflowLabel}</DropdownMenuLabel>
+        {hiddenTabs.map((tab) => {
+          const brand = getCliBrand(tab.aiTool);
+          return (
+            <DropdownMenuItem key={tab.id} onSelect={() => onNavigate(tab.id)}>
+              <span className="flex min-w-0 items-center gap-2">
+                <span
+                  className={
+                    tab.status === "running"
+                      ? "size-1.5 shrink-0 rounded-full motion-safe:animate-pulse"
+                      : "size-1.5 shrink-0 rounded-full opacity-50"
+                  }
+                  style={{ backgroundColor: brand.color }}
+                />
+                {brand.id !== "unknown" ? (
+                  <CliBrandIcon aiTool={tab.aiTool} className="size-3.5 shrink-0" />
+                ) : null}
+                <span className="min-w-0 flex-1 truncate">
+                  {tab.lastPrompt ?? tab.label}
+                </span>
+                {tab.projectName ? (
+                  <span className="shrink-0 truncate text-[10px] text-muted-foreground">
+                    {tab.projectName}
+                  </span>
+                ) : null}
+              </span>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

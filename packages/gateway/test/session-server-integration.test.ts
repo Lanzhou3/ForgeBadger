@@ -59,13 +59,22 @@ describe("SessionServer core", () => {
 
   it("throws on duplicate session", async () => {
     const server = new SessionServer();
-    const plan = shortPlan(cwd, "echo dup");
+    // Long-lived process: a short-lived one may already be exited by the
+    // second create, and replacing an exited session is intentionally allowed.
+    const plan: LaunchPlanPayload = {
+      command: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"],
+      cwd, env: {}, secretEnvNames: [], credentialMode: "host_environment"
+    };
 
     await server.createSession({ sessionId: "dup", userId: "u", attachToken: "t", launchPlan: plan });
-    await assert.rejects(
-      () => server.createSession({ sessionId: "dup", userId: "u", attachToken: "t", launchPlan: plan }),
-      /Session already exists/
-    );
+    try {
+      await assert.rejects(
+        () => server.createSession({ sessionId: "dup", userId: "u", attachToken: "t", launchPlan: plan }),
+        /Session already exists/
+      );
+    } finally {
+      await server.destroy();
+    }
   });
 
   it("throws on unknown session operations", async () => {
@@ -76,25 +85,34 @@ describe("SessionServer core", () => {
 
   it("handles multi-client attach/detach", async () => {
     const server = new SessionServer();
-    const plan = shortPlan(cwd, "echo mc");
+    // Long-lived process: attaching after a short-lived process exits and is
+    // reaped fails with Session-not-found on fast machines.
+    const plan: LaunchPlanPayload = {
+      command: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"],
+      cwd, env: {}, secretEnvNames: [], credentialMode: "host_environment"
+    };
 
     await server.createSession({ sessionId: "mc", userId: "u", attachToken: "t", launchPlan: plan });
-    const attach1 = await server.attachClient("mc", "c1");
-    const attach2 = await server.attachClient("mc", "c2");
-    assert.strictEqual(typeof attach1.snapshot, "string");
-    assert.strictEqual(typeof attach2.snapshot, "string");
-    server.endClientBuffering("mc", "c1");
-    server.endClientBuffering("mc", "c2");
+    try {
+      const attach1 = await server.attachClient("mc", "c1");
+      const attach2 = await server.attachClient("mc", "c2");
+      assert.strictEqual(typeof attach1.snapshot, "string");
+      assert.strictEqual(typeof attach2.snapshot, "string");
+      server.endClientBuffering("mc", "c1");
+      server.endClientBuffering("mc", "c2");
 
-    const handle = server.getSession("mc");
-    assert.ok(handle);
-    assert.strictEqual(handle.clientCount, 2);
-    assert.strictEqual(handle.hasClient("c1"), true);
-    assert.strictEqual(handle.hasClient("c2"), true);
+      const handle = server.getSession("mc");
+      assert.ok(handle);
+      assert.strictEqual(handle.clientCount, 2);
+      assert.strictEqual(handle.hasClient("c1"), true);
+      assert.strictEqual(handle.hasClient("c2"), true);
 
-    server.detachClient("mc", "c1");
-    assert.strictEqual(handle.clientCount, 1);
-    assert.strictEqual(handle.hasClient("c1"), false);
+      server.detachClient("mc", "c1");
+      assert.strictEqual(handle.clientCount, 1);
+      assert.strictEqual(handle.hasClient("c1"), false);
+    } finally {
+      await server.destroy();
+    }
   });
 
   it("onExit callback fires when process exits", async () => {
@@ -119,10 +137,19 @@ describe("SessionServer core", () => {
 
   it("resize works without throwing", async () => {
     const server = new SessionServer();
-    const plan = shortPlan(cwd, "echo r");
+    // Long-lived process: resizing a pty whose process already exited throws
+    // EBADF on fast machines.
+    const plan: LaunchPlanPayload = {
+      command: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"],
+      cwd, env: {}, secretEnvNames: [], credentialMode: "host_environment"
+    };
 
     await server.createSession({ sessionId: "r", userId: "u", attachToken: "t", launchPlan: plan });
-    server.resizeWindow("r", 160, 50);
-    // Should not throw
+    try {
+      server.resizeWindow("r", 160, 50);
+      // Should not throw
+    } finally {
+      await server.destroy();
+    }
   });
 });

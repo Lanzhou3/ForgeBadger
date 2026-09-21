@@ -1,0 +1,15 @@
+{
+  "blender": "5.2.1 LTS",
+  "hair_strands": {
+    "Body | sculpted compact pear silhouette": 132925,
+    "Head | single continuous cheek and muzzle surface": 170934,
+    "Forearm -1 | inward resting pose": 25000,
+    "Forearm 1 | inward resting pose": 25000
+  },
+  "total_hair_strands": 353859,
+  "head_tilt_degrees": 14,
+  "native_hair_objects": 4,
+  "mesh_objects": 42,
+  "rigged": false,
+  "runtime_integrated": false
+}

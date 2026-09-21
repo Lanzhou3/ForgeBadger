@@ -9,9 +9,14 @@
  */
 import { lookup } from "node:dns/promises";
 import type { ModelProviderRepository, ProviderApiFormat } from "../../db/repositories/model-provider-repository.js";
-import { validateOutboundHost } from "../network-policy.js";
+import { assertResolvedPublicHttpsEndpoint } from "../network-policy.js";
 import { AgentError } from "./types.js";
 import { redactAgentErrorMessage } from "./redaction.js";
+import { createAgentPublicFetch } from "./llm-public-fetch.js";
+import { readOpenAiCompletion } from "./llm-openai.js";
+import { readAnthropicCompletion } from "./llm-anthropic.js";
+import { withAbort, type LlmResult, type LlmUsage } from "./llm-response.js";
+import { MAX_CONTEXT_CHARS } from "./context.js";
 
 export interface AgentLlmMessage {
   role: "user" | "assistant" | "tool";
@@ -33,6 +38,8 @@ export interface AgentLlmStreamEvent {
   text?: string;
   toolCall?: { id: string; name: string; arguments: string };
   message?: string;
+  finishReason?: string;
+  usage?: LlmUsage;
 }
 
 export interface AgentLlmRequest {
@@ -55,6 +62,7 @@ export interface AgentLlmProviderResolution {
   apiKey: string;
   authType: "api_key" | "bearer_token" | "oauth" | "none";
   defaultHeaders: Record<string, string>;
+  allowPlaintextHttp?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -67,7 +75,6 @@ export function createAgentLlmClient(input: {
   resolveHost?: (hostname: string, options: { all: true }) => Promise<Array<{ address: string; family: number }>>;
   timeoutMs?: number;
 }) {
-  const fetchImpl = input.fetchImpl ?? fetch;
   const resolveHost = input.resolveHost ?? lookup;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   // Per-client resolution cache. The client is constructed per user per stack,
@@ -102,14 +109,15 @@ export function createAgentLlmClient(input: {
       baseUrl: baseUrl.replace(/\/+$/u, ""),
       apiKey,
       authType: provider.authType,
-      defaultHeaders: provider.defaultHeaders
+      defaultHeaders: provider.defaultHeaders,
+      allowPlaintextHttp: provider.allowPlaintextHttp
     };
     resolutionCache.set(cacheKey, resolution);
     return resolution;
   }
 
   /** Stream one model request; emits text/tool deltas. Resolves on completion. */
-  async function stream(request: AgentLlmRequest): Promise<{ message: string }> {
+  async function stream(request: AgentLlmRequest): Promise<LlmResult> {
     const resolution = resolveProvider(request.modelId);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -119,15 +127,20 @@ export function createAgentLlmClient(input: {
     outer?.addEventListener("abort", abort, { once: true });
     try {
       controller.signal.throwIfAborted();
-      const host = new URL(resolution.baseUrl).hostname;
-      const blocked = await validateOutboundHost(host, resolveHost);
-      controller.signal.throwIfAborted();
-      if (blocked) throw new AgentError("AGENT_HOST_BLOCKED", `Outbound host blocked: ${blocked}`);
+      if (input.fetchImpl) {
+        try {
+          await withAbort(assertResolvedPublicHttpsEndpoint(resolution.baseUrl, resolveHost, { allowPlaintextHttp: resolution.allowPlaintextHttp }), controller.signal);
+        } catch (error) {
+          if (controller.signal.aborted) throw error;
+          throw new AgentError("AGENT_HOST_BLOCKED", "Provider endpoint failed public-network validation");
+        }
+      }
+      const fetchImpl = input.fetchImpl ?? createAgentPublicFetch({ resolveHost, allowPlaintextHttp: resolution.allowPlaintextHttp ?? false });
 
       if (resolution.apiFormat === "anthropic") {
-        return await streamAnthropic(resolution, request, fetchImpl, controller.signal, input.timeoutMs);
+        return await streamAnthropic(resolution, request, fetchImpl, controller.signal);
       }
-      return await streamOpenAi(resolution, request, fetchImpl, controller.signal, input.timeoutMs);
+      return await streamOpenAi(resolution, request, fetchImpl, controller.signal);
     } catch (error) {
       if (error instanceof AgentError) throw error;
       throw new AgentError("AGENT_LLM_FAILED", redactAgentErrorMessage(error instanceof Error ? error.message : "LLM request failed"));
@@ -238,9 +251,8 @@ async function streamAnthropic(
   resolution: AgentLlmProviderResolution,
   request: AgentLlmRequest,
   fetchImpl: AgentFetch,
-  signal: AbortSignal,
-  timeoutMs: number | undefined
-): Promise<{ message: string }> {
+  signal: AbortSignal
+): Promise<LlmResult> {
   const system = request.system ?? SYSTEM_PROMPT;
   const apiMessages: Array<{ role: "user" | "assistant"; content: Array<Record<string, unknown>> }> = [];
   for (const message of request.messages) {
@@ -256,14 +268,16 @@ async function streamAnthropic(
 
   const body: Record<string, unknown> = {
     model: resolution.modelId,
+    stream: true,
     max_tokens: 8192,
     system,
     messages: apiMessages,
     tools: request.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema }))
   };
 
-  const response = await fetchImpl(`${resolution.baseUrl}/v1/messages`, {
+  const response = await withAbort(fetchImpl(`${resolution.baseUrl}/v1/messages`, {
     method: "POST",
+    redirect: "error",
     headers: {
       "content-type": "application/json",
       "x-api-key": resolution.apiKey,
@@ -271,42 +285,20 @@ async function streamAnthropic(
       ...authHeaders(resolution),
       ...resolution.defaultHeaders
     },
-    body: JSON.stringify(body),
+    body: serializeProviderRequest(body),
     signal
-  });
+  }), signal);
   if (!response.ok) throw new AgentError("AGENT_HTTP_ERROR", await readError(response));
 
-  const data = await response.json() as {
-    content?: Array<{ type: string; text?: string; thinking?: string; name?: string; id?: string; input?: unknown }>;
-    stop_reason?: string;
-  };
-  signal.throwIfAborted();
-  let message = "";
-  for (const block of data.content ?? []) {
-    if (block.type === "thinking" && block.thinking) {
-      // Anthropic extended thinking lives in its own content block — surface it
-      // to the UI as a dedicated thinking_delta so the chat can render it
-      // separately from the real answer text.
-      request.onEvent({ type: "thinking_delta", text: block.thinking });
-    } else if (block.type === "text" && block.text) {
-      message += block.text;
-      request.onEvent({ type: "text_delta", text: block.text });
-    } else if (block.type === "tool_use" && block.name) {
-      const tc = { id: block.id ?? crypto.randomUUID(), name: block.name, arguments: JSON.stringify(block.input ?? {}) };
-      request.onEvent({ type: "tool_call", toolCall: tc });
-    }
-  }
-  request.onEvent({ type: "done", message });
-  return { message };
+  return readAnthropicCompletion(response, request.onEvent, signal);
 }
 
 async function streamOpenAi(
   resolution: AgentLlmProviderResolution,
   request: AgentLlmRequest,
   fetchImpl: AgentFetch,
-  signal: AbortSignal,
-  timeoutMs: number | undefined
-): Promise<{ message: string }> {
+  signal: AbortSignal
+): Promise<LlmResult> {
   const mapped = request.messages.map((m) => {
     if (m.role === "tool") {
       return { role: "tool" as const, tool_call_id: m.toolCallId, content: m.content };
@@ -324,44 +316,28 @@ async function streamOpenAi(
 
   const body: Record<string, unknown> = {
     model: resolution.modelId,
+    stream: true,
     messages: apiMessages,
     tools: request.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }))
   };
 
-  const response = await fetchImpl(`${resolution.baseUrl}/chat/completions`, {
+  const endpoint = new URL(`${resolution.baseUrl}/chat/completions`);
+  const response = await withAbort(fetchImpl(endpoint.href, {
     method: "POST",
+    redirect: "error",
     headers: {
       "content-type": "application/json",
       ...authHeaders(resolution),
       ...resolution.defaultHeaders
     },
-    body: JSON.stringify(body),
+    body: serializeProviderRequest(body),
     signal
-  });
+  }), signal);
   if (!response.ok) throw new AgentError("AGENT_HTTP_ERROR", await readError(response));
 
-  const data = await response.json() as {
-    choices?: Array<{
-      message?: {
-        content?: string | null;
-        // OpenAI o-series / DeepSeek / o1-compat: a separate reasoning field
-        // that the chat UI surfaces as a dedicated "thinking" section.
-        reasoning_content?: string | null;
-        tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
-      };
-    }>;
-  };
-  signal.throwIfAborted();
-  const choice = data.choices?.[0];
-  let message = choice?.message?.content ?? "";
-  const reasoning = choice?.message?.reasoning_content ?? "";
-  if (reasoning) request.onEvent({ type: "thinking_delta", text: reasoning });
-  for (const tc of choice?.message?.tool_calls ?? []) {
-    request.onEvent({ type: "tool_call", toolCall: { id: tc.id, name: tc.function.name, arguments: tc.function.arguments } });
-  }
-  if (message) request.onEvent({ type: "text_delta", text: message });
-  request.onEvent({ type: "done", message });
-  return { message };
+  const allowFinishReasonEof = endpoint.protocol === "https:"
+    && ["api.minimaxi.com", "api.minimax.cn", "api.minimax.io"].includes(endpoint.hostname);
+  return readOpenAiCompletion(response, request.onEvent, signal, { allowFinishReasonEof });
 }
 
 const SYSTEM_PROMPT = [
@@ -372,21 +348,31 @@ const SYSTEM_PROMPT = [
   "- memory: read/write scoped memory (global, project, session)",
   "",
   "Be concise. When you need to take an operate action, request it and it will be",
-  "approved by the owner before it executes. Never claim a write happened until",
+  "authorized by a matching scoped Grant or an exact owner approval before execution.",
+  "Use list_playbooks and load_playbook for Copilot operating guides. CLI Skills",
+  "belong to CLI sessions and do not add tools to your runtime. Task preparation",
+  "does not start a CLI or dispatch a prompt. Autonomous dispatch is unavailable.",
+  "Never claim a write happened until",
   "the tool result confirms it."
 ].join("\n");
+
+/** Final wire guard: provider envelopes and JSON escaping can exceed projection estimates. */
+function serializeProviderRequest(body: Record<string, unknown>): string {
+  const serialized = JSON.stringify(body);
+  if (serialized.length > MAX_CONTEXT_CHARS) {
+    throw new AgentError("COPILOT_CONTEXT_TOO_LARGE",
+      `Final provider request exceeds ${MAX_CONTEXT_CHARS} application characters (${serialized.length})`);
+  }
+  return serialized;
+}
 
 function safeJsonParse(value: string): unknown {
   try { return JSON.parse(value); } catch { return {}; }
 }
 
 async function readError(response: Response): Promise<string> {
-  try {
-    const text = await response.text();
-    return `Provider returned ${response.status}: ${text.slice(0, 500)}`;
-  } catch {
-    return `Provider returned ${response.status}`;
-  }
+  void response.body?.cancel().catch(() => undefined);
+  return `Provider returned HTTP ${response.status}`;
 }
 
 export function toolSchemaToModelFormat(tool: { name: string; description: string; inputSchema: Record<string, unknown> }): AgentToolSchema {

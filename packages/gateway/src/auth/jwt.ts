@@ -7,11 +7,11 @@ import jwt from "jsonwebtoken";
  */
 const ACCESS_TOKEN_TTL = "24h";
 
-export function signJwt(payload: { userId: string; email: string }, secret: string): string {
+export function signJwt(payload: { userId: string; email: string; authEpoch?: number }, secret: string): string {
   return jwt.sign(payload, secret, { algorithm: "HS256", expiresIn: ACCESS_TOKEN_TTL });
 }
 
-export function verifyJwt(token: string, secret: string): { userId: string; email: string } {
+export function verifyJwt(token: string, secret: string): { userId: string; email: string; authEpoch?: number } {
   const decoded = jwt.verify(token, secret, { algorithms: ["HS256"] });
   if (typeof decoded !== "object" || decoded === null) {
     throw new Error("Invalid JWT payload");
@@ -20,10 +20,11 @@ export function verifyJwt(token: string, secret: string): { userId: string; emai
   if (typeof payload.userId !== "string" || typeof payload.email !== "string") {
     throw new Error("Invalid JWT payload");
   }
-  return { userId: payload.userId, email: payload.email };
+  if (payload.authEpoch !== undefined && (!Number.isSafeInteger(payload.authEpoch) || Number(payload.authEpoch) < 0)) throw new Error("Invalid JWT epoch");
+  return { userId: payload.userId, email: payload.email, ...(payload.authEpoch === undefined ? {} : {authEpoch: Number(payload.authEpoch)}) };
 }
 
-export function decodeJwt(token: string): { userId: string; email: string } | null {
+export function decodeJwt(token: string): { userId: string; email: string; authEpoch?: number } | null {
   const decoded = jwt.decode(token);
   if (!decoded || typeof decoded !== "object") return null;
   const payload = decoded as Record<string, unknown>;

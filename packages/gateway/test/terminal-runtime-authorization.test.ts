@@ -28,7 +28,7 @@ function createRuntimeFixture(): Database.Database {
 }
 
 describe("TerminalRuntimeAuthorizationRegistry", () => {
-  it("keeps the hot path in memory and revalidates only a matching session", () => {
+  it("rechecks authority on use even without an invalidation event", () => {
     const invalidator = new RuntimeAuthorizationInvalidator();
     const registry = new TerminalRuntimeAuthorizationRegistry(invalidator);
     let validationCount = 0;
@@ -51,23 +51,23 @@ describe("TerminalRuntimeAuthorizationRegistry", () => {
     for (let index = 0; index < 1_000; index += 1) {
       assert.equal(lease.isAuthorized(), true);
     }
-    assert.equal(validationCount, 1);
+    assert.equal(validationCount, 1002);
 
     invalidator.invalidate({ scope: "session", userId: "u1", sessionId: "other" });
-    assert.equal(validationCount, 1);
+    assert.equal(validationCount, 1002);
 
     invalidator.invalidate({ scope: "session", userId: "u1", sessionId: "s1" });
-    assert.equal(validationCount, 2);
+    assert.equal(validationCount, 1003);
     assert.equal(lease.isAuthorized(), true);
 
     valid = false;
-    invalidator.invalidate({ scope: "session", userId: "u1", sessionId: "s1" });
-    assert.equal(validationCount, 3);
+    assert.equal(lease.isAuthorized(), false);
+    assert.equal(validationCount, 1005);
     assert.equal(lease.isAuthorized(), false);
     assert.equal(invalidatedCount, 1);
 
     invalidator.invalidate({ scope: "session", userId: "u1", sessionId: "s1" });
-    assert.equal(validationCount, 3);
+    assert.equal(validationCount, 1005);
     assert.equal(invalidatedCount, 1);
   });
 

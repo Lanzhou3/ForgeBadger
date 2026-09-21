@@ -78,7 +78,7 @@ export function openaiToAnthropicResponse(
  * Local token estimate for /v1/messages/count_tokens when the upstream is
  * OpenAI-protocol (no count_tokens equivalent). ~4 chars/token heuristic.
  */
-export function estimateInputTokens(requestBody: Record<string, unknown>): number {
+export function estimateInputTokens(requestBody: unknown): number {
   const serialized = JSON.stringify(requestBody);
   return Math.max(1, Math.ceil(serialized.length / 4));
 }

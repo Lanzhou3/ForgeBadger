@@ -1,3 +1,4 @@
+import { canUseProjectPath, hasDeliveryHistory } from '../db/repositories/managed-project-access.js';
 import { randomUUID } from "node:crypto";
 import { PlatformActions } from "../services/platform-commands/actions.js";
 import { createPlatformCommands } from "../services/platform-commands/catalog.js";
@@ -27,7 +28,13 @@ import type { RuntimeAuthorizationInvalidator } from "../services/runtime-author
 import type { CredentialMode, WriteResult } from "../config-generation/types.js";
 import { readGlobalAiConfig, readProjectAiConfig, writeProjectAiConfigFile } from "../services/project-ai-config.js";
 import { listWorkspaceTree, maxFileWriteBytes, readWorkspaceFile, writeWorkspaceFile } from "../services/workspace-context.js";
-import { getProjectGitChanges, getProjectGitFileDiff } from "../services/project-git.js";
+import {
+  checkoutProjectGitBranch,
+  getProjectGitBranches,
+  getProjectGitChanges,
+  getProjectGitFileDiff,
+  ProjectGitError
+} from "../services/project-git.js";
 import { recordActivity } from "../services/activity-events.js";
 import { buildConfigSyncSummary, buildProjectConfigRenderPlan } from "../services/project-config-render.js";
 import { extractProjectTemplate } from "../services/project-template-extract.js";
@@ -36,7 +43,7 @@ export {
   buildProjectConfigRenderPlan
 } from "../services/project-config-render.js";
 
-const aiToolSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
+const aiToolSchema = z.enum(["claude", "opencode", "codex", "kimi", "pi"]);
 
 const createProjectSchema = z.object({
   name: z.string().min(1),
@@ -104,6 +111,23 @@ const gitDiffQuerySchema = z.object({
   untracked: z.enum(["0", "1"]).optional()
 }).strict();
 
+const gitCheckoutSchema = z.object({
+  branch: z.string().min(1).max(200),
+  create: z.boolean().optional().default(false)
+}).strict();
+
+function gitCheckoutErrorStatus(code: ProjectGitError["code"]): number {
+  switch (code) {
+    case "GIT_BRANCH_NOT_FOUND":
+      return 404;
+    case "GIT_WORKING_TREE_DIRTY":
+    case "GIT_BRANCH_EXISTS":
+      return 409;
+    default:
+      return 400;
+  }
+}
+
 // Projects are created CLI-agnostic: ai_tool stays an empty sentinel until an
 // explicit designation exists (e.g. a project draft naming an adapter).
 // Legacy rows still carry "claude" and keep working through explicit overrides.
@@ -123,6 +147,13 @@ export function createProjectRoutes(
 ): Router {
   const router = Router();
   router.use(authenticate);
+  router.use((req,res,next) => {
+    const actorId=(req as unknown as AuthenticatedRequest).userId;
+    if (typeof req.body?.path === "string" && !canUseProjectPath(db,actorId,req.body.path)) {
+      res.status(403).json({code:1,message:"Protected project path",details:{code:"MANAGED_PROJECT_ACCESS_DENIED"}}); return;
+    }
+    next();
+  });
 
   router.post("/", async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
@@ -264,23 +295,35 @@ export function createProjectRoutes(
       res.status(404).json({ code: 1, message: "Project not found" });
       return;
     }
-    if (sessionManager) {
-      const sessionRepo = new SessionRepository(db, userId);
-      const projectSessions = sessionRepo
-        .list()
-        .filter((session) => session.projectId === project.id && session.status === "running");
-      for (const session of projectSessions) {
-        if (!session.runtimeSessionName) {
-          continue;
-        }
-        try {
-          await sessionManager.stopSession(session.id, session.runtimeSessionName, userId);
-        } catch {
-          // The project record can still be removed when an already-dead runtime session is referenced.
+    if (hasDeliveryHistory(db,"project",project.id)) {
+      res.status(409).json({code:1,message:"Project has delivery history; archive it in the workspace",details:{code:"DELIVERY_HISTORY_REQUIRES_ARCHIVE"}}); return;
+    }
+    const sessionRepo = new SessionRepository(db, userId);
+    const projectSessions = sessionRepo.list().filter(session => session.projectId === project.id)
+      .sort((a, b) => a.id.localeCompare(b.id));
+    const removeWhenStopped = async (): Promise<void> => {
+      if (sessionManager) {
+        for (const session of projectSessions) {
+          const live = sessionManager.getSession(session.id);
+          const runtimeName = live?.runtimeSessionName ?? session.runtimeSessionName ?? undefined;
+          if (live || runtimeName) await sessionManager.stopSession(session.id, runtimeName, userId);
         }
       }
+      repo.delete(project.id);
+    };
+    // Hold every existing session lock through deletion, including error/idle
+    // rows whose process can still be alive after a failed launch or IPC outage.
+    const withSessionLocks = async (index: number): Promise<void> => {
+      const session = projectSessions[index];
+      if (!sessionManager || !session) return removeWhenStopped();
+      await sessionManager.runExclusive(session.id, () => withSessionLocks(index + 1));
+    };
+    try {
+      await withSessionLocks(0);
+    } catch {
+      res.status(409).json({ code: 1, message: "Project sessions have not all confirmed their stop; retry after the runtime is available", details: { code: "SESSION_RUNTIME_STOP_UNCONFIRMED" } });
+      return;
     }
-    repo.delete(req.params.id);
     runtimeAuthorizationInvalidator.invalidate({
       scope: "project",
       userId,
@@ -1017,6 +1060,77 @@ export function createProjectRoutes(
       res.status(400).json({
         code: 1,
         message: error instanceof Error ? error.message : "Git diff read failed"
+      });
+    }
+  });
+
+  router.get("/:id/git-branches", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const projectRepo = new ProjectRepository(db, userId);
+    const project = projectRepo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const git = await getProjectGitBranches(project.path);
+      res.json({
+        code: 0,
+        data: {
+          projectId: project.id,
+          git
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Git branches read failed"
+      });
+    }
+  });
+
+  router.post("/:id/git-checkout", async (req, res) => {
+    const parseResult = gitCheckoutSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const projectRepo = new ProjectRepository(db, userId);
+    const project = projectRepo.getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const result = await checkoutProjectGitBranch(project.path, parseResult.data.branch, {
+        create: parseResult.data.create
+      });
+      res.json({
+        code: 0,
+        data: {
+          projectId: project.id,
+          ...result
+        },
+        message: ""
+      });
+    } catch (error) {
+      if (error instanceof ProjectGitError) {
+        const status = gitCheckoutErrorStatus(error.code);
+        res.status(status).json({
+          code: 1,
+          message: error.message,
+          ...(error.details ? { details: error.details } : {})
+        });
+        return;
+      }
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Git checkout failed"
       });
     }
   });

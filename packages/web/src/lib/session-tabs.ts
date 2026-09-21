@@ -14,7 +14,13 @@ export interface SessionTab {
 }
 
 const SESSION_TABS_KEY = "forgebadger.sessionTabs.v1";
-const MAX_SESSION_TABS = 8;
+/** Most recent stopped/idle tabs kept. Running tabs are never capped — the
+ *  strip exists to show what's active, so a live session is not trimmed. */
+const MAX_INACTIVE_TABS = 8;
+/** Most session tabs rendered inline before the rest fold into the overflow
+ *  menu. A display safeguard so a pathological number of running tabs (which
+ *  are never trimmed) can't stretch the strip into an endless scroll. */
+export const MAX_VISIBLE_TABS = 12;
 
 export function sessionToTab(session: Session, now = Date.now()): SessionTab {
   return {
@@ -34,15 +40,12 @@ export function readSessionTabs(storage: BrandStorage = window.localStorage): Se
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(isSessionTab)
-      .slice(0, MAX_SESSION_TABS)
-      .map((tab) => {
-        const lastPrompt = sanitizeStoredPrompt(tab.lastPrompt);
-        if (lastPrompt === tab.lastPrompt) return tab;
-        const { lastPrompt: _dropped, ...rest } = tab;
-        return lastPrompt ? { ...rest, lastPrompt } : rest;
-      });
+    return capSessionTabs(parsed.filter(isSessionTab)).map((tab) => {
+      const lastPrompt = sanitizeStoredPrompt(tab.lastPrompt);
+      if (lastPrompt === tab.lastPrompt) return tab;
+      const { lastPrompt: _dropped, ...rest } = tab;
+      return lastPrompt ? { ...rest, lastPrompt } : rest;
+    });
   } catch {
     return [];
   }
@@ -170,6 +173,42 @@ export function groupSessionTabs(tabs: SessionTab[]): SessionTabGroup[] {
   return groups;
 }
 
+/**
+ * Splits tabs into the set shown inline in the strip and the set folded into
+ * the overflow menu. Tabs are considered in display (grouped) order: at most
+ * `maxVisible` are shown inline. The active tab is the exception — if it would
+ * otherwise fall past the limit it is still shown inline (so it costs no
+ * budget only in that off-screen case); within the limit it occupies a slot
+ * like any other tab. Hidden tabs keep display order.
+ */
+export function splitSessionTabsByVisibility(
+  tabs: SessionTab[],
+  activeId: string,
+  maxVisible = MAX_VISIBLE_TABS
+): { visibleIds: ReadonlySet<string>; hiddenTabs: SessionTab[] } {
+  const ordered = groupSessionTabs(tabs).flatMap((group) => group.tabs);
+  let budget = maxVisible;
+  const visibleIds = new Set<string>();
+  const hiddenTabs: SessionTab[] = [];
+  for (const tab of ordered) {
+    const inBudget = budget > 0;
+    if (tab.id === activeId) {
+      // Always inline; consumes a slot only if there is one left (i.e. it is
+      // within the limit). Otherwise it is the off-screen active exception.
+      visibleIds.add(tab.id);
+      if (inBudget) budget -= 1;
+      continue;
+    }
+    if (inBudget) {
+      visibleIds.add(tab.id);
+      budget -= 1;
+    } else {
+      hiddenTabs.push(tab);
+    }
+  }
+  return { visibleIds, hiddenTabs };
+}
+
 export function pruneSessionTabs(
   allowedIds: Set<string>,
   storage: BrandStorage = window.localStorage
@@ -182,13 +221,29 @@ export function pruneSessionTabs(
 
 function normalizeTabs(tabs: SessionTab[]): SessionTab[] {
   const seen = new Set<string>();
-  const normalized: SessionTab[] = [];
+  const deduped: SessionTab[] = [];
   for (const tab of tabs) {
     if (!tab.id || seen.has(tab.id)) continue;
     seen.add(tab.id);
-    normalized.push(tab);
+    deduped.push(tab);
   }
-  return normalized.slice(-MAX_SESSION_TABS);
+  return capSessionTabs(deduped);
+}
+
+/**
+ * Bounds the tab list without dropping a live session. Running tabs are kept
+ * unconditionally (this mirrors the strip's own `status === "running"` check);
+ * stopped/idle tabs are trimmed to the most recently used `MAX_INACTIVE_TABS`.
+ * The result preserves the input's relative order.
+ */
+function capSessionTabs(tabs: SessionTab[]): SessionTab[] {
+  const running = tabs.filter((tab) => tab.status === "running");
+  const inactive = tabs
+    .filter((tab) => tab.status !== "running")
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, MAX_INACTIVE_TABS);
+  const keep = new Set([...running, ...inactive].map((tab) => tab.id));
+  return tabs.filter((tab) => keep.has(tab.id));
 }
 
 function isSessionTab(value: unknown): value is SessionTab {

@@ -23,6 +23,13 @@ describe("adapter discovery", () => {
     assert.equal(kimi?.command, "kimi");
     assert.equal(kimi?.configDir, ".kimi-code");
     assert.deepEqual(kimi?.runtimeModes, ["terminal"]);
+    const pi = definitions.find((adapter) => adapter.id === "pi");
+    assert.equal(pi?.supportLevel, "supported");
+    assert.equal(pi?.label, "PI");
+    assert.equal(pi?.command, "pi");
+    assert.equal(pi?.configDir, ".pi");
+    assert.equal(pi?.launchEnabled, true);
+    assert.deepEqual(pi?.runtimeModes, ["terminal"]);
   });
 
   it("enables launch only when the supported adapter command is available", async () => {
@@ -44,6 +51,9 @@ describe("adapter discovery", () => {
     assert.equal(codex?.available, true);
     assert.equal(codex?.supportLevel, "supported");
     assert.equal(codex?.launchEnabled, true);
+    const pi = adapters.find((adapter) => adapter.id === "pi");
+    assert.equal(pi?.available, true);
+    assert.equal(pi?.launchEnabled, true);
   });
 
   it("disables launch when the daemon is unavailable even with installed adapters", async () => {

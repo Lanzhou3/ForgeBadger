@@ -37,6 +37,7 @@ import {
   type RuntimeAdapterId,
   type Session,
 } from "@/lib/api";
+import { TaskAuthorityContext, useTaskAuthority, type TaskAuthority } from "./TaskAuthority";
 import { cn } from "@/lib/utils";
 import { taskPacketSelectableSessions } from "../project-manager-task-packet";
 import { ProjectManagerGoalBanner } from "./GoalBanner";
@@ -85,14 +86,20 @@ interface ProjectManagerPanelProps {
   projectId: string;
   enabled: boolean;
   selectedWorkItemId?: string | null;
+  authority: TaskAuthority;
 }
 
-export function ProjectManagerPanel({
+export function ProjectManagerPanel(props: ProjectManagerPanelProps) {
+  return <TaskAuthorityContext.Provider value={props.authority}><ProjectManagerPanelContent {...props} /></TaskAuthorityContext.Provider>;
+}
+
+function ProjectManagerPanelContent({
   projectId,
   enabled,
   selectedWorkItemId: requestedWorkItemId = null,
 }: ProjectManagerPanelProps) {
   const { t } = useLanguage();
+  const {canEdit, canManage, legacySessions, actorId} = useTaskAuthority();
   const queryClient = useQueryClient();
   const canLoad = enabled && projectId.length > 0;
   const [isGoalEditing, setIsGoalEditing] = useState(false);
@@ -128,14 +135,15 @@ export function ProjectManagerPanel({
   const [ledgerFilter, setLedgerFilter] = useState<LedgerFilter>("all");
   const [ledgerLimit, setLedgerLimit] = useState(LEDGER_PAGE_SIZE);
   const [statusMutationError, setStatusMutationError] = useState<string | null>(null);
-  const [pendingDoneWorkItemId, setPendingDoneWorkItemId] = useState<string | null>(null);
+  const [pendingDoneItems, setPendingDoneItems] = useState<ProjectManagerWorkItem[] | null>(null);
+  const [pendingDoneIsBatch, setPendingDoneIsBatch] = useState(false);
   const [doneReason, setDoneReason] = useState("");
   const [doneReasonError, setDoneReasonError] = useState<string | null>(null);
   const doneReasonRef = useRef<HTMLTextAreaElement | null>(null);
   const appliedRequestedWorkItemIdRef = useRef<string | null>(null);
 
   const goalQuery = useQuery({
-    queryKey: ["project-manager", projectId, "goal"],
+    queryKey: ["project-manager", projectId, "goal", actorId],
     queryFn: () => getProjectManagerGoal(projectId),
     enabled: canLoad,
     retry: false,
@@ -144,51 +152,51 @@ export function ProjectManagerPanel({
   const goal = goalQuery.data?.goal ?? null;
 
   const workItemsQuery = useQuery({
-    queryKey: ["project-manager", projectId, "work-items", { limit: WORK_ITEM_LIMIT }],
+    queryKey: ["project-manager", projectId, "work-items", { limit: WORK_ITEM_LIMIT }, actorId],
     queryFn: () => listProjectManagerWorkItems(projectId, { limit: WORK_ITEM_LIMIT }),
     enabled: canLoad,
     retry: false,
   });
 
   const taskPacketsQuery = useQuery({
-    queryKey: ["project-manager", projectId, "task-packets", { limit: WORK_ITEM_LIMIT }],
+    queryKey: ["project-manager", projectId, "task-packets", { limit: WORK_ITEM_LIMIT }, actorId],
     queryFn: () => listProjectManagerTaskPackets(projectId, { limit: WORK_ITEM_LIMIT }),
-    enabled: canLoad,
+    enabled: canLoad && legacySessions,
     retry: false,
   });
 
   const stagesQuery = useQuery({
-    queryKey: ["project-manager", projectId, "stages"],
+    queryKey: ["project-manager", projectId, "stages", actorId],
     queryFn: () => listProjectManagerStages(projectId),
     enabled: canLoad,
     retry: false,
   });
 
   const workItemLinksQuery = useQuery({
-    queryKey: ["project-manager", projectId, "work-item-links"],
+    queryKey: ["project-manager", projectId, "work-item-links", actorId],
     queryFn: () => listProjectManagerWorkItemLinks(projectId),
     enabled: canLoad,
     retry: false,
   });
 
   const ledgerQuery = useQuery({
-    queryKey: ["project-manager", projectId, "ledger", { limit: ledgerLimit }],
+    queryKey: ["project-manager", projectId, "ledger", { limit: ledgerLimit }, actorId],
     queryFn: () => listProjectManagerLedger(projectId, { limit: ledgerLimit }),
     enabled: canLoad,
     retry: false,
   });
 
   const taskPacketQuery = useQuery({
-    queryKey: ["project-manager", projectId, "work-item", selectedWorkItemId, "task-packet"],
+    queryKey: ["project-manager", projectId, "work-item", selectedWorkItemId, "task-packet", actorId],
     queryFn: () => getProjectManagerTaskPacket(projectId, selectedWorkItemId ?? ""),
-    enabled: canLoad && !!selectedWorkItemId,
+    enabled: canLoad && legacySessions && !!selectedWorkItemId,
     retry: false,
   });
 
   const sessionsQuery = useQuery({
-    queryKey: ["sessions", { projectId }],
+    queryKey: ["sessions", { projectId }, actorId],
     queryFn: () => listSessions({ projectId }),
-    enabled: canLoad && !!selectedWorkItemId,
+    enabled: canLoad && legacySessions && !!selectedWorkItemId,
     retry: false,
   });
 
@@ -211,13 +219,15 @@ export function ProjectManagerPanel({
       queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
       queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
       queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
       queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "stages"] }),
       queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-item-links"] }),
     ]);
   };
   const updateWorkItemsCache = (updater: (items: ProjectManagerWorkItem[]) => ProjectManagerWorkItem[]) => {
     queryClient.setQueriesData<{ workItems: ProjectManagerWorkItem[] }>(
-      { queryKey: ["project-manager", projectId, "work-items"] },
+      { queryKey: ["project-manager", projectId, "work-items"], predicate: query => query.queryKey.at(-1) === actorId },
       (current) => current ? { workItems: updater(current.workItems) } : current
     );
   };
@@ -246,6 +256,8 @@ export function ProjectManagerPanel({
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
       ]);
     },
     onError: (error) => {
@@ -265,6 +277,8 @@ export function ProjectManagerPanel({
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
       ]);
     },
     onError: (error) => {
@@ -274,7 +288,7 @@ export function ProjectManagerPanel({
 
   const deleteWorkItemMutation = useMutation({
     mutationFn: ({ workItemId }: { workItemId: string }) =>
-      deleteProjectManagerWorkItem(projectId, workItemId, { confirm: true }),
+      deleteProjectManagerWorkItem(projectId, workItemId, { confirm: true, expectedRevision: workItemsQuery.data?.workItems.find(item => item.id === workItemId)?.revision }),
     onSuccess: async ({ workItem }, variables) => {
       setDeleteWorkItemError(null);
       setDeletingWorkItemId(null);
@@ -285,6 +299,8 @@ export function ProjectManagerPanel({
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
       ]);
     },
     onError: (error) => {
@@ -293,22 +309,29 @@ export function ProjectManagerPanel({
   });
 
   const batchStatusMutation = useMutation({
-    mutationFn: (input: { updates: Array<{ workItemId: string; status: ProjectManagerWorkItemStatus }> }) =>
+    mutationFn: (input: { updates: Array<{ workItemId: string; status: ProjectManagerWorkItemStatus; expectedRevision?: number; manualCompletionReason?: string }> }) =>
       batchUpdateProjectManagerWorkItemStatuses(projectId, input),
     onSuccess: async ({ workItems: updatedWorkItems }) => {
       setBatchStatusError(null);
       setBatchTargetStatus("");
       setSelectedBoardWorkItemIds([]);
+      setPendingDoneItems(null);
+      setDoneReason("");
+      setDoneReasonError(null);
       const updatedById = new Map(updatedWorkItems.map((item) => [item.id, item]));
       updateWorkItemsCache((items) => items.map((item) => updatedById.get(item.id) ?? item));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
       ]);
     },
     onError: (error) => {
-      setBatchStatusError(projectManagerMutationMessage(error, t("projects.projectManagerBatchStatusError")));
+      const message = projectManagerMutationMessage(error, t("projects.projectManagerBatchStatusError"));
+      setBatchStatusError(message);
+      if (pendingDoneItems) setDoneReasonError(message);
     },
   });
 
@@ -317,13 +340,15 @@ export function ProjectManagerPanel({
       updateProjectManagerWorkItemStatus(projectId, workItemId, input),
     onSuccess: async () => {
       setStatusMutationError(null);
-      setPendingDoneWorkItemId(null);
+      setPendingDoneItems(null);
       setDoneReason("");
       setDoneReasonError(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
       ]);
     },
     onError: (error) => {
@@ -333,7 +358,7 @@ export function ProjectManagerPanel({
 
   const evidenceMutation = useMutation({
     mutationFn: ({ reference, workItemId }: { reference: ProjectManagerEvidenceRef; workItemId: string }) =>
-      attachProjectManagerWorkItemEvidence(projectId, workItemId, { evidenceRefs: [reference] }),
+      attachProjectManagerWorkItemEvidence(projectId, workItemId, { evidenceRefs: [reference], expectedRevision: workItemsQuery.data?.workItems.find(item => item.id === workItemId)?.revision }),
     onSuccess: async () => {
       setEvidenceAttachError(null);
       setEvidenceDraft(createEvidenceDraft());
@@ -341,6 +366,8 @@ export function ProjectManagerPanel({
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
+        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
       ]);
     },
     onError: (error) => {
@@ -402,7 +429,7 @@ export function ProjectManagerPanel({
   const isLoading = goalQuery.isLoading || workItemsQuery.isLoading;
   const isRefreshing = goalQuery.isFetching || workItemsQuery.isFetching || taskPacketsQuery.isFetching || ledgerQuery.isFetching;
   const workItems = workItemsQuery.data?.workItems ?? [];
-  const taskPackets = taskPacketsQuery.data?.taskPackets ?? [];
+  const taskPackets = legacySessions ? taskPacketsQuery.data?.taskPackets ?? [] : [];
   const stages = stagesQuery.data?.stages ?? [];
   const workItemLinks = workItemLinksQuery.data?.links ?? [];
   const tableWorkItems = filterWorkItemsForTable(workItems, workItemStatusFilter);
@@ -420,7 +447,7 @@ export function ProjectManagerPanel({
   const effectiveBatchTargetStatus = batchTargetOptions.includes(batchTargetStatus as ProjectManagerWorkItemStatus)
     ? batchTargetStatus
     : "";
-  const pendingDoneWorkItem = workItems.find((item) => item.id === pendingDoneWorkItemId) ?? null;
+  const pendingDoneWorkItem = pendingDoneItems?.[0] ?? null;
 
   useEffect(() => {
     const requested = requestedWorkItemId?.trim() ?? "";
@@ -448,10 +475,10 @@ export function ProjectManagerPanel({
   }, [taskPacket?.sessionLink?.sessionId]);
 
   useEffect(() => {
-    if (pendingDoneWorkItemId) {
+    if (pendingDoneItems) {
       doneReasonRef.current?.focus();
     }
-  }, [pendingDoneWorkItemId]);
+  }, [pendingDoneItems]);
 
   if (!enabled) {
     return null;
@@ -461,7 +488,7 @@ export function ProjectManagerPanel({
     if (!canLoad) return;
     void goalQuery.refetch();
     void workItemsQuery.refetch();
-    void taskPacketsQuery.refetch();
+    if (legacySessions) void taskPacketsQuery.refetch();
     void ledgerQuery.refetch();
     void stagesQuery.refetch();
     void workItemLinksQuery.refetch();
@@ -489,6 +516,7 @@ export function ProjectManagerPanel({
   };
 
   const saveGoal = () => {
+    if (!(canManage ?? canEdit)) return;
     const summary = goalDraft.summary.trim();
     if (!summary) {
       setGoalFormError(t("projects.projectManagerGoalSummaryRequired"));
@@ -510,6 +538,7 @@ export function ProjectManagerPanel({
   };
 
   const saveWorkItem = () => {
+    if (!canEdit) return;
     const title = workItemDraft.title.trim();
     if (!title) {
       setCreateWorkItemError(t("projects.projectManagerWorkItemTitleRequired"));
@@ -527,6 +556,7 @@ export function ProjectManagerPanel({
   };
 
   const saveEditedWorkItem = () => {
+    if (!canEdit) return;
     if (!editingWorkItem) return;
     const title = editWorkItemDraft.title.trim();
     if (!title) {
@@ -547,6 +577,7 @@ export function ProjectManagerPanel({
   };
 
   const confirmDeleteWorkItem = () => {
+    if (!canEdit) return;
     if (!deletingWorkItem) return;
     setDeleteWorkItemError(null);
     deleteWorkItemMutation.mutate({ workItemId: deletingWorkItem.id });
@@ -561,6 +592,7 @@ export function ProjectManagerPanel({
   };
 
   const submitBatchStatusChange = () => {
+    if (!canEdit) return;
     if (selectedBoardWorkItems.length === 0) {
       setBatchStatusError(t("projects.projectManagerBatchStatusSelectionRequired"));
       return;
@@ -571,15 +603,24 @@ export function ProjectManagerPanel({
     }
 
     setBatchStatusError(null);
+    if (effectiveBatchTargetStatus === "done") {
+      setPendingDoneItems(selectedBoardWorkItems.map((item) => ({ ...item })));
+      setPendingDoneIsBatch(true);
+      setDoneReason("");
+      setDoneReasonError(null);
+      return;
+    }
     batchStatusMutation.mutate({
       updates: selectedBoardWorkItems.map((item) => ({
         workItemId: item.id,
+        expectedRevision: item.revision,
         status: effectiveBatchTargetStatus,
       })),
     });
   };
 
   const attachEvidence = () => {
+    if (!canEdit) return;
     if (!selectedWorkItem) return;
     if (evidenceDraft.kind.trim().length === 0) {
       setEvidenceAttachError(t("projects.projectManagerEvidenceKindRequired"));
@@ -619,6 +660,7 @@ export function ProjectManagerPanel({
   };
 
   const linkTaskPacketSession = () => {
+    if (!legacySessions) return;
     if (!selectedWorkItem) return;
     const sessionId = taskPacketSessionId.trim();
     if (!sessionId) {
@@ -631,6 +673,7 @@ export function ProjectManagerPanel({
   };
 
   const startTaskPacket = () => {
+    if (!legacySessions) return;
     if (!selectedWorkItem) return;
     setTaskPacketStartError(null);
     taskPacketStartMutation.mutate({ workItemId: selectedWorkItem.id });
@@ -649,19 +692,22 @@ export function ProjectManagerPanel({
   };
 
   const requestStatusChange = (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => {
+    if (!canEdit) return;
     setStatusMutationError(null);
-    if (nextStatus === "done" && item.evidenceRefCount === 0) {
-      setPendingDoneWorkItemId(item.id);
+    if (nextStatus === "done") {
+      setPendingDoneItems([{ ...item }]);
+      setPendingDoneIsBatch(false);
       setDoneReason("");
       setDoneReasonError(null);
       return;
     }
 
-    statusMutation.mutate({ workItemId: item.id, input: { status: nextStatus } });
+    statusMutation.mutate({ workItemId: item.id, input: { status: nextStatus, expectedRevision: item.revision } });
   };
 
   const confirmDoneWithReason = () => {
-    if (!pendingDoneWorkItem) return;
+    if (!canEdit) return;
+    if (!pendingDoneWorkItem || !pendingDoneItems || statusMutation.isPending || batchStatusMutation.isPending) return;
     const manualCompletionReason = doneReason.trim();
     if (!manualCompletionReason) {
       setDoneReasonError(t("projects.projectManagerDoneReasonRequired"));
@@ -669,9 +715,17 @@ export function ProjectManagerPanel({
     }
 
     setDoneReasonError(null);
+    if (pendingDoneIsBatch) {
+      batchStatusMutation.mutate({
+        updates: pendingDoneItems.map((item) => ({
+          workItemId: item.id, status: "done", expectedRevision: item.revision, manualCompletionReason,
+        })),
+      });
+      return;
+    }
     statusMutation.mutate({
       workItemId: pendingDoneWorkItem.id,
-      input: { status: "done", manualCompletionReason },
+      input: { status: "done", manualCompletionReason, expectedRevision: pendingDoneWorkItem.revision },
     });
   };
 
@@ -752,7 +806,7 @@ export function ProjectManagerPanel({
             selectedWorkItemIds={selectedBoardWorkItemIds}
             statusError={statusMutationError}
             statusFilter={workItemStatusFilter}
-            statusMutationPending={statusMutation.isPending}
+            statusMutationPending={!canEdit || statusMutation.isPending}
             viewMode={workItemViewMode}
             onViewModeChange={setWorkItemViewMode}
             highlightedWorkItemId={requestedWorkItemId}
@@ -801,7 +855,7 @@ export function ProjectManagerPanel({
         open={!!selectedWorkItem}
         projectId={projectId}
         stages={stages}
-        statusMutationPending={statusMutation.isPending}
+        statusMutationPending={!canEdit || statusMutation.isPending}
         t={t}
         taskPacket={taskPacket}
         taskPacketError={taskPacketQuery.error}
@@ -832,7 +886,7 @@ export function ProjectManagerPanel({
       <CreateWorkItemDialog
         draft={workItemDraft}
         error={createWorkItemError}
-        isSaving={createWorkItemMutation.isPending}
+        isSaving={!canEdit || createWorkItemMutation.isPending}
         onDraftChange={setWorkItemDraft}
         onOpenChange={setIsCreateWorkItemOpen}
         onSave={saveWorkItem}
@@ -842,7 +896,7 @@ export function ProjectManagerPanel({
       <EditWorkItemDialog
         draft={editWorkItemDraft}
         error={editWorkItemError}
-        isSaving={editWorkItemMutation.isPending}
+        isSaving={!canEdit || editWorkItemMutation.isPending}
         item={editingWorkItem}
         onDraftChange={setEditWorkItemDraft}
         onOpenChange={(open) => {
@@ -857,7 +911,7 @@ export function ProjectManagerPanel({
       />
       <DeleteWorkItemDialog
         error={deleteWorkItemError}
-        isDeleting={deleteWorkItemMutation.isPending}
+        isDeleting={!canEdit || deleteWorkItemMutation.isPending}
         item={deletingWorkItem}
         onConfirm={confirmDeleteWorkItem}
         onOpenChange={(open) => {
@@ -870,11 +924,11 @@ export function ProjectManagerPanel({
       />
       <DoneReasonDialog
         error={doneReasonError}
-        isSaving={statusMutation.isPending}
+        isSaving={statusMutation.isPending || batchStatusMutation.isPending}
         onConfirm={confirmDoneWithReason}
         onOpenChange={(open) => {
           if (!open) {
-            setPendingDoneWorkItemId(null);
+            setPendingDoneItems(null);
             setDoneReason("");
             setDoneReasonError(null);
           }
@@ -884,7 +938,7 @@ export function ProjectManagerPanel({
         reasonRef={doneReasonRef}
         setReason={setDoneReason}
         t={t}
-        workItemTitle={pendingDoneWorkItem?.title ?? ""}
+        workItemTitle={pendingDoneItems?.map((item) => item.title).join(" · ") ?? ""}
       />
     </div>
   );

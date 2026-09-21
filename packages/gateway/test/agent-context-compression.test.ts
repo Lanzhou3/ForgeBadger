@@ -110,7 +110,7 @@ describe("copilot context compression", () => {
     assert.ok(second.length >= 30 && second.length <= 32, `expected ~30, got ${second.length}`);
   });
 
-  it("degrades to the raw history when summarization fails", async () => {
+  it("bounds history when summarization fails", async () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("ctx@example.com", "hash");
     const log = new CopilotConversationLog(db, user.id);
@@ -123,8 +123,8 @@ describe("copilot context compression", () => {
     } as unknown as AgentLlmClient;
 
     const result = await buildCompressedContext(log, conversation.id, llm);
-    assert.equal(result.compressed, false);
-    assert.equal(result.messages.length, 60);
+    assert.equal(result.compressed, true);
+    assert.ok(JSON.stringify(result.messages).length <= MAX_CONTEXT_CHARS);
   });
 
   it("exposes a context budget constant for the harness", () => {
@@ -179,11 +179,7 @@ it("keeps a whole oversized latest turn and labels incomplete legacy calls as hi
     log.appendMessage(conversation.id, { role: "user", kind: "text", content: "x".repeat(MAX_CONTEXT_CHARS + 1) });
     log.appendMessage(conversation.id, { role: "assistant", kind: "tool_call", toolCallId: "missing", toolName: "read", toolInputJson: "{}", content: "" });
     const llm = { async summarize() { assert.fail("must not cut a single turn"); } } as unknown as AgentLlmClient;
-    const result = await buildCompressedContext(log, conversation.id, llm);
-    assert.equal(result.compressed, false);
-    assert.equal(result.messages[0]?.content.length, MAX_CONTEXT_CHARS + 1);
-    assert.match(result.messages[1]!.content, /Historical tool_call/);
-    assert.equal(result.messages.some((message) => message.toolCalls?.length), false);
+    await assert.rejects(buildCompressedContext(log, conversation.id, llm), /COPILOT_CONTEXT_TOO_LARGE/);
   } finally { db.close(); }
 });
 
@@ -206,4 +202,46 @@ it("compresses at user-turn boundaries and includes tool facts in the summary re
     assert.deepEqual(result.messages.slice(1).map((message) => message.role), ["user", "assistant", "tool"]);
     assert.equal(result.messages.at(-1)?.toolCallId, "new");
   } finally { db.close(); }
+});
+
+it("bounds one oversized tool turn and includes immutable request overhead", async () => {
+  const db = createTestDb();
+  try {
+    const user = new UserRepository(db).create("bounded@example.com", "hash");
+    const log = new CopilotConversationLog(db, user.id);
+    const c = log.createConversation();
+    log.appendMessage(c.id,{role:"user",kind:"text",content:"Keep the latest goal intact"});
+    for (const id of ["a","b","c"]) log.appendMessage(c.id,{role:"assistant",kind:"tool_call",content:"",toolName:"get_project",toolCallId:id,toolInputJson:'{}'});
+    for (const id of ["a","b","c"]) log.appendMessage(c.id,{role:"tool",kind:"tool_result",content:'\\"'.repeat(48000),toolCallId:id});
+    const tools=[{description:"x".repeat(20000)}];
+    const prefixMessages: AgentLlmMessage[]=[{role:"user",content:"immutable skill/project"}];
+    const result=await buildCompressedContext(log,c.id,{} as AgentLlmClient,undefined,{tools,prefixMessages,reservedChars:5000});
+    assert.ok(JSON.stringify({messages:result.messages,tools}).length+5000 <= MAX_CONTEXT_CHARS);
+    assert.equal(result.messages[1]?.content,"Keep the latest goal intact");
+    assert.equal(result.messages.filter(m=>m.role==='tool').length,3);
+    for(const m of result.messages.filter(m=>m.role==='tool')) assert.match(m.content,/read_tool_result/);
+    await assert.rejects(buildCompressedContext(log,c.id,{} as AgentLlmClient,undefined,{reservedChars:MAX_CONTEXT_CHARS}),/COPILOT_CONTEXT_TOO_LARGE/);
+  } finally {db.close();}
+});
+
+it('bounds summarizer input and oversized output without cutting tool argument JSON', async () => {
+  const db=createTestDb();
+  try {
+    const user=new UserRepository(db).create('summary-budget@test.dev','hash');
+    const log=new CopilotConversationLog(db,user.id);const c=log.createConversation();
+    log.appendMessage(c.id,{role:'user',kind:'text',content:'old goal'});
+    for (const id of ['a','b','c']) log.appendMessage(c.id,{role:'assistant',kind:'tool_call',content:'',toolName:'read',toolCallId:id,toolInputJson:JSON.stringify({value:'escape "\\'})});
+    for (const id of ['a','b','c']) log.appendMessage(c.id,{role:'tool',kind:'tool_result',content:'"\\'.repeat(90000),toolCallId:id});
+    log.appendMessage(c.id,{role:'user',kind:'text',content:'newest goal'});
+    let called=false;
+    const llm={async summarize({messages}:{messages:AgentLlmMessage[]}) {
+      called=true;assert.ok(JSON.stringify({messages,tools:[]}).length+4096<=MAX_CONTEXT_CHARS);
+      for (const message of messages) for(const call of message.toolCalls??[]) assert.deepEqual(JSON.parse(call.arguments),{value:'escape "\\'});
+      return 'S'.repeat(MAX_CONTEXT_CHARS*2);
+    }} as unknown as AgentLlmClient;
+    const result=await buildCompressedContext(log,c.id,llm);
+    assert.equal(called,true);assert.ok(JSON.stringify({messages:result.messages,tools:[]}).length<=MAX_CONTEXT_CHARS);
+    assert.equal(result.messages.at(-1)?.content,'newest goal');
+    assert.ok((log.getConversation(c.id)?.summary?.length??0)<=4096);
+  }finally{db.close();}
 });

@@ -1,0 +1,31 @@
+{
+  "frameSize": 192,
+  "displaySize": 88,
+  "sheets": {
+    "stand": {
+      "frames": [
+        "stand",
+        "blink"
+      ],
+      "bytes": 8956,
+      "decodedBytes": 294912
+    },
+    "walk": {
+      "frames": [
+        "walk1",
+        "walk2"
+      ],
+      "bytes": 9494,
+      "decodedBytes": 294912
+    },
+    "sit": {
+      "frames": [
+        "sit1",
+        "sit2",
+        "sitBlink"
+      ],
+      "bytes": 8854,
+      "decodedBytes": 442368
+    }
+  }
+}

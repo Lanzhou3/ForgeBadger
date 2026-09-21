@@ -91,6 +91,14 @@ const cliConfigMeta: Record<AdapterId, CliConfigMeta> = {
     editableFiles: ["config.toml", "mcp.json", "AGENTS.md"],
     fileType: "toml",
     configRoot: () => globalConfigRoot("kimi")
+  },
+  pi: {
+    mainFile: "models.json",
+    // auth.json is read-only from this surface (owned by pi /login, OAuth
+    // tokens inside); settings.json carries the startup model defaults.
+    editableFiles: ["models.json", "settings.json"],
+    fileType: "json",
+    configRoot: () => globalConfigRoot("pi")
   }
 };
 
@@ -211,6 +219,24 @@ export async function upsertCliProvider(
         if (input.baseUrl !== undefined) next.base_url = input.baseUrl;
         providers[providerId] = next;
       });
+    case "pi":
+      return mutateMainConfig("pi", (doc) => {
+        const providers = ensureRecord(doc, "providers");
+        const existing = asRecord(providers[providerId]);
+        const next: Record<string, unknown> = { ...existing };
+        if (input.name !== undefined) next.name = input.name;
+        if (input.baseUrl !== undefined) next.baseUrl = input.baseUrl;
+        if (input.protocol !== undefined) {
+          const api = piApiNameForProtocol(input.protocol);
+          if (api === undefined) {
+            throw new Error(
+              `PI models.json has no file-based API for the '${input.protocol}' protocol; PI does not support Bedrock providers`
+            );
+          }
+          next.api = api;
+        }
+        providers[providerId] = next;
+      });
   }
 }
 
@@ -261,6 +287,8 @@ export async function removeCliProvider(adapter: AdapterId, providerId: string):
           delete doc.default_model;
         }
       });
+    case "pi":
+      return removePiProvider(providerId);
   }
 }
 
@@ -270,12 +298,38 @@ export async function upsertCliModel(
   input: { provider: string; modelId: string }
 ): Promise<CliConfigSnapshot> {
   assertValidAlias(alias);
-  if (adapter !== "kimi") {
-    throw new Error(`Model entries are only supported for the Kimi Code config; use default-model for ${adapter}`);
-  }
   assertValidId(input.provider, "provider id");
   if (!input.modelId.trim()) {
     throw new Error("modelId is required");
+  }
+  if (adapter === "pi") {
+    // PI has no separate model registry: model entries live inside the
+    // provider's `models` array in models.json. The API key (if any) is
+    // written by the apply-provider engine, never by this manual surface.
+    return mutateMainConfig("pi", (doc) => {
+      const providers = asRecord(doc.providers);
+      const existingProvider = providers ? asRecord(providers[input.provider]) : undefined;
+      if (!existingProvider) {
+        throw new Error(`Unknown PI provider '${input.provider}' in models.json; upsert the provider first`);
+      }
+      const models = Array.isArray(existingProvider.models) ? existingProvider.models : [];
+      const index = models.findIndex((item) => asRecord(item)?.id === input.modelId);
+      const existing = index >= 0 ? asRecord(models[index]) : undefined;
+      const entry: Record<string, unknown> = {
+        ...existing,
+        id: input.modelId,
+        name: stringValue(existing?.name) || input.modelId,
+        contextWindow: typeof existing?.contextWindow === "number" ? existing.contextWindow : 262144
+      };
+      if (index >= 0) models[index] = entry;
+      else models.push(entry);
+      existingProvider.models = models;
+    });
+  }
+  if (adapter !== "kimi") {
+    throw new Error(
+      `Model entries are only supported for the Kimi Code config; PI models are managed per provider in models.json — use ${adapter}'s default-model control instead`
+    );
   }
   return mutateKimiConfig((doc) => {
     const models = ensureRecord(doc, "models");
@@ -294,8 +348,28 @@ export async function upsertCliModel(
 
 export async function removeCliModel(adapter: AdapterId, alias: string): Promise<CliConfigSnapshot> {
   assertValidAlias(alias);
+  if (adapter === "pi") {
+    const separator = alias.indexOf("/");
+    if (separator <= 0) {
+      throw new Error("PI model aliases use the '<provider>/<modelId>' form");
+    }
+    const providerId = alias.slice(0, separator);
+    const modelId = alias.slice(separator + 1);
+    return mutateMainConfig("pi", (doc) => {
+      const providers = asRecord(doc.providers);
+      const existingProvider = providers ? asRecord(providers[providerId]) : undefined;
+      const models = existingProvider && Array.isArray(existingProvider.models)
+        ? existingProvider.models
+        : [];
+      if (existingProvider) {
+        existingProvider.models = models.filter((item) => asRecord(item)?.id !== modelId);
+      }
+    });
+  }
   if (adapter !== "kimi") {
-    throw new Error(`Model entries are only supported for the Kimi Code config; use default-model for ${adapter}`);
+    throw new Error(
+      `Model entries are only supported for the Kimi Code config; PI models are managed per provider in models.json — use ${adapter}'s default-model control instead`
+    );
   }
   return mutateKimiConfig((doc) => {
     const models = asRecord(doc.models);
@@ -335,6 +409,31 @@ export async function setCliDefaultModel(
     case "kimi":
       return mutateKimiConfig((doc) => {
         doc.default_model = model;
+      });
+    case "pi":
+      return mutatePiSettings((doc) => {
+        // PI settings.json pairs a bare model id with the provider key
+        // (defaultProvider + defaultModel, settings.md). Accept a
+        // "provider/model" alias or a bare id; an explicit providerId wins
+        // over alias inference (a bare id that itself contains "/" is only
+        // split when no providerId was given).
+        let provider = providerId;
+        let bareModel = model;
+        if (provider) {
+          assertValidId(provider, "provider id");
+          if (model.startsWith(`${provider}/`)) bareModel = model.slice(provider.length + 1);
+        } else {
+          const slash = model.indexOf("/");
+          if (slash > 0) {
+            provider = model.slice(0, slash);
+            bareModel = model.slice(slash + 1);
+          }
+        }
+        if (provider) {
+          assertValidId(provider, "provider id");
+          doc.defaultProvider = provider;
+        }
+        doc.defaultModel = bareModel;
       });
   }
 }
@@ -435,6 +534,9 @@ async function parseMainConfig(adapter: AdapterId): Promise<{
 }> {
   const meta = cliConfigMeta[adapter];
   const root = meta.configRoot();
+  // PI's snapshot spans two files (models.json registry + settings.json
+  // defaults), so it short-circuits before the single-main-file path.
+  if (adapter === "pi") return describePi(root);
   const content = await readFileIfExists(root, meta.mainFile);
   if (content === undefined || !content.trim()) {
     return { providers: [], models: [], defaultModel: "" };
@@ -518,6 +620,68 @@ function describeKimi(doc: ConfigDoc) {
   return { providers, models, defaultModel };
 }
 
+/**
+ * PI snapshot: providers/models come from models.json (`providers.<id>` with
+ * a `models` array), the startup default from settings.json
+ * (`defaultModel` is a bare model id; `defaultProvider` names the provider).
+ */
+async function describePi(root: string): Promise<{
+  providers: CliProviderEntry[];
+  models: CliModelEntry[];
+  defaultModel: string;
+}> {
+  const [modelsRaw, settingsRaw] = await Promise.all([
+    readFileIfExists(root, "models.json"),
+    readFileIfExists(root, "settings.json")
+  ]);
+  const modelsDoc = modelsRaw !== undefined && modelsRaw.trim()
+    ? parseConfigDoc("json", modelsRaw)
+    : {};
+  const settingsDoc = settingsRaw !== undefined && settingsRaw.trim()
+    ? parseConfigDoc("json", settingsRaw)
+    : {};
+  const defaultModel = stringValue(settingsDoc.defaultModel);
+  const defaultProvider = stringValue(settingsDoc.defaultProvider);
+  const providers: CliProviderEntry[] = [];
+  const models: CliModelEntry[] = [];
+  for (const [id, value] of Object.entries(asRecord(modelsDoc.providers) ?? {})) {
+    const entry = asRecord(value) ?? {};
+    providers.push({
+      id,
+      name: stringValue(entry.name) || id,
+      protocol: stringValue(entry.api),
+      baseUrl: stringValue(entry.baseUrl),
+      hasApiKey: Boolean(stringValue(entry.apiKey)),
+      isActive: id === defaultProvider
+    });
+    const modelList = Array.isArray(entry.models) ? entry.models : [];
+    for (const item of modelList) {
+      const modelEntry = asRecord(item);
+      if (!modelEntry) continue;
+      const modelId = stringValue(modelEntry.id);
+      if (!modelId) continue;
+      models.push({ alias: `${id}/${modelId}`, provider: id, modelId });
+    }
+  }
+  return { providers, models, defaultModel };
+}
+
+/** PI `models.json` `api` values accepted for file-based providers (models.md). */
+function piApiNameForProtocol(protocol: string | undefined): string | undefined {
+  switch (protocol) {
+    case "anthropic":
+      return "anthropic-messages";
+    case "openai":
+    case "openai-compatible":
+    case "local":
+      return "openai-completions";
+    case "google":
+      return "google-generative-ai";
+    default:
+      return undefined;
+  }
+}
+
 async function mutateClaudeConfig(mutate: (doc: ConfigDoc) => void): Promise<CliConfigSnapshot> {
   return mutateMainConfig("claude", mutate);
 }
@@ -532,6 +696,63 @@ async function mutateCodexConfig(mutate: (doc: ConfigDoc) => void): Promise<CliC
 
 async function mutateKimiConfig(mutate: (doc: ConfigDoc) => void): Promise<CliConfigSnapshot> {
   return mutateMainConfig("kimi", mutate);
+}
+
+async function mutatePiSettings(mutate: (doc: ConfigDoc) => void): Promise<CliConfigSnapshot> {
+  const root = cliConfigMeta.pi.configRoot();
+  const content = await readFileIfExists(root, "settings.json");
+  const doc = content !== undefined && content.trim() ? parseConfigDoc("json", content) : {};
+  mutate(doc);
+  await writeConfigFile(root, "settings.json", `${JSON.stringify(doc, null, 2)}\n`);
+  return readCliConfig("pi");
+}
+
+/**
+ * Removes a provider from PI's models.json and clears settings.json startup
+ * defaults that pointed at it (defaultProvider by id; defaultModel when the
+ * removed provider owned the bare model id). models.json is rewritten only
+ * when the provider entry actually existed.
+ */
+async function removePiProvider(providerId: string): Promise<CliConfigSnapshot> {
+  const root = cliConfigMeta.pi.configRoot();
+  const modelsRaw = await readFileIfExists(root, "models.json");
+  const modelsDoc = modelsRaw !== undefined && modelsRaw.trim()
+    ? parseConfigDoc("json", modelsRaw)
+    : {};
+  const providers = asRecord(modelsDoc.providers);
+  const removedEntry = providers ? asRecord(providers[providerId]) : undefined;
+  let removed = false;
+  if (providers && Object.hasOwn(providers, providerId)) {
+    delete providers[providerId];
+    removed = true;
+  }
+  let removedModelIds: string[] = [];
+  if (removedEntry) {
+    removedModelIds = (Array.isArray(removedEntry.models) ? removedEntry.models : [])
+      .map((item) => stringValue(asRecord(item)?.id))
+      .filter((id) => id !== "");
+  }
+  if (removed) {
+    await writeConfigFile(root, "models.json", `${JSON.stringify(modelsDoc, null, 2)}\n`);
+  }
+  const settingsRaw = await readFileIfExists(root, "settings.json");
+  if (settingsRaw !== undefined && settingsRaw.trim()) {
+    const settingsDoc = parseConfigDoc("json", settingsRaw);
+    let settingsChanged = false;
+    if (settingsDoc.defaultProvider === providerId) {
+      delete settingsDoc.defaultProvider;
+      settingsChanged = true;
+    }
+    const defaultModel = stringValue(settingsDoc.defaultModel);
+    if (defaultModel !== "" && removedModelIds.some((id) => defaultModel === id || defaultModel === `${providerId}/${id}`)) {
+      delete settingsDoc.defaultModel;
+      settingsChanged = true;
+    }
+    if (settingsChanged) {
+      await writeConfigFile(root, "settings.json", `${JSON.stringify(settingsDoc, null, 2)}\n`);
+    }
+  }
+  return readCliConfig("pi");
 }
 
 async function mutateMainConfig(adapter: AdapterId, mutate: (doc: ConfigDoc) => void): Promise<CliConfigSnapshot> {

@@ -126,7 +126,8 @@ export class AgentMemoryRepository {
   }
 
   /**
-   * Search across multiple scopes and merge by id, preserving FTS rank order.
+   * Search all permitted scopes, retaining FTS rank within each scope and
+   * reserving a recall opportunity for scoped decisions before global facts.
    * Used by the recall path to combine global + project memory in one block.
    *
    * Uses OR-token semantics (any query token matches) rather than the strict
@@ -136,9 +137,9 @@ export class AgentMemoryRepository {
   searchMulti(scopes: AgentMemoryScope[], query: string, limit = 10): AgentMemoryEntry[] {
     const q = query.trim();
     if (!q) return [];
-    const seen = new Set<string>();
-    const merged: AgentMemoryEntry[] = [];
-    for (const scope of scopes) {
+    const max = Math.max(1, Math.min(limit, MAX_SEARCH_LIMIT));
+    const priority = { session: 0, project: 1, global: 2 };
+    const candidates = [...scopes].sort((a, b) => priority[a.scope] - priority[b.scope]).map(scope => {
       this.validateScope(scope);
       const rows = this.db.prepare(`
         SELECT m.* FROM copilot_memory m
@@ -146,12 +147,19 @@ export class AgentMemoryRepository {
         WHERE m.user_id = ? AND fts.user_id = m.user_id AND fts.copilot_memory_fts MATCH ?
           AND m.scope = ? AND m.project_id IS ? AND m.conversation_id IS ?
         ORDER BY rank LIMIT ?
-      `).all(this.userId, quoteFtsOr(q), scope.scope, scope.projectId ?? null, scope.conversationId ?? null, Math.max(1, Math.min(limit, MAX_SEARCH_LIMIT))) as MemoryRow[];
-      for (const entry of rows.map(toEntry)) {
+      `).all(this.userId, quoteFtsOr(q), scope.scope, scope.projectId ?? null, scope.conversationId ?? null, max) as MemoryRow[];
+      return rows.map(toEntry);
+    });
+    const seen = new Set<string>();
+    const merged: AgentMemoryEntry[] = [];
+    for (let rank = 0; rank < max; rank++) {
+      for (const rows of candidates) {
+        const entry = rows[rank];
+        if (!entry) continue;
         if (seen.has(entry.id)) continue;
         seen.add(entry.id);
         merged.push(entry);
-        if (merged.length >= limit) return merged;
+        if (merged.length >= max) return merged;
       }
     }
     return merged;

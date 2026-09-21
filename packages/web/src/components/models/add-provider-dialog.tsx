@@ -46,7 +46,7 @@ const API_FORMATS: ProviderApiFormat[] = [
 
 const AUTH_TYPES: ProviderAuthType[] = ["api_key", "bearer_token", "oauth", "none"];
 
-const SUPPORTED_ADAPTERS: ProviderSupportedAdapter[] = ["claude", "opencode", "codex", "kimi"];
+const SUPPORTED_ADAPTERS: ProviderSupportedAdapter[] = ["claude", "opencode", "codex", "kimi", "pi"];
 
 interface AddProviderDialogProps {
   open: boolean;

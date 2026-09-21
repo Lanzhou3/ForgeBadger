@@ -7,6 +7,20 @@ import { describe, it } from "node:test";
 import { verifyNpmPackage } from "./verify-npm-package.mjs";
 
 describe("verifyNpmPackage", () => {
+  it("rejects a retired verification executor left in build output", async () => {
+    const root = await createPackageTree();
+    await writeFile(await ensureFile(root, "dist/gateway/src/services/collaboration/verification-runner-entry.js"), "");
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /retired verification executor/);
+  });
+  it("rejects a delivery package that omits its linked workflow guide", async () => {
+    const root = await createPackageTree();
+    await rm(path.join(root, "docs/PERSONAL-TEAM-WORKFLOWS.md"));
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /PERSONAL-TEAM-WORKFLOWS/);
+  });
   it("rejects a package missing its native-helper postinstall entry", async () => {
     const root = await createPackageTree();
     await rm(path.join(root, "postinstall.mjs"));
@@ -182,7 +196,7 @@ describe("verifyNpmPackage", () => {
 async function createPackageTree(options = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "forgebadger-npm-verify-"));
   const packageJson = {
-    files: ["dist", "README.md", "LICENSE", "docs/README.zh-CN.md", "docs/README.zh-TW.md", "package.json", "postinstall.mjs"],
+    files: ["dist", "README.md", "LICENSE", "docs/README.zh-CN.md", "docs/README.zh-TW.md", "docs/PERSONAL-TEAM-WORKFLOWS.md", "package.json", "postinstall.mjs"],
     scripts: { postinstall: "node postinstall.mjs" },
     ...options.packageJson
   };
@@ -195,6 +209,7 @@ async function createPackageTree(options = {}) {
   await mkdir(path.join(root, "docs"), { recursive: true });
   await writeFile(path.join(root, "docs", "README.zh-CN.md"), "# ForgeBadger\n");
   await writeFile(path.join(root, "docs", "README.zh-TW.md"), "# ForgeBadger\n");
+  await writeFile(path.join(root, "docs", "PERSONAL-TEAM-WORKFLOWS.md"), "# Workflow\n");
 
   await writeFile(await ensureFile(root, "dist/index.js"), "");
   await writeFile(await ensureFile(root, "postinstall.mjs"), "");

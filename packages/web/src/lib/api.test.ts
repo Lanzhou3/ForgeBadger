@@ -830,7 +830,6 @@ describe("api client", () => {
       priority: 10,
       acceptanceCriteria: ["Tab is visible"],
       evidenceRefs: [{ kind: "test", label: "API test", ref: "api.test.ts", path: "packages/web/src/lib/api.test.ts" }],
-      feishuRefs: [{ kind: "message", label: "Approval", ref: "om_123", feishuMessageId: "om_msg_123" }],
     });
     await projectManagerApi.getProjectManagerWorkItem("project/1", "work/item-1");
     await projectManagerApi.updateProjectManagerWorkItem("project/1", "work/item-1", {
@@ -900,8 +899,7 @@ describe("api client", () => {
           priority: 10,
           acceptanceCriteria: ["Tab is visible"],
           evidenceRefs: [{ kind: "test", label: "API test", ref: "api.test.ts", path: "packages/web/src/lib/api.test.ts" }],
-          feishuRefs: [{ kind: "message", label: "Approval", ref: "om_123", feishuMessageId: "om_msg_123" }],
-        }),
+            }),
       })
     );
     expect(fetch).toHaveBeenNthCalledWith(

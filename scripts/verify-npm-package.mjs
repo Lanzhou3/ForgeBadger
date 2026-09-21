@@ -19,7 +19,8 @@ const required = [
   { path: "README.md", type: "file" },
   { path: "LICENSE", type: "file" },
   { path: "docs/README.zh-CN.md", type: "file" },
-  { path: "docs/README.zh-TW.md", type: "file" }
+  { path: "docs/README.zh-TW.md", type: "file" },
+  { path: "docs/PERSONAL-TEAM-WORKFLOWS.md", type: "file" }
 ];
 
 const packageArtifactRoots = ["postinstall.mjs", "dist", "README.md", "LICENSE", "docs"];
@@ -50,6 +51,9 @@ export async function verifyNpmPackage(options = {}) {
   const errors = [];
   if (packageJson.scripts?.postinstall !== "node postinstall.mjs") {
     errors.push("package postinstall must run node postinstall.mjs");
+  }
+  if (existsSync(path.join(cliPackageRoot, "dist/gateway/src/services/collaboration/verification-runner-entry.js"))) {
+    errors.push("retired verification executor bundled");
   }
   for (const retired of ["tmux.js", "terminal-multiplexer-runtime.js"]) {
     if (existsSync(path.join(cliPackageRoot, "dist/gateway/src/services", retired))) {
@@ -169,6 +173,7 @@ function hasAllowedFilesWhitelist(cliPackageRoot) {
     "LICENSE",
     "docs/README.zh-CN.md",
     "docs/README.zh-TW.md",
+    "docs/PERSONAL-TEAM-WORKFLOWS.md",
     "package.json",
     "postinstall.mjs"
   ];

@@ -58,9 +58,9 @@ describe("Session Server IPC", () => {
 
   it("create session via IPC and verify management", async () => {
     const ipcPath = uniqueIpcPath();
-    const { ipcServer, client } = await startPair(ipcPath, cwd);
+    const { sessionServer, ipcServer, client } = await startPair(ipcPath, cwd);
     try {
-      const plan = shellPlan(cwd, "echo ipc && exit 0");
+      const plan = {cwd,command:process.execPath,args:['-e',"console.log('ipc');process.stdin.once('data',()=>process.exit(0));setTimeout(()=>process.exit(1),15000);"],env:{}};
 
       await client.createSession({
         name: "ipc-s1", cwd: plan.cwd, command: plan.command, args: plan.args, env: plan.env
@@ -74,9 +74,11 @@ describe("Session Server IPC", () => {
 
       const scrollback = await client.capturePane("ipc-s1");
       assert.strictEqual(typeof scrollback, "string");
+      await client.sendInput("ipc-s1", "finish\n");
     } finally {
       await client.disconnect();
       await ipcServer.stop();
+      await sessionServer.destroy();
     }
   });
 
@@ -84,8 +86,11 @@ describe("Session Server IPC", () => {
     const ipcPath = uniqueIpcPath();
     const { ipcServer, client } = await startPair(ipcPath, cwd);
     try {
+      // Long-lived process: an instant "exit 0" can be reaped before the kill
+      // arrives on fast machines, turning the kill into a Session-not-found.
+      const linger = process.platform === "win32" ? "ping -n 30 127.0.0.1 >nul" : "sleep 30";
       await client.createSession({
-        name: "ipc-k1", cwd, command: shell, args: [shellArg, "exit 0"], env: {}
+        name: "ipc-k1", cwd, command: shell, args: [shellArg, linger], env: {}
       });
 
       await client.killSession("ipc-k1");
@@ -102,8 +107,11 @@ describe("Session Server IPC", () => {
     const ipcPath = uniqueIpcPath();
     const { ipcServer, client } = await startPair(ipcPath, cwd);
     try {
+      // Stay alive briefly: a plain "exit 0" can exit before the first
+      // has_session roundtrip on fast machines, racing the assertion below.
+      const linger = process.platform === "win32" ? "ping -n 3 127.0.0.1 >nul" : "sleep 2";
       await client.createSession({
-        name: "ipc-x1", cwd, command: shell, args: [shellArg, "exit 0"], env: {}
+        name: "ipc-x1", cwd, command: shell, args: [shellArg, linger], env: {}
       });
       assert.strictEqual(await client.hasSession("ipc-x1"), true);
 

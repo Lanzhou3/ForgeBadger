@@ -1,3 +1,4 @@
+import { toolUnavailableReason } from "../agent/tool-availability.js";
 /**
  * MCP (Model Context Protocol) bridge for the Gateway.
  *
@@ -53,7 +54,7 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
   const preferences = new CopilotToolPreferenceRepository(deps.db, deps.userId);
   const canOperate = deps.scopes.includes("operate");
   const tools = createPlatformTools().filter(
-    (tool) => (tool.risk === "read" || canOperate) && preferences.isEnabled(tool.name)
+    (tool) => (tool.risk === "read" || canOperate) && preferences.isEnabled(tool.name) && !toolUnavailableReason(tool.name, !!deps.sessionManager)
   );
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
 
@@ -102,6 +103,11 @@ async function executeMcpTool(tool: AgentTool, rawInput: unknown, deps: McpBridg
     userId: deps.userId,
     db: deps.db,
     masterKey: deps.masterKey,
+    availableToolNames: createPlatformTools().filter(candidate =>
+      (candidate.risk === "read" || deps.scopes.includes("operate")) &&
+      new CopilotToolPreferenceRepository(deps.db, deps.userId).isEnabled(candidate.name) &&
+      !toolUnavailableReason(candidate.name, !!deps.sessionManager)
+    ).map(candidate=>candidate.name),
     ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}),
     ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
   };

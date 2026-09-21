@@ -1,4 +1,6 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { assertRuntimeDeletionConfirmed } from './session-runtime-confirmation-repository.js';
+import { assertNewProjectResource, assertProjectPathAccess, canUseProjectPath, hasDeliveryHistory } from './managed-project-access.js';
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { Database } from "../types.js";
@@ -64,11 +66,12 @@ const sessionColumns = {
 export class SessionRepository {
   private drizzle;
 
-  constructor(db: Database, private userId: string) {
+  constructor(private readonly db: Database, private userId: string) {
     this.drizzle = drizzle(db);
   }
 
-  create(input: CreateSessionInput): Session {
+  create(input: CreateSessionInput, managedRunId?:string): Session {
+    assertNewProjectResource(this.db,this.userId,input.workingDir,managedRunId);
     const result = this.drizzle
       .insert(sessions)
       .values({
@@ -94,9 +97,10 @@ export class SessionRepository {
       .from(sessions)
       .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(eq(sessions.userId, this.userId))
-      .orderBy(asc(sessions.createdAt), asc(sessions.id))
+      .orderBy(asc(sessions.createdAt), sql`sessions.rowid`, asc(sessions.id))
       .all()
-      .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
+      .map((row) => ({ ...row.session, projectName: row.projectName }) as Session)
+      .filter(session => canUseProjectPath(this.db,this.userId,session.workingDir));
   }
 
   listByProject(projectId: string): Session[] {
@@ -105,9 +109,10 @@ export class SessionRepository {
       .from(sessions)
       .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(and(eq(sessions.userId, this.userId), eq(sessions.projectId, projectId)))
-      .orderBy(asc(sessions.createdAt), asc(sessions.id))
+      .orderBy(asc(sessions.createdAt), sql`sessions.rowid`, asc(sessions.id))
       .all()
-      .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
+      .map((row) => ({ ...row.session, projectName: row.projectName }) as Session)
+      .filter(session => canUseProjectPath(this.db,this.userId,session.workingDir));
   }
 
   listByIds(projectId: string, ids: string[]): Session[] {
@@ -121,9 +126,10 @@ export class SessionRepository {
         eq(sessions.projectId, projectId),
         inArray(sessions.id, ids)
       ))
-      .orderBy(asc(sessions.createdAt), asc(sessions.id))
+      .orderBy(asc(sessions.createdAt), sql`sessions.rowid`, asc(sessions.id))
       .all()
-      .map((row) => ({ ...row.session, projectName: row.projectName }) as Session);
+      .map((row) => ({ ...row.session, projectName: row.projectName }) as Session)
+      .filter(session => canUseProjectPath(this.db,this.userId,session.workingDir));
   }
 
   getById(id: string): Session | undefined {
@@ -133,7 +139,7 @@ export class SessionRepository {
       .leftJoin(projects, eq(sessions.projectId, projects.id))
       .where(and(eq(sessions.id, id), eq(sessions.userId, this.userId)))
       .get();
-    return row ? ({ ...row.session, projectName: row.projectName } as Session) : undefined;
+    return row && canUseProjectPath(this.db,this.userId,row.session.workingDir) ? ({ ...row.session, projectName: row.projectName } as Session) : undefined;
   }
 
   updateStatus(id: string, status: string): Session | undefined {
@@ -178,6 +184,8 @@ export class SessionRepository {
   }
 
   delete(id: string): void {
+    assertRuntimeDeletionConfirmed(this.db,this.userId,"session",id);
+    if (hasDeliveryHistory(this.db,"session",id)) throw new Error("DELIVERY_HISTORY_REQUIRES_ARCHIVE");
     this.drizzle
       .delete(sessions)
       .where(and(eq(sessions.id, id), eq(sessions.userId, this.userId)))

@@ -1,15 +1,21 @@
 /**
  * OpenAI Chat Completions SSE stream → Anthropic Messages API SSE stream.
  *
- * Event sequence produced (cc-switch parity for the core shapes):
+ * Event sequence produced:
  *   message_start → content_block_start/delta/stop (text and/or tool_use)
  *   → message_delta (stop_reason + usage) → message_stop
  *
- * The final message_delta is deferred until the upstream `usage` chunk (sent
- * after the finish chunk when stream_options.include_usage is set) or the
- * stream ends, so usage is not lost. A source failure before any event was
- * emitted rethrows (caller can still answer with an HTTP error); a failure
- * mid-stream degrades to a graceful end_turn close of the open message.
+ * The terminal `message_delta` + `message_stop` pair is NOT emitted when the
+ * finish chunk arrives. It is held in `pendingDelta` and flushed at exactly
+ * one of two points: the upstream `[DONE]` marker, or the end of the stream
+ * (upstream close / read error). Holding it lets a trailing `usage` chunk —
+ * which compatible gateways (OpenRouter, vLLM) send AFTER the finish chunk —
+ * still be folded in, so the final usage is never zeroed by a premature flush.
+ *
+ * Failure semantics: a source failure before any event was emitted rethrows
+ * (the caller can still answer with an HTTP error). A failure mid-stream
+ * degrades to a graceful end_turn close of the open message so the client
+ * receives a well-formed (partial) response instead of a dangling stream.
  */
 
 import { mapFinishReason } from "./transform-response.js";
@@ -37,8 +43,14 @@ interface StreamState {
   toolBlocks: Map<number, ToolBlockState>;
   inputTokens: number | null;
   outputTokens: number | null;
-  pendingFinish: "end_turn" | "tool_use" | "max_tokens" | null;
-  finished: boolean;
+  /**
+   * The terminal message_delta, cached on the first finish_reason and emitted
+   * only at [DONE] / stream end — never on the finish chunk itself. Kept as a
+   * single slot so a duplicate finish_reason chunk (some gateways send more
+   * than one) can only ever produce ONE message_delta.
+   */
+  pendingDelta: { stopReason: "end_turn" | "tool_use" | "max_tokens" } | null;
+  emittedFinal: boolean;
 }
 
 function sseEvent(name: string, data: unknown): string {
@@ -61,7 +73,7 @@ function closeTextBlock(state: StreamState, out: string[]): void {
   out.push(sseEvent("content_block_stop", { type: "content_block_stop", index: state.textIndex }));
 }
 
-function closeToolBlock(state: StreamState, block: ToolBlockState, out: string[]): void {
+function closeToolBlock(block: ToolBlockState, out: string[]): void {
   if (block.closed) return;
   block.closed = true;
   out.push(sseEvent("content_block_stop", { type: "content_block_stop", index: block.anthropicIndex }));
@@ -86,12 +98,43 @@ function startToolBlock(state: StreamState, key: number, block: ToolBlockState, 
   block.pendingJson = [];
 }
 
+/**
+ * Emits message_start if the upstream produced no chunks at all (an empty
+ * completion still must be a well-formed Anthropic message: a start before the
+ * terminal delta/stop). Mirrors the start emitted on the first chunk, using a
+ * generated id when the upstream gave none.
+ */
+function ensureMessageStarted(state: StreamState, out: string[]): void {
+  if (state.started) return;
+  state.started = true;
+  state.messageId = `msg_${Date.now().toString(36)}_route`;
+  out.push(sseEvent("message_start", {
+    type: "message_start",
+    message: {
+      id: state.messageId,
+      type: "message",
+      role: "assistant",
+      model: state.requestedModel,
+      content: [],
+      stop_reason: null,
+      stop_sequence: null,
+      usage: { input_tokens: 0, output_tokens: 0 }
+    }
+  }));
+}
+
+/**
+ * Closes every open content block and emits the cached message_delta +
+ * message_stop. Idempotent: safe to call from both the [DONE] handler and the
+ * stream-end fallback, but only the first call produces events.
+ */
 function flushFinal(state: StreamState, out: string[]): void {
-  if (state.finished) return;
-  state.finished = true;
+  if (state.emittedFinal) return;
+  state.emittedFinal = true;
+  ensureMessageStarted(state, out);
   closeTextBlock(state, out);
-  for (const block of state.toolBlocks.values()) closeToolBlock(state, block, out);
-  const stopReason = state.pendingFinish ?? "end_turn";
+  for (const block of state.toolBlocks.values()) closeToolBlock(block, out);
+  const stopReason = state.pendingDelta?.stopReason ?? "end_turn";
   out.push(sseEvent("message_delta", {
     type: "message_delta",
     delta: { stop_reason: stopReason, stop_sequence: null },
@@ -101,6 +144,27 @@ function flushFinal(state: StreamState, out: string[]): void {
     }
   }));
   out.push(sseEvent("message_stop", { type: "message_stop" }));
+}
+
+/**
+ * Handles the first finish_reason in a chunk: closes any open content blocks
+ * (opening any tool blocks that are still holding JSON they accumulated before
+ * id/name arrived) and caches the terminal message_delta for later emission.
+ * Later chunks — including usage chunks and duplicate finish chunks — never
+ * reopen anything; they only top up the usage counters.
+ */
+function finishBlock(state: StreamState, stopReason: "end_turn" | "tool_use" | "max_tokens", out: string[]): void {
+  closeTextBlock(state, out);
+  for (const [key, block] of [...state.toolBlocks.entries()]) {
+    if (!block.started && (block.id || block.name || block.pendingJson.length > 0)) {
+      if (!block.id) block.id = `toolu_${key}`;
+      if (!block.name) block.name = "unknown_tool";
+      state.toolBlocks.delete(key);
+      startToolBlock(state, key, block, out);
+    }
+    closeToolBlock(block, out);
+  }
+  state.pendingDelta = { stopReason };
 }
 
 function handleChunk(data: Record<string, unknown>, state: StreamState, out: string[]): void {
@@ -170,15 +234,13 @@ function handleChunk(data: Record<string, unknown>, state: StreamState, out: str
       if (!block.started && block.id && block.name) startToolBlock(state, key, block, out);
     }
 
-    if (typeof finishReason === "string" && !state.pendingFinish) {
-      state.pendingFinish = mapFinishReason(finishReason);
+    // Cache the terminal delta on the FIRST finish_reason only. We do not emit
+    // it here: a trailing usage chunk usually follows, and some gateways repeat
+    // the finish chunk. Both are handled downstream (usage counters above; a
+    // second finish is ignored because pendingDelta is already set).
+    if (typeof finishReason === "string" && !state.pendingDelta) {
+      finishBlock(state, mapFinishReason(finishReason), out);
     }
-  }
-
-  // The usage chunk normally follows the finish chunk; emit the tail as soon
-  // as we know the finish reason AND the usage, or when usage is present.
-  if (state.pendingFinish !== null && (state.outputTokens !== null || data.usage !== undefined)) {
-    flushFinal(state, out);
   }
 }
 
@@ -200,8 +262,8 @@ export async function* openaiSseToAnthropicSse(
     toolBlocks: new Map(),
     inputTokens: null,
     outputTokens: null,
-    pendingFinish: null,
-    finished: false
+    pendingDelta: null,
+    emittedFinal: false
   };
   const decoder = new TextDecoder();
   let lineBuffer = "";
@@ -216,7 +278,11 @@ export async function* openaiSseToAnthropicSse(
         if (!trimmed.startsWith("data:")) continue;
         const payload = trimmed.slice("data:".length).trim();
         if (payload === "[DONE]") {
-          if (state.pendingFinish !== null) flushFinal(state, []);
+          // Normal terminal marker: emit the cached tail now. The finally block
+          // is the no-op fallback for upstreams that close without [DONE].
+          const out: string[] = [];
+          flushFinal(state, out);
+          for (const event of out) yield event;
           continue;
         }
         let data: Record<string, unknown>;
@@ -239,6 +305,10 @@ export async function* openaiSseToAnthropicSse(
           handleChunk(record(JSON.parse(payload)), state, out);
           for (const event of out) yield event;
         } catch { /* trailing garbage */ }
+      } else {
+        const out: string[] = [];
+        flushFinal(state, out);
+        for (const event of out) yield event;
       }
     }
   } catch (error) {
@@ -250,10 +320,8 @@ export async function* openaiSseToAnthropicSse(
       message: error instanceof Error ? error.message : String(error)
     });
   } finally {
-    if (!state.finished) {
-      const out: string[] = [];
-      flushFinal(state, out);
-      for (const event of out) yield event;
-    }
+    const out: string[] = [];
+    flushFinal(state, out);
+    for (const event of out) yield event;
   }
 }

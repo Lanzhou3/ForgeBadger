@@ -10,7 +10,7 @@ export function agentActionInput(name: string, input: unknown, context: AgentToo
         }).scope === 'session' ? { conversationId: context.conversationId } : {}) } : input;
 }
 export function agentActions(context: AgentToolContext) {
-    return new PlatformActions({ db: context.db, userId: context.userId, masterKey: context.masterKey, ...(context.sessionManager ? { sessionManager: context.sessionManager as NonNullable<CommandContext['sessionManager']> } : {}), ...(context.adapterCommandRunner ? { adapterCommandRunner: context.adapterCommandRunner as CommandContext['adapterCommandRunner'] } : {}) }, createPlatformCommands());
+    return new PlatformActions({ db: context.db, userId: context.userId, masterKey: context.masterKey, ...(typeof context.runId==='string'&&typeof context.stepId==='string'?{actionOrigin:{kind:'copilot' as const,runId:context.runId,stepId:context.stepId}}:{}), ...(context.sessionManager ? { sessionManager: context.sessionManager as NonNullable<CommandContext['sessionManager']> } : {}), ...(context.adapterCommandRunner ? { adapterCommandRunner: context.adapterCommandRunner as CommandContext['adapterCommandRunner'] } : {}) }, createPlatformCommands());
 }
 export async function executeAgentAction(name: string, input: unknown, context: AgentToolContext) {
     const actions = agentActions(context);
@@ -23,7 +23,7 @@ export async function executeAgentAction(name: string, input: unknown, context: 
     const result = (await actions.execute(intentId)).result;
     if (name === 'create_project')
         return { created: true, ...result as object };
-    if (name === 'pm_start_task_packet')
+    if (name === 'pm_prepare_task_packet')
         return { prepared: true, ...result as object };
     return result;
 }

@@ -77,8 +77,8 @@ identifiers.
 - Provider model profiles with encrypted API key storage and live model sync
   for OpenAI-compatible provider endpoints.
 - Explicit apply-provider flow that writes a selected provider/model/credential
-  into each CLI's native global config (cc-switch parity: atomic `0600` writes,
-  AES-256-GCM-encrypted backup, and rollback), with a redacted preview.
+  into each CLI's native global config with atomic `0600` writes, an
+  AES-256-GCM-encrypted backup, and rollback, with a redacted preview.
 - Agent, Skill, Template, usage, history, notification, and settings
   surfaces in the Web console.
 - Session snapshots, terminal focus mode, command palette prototype, and local
@@ -114,8 +114,8 @@ Key rules:
 - The embedded Session Server is the persistence layer for terminal sessions.
 - Terminal history is recovered from the Session Server's rendered screen, not
   stored in SQLite.
-- API keys are decrypted only in Gateway memory and injected into CLI sessions
-  through the session launch environment.
+- CLI sessions use host-environment credentials. Applying a Model Center provider
+  explicitly writes the selected CLI global configuration; session launch injects no provider secrets.
 
 ## Requirements
 
@@ -124,6 +124,8 @@ Key rules:
 - SQLite-compatible local filesystem
 - Claude Code, OpenCode, Codex, and/or Kimi Code installed on `PATH` for real AI CLI
   sessions
+- CodeGraph (`npm install -g @colbymchenry/codegraph`) optionally, for the
+  read-only project code graph
 
 ## Install From npm
 
@@ -137,15 +139,20 @@ Open the Web console at the URL printed by `forgebadger start`.
 
 The interactive `start` / `init` preflight prints a dependency-free ForgeBadger
 text logo before any environment probe. Color is used only on a capable TTY;
-redirected, `NO_COLOR`, and `TERM=dumb` output stays plain text.
+redirected, `NO_COLOR`, and `TERM=dumb` output stays plain text. On the first
+`forgebadger start` (no runtime config yet), a non-blocking environment check
+lists the detected AI CLIs, or prints their official install commands when none
+are found.
 
 The npm package postinstall does not install system software. `forgebadger
-doctor` only reports dependency state, including whether the bundled `node-pty`
-native module loads; if it does not, reinstall ForgeBadger to rebuild native
-modules. `forgebadger doctor` is read-only: inspecting an empty
-state directory does not create config, secrets, databases, or directories.
-Install Claude Code, OpenCode, Codex, or Kimi Code separately and make sure the
-tools you plan to use are available on `PATH`.
+doctor` reports the platform, architecture, and Node version, then checks the
+bundled `node-pty` native module, the supported AI CLIs (Claude Code, OpenCode,
+Codex, Kimi Code), and optional tooling (`codegraph`, `git`); each missing tool
+is paired with its official install command. If `node-pty` does not load,
+reinstall ForgeBadger to rebuild native modules. `forgebadger doctor` is
+read-only: inspecting an empty state directory does not create config, secrets,
+databases, or directories. Install the AI CLIs you plan to use separately and
+make sure they are available on `PATH`.
 
 ## Development From Source
 
@@ -239,3 +246,33 @@ results.
 ## License
 
 ForgeBadger is released under the [MIT License](LICENSE).
+
+### Backup and restore
+
+```bash
+forgebadger backup --output /private/path/new-backup
+# Stop the Gateway and Web processes before restoring.
+forgebadger restore --from /private/path/new-backup --to /private/path/new-state
+FORGEBADGER_STATE_DIR=/private/path/new-state forgebadger start
+```
+
+Backup uses SQLite's online backup API, including committed WAL data. It stores the platform database and effective runtime `config.json`, **including the master encryption key and JWT secret**. Keep the backup private: directories are mode `0700` and files `0600`. Source selection follows `FORGEBADGER_STATE_DIR`, the saved runtime config and `FORGEBADGER_DB_PATH`; installations without a saved config must supply their original `FORGEBADGER_MASTER_KEY` and `FORGEBADGER_JWT_SECRET` in the environment. Keys are never printed or included in the manifest.
+
+Restore verifies file hashes, schema/migration compatibility, table counts, SQLite integrity, foreign keys and encrypted database contents. It requires a new destination, refuses symlink inputs and existing destinations, and checks that the recorded Gateway/Web endpoints are stopped. It publishes staged state atomically, preserves the master key for decryption, rotates the JWT secret and revokes restored browser authentication sessions. Clear an old `FORGEBADGER_DB_PATH` override before starting the restored instance. Unknown encryption formats or incompatible/future migrations are rejected rather than silently restored.
+
+This backup does not contain project repositories, managed worktrees, running terminals, terminal history, host CLI login/configuration, filesystem-side CLI config rollback files or the account-recovery key. Restore those resources separately as needed; restored session metadata does not recreate processes. JWT rotation invalidates legacy JWTs, and restored opaque browser sessions are deleted; sign in again after restore. Source and backup authentication records remain unchanged. The backup is sensitive local state, not an encrypted archive.
+
+
+## Personal and small-team delivery
+
+Open **Workspaces** to turn a project task into an isolated Git worktree, private CLI
+session, commit-bound verification receipt, review and explicit fast-forward delivery.
+Owners can add existing local users as developers, reviewers or viewers. Shared
+screens expose task evidence and diffs; terminals and host credentials stay private.
+This mode is for a trusted local/private host. It does not sandbox untrusted code or
+provide hosted multi-tenant execution. Verification currently supports macOS/Linux;
+native Windows process-tree containment remains an open release gate.
+
+See [the workflow and recovery guide](docs/PERSONAL-TEAM-WORKFLOWS.md) for first delivery,
+roles, concurrency, backup scope and recovery limits. No workflow automatically starts
+an AI task, pushes a branch, opens a pull request, or deploys an application.

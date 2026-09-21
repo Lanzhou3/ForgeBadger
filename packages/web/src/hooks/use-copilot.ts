@@ -175,8 +175,8 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       throw error;
     }
   }, [markPending, update, reconcile, clearActive]);
-  const startRun = useCallback((id: string, text: string, modelId?: string) =>
-    submit(id, () => sendMessage(id, text, modelId)), [submit]);
+  const startRun = useCallback((id: string, text: string, modelId?: string, options?: import("@/lib/copilot-api").CopilotMessageOptions) =>
+    submit(id, () => options ? sendMessage(id, text, modelId, options) : sendMessage(id, text, modelId)), [submit]);
   const startEditedRun = useCallback((id: string, messageId: string, text: string) =>
     submit(id, () => editMessage(id, messageId, text)), [submit]);
   const approveAction = useCallback(async (runId: string, actionId: string, approved: boolean) => {

@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
@@ -11,6 +11,7 @@ import { ClaudeRouteRepository } from "../db/repositories/claude-route-repositor
 import {
   ModelProviderRepository,
   type ModelProfile,
+  type ProviderApiFormat,
   type ProviderCredentialSummary,
   type ProviderProfile
 } from "../db/repositories/model-provider-repository.js";
@@ -33,7 +34,7 @@ import {
 const backupMaxAgeMs = 7 * 24 * 60 * 60 * 1000;
 const inProcessLocks = new Map<string, Promise<void>>();
 
-/** cc-switch parity: Kimi For Coding exposes a 256k context window. */
+/** Kimi For Coding exposes a 256k context window. */
 const kimiCodingContextTokens = "262144";
 
 /**
@@ -50,6 +51,8 @@ const minimaxAnthropicContextTokens = 524288;
  * context window.
  */
 const kimiDefaultMaxContextSize = 262144;
+/** PI models.json context window fallback when the model profile has none. */
+const piDefaultContextWindow = 262144;
 
 export class CliConfigApplyError extends Error {
   constructor(readonly code: string, message = code) {
@@ -57,7 +60,7 @@ export class CliConfigApplyError extends Error {
   }
 }
 
-/** Claude alias slots that can be mapped to distinct models (cc-switch role table). */
+/** Claude alias slots that can be mapped to distinct models. */
 export type ClaudeModelSlot = "opus" | "sonnet" | "haiku" | "fable" | "subagent";
 
 export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";
@@ -128,7 +131,7 @@ interface ApplyContext {
   model: ModelProfile;
   /** All active model profiles of the provider (OpenCode writes them all). */
   activeModels: ModelProfile[];
-  /** Claude role slots resolved to model profiles (cc-switch normalize semantics). */
+  /** Claude role slots resolved to model profiles; unset slots fall back to the primary model. */
   slotModels: Partial<Record<ClaudeModelSlot, ModelProfile>>;
   reasoningEffort: CodexReasoningEffort | undefined;
   credential: ProviderCredentialSummary;
@@ -163,7 +166,7 @@ export type CodexWireApi = "chat" | "responses";
 interface ApplyTarget {
   targetPath: string;
   fileType: "json" | "toml";
-  role: "config" | "auth";
+  role: "config" | "auth" | "settings";
 }
 
 interface ApplyDocumentPlan {
@@ -199,6 +202,14 @@ export async function previewCliConfigApply(input: CliConfigApplyInput): Promise
     // filters this code out of the generic warning list.
     warnings.push("OPENAI_PROTOCOL_REQUIRES_ROUTE");
   }
+  if (context.adapter === "pi" && piAuthHasProvider(context.providerKey)) {
+    // PI's credential resolution order is auth.json > environment >
+    // models.json apiKey, so the key this apply writes into models.json is
+    // shadowed by the user's existing `pi /login` credential for the same
+    // provider. Machine-readable marker; the web dialog renders a localized
+    // banner. auth.json itself is never read into previews or written.
+    warnings.push("PI_CREDENTIAL_SHADOWED_BY_AUTH");
+  }
   return {
     adapter: context.adapter,
     providerProfileId: context.provider.id,
@@ -211,7 +222,7 @@ export async function previewCliConfigApply(input: CliConfigApplyInput): Promise
 
 /**
  * Applies the selected provider/model/credential to the adapter's global CLI
- * config with plaintext credentials (cc-switch semantics): encrypted backup
+ * config with plaintext credentials: encrypted backup
  * first, then atomic 0600 writes (or deletes for emptied auth files) with
  * read-back verification. A failure on a later file (Codex auth.json) rolls
  * back the files already written.
@@ -520,7 +531,7 @@ function planApplyDocuments(context: ApplyContext, plaintextSecret: string | nul
     buildApplyDocument(context, target, doc, plaintextSecret);
     // An auth file whose last managed field was removed is deleted outright:
     // Codex reports an error for an empty auth.json but shows the login screen
-    // when the file is missing (cc-switch behavior).
+    // when the file is missing.
     const serialized = target.role === "auth" && Object.keys(doc).length === 0
       ? null
       : serializeDocument(target.fileType, doc);
@@ -543,6 +554,16 @@ function applyTargets(adapter: AdapterId): ApplyTarget[] {
     return [
       { targetPath: main, fileType: "toml", role: "config" },
       { targetPath: path.join(globalConfigRoot("codex"), "auth.json"), fileType: "json", role: "auth" }
+    ];
+  }
+  if (adapter === "pi") {
+    // PI reads file-based providers from models.json; the startup model
+    // selection lives in settings.json (managed keys only, every other user
+    // setting is preserved). auth.json is self-managed by `pi /login` and is
+    // never written by ForgeBadger.
+    return [
+      { targetPath: main, fileType: "json", role: "config" },
+      { targetPath: path.join(globalConfigRoot("pi"), "settings.json"), fileType: "json", role: "settings" }
     ];
   }
   return [{
@@ -570,7 +591,7 @@ function buildApplyDocument(
     // shadow the freshly written token.
     delete env.ANTHROPIC_API_KEY;
     // Role mapping (official alias pinning): unset slots fall back to the
-    // primary model — fill only, matching cc-switch normalize semantics.
+    // primary model — fill only, never overwriting explicit user values.
     const primary = context.model;
     const opus = context.slotModels.opus ?? primary;
     const sonnet = context.slotModels.sonnet ?? primary;
@@ -599,7 +620,7 @@ function buildApplyDocument(
   }
   if (context.adapter === "codex") {
     if (target.role === "auth") {
-      // cc-switch semantics (Codex 0.149+): third-party credentials live in
+      // Codex 0.149+ layout: third-party credentials live in
       // model_providers.<id>.experimental_bearer_token, not in auth.json.
       // Remove the legacy OPENAI_API_KEY slot but preserve other auth material
       // (e.g. ChatGPT login tokens); the planner deletes an emptied file.
@@ -635,7 +656,7 @@ function buildApplyDocument(
     const options: Record<string, unknown> = { apiKey: secret };
     if (context.baseUrl) options.baseURL = context.baseUrl;
     const existing = record(providers[context.providerKey]);
-    // Additive semantics (cc-switch): upsert the provider entry with every
+    // Additive semantics: upsert the provider entry with every
     // active model of the provider, merging into models already present from
     // earlier applies. The top-level "model" key is user-owned and is never
     // touched — model selection happens inside OpenCode.
@@ -661,6 +682,70 @@ function buildApplyDocument(
     doc.provider = providers;
     return;
   }
+  if (context.adapter === "pi") {
+    if (context.provider.apiFormat === "bedrock") {
+      throw new CliConfigApplyError(
+        "CLI_CONFIG_APPLY_ADAPTER_UNSUPPORTED",
+        "PI providers are file-based (models.json) and do not support the Bedrock API format"
+      );
+    }
+    if (target.role === "settings") {
+      // Managed startup selection only: PI pairs a bare model id with the
+      // provider key (settings.md: defaultProvider + defaultModel). Every
+      // other user setting (theme, keybindings, ...) survives the
+      // parse/mutate/serialize cycle untouched.
+      doc.defaultProvider = context.providerKey;
+      doc.defaultModel = context.model.modelId;
+      return;
+    }
+    if (!context.baseUrl) {
+      throw new CliConfigApplyError("CLI_CONFIG_APPLY_ENDPOINT_UNSAFE", "PI providers require a base URL");
+    }
+    const providers = record(doc.providers);
+    const existing = record(providers[context.providerKey]);
+    const existingModels = Array.isArray(existing.models) ? existing.models : [];
+    // Whole-provider upsert (D4): baseUrl/api/apiKey/models are managed.
+    // Per-model `reasoning` is capability-driven: the profile's "reasoning"
+    // capability enables PI's extended thinking — without the flag the TUI
+    // hides every thinking control and the model never thinks. Startup level
+    // then falls back to pi's built-in "medium", so thinking is on by default
+    // and adjustable via /thinking. A hand-set `reasoning: true` on an
+    // existing entry is preserved even when the profile lacks the capability.
+    // `thinkingLevelMap` is mostly user-managed, except that reasoning
+    // models on openai-completions relays gain an additive `xhigh: "xhigh"`
+    // entry (PI's TUI hides xhigh/max unless the map explicitly defines
+    // them; generic openai-completions relays receive
+    // `reasoning_effort: <mapped value>` verbatim). Existing map entries —
+    // and any other per-model user tuning (maxTokens, input, ...) — are
+    // preserved additively.
+    const api = piApiName(context.provider.apiFormat, context.providerKey);
+    const models = context.activeModels.map((activeModel) => {
+      const current = record(existingModels.find((entry) => record(entry).id === activeModel.modelId));
+      const next: Record<string, unknown> = { ...current, id: activeModel.modelId, name: activeModel.name };
+      next.reasoning = activeModel.capabilities.includes("reasoning") || current.reasoning === true;
+      if (next.reasoning === true && api === "openai-completions") {
+        const currentMap = record(current.thinkingLevelMap);
+        if (currentMap.xhigh === undefined) {
+          next.thinkingLevelMap = { ...currentMap, xhigh: "xhigh" };
+        }
+      }
+      next.contextWindow = activeModel.contextWindow && activeModel.contextWindow > 0
+        ? activeModel.contextWindow
+        : typeof current.contextWindow === "number" && current.contextWindow > 0
+          ? current.contextWindow
+          : piDefaultContextWindow;
+      return next;
+    });
+    providers[context.providerKey] = {
+      ...existing,
+      baseUrl: context.baseUrl,
+      api,
+      apiKey: secret,
+      models
+    };
+    doc.providers = providers;
+    return;
+  }
   const providers = record(doc.providers);
   const definition: Record<string, unknown> = {
     type: kimiProviderType(context.provider.apiFormat, context.baseUrl),
@@ -668,7 +753,7 @@ function buildApplyDocument(
   };
   if (context.baseUrl) definition.base_url = context.baseUrl;
   providers[context.providerKey] = definition;
-  // Additive semantics (cc-switch parity with the opencode branch): upsert
+  // Additive semantics (matching the opencode branch): upsert
   // every active model of the provider as an alias so the /model picker in
   // Kimi Code can switch between them; default_model pins the selected one.
   const models = record(doc.models);
@@ -814,7 +899,7 @@ function maskSecretsDeep(value: Record<string, unknown>): void {
     const normalized = key.replace(/[^a-z0-9]/giu, "").toLowerCase();
     // Suffix-match instead of a fixed allowlist: api_key / auth_token /
     // bearer_token / access_token / refresh_token and any future *-key/*-token
-    // field are all masked (cc-switch sensitive-key convention).
+    // field are all masked.
     if ((normalized === "apikey" || normalized.endsWith("apikey") || normalized.endsWith("token"))
       && typeof child === "string" && child.length > 0) {
       value[key] = "[redacted]";
@@ -919,7 +1004,7 @@ export function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId
     return provider.anthropicBaseUrl
       ?? (provider.apiFormat === "anthropic" ? provider.baseUrl : provider.openaiBaseUrl ?? provider.baseUrl);
   }
-  if ((adapter === "opencode" || adapter === "kimi") && provider.apiFormat === "anthropic") {
+  if ((adapter === "opencode" || adapter === "kimi" || adapter === "pi") && provider.apiFormat === "anthropic") {
     return provider.anthropicBaseUrl ?? provider.baseUrl;
   }
   return provider.openaiBaseUrl ?? provider.baseUrl;
@@ -953,6 +1038,43 @@ function openCodePackage(apiFormat: ProviderProfile["apiFormat"]): string {
   if (apiFormat === "google") return "@ai-sdk/google";
   if (apiFormat === "bedrock") return "@ai-sdk/amazon-bedrock";
   return "@ai-sdk/openai-compatible";
+}
+
+/**
+ * PI models.json `api` values for file-based providers (models.md):
+ * anthropic→anthropic-messages, google→google-generative-ai, everything
+ * OpenAI-flavored→openai-completions except OpenAI-native providers, which
+ * get the /responses API. Bedrock has no file-based API (rejected upstream).
+ */
+function piApiName(apiFormat: ProviderApiFormat, providerKey: string): string {
+  if (apiFormat === "anthropic") return "anthropic-messages";
+  if (apiFormat === "google") return "google-generative-ai";
+  if (apiFormat === "openai" && ["openai", "codex", "chatgpt"].includes(providerKey)) {
+    return "openai-responses";
+  }
+  return "openai-completions";
+}
+
+/**
+ * Read-only probe of PI's self-managed auth.json (`pi /login` credentials):
+ * true when the provider key already has a credential there, in which case
+ * it shadows the models.json apiKey this apply writes (resolution order:
+ * auth.json > env > models.json). Never writes, never returns content.
+ */
+function piAuthHasProvider(providerKey: string): boolean {
+  let raw: string;
+  try {
+    raw = readFileSync(path.join(globalConfigRoot("pi"), "auth.json"), "utf8");
+  } catch {
+    return false;
+  }
+  try {
+    const doc: unknown = JSON.parse(raw);
+    return doc !== null && typeof doc === "object" && !Array.isArray(doc)
+      && Object.hasOwn(doc, providerKey);
+  } catch {
+    return false;
+  }
 }
 
 function claudeTimeout(providerKey: string): string | undefined {

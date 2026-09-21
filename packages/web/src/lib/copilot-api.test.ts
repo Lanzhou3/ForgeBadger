@@ -8,6 +8,9 @@ import {
   getCopilotCapabilities,
   getRun,
   listConversations,
+  listCopilotPlaybooks,
+  setCopilotPlaybookEnabled,
+  updateCopilotPlaybook,
   listMemoryEntries,
   listMessages,
   searchMemory,
@@ -78,6 +81,12 @@ describe("copilot api client", () => {
     );
   });
 
+  it("sends explicit project context and a stable logical request identity", async () => {
+    await sendMessage("conv-1", "inspect", undefined, { projectId: "project-1", clientRequestId: "request-1" });
+    expect(fetch).toHaveBeenLastCalledWith(`${BASE}/api/v1/copilot/conversations/conv-1/messages`,
+      expect.objectContaining({ body: JSON.stringify({ content: "inspect", projectId: "project-1", clientRequestId: "request-1" }) }));
+  });
+
   it("gets a run with its pending actions", async () => {
     vi.stubGlobal(
       "fetch",
@@ -135,6 +144,17 @@ describe("copilot api client", () => {
       `${BASE}/api/v1/copilot/memory/entries/mem-1`,
       expect.objectContaining({ method: "DELETE" })
     );
+  });
+
+  it("manages playbooks through isolated Copilot routes and stable encoded IDs", async () => {
+    await listCopilotPlaybooks();
+    expect(fetch).toHaveBeenLastCalledWith(`${BASE}/api/v1/copilot/playbooks`, expect.anything());
+    await setCopilotPlaybookEnabled("owner/id", false);
+    expect(fetch).toHaveBeenLastCalledWith(`${BASE}/api/v1/copilot/playbooks/owner%2Fid/enabled`,
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ enabled: false }) }));
+    await updateCopilotPlaybook("owner/id", { content: "Reviewed body", version: "2.0.0" });
+    expect(fetch).toHaveBeenLastCalledWith(`${BASE}/api/v1/copilot/playbooks/owner%2Fid`,
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ content: "Reviewed body", version: "2.0.0" }) }));
   });
 
   it("fetches capabilities", async () => {

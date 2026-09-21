@@ -1,3 +1,4 @@
+import { hasDeliveryHistory } from './managed-project-access.js';
 import { randomUUID } from "node:crypto";
 
 import { AuditLogRepository } from "./audit-log-repository.js";
@@ -81,7 +82,6 @@ export interface ProjectManagerWorkItem {
   priority: number;
   acceptanceCriteria: string[];
   evidenceRefs: ProjectManagerEvidenceRef[];
-  feishuRefs: ProjectManagerEvidenceRef[];
   details: Record<string, unknown>;
   stageId: string | null;
   createdAt: number;
@@ -117,7 +117,6 @@ export interface ProjectManagerLedgerEvent {
   eventType: ProjectManagerLedgerEventType;
   status: ProjectManagerWorkItemStatus | null;
   evidenceRefs: ProjectManagerEvidenceRef[];
-  feishuRefs: ProjectManagerEvidenceRef[];
   details: Record<string, unknown>;
   createdAt: number;
 }
@@ -146,12 +145,12 @@ export interface CreateProjectManagerWorkItemInput {
   priority?: number | undefined;
   acceptanceCriteria?: string[] | undefined;
   evidenceRefs?: ProjectManagerEvidenceRef[] | undefined;
-  feishuRefs?: ProjectManagerEvidenceRef[] | undefined;
   details?: Record<string, unknown> | undefined;
   stageId?: string | null | undefined;
 }
 
 export interface UpdateProjectManagerWorkItemInput {
+  expectedRevision?: number | undefined;
   title?: string | undefined;
   description?: string | null | undefined;
   priority?: number | undefined;
@@ -172,6 +171,7 @@ export interface UpdateProjectManagerStageInput {
 }
 
 export interface UpdateProjectManagerWorkItemStatusInput {
+  expectedRevision?: number | undefined;
   status: ProjectManagerWorkItemStatus;
   evidenceRefs?: ProjectManagerEvidenceRef[] | undefined;
   manualCompletionReason?: string | undefined;
@@ -187,11 +187,13 @@ export interface BatchUpdateProjectManagerWorkItemStatusesInput {
 }
 
 export interface AttachProjectManagerEvidenceInput {
+  expectedRevision?: number | undefined;
   evidenceRefs: ProjectManagerEvidenceRef[];
   details?: Record<string, unknown> | undefined;
 }
 
 export interface DeleteProjectManagerWorkItemInput {
+  expectedRevision?: number | undefined;
   confirm: true;
   details?: Record<string, unknown> | undefined;
 }
@@ -219,7 +221,6 @@ interface WorkItemRow {
   priority: number;
   acceptance_criteria_json: string;
   evidence_refs_json: string;
-  feishu_refs_json: string;
   details_json: string;
   stage_id: string | null;
   created_at: number;
@@ -255,7 +256,6 @@ interface LedgerEventRow {
   event_type: string;
   status: string | null;
   evidence_refs_json: string;
-  feishu_refs_json: string;
   details_json: string;
   created_at: number;
 }
@@ -294,7 +294,16 @@ const headerSecretPattern = /\b(X-Lark-[Ss]ignature|Authorization)(\s*:\s*)([^\s
 const keyValueSecretPattern = /\b(api[_-]?key|token|password|secret|private[_-]?key|credential|event[_-]?encrypt[_-]?key)\b(\s*[:=]\s*)([^\s,;]+)/giu;
 
 export class ProjectManagerRepository {
-  constructor(private readonly db: Database, private readonly userId: string) {}
+  constructor(private readonly db: Database, private readonly userId: string, private readonly actorId: string = userId) {}
+
+  taskMetadata(projectId: string, workItemId: string) {
+    const row = this.db.prepare('SELECT revision,semantic_revision AS semanticRevision,assignee_id AS assigneeId,reviewer_id AS reviewerId FROM collaboration_tasks WHERE user_id=? AND project_id=? AND work_item_id=?').get(this.userId,projectId,workItemId) as {revision:number;semanticRevision:number;assigneeId:string|null;reviewerId:string|null}|undefined;
+    return row ?? {revision:1,semanticRevision:1,assigneeId:null,reviewerId:null};
+  }
+
+  assertRevision(projectId:string, workItemId:string, expectedRevision:number|undefined):void {
+    if(expectedRevision !== undefined && this.taskMetadata(projectId,workItemId).revision !== expectedRevision) throw new Error('STALE_TASK_REVISION');
+  }
 
   getGoal(projectId: string): ProjectManagerGoal | undefined {
     const row = this.db.prepare(`
@@ -340,7 +349,7 @@ export class ProjectManagerRepository {
         now,
         now
       );
-      this.insertLedgerEvent(projectId, null, "goal_updated", null, [], [], {
+      this.insertLedgerEvent(projectId, null, "goal_updated", null, [], {
         status,
         acceptanceCriteriaCount: acceptanceCriteria.length,
         constraintCount: constraints.length
@@ -375,9 +384,9 @@ export class ProjectManagerRepository {
       this.db.prepare(`
         INSERT INTO project_manager_work_items (
           id, user_id, project_id, title, description, status, priority,
-          acceptance_criteria_json, evidence_refs_json, feishu_refs_json,
+          acceptance_criteria_json, evidence_refs_json,
           details_json, stage_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         this.userId,
@@ -388,13 +397,12 @@ export class ProjectManagerRepository {
         item.priority,
         JSON.stringify(item.acceptanceCriteria),
         JSON.stringify(item.evidenceRefs),
-        JSON.stringify(item.feishuRefs),
         JSON.stringify(item.details),
         stageId,
         now,
         now
       );
-      this.insertLedgerEvent(projectId, id, "work_item_created", status, item.evidenceRefs, item.feishuRefs, eventDetails, now);
+      this.insertLedgerEvent(projectId, id, "work_item_created", status, item.evidenceRefs, eventDetails, now);
       this.writeAudit("project_manager.work_item.create", "project_manager_work_item", id, {
         projectId,
         status,
@@ -458,6 +466,7 @@ export class ProjectManagerRepository {
     workItemId: string,
     input: UpdateProjectManagerWorkItemInput
   ): ProjectManagerWorkItem {
+    this.assertRevision(projectId,workItemId,input.expectedRevision);
     const existing = this.requireWorkItem(projectId, workItemId);
     const nextTitle = input.title === undefined
       ? existing.title
@@ -494,6 +503,7 @@ export class ProjectManagerRepository {
     const now = Date.now();
 
     const write = this.db.transaction(() => {
+      this.assertRevision(projectId,workItemId,input.expectedRevision);
       this.db.prepare(`
         UPDATE project_manager_work_items
         SET title = ?, description = ?, priority = ?, acceptance_criteria_json = ?, details_json = ?, stage_id = ?, updated_at = ?
@@ -510,7 +520,7 @@ export class ProjectManagerRepository {
         this.userId,
         projectId
       );
-      this.insertLedgerEvent(projectId, workItemId, "work_item_updated", existing.status, existing.evidenceRefs, existing.feishuRefs, eventDetails, now);
+      this.insertLedgerEvent(projectId, workItemId, "work_item_updated", existing.status, existing.evidenceRefs, eventDetails, now);
       this.writeAudit("project_manager.work_item.update", "project_manager_work_item", workItemId, {
         projectId,
         changedFields
@@ -525,6 +535,7 @@ export class ProjectManagerRepository {
     workItemId: string,
     input: UpdateProjectManagerWorkItemStatusInput
   ): ProjectManagerWorkItem {
+    this.assertRevision(projectId,workItemId,input.expectedRevision);
     const existing = this.requireWorkItem(projectId, workItemId);
     const nextStatus = normalizeStatus(input.status);
     validateTransition(existing.status, nextStatus);
@@ -536,6 +547,7 @@ export class ProjectManagerRepository {
     }
 
     const details = mergeWorkItemDetails(existing.details, input.details);
+    if(nextStatus === "done" && hasManualReason) details.manualCompletion={reason:input.manualCompletionReason,actorId:this.actorId,createdAt:Date.now()};
     const eventType = statusLedgerEventType(existing.status, nextStatus, hasManualReason);
     const eventDetails = mergeLedgerDetails({
       fromStatus: existing.status,
@@ -545,12 +557,13 @@ export class ProjectManagerRepository {
     }, details);
     const now = Date.now();
     const write = this.db.transaction(() => {
+      this.assertRevision(projectId,workItemId,input.expectedRevision);
       this.db.prepare(`
         UPDATE project_manager_work_items
         SET status = ?, evidence_refs_json = ?, details_json = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND project_id = ?
       `).run(nextStatus, JSON.stringify(evidenceRefs), JSON.stringify(details), now, workItemId, this.userId, projectId);
-      this.insertLedgerEvent(projectId, workItemId, eventType, nextStatus, evidenceRefs, existing.feishuRefs, eventDetails, now);
+      this.insertLedgerEvent(projectId, workItemId, eventType, nextStatus, evidenceRefs, eventDetails, now);
       this.writeAudit("project_manager.work_item.status_change", "project_manager_work_item", workItemId, {
         projectId,
         fromStatus: existing.status,
@@ -573,6 +586,7 @@ export class ProjectManagerRepository {
     const prepared = input.updates.map((update) => {
       if (seen.has(update.workItemId)) throw new Error("Duplicate work item in batch status update");
       seen.add(update.workItemId);
+      this.assertRevision(projectId,update.workItemId,update.expectedRevision);
       const existing = this.requireWorkItem(projectId, update.workItemId);
       const nextStatus = normalizeStatus(update.status);
       validateTransition(existing.status, nextStatus);
@@ -583,6 +597,7 @@ export class ProjectManagerRepository {
         throw new Error("Marking done requires evidence references or a manual completion reason");
       }
       const details = mergeWorkItemDetails(existing.details, update.details);
+      if(nextStatus === "done" && hasManualReason) details.manualCompletion={reason:update.manualCompletionReason,actorId:this.actorId,createdAt:Date.now()};
       return {
         existing,
         nextStatus,
@@ -594,6 +609,7 @@ export class ProjectManagerRepository {
     });
     const now = Date.now();
     const write = this.db.transaction(() => {
+      for(const update of input.updates)this.assertRevision(projectId,update.workItemId,update.expectedRevision);
       for (const item of prepared) {
         const eventDetails = mergeLedgerDetails({
           fromStatus: item.existing.status,
@@ -615,7 +631,7 @@ export class ProjectManagerRepository {
           this.userId,
           projectId
         );
-        this.insertLedgerEvent(projectId, item.existing.id, item.eventType, item.nextStatus, item.evidenceRefs, item.existing.feishuRefs, eventDetails, now);
+        this.insertLedgerEvent(projectId, item.existing.id, item.eventType, item.nextStatus, item.evidenceRefs, eventDetails, now);
         this.writeAudit("project_manager.work_item.status_change", "project_manager_work_item", item.existing.id, {
           projectId,
           fromStatus: item.existing.status,
@@ -635,7 +651,9 @@ export class ProjectManagerRepository {
     workItemId: string,
     input: DeleteProjectManagerWorkItemInput
   ): ProjectManagerWorkItem {
+    this.assertRevision(projectId,workItemId,input.expectedRevision);
     if (input.confirm !== true) throw new Error("Work item deletion requires confirmation");
+    if (hasDeliveryHistory(this.db,"task",workItemId)) throw new Error("DELIVERY_HISTORY_REQUIRES_ARCHIVE");
     const existing = this.requireWorkItem(projectId, workItemId);
     const details = normalizeDetails(input.details ?? {});
     const eventDetails = mergeLedgerDetails({
@@ -646,7 +664,8 @@ export class ProjectManagerRepository {
     }, details);
     const now = Date.now();
     const write = this.db.transaction(() => {
-      this.insertLedgerEvent(projectId, null, "work_item_deleted", existing.status, existing.evidenceRefs, existing.feishuRefs, eventDetails, now);
+      this.assertRevision(projectId,workItemId,input.expectedRevision);
+      this.insertLedgerEvent(projectId, null, "work_item_deleted", existing.status, existing.evidenceRefs, eventDetails, now);
       this.db.prepare(`
         DELETE FROM project_manager_work_item_links
         WHERE user_id = ? AND project_id = ? AND (blocker_work_item_id = ? OR blocked_work_item_id = ?)
@@ -670,6 +689,7 @@ export class ProjectManagerRepository {
     workItemId: string,
     input: AttachProjectManagerEvidenceInput
   ): ProjectManagerWorkItem {
+    this.assertRevision(projectId,workItemId,input.expectedRevision);
     const existing = this.requireWorkItem(projectId, workItemId);
     const nextEvidenceRefs = [...existing.evidenceRefs, ...normalizeEvidenceRefs(input.evidenceRefs)];
     if (nextEvidenceRefs.length === existing.evidenceRefs.length) {
@@ -682,12 +702,13 @@ export class ProjectManagerRepository {
     const now = Date.now();
 
     const write = this.db.transaction(() => {
+      this.assertRevision(projectId,workItemId,input.expectedRevision);
       this.db.prepare(`
         UPDATE project_manager_work_items
         SET evidence_refs_json = ?, details_json = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND project_id = ?
       `).run(JSON.stringify(nextEvidenceRefs), JSON.stringify(details), now, workItemId, this.userId, projectId);
-      this.insertLedgerEvent(projectId, workItemId, "evidence_attached", existing.status, nextEvidenceRefs, existing.feishuRefs, eventDetails, now);
+      this.insertLedgerEvent(projectId, workItemId, "evidence_attached", existing.status, nextEvidenceRefs, eventDetails, now);
       this.writeAudit("project_manager.work_item.evidence_attach", "project_manager_work_item", workItemId, {
         projectId,
         evidenceRefCount: nextEvidenceRefs.length
@@ -753,7 +774,7 @@ export class ProjectManagerRepository {
         SET name = ?, description = ?, status = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND project_id = ?
       `).run(nextName, nextDescription, nextStatus, now, stageId, this.userId, projectId);
-      this.insertLedgerEvent(projectId, null, "stage_updated", null, [], [], {
+      this.insertLedgerEvent(projectId, null, "stage_updated", null, [], {
         targetType: "stage",
         targetId: stageId,
         changedFields
@@ -772,6 +793,8 @@ export class ProjectManagerRepository {
     const now = Date.now();
 
     const write = this.db.transaction(() => {
+      const moved=this.db.prepare('SELECT id FROM project_manager_work_items WHERE user_id=? AND project_id=? AND stage_id=?').all(this.userId,projectId,stageId) as Array<{id:string}>;
+      for(const item of moved)this.bumpTaskRevision(projectId,item.id);
       // Test databases run with foreign keys off, so work items are moved back
       // to the backlog explicitly instead of relying on ON DELETE SET NULL.
       this.db.prepare(`
@@ -783,7 +806,7 @@ export class ProjectManagerRepository {
         DELETE FROM project_manager_stages
         WHERE id = ? AND user_id = ? AND project_id = ?
       `).run(stageId, this.userId, projectId);
-      this.insertLedgerEvent(projectId, null, "stage_deleted", null, [], [], {
+      this.insertLedgerEvent(projectId, null, "stage_deleted", null, [], {
         targetType: "stage",
         targetId: stageId,
         name: existing.name
@@ -813,7 +836,7 @@ export class ProjectManagerRepository {
           WHERE id = ? AND user_id = ? AND project_id = ?
         `).run(index, now, id, this.userId, projectId);
       });
-      this.insertLedgerEvent(projectId, null, "stage_updated", null, [], [], {
+      this.insertLedgerEvent(projectId, null, "stage_updated", null, [], {
         targetType: "stage",
         action: "reorder",
         stageCount: stageIds.length
@@ -890,7 +913,7 @@ export class ProjectManagerRepository {
           id, user_id, project_id, blocker_work_item_id, blocked_work_item_id, created_at
         ) VALUES (?, ?, ?, ?, ?, ?)
       `).run(id, this.userId, projectId, blockerWorkItemId, blockedWorkItemId, now);
-      this.insertLedgerEvent(projectId, blockedWorkItemId, "dependency_added", null, [], [], {
+      this.insertLedgerEvent(projectId, blockedWorkItemId, "dependency_added", null, [], {
         targetType: "work_item_link",
         targetId: id,
         blockerWorkItemId,
@@ -922,7 +945,7 @@ export class ProjectManagerRepository {
       if (result.changes === 0) {
         throw new Error("Dependency link not found");
       }
-      this.insertLedgerEvent(projectId, blockedWorkItemId, "dependency_removed", null, [], [], {
+      this.insertLedgerEvent(projectId, blockedWorkItemId, "dependency_removed", null, [], {
         targetType: "work_item_link",
         blockerWorkItemId,
         blockedWorkItemId
@@ -1037,7 +1060,7 @@ export class ProjectManagerRepository {
         id, user_id, project_id, name, description, position, status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(stage.id, this.userId, projectId, stage.name, stage.description, stage.position, stage.status, now, now);
-    this.insertLedgerEvent(projectId, null, "stage_created", null, [], [], {
+    this.insertLedgerEvent(projectId, null, "stage_created", null, [], {
       targetType: "stage",
       targetId: stage.id,
       name: stage.name,
@@ -1080,15 +1103,17 @@ export class ProjectManagerRepository {
     eventType: ProjectManagerLedgerEventType,
     status: ProjectManagerWorkItemStatus | null,
     evidenceRefs: ProjectManagerEvidenceRef[],
-    feishuRefs: ProjectManagerEvidenceRef[],
     details: Record<string, unknown>,
     createdAt: number
   ): void {
+    if(workItemId && eventType !== 'work_item_created') {
+      this.bumpTaskRevision(projectId,workItemId);
+    }
     this.db.prepare(`
       INSERT INTO project_manager_ledger_events (
         id, user_id, project_id, work_item_id, event_type, status,
-        evidence_refs_json, feishu_refs_json, details_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        evidence_refs_json, details_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       randomUUID(),
       this.userId,
@@ -1097,10 +1122,14 @@ export class ProjectManagerRepository {
       eventType,
       status,
       JSON.stringify(normalizeEvidenceRefs(evidenceRefs)),
-      JSON.stringify(normalizeEvidenceRefs(feishuRefs)),
       JSON.stringify(normalizeDetails(details)),
       createdAt
     );
+  }
+
+  private bumpTaskRevision(projectId:string,workItemId:string):void {
+    this.db.prepare('INSERT OR IGNORE INTO collaboration_tasks(user_id,project_id,work_item_id) VALUES(?,?,?)').run(this.userId,projectId,workItemId);
+    this.db.prepare('UPDATE collaboration_tasks SET revision=revision+1 WHERE user_id=? AND project_id=? AND work_item_id=?').run(this.userId,projectId,workItemId);
   }
 
   private writeAudit(
@@ -1113,7 +1142,7 @@ export class ProjectManagerRepository {
       action,
       resourceType,
       resourceId,
-      details: normalizeDetails(details)
+      details: normalizeDetails({ ...details, actorId: this.actorId })
     });
   }
 
@@ -1158,7 +1187,6 @@ function normalizeWorkItemInput(input: CreateProjectManagerWorkItemInput) {
     priority: normalizePriority(input.priority),
     acceptanceCriteria: normalizeTextList(input.acceptanceCriteria ?? []),
     evidenceRefs: normalizeEvidenceRefs(input.evidenceRefs ?? []),
-    feishuRefs: normalizeEvidenceRefs(input.feishuRefs ?? []),
     details: normalizeDetails(input.details ?? {})
   };
 }
@@ -1294,6 +1322,11 @@ function normalizeDetailValue(value: unknown, key: string, depth: number): unkno
     return value.map((item) => normalizeDetailValue(item, key, depth + 1));
   }
   if (value && typeof value === "object") {
+    if(key === 'manualCompletion') {
+      const record=value as Record<string,unknown>;
+      if(typeof record.reason==='string'&&record.reason.length<=1000&&typeof record.actorId==='string'&&record.actorId.length<=128&&typeof record.createdAt==='number'&&Number.isFinite(record.createdAt))return {reason:record.reason,actorId:record.actorId,createdAt:record.createdAt};
+      throw new Error('Invalid manual completion record');
+    }
     if (depth >= maxDetailDepth) return "[REDACTED]";
     const entries = Object.entries(value);
     if (entries.length > maxDetailKeys) throw new Error("Project-manager details cannot exceed 20 keys");
@@ -1381,7 +1414,6 @@ function toWorkItem(row: WorkItemRow): ProjectManagerWorkItem {
     priority: row.priority,
     acceptanceCriteria: parseJsonArray<string>(row.acceptance_criteria_json),
     evidenceRefs: parseJsonArray<ProjectManagerEvidenceRef>(row.evidence_refs_json),
-    feishuRefs: parseJsonArray<ProjectManagerEvidenceRef>(row.feishu_refs_json),
     details: parseJsonObject(row.details_json),
     stageId: row.stage_id,
     createdAt: row.created_at,
@@ -1423,7 +1455,6 @@ function toLedgerEvent(row: LedgerEventRow): ProjectManagerLedgerEvent {
     eventType: normalizeEventType(row.event_type),
     status: row.status ? normalizeStatus(row.status) : null,
     evidenceRefs: parseJsonArray<ProjectManagerEvidenceRef>(row.evidence_refs_json),
-    feishuRefs: parseJsonArray<ProjectManagerEvidenceRef>(row.feishu_refs_json),
     details: parseJsonObject(row.details_json),
     createdAt: row.created_at
   };

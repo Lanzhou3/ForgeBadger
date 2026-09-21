@@ -389,9 +389,9 @@ describe("session board and last-prompt routes", () => {
       db.prepare(`
         INSERT INTO project_manager_work_items (
           id, user_id, project_id, title, status, priority,
-          acceptance_criteria_json, evidence_refs_json, feishu_refs_json,
+          acceptance_criteria_json, evidence_refs_json,
           details_json, stage_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
       `).run(
         "corrupt-details-item",
         auth.userId,
@@ -399,7 +399,6 @@ describe("session board and last-prompt routes", () => {
         "Corrupt task",
         "todo",
         0,
-        "[]",
         "[]",
         "[]",
         "{not-valid-json",

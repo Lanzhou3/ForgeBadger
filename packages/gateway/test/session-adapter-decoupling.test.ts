@@ -115,7 +115,7 @@ describe("session adapter decoupling", () => {
     assert.equal(projectData.data.project.templateId, null);
   });
 
-  it("ignores legacy runtime CLI/template fields on project create/import", async () => {
+  it("ignores legacy runtime CLI fields while preserving explicit template selection", async () => {
     const token = await register("adapter-project-legacy@example.com");
     const createPath = await mkdtemp(path.join(tmpdir(), "forgebadger-project-legacy-create-"));
     const importPath = await mkdtemp(path.join(tmpdir(), "forgebadger-project-legacy-import-"));
@@ -148,7 +148,7 @@ describe("session adapter decoupling", () => {
     assert.equal(createData.data.project.templateId, null);
     assert.equal(importRes.status, 201);
     assert.equal(importData.data.project.aiTool, "");
-    assert.equal(importData.data.project.templateId, null);
+    assert.equal(importData.data.project.templateId, "builtin-opencode");
   });
 
   it("requires an explicit runtime CLI when the project has no adapter hint", async () => {

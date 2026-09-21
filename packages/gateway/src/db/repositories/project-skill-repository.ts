@@ -4,6 +4,8 @@ import type { Database } from "../types.js";
 import { projectSkills, skills, users } from "../schema.js";
 
 export interface ProjectSkill {
+  runtimeTarget?: "cli" | "copilot";
+  resourceManifest?: string | null;
   skillId: string;
   name: string;
   description: string | null;
@@ -25,6 +27,8 @@ export class ProjectSkillRepository {
     const readableVisibility = this.readableVisibility();
     const rows = this.drizzle
       .select({
+        runtimeTarget: skills.runtimeTarget,
+        resourceManifest: skills.resourceManifest,
         skillId: skills.id,
         name: skills.name,
         description: skills.description,
@@ -45,6 +49,8 @@ export class ProjectSkillRepository {
       )
       .where(readableVisibility)
       .all() as Array<{
+        runtimeTarget: "cli" | "copilot";
+        resourceManifest: string | null;
         skillId: string;
         name: string;
         description: string | null;
@@ -59,6 +65,8 @@ export class ProjectSkillRepository {
       const inherited = row.projectEnabled === null;
       const isEnabled = inherited ? row.globalEnabled : row.projectEnabled === true;
       return {
+        runtimeTarget: row.runtimeTarget,
+        resourceManifest: row.resourceManifest,
         skillId: row.skillId,
         name: row.name,
         description: row.description,
@@ -74,6 +82,8 @@ export class ProjectSkillRepository {
   }
 
   setSkill(projectId: string, skillId: string, enabled: boolean): { projectId: string; skillId: string; isEnabled: boolean } | undefined {
+    const readable = this.drizzle.select({id: skills.id}).from(skills).where(and(eq(skills.id, skillId), this.readableVisibility())).get();
+    if (!readable) return undefined;
     const existing = this.drizzle
       .select()
       .from(projectSkills)
@@ -113,7 +123,7 @@ export class ProjectSkillRepository {
     if (this.isAdminUser()) {
       base.push(eq(skills.visibility, "admin"));
     }
-    return or(...base);
+    return and(eq(skills.runtimeTarget, "cli"), or(...base));
   }
 
   private isAdminUser(): boolean {

@@ -211,7 +211,6 @@ export const projectManagerWorkItems = sqliteTable(
     priority: integer("priority").notNull().default(0),
     acceptanceCriteriaJson: text("acceptance_criteria_json").notNull().default("[]"),
     evidenceRefsJson: text("evidence_refs_json").notNull().default("[]"),
-    feishuRefsJson: text("feishu_refs_json").notNull().default("[]"),
     detailsJson: text("details_json").notNull().default("{}"),
     stageId: text("stage_id"),
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
@@ -320,7 +319,6 @@ export const projectManagerLedgerEvents = sqliteTable(
     eventType: text("event_type").notNull(),
     status: text("status"),
     evidenceRefsJson: text("evidence_refs_json").notNull().default("[]"),
-    feishuRefsJson: text("feishu_refs_json").notNull().default("[]"),
     detailsJson: text("details_json").notNull().default("{}"),
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date())
   },
@@ -349,6 +347,8 @@ export const skills = sqliteTable("skills", {
     .references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
+  runtimeTarget: text("runtime_target", { enum: ["cli", "copilot"] }).notNull().default("cli"),
+  resourceManifest: text("resource_manifest"),
   source: text("source").notNull().default("local"),
   content: text("content").notNull(),
   version: text("version").notNull().default("1.0.0"),
@@ -356,7 +356,7 @@ export const skills = sqliteTable("skills", {
   isEnabled: integer("is_enabled", { mode: "boolean" }).notNull().default(true),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-}, (table) => ({ idx_skills_user_name: uniqueIndex("idx_skills_user_name").on(table.userId, table.name) }));
+}, (table) => ({ idx_skills_user_target_name: uniqueIndex("idx_skills_user_target_name").on(table.userId, table.runtimeTarget, table.name), idx_skills_id_user: uniqueIndex("idx_skills_id_user").on(table.id, table.userId) }));
 
 export const projectSkills = sqliteTable(
   "project_skills",
@@ -508,7 +508,7 @@ export const modelProviderBindings = sqliteTable(
     idxBindingActiveRealpath: uniqueIndex("idx_model_provider_bindings_active_realpath")
       .on(table.targetRealpathHash)
       .where(sql`${table.status} = 'active' AND ${table.targetRealpathHash} IS NOT NULL`),
-    adapterCheck: check("model_provider_bindings_adapter_check", sql`${table.adapter} IN ('claude','opencode','codex','kimi')`),
+    adapterCheck: check("model_provider_bindings_adapter_check", sql`${table.adapter} IN ('claude','opencode','codex','kimi','pi')`),
     authModeCheck: check("model_provider_bindings_auth_mode_check", sql`${table.authMode} IN ('managed_credential','native_cli_login','host_environment','none')`),
     statusCheck: check("model_provider_bindings_status_check", sql`${table.status} IN ('active','revoked')`),
     revisionCheck: check("model_provider_bindings_revision_check", sql`${table.desiredRevision} >= 1`),
@@ -571,6 +571,7 @@ export const sessions = sqliteTable(
     updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
   },
   (table) => ({
+    idxSessionsTenantIdentity: uniqueIndex("idx_sessions_tenant_identity").on(table.userId,table.id),
     idx_sessions_user_project: index("idx_sessions_user_project").on(table.userId, table.projectId),
     idx_sessions_user_project_id: uniqueIndex("idx_sessions_user_project_id").on(table.userId, table.projectId, table.id),
     idx_sessions_user_status: index("idx_sessions_user_status").on(table.userId, table.status),
@@ -893,7 +894,7 @@ export const userSettings = sqliteTable("user_settings", {
   theme: text("theme").notNull().default("light"),
   language: text("language").notNull().default("zh-CN"),
   modelId: text("model_id").references(() => modelProfiles.id),
-  // Claude Code protocol routing (cc-switch-style local proxy, Gateway edition).
+  // Claude Code protocol routing (Gateway loopback Anthropic-compatible proxy).
   claudeRouteEnabled: integer("claude_route_enabled", { mode: "boolean" }).notNull().default(false),
   // EncryptedSecret JSON (master key) of the loopback route token; null until
   // routing is first enabled.
@@ -1405,6 +1406,8 @@ export const copilotRuns = sqliteTable("copilot_runs", {
   status: text("status").notNull().default("pending"), // pending | running | awaiting_approval | completed | cancelled | failed
   runtimeVersion: integer("runtime_version").notNull().default(0),
   source: text("source").notNull().default("user"),
+  clientRequestId: text('client_request_id'),
+  requestDigest: text('request_digest'),
   inputJson: text("input_json").notNull().default("{}"),
   maxSteps: integer("max_steps").notNull().default(16),
   stopReason: text("stop_reason"),
@@ -1420,7 +1423,7 @@ export const copilotRuns = sqliteTable("copilot_runs", {
   completedAt: integer("completed_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-}, (table) => ({ tenantIdentity: uniqueIndex("idx_copilot_run_tenant").on(table.userId,table.id), activeConversation: uniqueIndex("idx_copilot_active_conversation").on(table.userId,table.conversationId).where(sql`${table.runtimeVersion} = 1 AND ${table.status} IN ('pending','running','awaiting_approval')`), conversationLookup: index("idx_copilot_runs_conversation_created").on(table.conversationId, table.createdAt), userLookup: index("idx_copilot_runs_user_created").on(table.userId, table.createdAt) }));
+}, (table) => ({ requestIdentity: uniqueIndex("idx_copilot_request_identity").on(table.userId,table.conversationId,table.clientRequestId).where(sql`${table.clientRequestId} IS NOT NULL`), tenantIdentity: uniqueIndex("idx_copilot_run_tenant").on(table.userId,table.id), activeConversation: uniqueIndex("idx_copilot_active_conversation").on(table.userId,table.conversationId).where(sql`${table.runtimeVersion} = 1 AND ${table.status} IN ('pending','running','awaiting_approval')`), conversationLookup: index("idx_copilot_runs_conversation_created").on(table.conversationId, table.createdAt), userLookup: index("idx_copilot_runs_user_created").on(table.userId, table.createdAt) }));
 
 export const copilotPendingActions = sqliteTable("copilot_pending_actions", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -1644,6 +1647,7 @@ export const copilotGrants = sqliteTable('copilot_grants', {
   usedActions:integer('used_actions').notNull().default(0),createdAt:integer('created_at').notNull()
 },t=>({tenant:uniqueIndex('idx_copilot_grant_tenant').on(t.userId,t.id)}));
 export const platformActionIntents = sqliteTable('platform_action_intents', {
+ originKind:text('origin_kind').notNull().default('legacy'),originRunId:text('origin_run_id'),originStepId:text('origin_step_id'),
  channelConversationId:text('channel_conversation_id'),
  id:text('id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),actorUserId:text('actor_user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),
  grantId:text('grant_id'),grantRevision:integer('grant_revision'),authority:text('authority').notNull(),commandId:text('command_id').notNull(),inputJson:text('input_json').notNull(),digest:text('digest').notNull(),
@@ -1719,4 +1723,246 @@ export const channelDeliveries = sqliteTable('channel_deliveries', {
   inbox: foreignKey({ columns: [t.userId,t.inboxId], foreignColumns: [channelMessages.userId,channelMessages.id] }),
   phase: uniqueIndex('idx_channel_delivery_phase').on(t.userId,t.inboxId,t.phase),
   pending: index('idx_channel_delivery_pending').on(t.userId,t.status,t.createdAt)
+}));
+
+// Immutable Copilot Skill package history; CLI skills never enter these tables.
+export const copilotSkillRevisions = sqliteTable("copilot_skill_revisions", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  skillId: text("skill_id").notNull(),
+  parentRevisionId: text("parent_revision_id"),
+  action: text("action").notNull(),
+  snapshotJson: text("snapshot_json").notNull(),
+  packageDigest: text("package_digest").notNull(),
+  createdAt: integer("created_at").notNull()
+}, table => ({
+  owner: index("idx_copilot_skill_revisions_owner").on(table.userId, table.skillId, table.createdAt),
+  identity: uniqueIndex("idx_copilot_skill_revisions_identity").on(table.id, table.userId, table.skillId),
+  skillOwner: foreignKey({columns:[table.skillId,table.userId],foreignColumns:[skills.id,skills.userId]}).onDelete("cascade"),
+  parentOwner: foreignKey({columns:[table.parentRevisionId,table.userId,table.skillId],foreignColumns:[table.id,table.userId,table.skillId]}),
+  validAction: check("copilot_skill_revision_action",sql`${table.action} IN ('import','update','rollback','legacy','builtin-update')`)
+}));
+export const copilotSkillHeads = sqliteTable("copilot_skill_heads", {
+  skillId: text("skill_id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  originKind: text("origin_kind").notNull(),
+  currentRevisionId: text("current_revision_id").notNull()
+}, table => ({
+  owner: index("idx_copilot_skill_heads_owner").on(table.userId),
+  skillOwner: foreignKey({columns:[table.skillId,table.userId],foreignColumns:[skills.id,skills.userId]}).onDelete("cascade"),
+  revisionOwner: foreignKey({columns:[table.currentRevisionId,table.userId,table.skillId],foreignColumns:[copilotSkillRevisions.id,copilotSkillRevisions.userId,copilotSkillRevisions.skillId]}),
+  validOrigin: check("copilot_skill_head_origin",sql`${table.originKind} IN ('builtin','external','legacy')`)
+}));
+
+export const copilotConnections = sqliteTable('copilot_connections', {
+ id: text('id').primaryKey(),
+ userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+ name: text('name').notNull(), endpoint: text('endpoint').notNull(), credentialEncrypted: text('credential_encrypted'),
+ enabled: integer('enabled').notNull().default(0), revision: integer('revision').notNull().default(1),
+ toolsJson: text('tools_json').notNull().default('[]'), enabledToolsJson: text('enabled_tools_json').notNull().default('[]'),
+ lastDiscoveredAt: integer('last_discovered_at'), createdAt: integer('created_at').notNull(), updatedAt: integer('updated_at').notNull()
+}, table => ({ idxCopilotConnectionsUser: index('idx_copilot_connections_user').on(table.userId) }));
+
+export const copilotDevelopmentTasks = sqliteTable('copilot_development_tasks', {
+ id:text('id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),projectId:text('project_id').notNull(),
+ goal:text('goal').notNull(),status:text('status').notNull(),planJson:text('plan_json').notNull(),recipeDigest:text('recipe_digest').notNull(),sourceDigest:text('source_digest').notNull(),outputDigest:text('output_digest').notNull(),
+ intentId:text('intent_id').notNull(),originRunId:text('origin_run_id'),originStepId:text('origin_step_id'),projectRoot:text('project_root').notNull(),workspacePath:text('workspace_path'),evidenceJson:text('evidence_json'),artifactDigest:text('artifact_digest'),error:text('error'),
+ owner:text('owner'),leaseExpiresAt:integer('lease_expires_at'),cancelRequested:integer('cancel_requested').notNull().default(0),revision:integer('revision').notNull().default(1),createdAt:integer('created_at').notNull(),updatedAt:integer('updated_at').notNull()
+},t=>({projectIdentity:uniqueIndex('idx_copilot_development_project_identity').on(t.userId,t.projectId,t.id),tenant:uniqueIndex('idx_development_tenant').on(t.userId,t.id),intent:uniqueIndex('idx_development_intent').on(t.userId,t.intentId),active:uniqueIndex('idx_copilot_development_active_project').on(t.userId,t.projectId).where(sql`${t.status} IN ('queued','running','indeterminate')`),hostSlot:uniqueIndex('idx_copilot_development_host_slot').on(sql`(1)`).where(sql`${t.status} IN ('running','indeterminate')`),queue:index('idx_copilot_development_queue').on(t.userId,t.status,t.createdAt),project:foreignKey({columns:[t.userId,t.projectId],foreignColumns:[projects.userId,projects.id]}).onDelete('cascade'),action:foreignKey({columns:[t.userId,t.intentId],foreignColumns:[platformActionIntents.userId,platformActionIntents.id]}),state:check('development_state',sql`${t.status} IN ('queued','running','checks_passed','checks_failed','failed','cancelled','indeterminate','accepted')`)}));
+export const copilotDevelopmentEvents=sqliteTable('copilot_development_events',{
+ id:text('id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),taskId:text('task_id').notNull(),revision:integer('revision').notNull(),status:text('status').notNull(),createdAt:integer('created_at').notNull(),deliveredAt:integer('delivered_at')
+},t=>({task:foreignKey({columns:[t.userId,t.taskId],foreignColumns:[copilotDevelopmentTasks.userId,copilotDevelopmentTasks.id]}).onDelete('cascade'),revision:uniqueIndex('idx_development_event_revision').on(t.userId,t.taskId,t.revision)}));
+export const collaborationProjects = sqliteTable("collaboration_projects", {
+ projectId: text("project_id").primaryKey().notNull(),
+ userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+ protectedRoot: text("protected_root").notNull(),
+ revision: integer("revision").notNull().default(0),
+ executionEnabled: integer("execution_enabled").notNull().default(0),
+ verificationJson: text("verification_json"),
+ verificationRevision: integer("verification_revision").notNull().default(0)
+}, t => ({
+ constraint0: check("collaboration_projects_execution_enabled_check", sql`execution_enabled IN (0,1)`),
+ constraint1: foreignKey({columns:[t.userId,t.projectId],foreignColumns:[projects.userId,projects.id]}).onDelete("cascade")
+}));
+
+export const collaborationMembers = sqliteTable("collaboration_members", {
+ projectId: text("project_id").notNull(),
+ userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+ memberId: text("member_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+ role: text("role").notNull(),
+ state: text("state").notNull().default("active"),
+ revision: integer("revision").notNull().default(1)
+}, t => ({
+ constraint0: check("collaboration_members_role_check", sql`role IN ('developer','reviewer','viewer')`),
+ constraint1: check("collaboration_members_state_check", sql`state IN ('active','revoking','revoked')`),
+ constraint2: primaryKey({columns:[t.projectId,t.memberId]}),
+ constraint3: foreignKey({columns:[t.userId,t.projectId],foreignColumns:[projects.userId,projects.id]}).onDelete("cascade"),
+ constraint4: index("idx_collaboration_members_actor").on(t.memberId,t.state)
+}));
+
+export const collaborationTasks = sqliteTable("collaboration_tasks", {
+ workItemId: text("work_item_id").primaryKey().notNull(),
+ userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+ projectId: text("project_id").notNull(),
+ revision: integer("revision").notNull().default(1),
+ semanticRevision: integer("semantic_revision").notNull().default(1),
+ assigneeId: text("assignee_id").references(() => users.id, { onDelete: "restrict" }),
+ reviewerId: text("reviewer_id").references(() => users.id, { onDelete: "restrict" })
+}, t => ({
+ constraint0: foreignKey({columns:[t.userId,t.projectId,t.workItemId],foreignColumns:[projectManagerWorkItems.userId,projectManagerWorkItems.projectId,projectManagerWorkItems.id]}).onDelete("cascade")
+}));
+
+export const collaborationEvents = sqliteTable("collaboration_events", {
+ id: text("id").primaryKey().notNull(),
+ userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+ projectId: text("project_id").notNull(),
+ taskId: text("task_id"),
+ actorId: text("actor_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+ kind: text("kind").notNull(),
+ bodyJson: text("body_json").notNull(),
+ createdAt: integer("created_at").notNull()
+}, t => ({
+ constraint0: foreignKey({columns:[t.userId,t.projectId],foreignColumns:[projects.userId,projects.id]}).onDelete("cascade"),
+ constraint1: index("idx_collaboration_events_project").on(t.userId,t.projectId,t.createdAt)
+}));
+
+export const deliveryRuns = sqliteTable("delivery_runs", {
+ id: text("id").primaryKey().notNull(),
+ userId: text("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+ projectId: text("project_id").notNull(),
+ workItemId: text("work_item_id").notNull(),
+ actorId: text("actor_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+ idempotencyKey: text("idempotency_key").notNull(),
+ inputDigest: text("input_digest").notNull(),
+ adapter: text("adapter").notNull(),
+ membershipRevision: integer("membership_revision").notNull(),
+ authorityEpoch:text("authority_epoch").notNull().default(""),
+ state: text("state").notNull(),
+ workspaceProjectId: text("workspace_project_id"),
+ sessionId: text("session_id").references(() => sessions.id, { onDelete: "restrict" }),
+ workspacePath: text("workspace_path").notNull(),
+ branch: text("branch").notNull(),
+ baseCommit: text("base_commit").notNull().default(""),
+ targetBranch: text("target_branch").notNull().default(""),
+ previewUrl: text("preview_url"),
+ prUrl: text("pr_url"),
+ errorCode: text("error_code"),
+ createdAt: integer("created_at").notNull(),
+ updatedAt: integer("updated_at").notNull()
+}, t => ({
+ constraint0: check("delivery_runs_state_check", sql`state IN ('provisioning','ready','failed','revoking','closed','integrated')`),
+ constraint1: foreignKey({columns:[t.userId,t.projectId,t.workItemId],foreignColumns:[projectManagerWorkItems.userId,projectManagerWorkItems.projectId,projectManagerWorkItems.id]}).onDelete("restrict"),
+ constraint2: foreignKey({columns:[t.actorId,t.workspaceProjectId],foreignColumns:[projects.userId,projects.id]}).onDelete("restrict"),
+ constraint3: uniqueIndex("delivery_runs_actor_id_idempotency_key_unique").on(t.actorId,t.idempotencyKey),
+ constraint4: uniqueIndex("delivery_runs_workspace_path_unique").on(t.workspacePath),
+ constraint5: uniqueIndex("delivery_runs_workspace_project_id_unique").on(t.workspaceProjectId),
+ constraint6: uniqueIndex("delivery_runs_session_id_unique").on(t.sessionId),
+ constraint7: uniqueIndex("idx_delivery_runs_identity").on(t.userId,t.projectId,t.id),
+ constraint8: uniqueIndex("idx_delivery_runs_active_actor_task").on(t.workItemId,t.actorId).where(sql`state IN ('provisioning','ready','revoking')`)
+}));
+
+export const deliveryVerifications = sqliteTable("delivery_verifications", {
+ id: text("id").primaryKey().notNull(),
+ userId: text("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+ projectId: text("project_id").notNull(),
+ runId: text("run_id").notNull(),
+ actorId: text("actor_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+ commitSha: text("commit_sha").notNull(),
+ taskDigest: text("task_digest").notNull(),
+ taskRevision: integer("task_revision").notNull(),
+ policyRevision: integer("policy_revision").notNull(),
+ commandJson: text("command_json").notNull(),
+ status: text("status").notNull(),
+ exitCode: integer("exit_code"),
+ summary: text("summary").notNull().default(""),
+ createdAt: integer("created_at").notNull(),
+ finishedAt: integer("finished_at")
+}, t => ({
+ constraint0: check("delivery_verifications_status_check", sql`status IN ('running','passed','failed','unknown')`),
+ constraint1: foreignKey({columns:[t.userId,t.projectId,t.runId],foreignColumns:[deliveryRuns.userId,deliveryRuns.projectId,deliveryRuns.id]}).onDelete("restrict"),
+ constraint2: uniqueIndex("idx_delivery_verifications_identity").on(t.userId,t.projectId,t.runId,t.id),
+ constraint3: uniqueIndex("idx_delivery_verifications_running").on(t.runId).where(sql`status='running'`)
+}));
+
+export const deliveryReviews = sqliteTable("delivery_reviews", {
+ id: text("id").primaryKey().notNull(),
+ userId: text("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+ projectId: text("project_id").notNull(),
+ runId: text("run_id").notNull(),
+ authorityEpoch:text("authority_epoch").notNull().default(""),
+ actorId: text("actor_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+ verificationId: text("verification_id").notNull(),
+ commitSha: text("commit_sha").notNull(),
+ taskDigest: text("task_digest").notNull(),
+ taskRevision: integer("task_revision").notNull(),
+ policyRevision: integer("policy_revision").notNull(),
+ decision: text("decision").notNull(),
+ note: text("note").notNull(),
+ createdAt: integer("created_at").notNull()
+}, t => ({
+ constraint0: check("delivery_reviews_decision_check", sql`decision IN ('accepted','changes_requested')`),
+ constraint1: foreignKey({columns:[t.userId,t.projectId,t.runId,t.verificationId],foreignColumns:[deliveryVerifications.userId,deliveryVerifications.projectId,deliveryVerifications.runId,deliveryVerifications.id]}).onDelete("restrict")
+}));
+
+export const deliveryOperations = sqliteTable("delivery_operations", {
+ runId: text("run_id").primaryKey().notNull(),
+ userId: text("user_id").notNull(),
+ projectId: text("project_id").notNull(),
+ kind: text("kind").notNull(),
+ phase: text("phase").notNull().default("active"),
+ expectedCommit: text("expected_commit"),
+ createdAt: integer("created_at").notNull()
+}, t => ({
+ constraint0: check("delivery_operations_kind_check", sql`kind IN ('verify','review','integrate','pull_request')`),
+ constraint1: check("delivery_operations_phase_check", sql`phase IN ('active','applying','interrupted')`),
+ constraint2: foreignKey({columns:[t.userId,t.projectId,t.runId],foreignColumns:[deliveryRuns.userId,deliveryRuns.projectId,deliveryRuns.id]}).onDelete("restrict")
+}));
+
+export const userAuthEpochs = sqliteTable('user_auth_epochs', {
+ userId:text('user_id').primaryKey().notNull().references(()=>users.id,{onDelete:'cascade'}),
+ epoch:integer('epoch').notNull().default(1)
+}, t=>({positiveEpoch:check('user_auth_epochs_positive',sql`${t.epoch} >= 1`)}));
+
+export const userAuthorityEpochs=sqliteTable('user_authority_epochs',{
+ userId:text('user_id').primaryKey().notNull().references(()=>users.id,{onDelete:'cascade'}),epoch:integer('epoch').notNull().default(1)
+});
+export const teams=sqliteTable('teams',{
+ id:text('id').primaryKey().notNull(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'restrict'}),ownerId:text('owner_id').notNull().references(()=>users.id,{onDelete:'restrict'}),
+ name:text('name').notNull(),state:text('state').notNull().default('active'),revision:integer('revision').notNull().default(1),createdAt:integer('created_at').notNull(),updatedAt:integer('updated_at').notNull()
+},t=>({tenant:uniqueIndex('idx_teams_tenant').on(t.userId,t.id)}));
+export const teamMembers=sqliteTable('team_members',{
+ userId:text('user_id').notNull(),teamId:text('team_id').notNull(),memberId:text('member_id').notNull().references(()=>users.id,{onDelete:'restrict'}),role:text('role').notNull(),state:text('state').notNull().default('active'),revision:integer('revision').notNull().default(1)
+},t=>({pk:primaryKey({columns:[t.teamId,t.memberId]}),tenant:foreignKey({columns:[t.userId,t.teamId],foreignColumns:[teams.userId,teams.id]}).onDelete('restrict'),actor:index('idx_team_members_actor').on(t.memberId,t.state)}));
+export const teamProjects=sqliteTable('team_projects',{
+ userId:text('user_id').notNull(),teamId:text('team_id').notNull(),projectUserId:text('project_user_id').notNull(),projectId:text('project_id').primaryKey().notNull(),logicalOwnerId:text('logical_owner_id').notNull().references(()=>users.id,{onDelete:'restrict'}),revision:integer('revision').notNull().default(1)
+},t=>({tenant:foreignKey({columns:[t.userId,t.teamId],foreignColumns:[teams.userId,teams.id]}).onDelete('restrict'),project:foreignKey({columns:[t.projectUserId,t.projectId],foreignColumns:[projects.userId,projects.id]}).onDelete('restrict'),team:index('idx_team_projects_team').on(t.teamId)}));
+export const teamInvitations=sqliteTable('team_invitations',{
+ id:text('id').primaryKey().notNull(),userId:text('user_id').notNull(),teamId:text('team_id').notNull(),tokenHash:text('token_hash').notNull().unique(),email:text('email').notNull(),role:text('role').notNull(),issuerId:text('issuer_id').notNull().references(()=>users.id,{onDelete:'restrict'}),issuerRevision:integer('issuer_revision').notNull(),state:text('state').notNull().default('pending'),expiresAt:integer('expires_at').notNull(),createdAt:integer('created_at').notNull(),usedAt:integer('used_at'),usedBy:text('used_by').references(()=>users.id,{onDelete:'restrict'})
+},t=>({tenant:foreignKey({columns:[t.userId,t.teamId],foreignColumns:[teams.userId,teams.id]}).onDelete('restrict'),team:index('idx_team_invitations_team').on(t.teamId,t.createdAt)}));
+export const teamOffboardingPlans=sqliteTable('team_offboarding_plans',{
+ id:text('id').primaryKey().notNull(),userId:text('user_id').notNull(),teamId:text('team_id').notNull(),actorId:text('actor_id').notNull().references(()=>users.id,{onDelete:'restrict'}),memberId:text('member_id').notNull().references(()=>users.id,{onDelete:'restrict'}),revision:integer("revision").notNull().default(1), confirmationHash:text('confirmation_hash').notNull(),planDigest:text('plan_digest').notNull(),handoffsJson:text('handoffs_json').notNull(),state:text('state').notNull().default('planned'),expiresAt:integer('expires_at').notNull(),createdAt:integer('created_at').notNull(),pendingStops:integer('pending_stops').notNull().default(0),error:text('error')
+},t=>({tenant:foreignKey({columns:[t.userId,t.teamId],foreignColumns:[teams.userId,teams.id]}).onDelete('restrict'),active:uniqueIndex('idx_team_offboarding_active').on(t.teamId,t.memberId).where(sql`${t.state}='stopping'`)}));
+export const teamEvents=sqliteTable('team_events',{
+ id:text('id').primaryKey().notNull(),userId:text('user_id').notNull(),teamId:text('team_id').notNull(),actorId:text('actor_id').notNull().references(()=>users.id,{onDelete:'restrict'}),kind:text('kind').notNull(),bodyJson:text('body_json').notNull(),createdAt:integer('created_at').notNull()
+},t=>({tenant:foreignKey({columns:[t.userId,t.teamId],foreignColumns:[teams.userId,teams.id]}).onDelete('restrict')}));
+
+export const deliveryPullRequests=sqliteTable('delivery_pull_requests',{
+ id:text('id').primaryKey().notNull(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'restrict'}),projectId:text('project_id').notNull(),runId:text('run_id').notNull(),
+ actorId:text('actor_id').notNull().references(()=>users.id,{onDelete:'restrict'}),requestDigest:text('request_digest').notNull(),repository:text('repository').notNull(),headBranch:text('head_branch').notNull(),baseBranch:text('base_branch').notNull(),commitSha:text('commit_sha').notNull(),
+ state:text('state').notNull(),url:text('url'),number:integer('number'),draft:integer('draft'),createdAt:integer('created_at').notNull(),updatedAt:integer('updated_at').notNull()
+},t=>({tenant:foreignKey({columns:[t.userId,t.projectId,t.runId],foreignColumns:[deliveryRuns.userId,deliveryRuns.projectId,deliveryRuns.id]}).onDelete('restrict'),identity:uniqueIndex('delivery_pull_requests_actor_id_run_id_request_digest_unique').on(t.actorId,t.runId,t.requestDigest),run:index('idx_delivery_pull_requests_run').on(t.userId,t.projectId,t.runId,t.createdAt),state:check('delivery_pull_requests_state_check',sql`state IN ('checking','creating','created','unknown')`)}));
+
+export const sessionRuntimeConfirmations=sqliteTable('session_runtime_confirmations',{
+ userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),sessionId:text('session_id').notNull(),runtimeName:text('runtime_name').notNull(),launchNonce:text('launch_nonce').notNull().unique(),daemonPid:integer('daemon_pid').notNull(),daemonStartedAt:text('daemon_started_at').notNull(),status:text('status').notNull(),receiptJson:text('receipt_json'),updatedAt:integer('updated_at').notNull()
+},t=>({pk:primaryKey({columns:[t.userId,t.sessionId]}),tenant:foreignKey({columns:[t.userId,t.sessionId],foreignColumns:[sessions.userId,sessions.id]}).onDelete('cascade'),status:check('session_runtime_confirmations_status_check',sql`status IN ('pending','stopped')`),pid:check('session_runtime_confirmations_pid_check',sql`daemon_pid > 0`),receipt:check('session_runtime_confirmations_receipt_check',sql`(status='pending' AND receipt_json IS NULL) OR (status='stopped' AND receipt_json IS NOT NULL)`)}));
+
+
+export const projectTaskArtifactLinks=sqliteTable('project_task_artifact_links',{
+ id:text('id').primaryKey().notNull(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),projectId:text('project_id').notNull(),workItemId:text('work_item_id').notNull(),developmentTaskId:text('development_task_id').notNull(),
+ artifactDigest:text('artifact_digest').notNull(),taskDigest:text('task_digest').notNull(),artifactStatus:text('artifact_status').notNull(),filesCount:integer('files_count').notNull(),checksCount:integer('checks_count').notNull(),passedChecks:integer('passed_checks').notNull(),linkedBy:text('linked_by').notNull().references(()=>users.id),linkedAt:integer('linked_at').notNull()
+},t=>({
+ task:foreignKey({columns:[t.userId,t.projectId,t.workItemId],foreignColumns:[projectManagerWorkItems.userId,projectManagerWorkItems.projectId,projectManagerWorkItems.id]}).onDelete('cascade'),
+ artifact:foreignKey({columns:[t.userId,t.projectId,t.developmentTaskId],foreignColumns:[copilotDevelopmentTasks.userId,copilotDevelopmentTasks.projectId,copilotDevelopmentTasks.id]}),
+ identity:uniqueIndex('idx_task_artifact_identity').on(t.userId,t.projectId,t.workItemId,t.developmentTaskId,t.artifactDigest),
+ status:check('task_artifact_status',sql`${t.artifactStatus} IN ('checks_passed','checks_failed','accepted')`),files:check('task_artifact_files',sql`${t.filesCount}>=0`),checks:check('task_artifact_checks',sql`${t.checksCount}>=0`),passed:check('task_artifact_passed',sql`${t.passedChecks}>=0 AND ${t.passedChecks}<=${t.checksCount}`)
 }));

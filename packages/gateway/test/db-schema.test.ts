@@ -59,12 +59,19 @@ describe("db schema", () => {
       "channel_routes",
       "claude_route_assignments",
       "cli_config_applied_providers",
+      "collaboration_events",
+      "collaboration_members",
+      "collaboration_projects",
+      "collaboration_tasks",
       "copilot_automation_run_projects",
       "copilot_automation_runs",
       "copilot_automation_suggestions",
       "copilot_automations",
+      "copilot_connections",
       "copilot_conversation_grants",
       "copilot_conversations",
+      "copilot_development_events",
+      "copilot_development_tasks",
       "copilot_dsh_config",
       "copilot_grants",
       "copilot_memory",
@@ -79,7 +86,14 @@ describe("db schema", () => {
       "copilot_pending_actions",
       "copilot_run_steps",
       "copilot_runs",
+      "copilot_skill_heads",
+      "copilot_skill_revisions",
       "copilot_tool_preferences",
+      "delivery_operations",
+      "delivery_pull_requests",
+      "delivery_reviews",
+      "delivery_runs",
+      "delivery_verifications",
       "feishu_card_actions",
       "feishu_channel_accounts",
       "feishu_channel_inbox",
@@ -141,18 +155,28 @@ describe("db schema", () => {
       "project_manager_work_item_links",
       "project_manager_work_items",
       "project_skills",
+      "project_task_artifact_links",
       "projects",
       "provider_credentials",
       "session_activities",
+      "session_runtime_confirmations",
       "session_snapshots",
       "session_writer_leases",
       "sessions",
       "skills",
+      "team_events",
+      "team_invitations",
+      "team_members",
+      "team_offboarding_plans",
+      "team_projects",
+      "teams",
       "template_files",
       "template_git_sources",
       "templates",
       "token_usage_records",
       "usage_sync_cursors",
+      "user_auth_epochs",
+      "user_authority_epochs",
       "user_settings",
       "users"
     ]);
@@ -396,9 +420,9 @@ describe("db schema", () => {
       () => db.prepare(`
         INSERT INTO project_manager_work_items (
           id, user_id, project_id, title, status, priority,
-          acceptance_criteria_json, evidence_refs_json, feishu_refs_json, details_json,
+          acceptance_criteria_json, evidence_refs_json, details_json,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'todo', 0, '[]', '[]', '[]', '{}', 1, 1)
+        ) VALUES (?, ?, ?, ?, 'todo', 0, '[]', '[]', '{}', 1, 1)
       `).run("cross-tenant-item", "tenant-a", "project-b", "Must fail"),
       /FOREIGN KEY constraint failed/u
     );
@@ -514,17 +538,17 @@ describe("db schema", () => {
     db.prepare(`
       INSERT INTO project_manager_work_items (
         id, user_id, project_id, title, status, priority,
-        acceptance_criteria_json, evidence_refs_json, feishu_refs_json, details_json,
+        acceptance_criteria_json, evidence_refs_json, details_json,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run("pm-work-1", "pm-user", "pm-project", "First", "todo", 0, "[]", "[]", "[]", "{}", 1, 1);
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run("pm-work-1", "pm-user", "pm-project", "First", "todo", 0, "[]", "[]", "{}", 1, 1);
     db.prepare(`
       INSERT INTO project_manager_work_items (
         id, user_id, project_id, title, status, priority,
-        acceptance_criteria_json, evidence_refs_json, feishu_refs_json, details_json,
+        acceptance_criteria_json, evidence_refs_json, details_json,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run("pm-work-2", "pm-user", "pm-project", "Second", "todo", 0, "[]", "[]", "[]", "{}", 1, 1);
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run("pm-work-2", "pm-user", "pm-project", "Second", "todo", 0, "[]", "[]", "{}", 1, 1);
 
     const insertAttempt = db.prepare(`
       INSERT INTO project_manager_task_attempts (

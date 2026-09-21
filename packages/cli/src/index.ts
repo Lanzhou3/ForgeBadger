@@ -4,6 +4,8 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { runBackup } from "./commands/backup.js";
+import { runRestore } from "./commands/restore.js";
 import { runDoctor } from "./commands/doctor.js";
 import { runInit } from "./commands/init.js";
 import { runStart, type RunStartOptions } from "./commands/start.js";
@@ -17,11 +19,15 @@ export type CliCommand =
       openBrowser: boolean;
     }
   | { command: "doctor" }
+  | { command: "backup"; output: string }
+  | { command: "restore"; from: string; to: string }
   | { command: "config"; args: string[] }
   | { command: "init"; args: string[] }
   | { command: "help" };
 
 export interface RunCliOptions {
+  backupRunner?: (command: Extract<CliCommand, { command: "backup" }>) => Promise<number>;
+  restoreRunner?: (command: Extract<CliCommand, { command: "restore" }>) => Promise<number>;
   doctorRunner?: () => Promise<number>;
   initRunner?: (args: string[]) => Promise<number>;
   startRunner?: (command: Extract<CliCommand, { command: "start" }>) => Promise<number>;
@@ -29,6 +35,9 @@ export interface RunCliOptions {
 
 export function parseCliArgs(args: string[]): CliCommand {
   const [command = "start", ...rest] = args;
+  if (command === "backup" || command === "restore") {
+    return parseBackupArgs(command, rest);
+  }
   if (command === "init") {
     return { command: "init", args };
   }
@@ -48,6 +57,20 @@ export function parseCliArgs(args: string[]): CliCommand {
     return parseStartArgs(args);
   }
   throw new Error(`Unknown command: ${command}`);
+}
+
+function parseBackupArgs(command: "backup" | "restore", args: string[]): CliCommand {
+  const allowed = command === "backup" ? ["--output"] : ["--from", "--to"];
+  const values = new Map<string, string>();
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index]!;
+    const value = args[index + 1];
+    if (!allowed.includes(flag) || values.has(flag)) throw new Error("Unexpected or duplicate backup/restore option");
+    if (!value || value.startsWith("--")) throw new Error(`Missing value for ${flag}`);
+    values.set(flag, value);
+  }
+  if (allowed.some((flag) => !values.has(flag))) throw new Error(`Required options: ${allowed.join(" ")}`);
+  return command === "backup" ? { command, output: values.get("--output")! } : { command, from: values.get("--from")!, to: values.get("--to")! };
 }
 
 function parseStartArgs(args: string[]): Extract<CliCommand, { command: "start" }> {
@@ -100,6 +123,8 @@ function parsePort(value: string, flag: string): number {
 
 export async function runCli(args = process.argv.slice(2), options: RunCliOptions = {}): Promise<number> {
   const command = parseCliArgs(args);
+  if (command.command === "backup") return (options.backupRunner ?? runBackup)(command);
+  if (command.command === "restore") return (options.restoreRunner ?? runRestore)(command);
   if (command.command === "start") {
     if (options.startRunner) {
       return options.startRunner(command);
@@ -113,7 +138,7 @@ export async function runCli(args = process.argv.slice(2), options: RunCliOption
     return (options.initRunner ?? runInit)(command.args);
   }
   if (command.command === "help") {
-    process.stdout.write("Usage: forgebadger [start|doctor|init|config]\n");
+    process.stdout.write("Usage: forgebadger [start|doctor|init|config|backup --output <new-dir>|restore --from <backup-dir> --to <new-state-dir>]\n");
     return 0;
   }
   throw new Error(`Command not implemented yet: ${command.command}`);

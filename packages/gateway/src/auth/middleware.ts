@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 
+import { jwtUserIsActive } from "./credential-epoch.js";
 import { verifyJwt } from "./jwt.js";
 import { verifyAuthSession } from "./session-service.js";
 import { loadEnv } from "../config/env.js";
@@ -43,7 +44,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
     }
   }
 
-  let payload: { userId: string };
+  let payload: ReturnType<typeof verifyJwt>;
   try {
     payload = verifyJwt(token, resolveJwtSecret(req));
   } catch {
@@ -54,7 +55,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
   // Revoke access for users that no longer exist or have been disabled so a
   // JWT issued before a status change does not survive the disable. Skipped
   // only when no DB is mounted (unit-test harnesses); production always has one.
-  if (db && !userIsActive(db, payload.userId)) {
+  if (db && !jwtUserIsActive(db, payload)) {
     res.status(401).json({ code: 1, message: "Unauthorized" });
     return;
   }

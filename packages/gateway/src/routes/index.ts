@@ -1,3 +1,11 @@
+import {createTeamRoutes} from './teams.js';
+import {TeamService} from '../services/teams/service.js';
+import {createDeliveryActionsRoutes} from './collaboration-delivery-actions.js';
+import { homedir } from 'node:os';
+import path from 'node:path';
+import { createTaskArtifactLinkRoutes } from './task-artifact-links.js';
+import { createCollaborationRoutes } from './collaboration.js';
+import { DeliveryService } from '../services/collaboration/delivery-service.js';
 import { createCopilotChannelRoutes } from "./copilot-channels.js";
 import { createPlatformActionRoutes } from "./platform-actions.js";
 import { createProjectManagementRoutes } from "./project-management.js";
@@ -35,18 +43,36 @@ import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
 import { createCopilotRoutes } from "./copilot.js";
 import { createAutomationRoutes } from "./automations.js";
 import { createMcpRoutes } from "./mcp.js";
+import { createMcpStatusRoutes } from "./mcp-status.js";
 import { createMcpTokenRoutes } from "./mcp-tokens.js";
 import { createSystemRoutes } from "./system.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/health", createHealthRoutes());
+  const collaborationOptions = {db:deps.db,sessionManager:deps.sessionManager,invalidator:deps.runtimeAuthorizationInvalidator,
+    workspacesRoot:path.join(process.env.FORGEBADGER_STATE_DIR ?? path.join(homedir(),'.forgebadger'),'workspaces')};
+  const delivery = new DeliveryService(collaborationOptions);
+  delivery.recoverInterrupted();
+  const teams=new TeamService(delivery);
+  delivery.afterSweep=()=>teams.sweep();
+  const deliverySweep = setInterval(() => {
+    if(!deps.db.open) { clearInterval(deliverySweep);return; }
+    void delivery.sweep().catch(() => { if(deps.db.open) console.error('[collaboration] recovery sweep failed'); });
+  },1000);
+  deliverySweep.unref();
+  app.locals.stopDelivery = async () => { clearInterval(deliverySweep); await delivery.shutdown(); };
+  app.use('/api/v1/collaboration',createCollaborationRoutes(collaborationOptions,delivery));
+  app.use('/api/v1/collaboration',createDeliveryActionsRoutes(delivery));
+  app.use('/api/v1/collaboration',createTaskArtifactLinkRoutes(deps.db));
+  app.use('/api/v1/teams',createTeamRoutes(delivery));
   app.use("/api/v1/gate-a/dependencies", createDependencyRoutes(deps.sessionManager));
   app.use("/api/v1/adapters", createAdapterRoutes(deps.sessionManager));
   app.use(
     "/api/v1/auth",
     createAuthRouter(new UserRepository(deps.db), deps.jwtSecret, {
       db: deps.db,
+      invalidator:deps.runtimeAuthorizationInvalidator,
       ...(deps.accountRecovery ? { accountRecovery: deps.accountRecovery } : {}),
       ...(deps.registrationMode ? { registrationMode: deps.registrationMode } : {})
     })
@@ -117,6 +143,8 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     appVersion: deps.appVersion
   }));
   app.use("/api/v1/system", createSystemRoutes());
+  // Status probe is unconditional so the console can render the disabled state.
+  app.use("/api/v1/mcp", createMcpStatusRoutes({ mcpEnabled: deps.mcpEnabled }));
   if (deps.mcpEnabled) {
     app.use("/api/v1/mcp/tokens", createMcpTokenRoutes(deps.db));
     app.use("/mcp", createMcpRoutes(deps));

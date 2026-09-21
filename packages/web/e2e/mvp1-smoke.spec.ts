@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { fillRecoveryKey } from "./register-user";
+
 test("MVP-1 management console smoke", async ({ page }) => {
   const suffix = uniqueSuffix();
   const email = `mvp1-${suffix}@example.com`;
@@ -17,6 +19,7 @@ test("MVP-1 management console smoke", async ({ page }) => {
 
   await page.goto("/register");
   await page.fill('input[name="email"]', email);
+  await fillRecoveryKey(page);
   await page.fill('input[name="password"]', password);
   await page.fill('input[name="confirmPassword"]', password);
   await page.getByRole("button", { name: "Create account" }).click();

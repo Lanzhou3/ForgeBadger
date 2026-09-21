@@ -1,3 +1,5 @@
+import { assertRuntimeDeletionConfirmed } from './session-runtime-confirmation-repository.js';
+import { assertNewProjectResource, assertProjectPathAccess, canUseProjectPath, hasDeliveryHistory } from './managed-project-access.js';
 import { and, eq } from "drizzle-orm";
 
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -32,11 +34,12 @@ export interface Project {
 export class ProjectRepository {
   private drizzle;
 
-  constructor(db: Database, private userId: string) {
+  constructor(private readonly db: Database, private userId: string) {
     this.drizzle = drizzle(db);
   }
 
-  create(input: CreateProjectInput): Project {
+  create(input: CreateProjectInput, managedRunId?:string): Project {
+    assertNewProjectResource(this.db,this.userId,input.path,managedRunId);
     const result = this.drizzle
       .insert(projects)
       .values({
@@ -54,6 +57,7 @@ export class ProjectRepository {
   }
 
   import(input: CreateProjectInput): Project {
+    assertNewProjectResource(this.db,this.userId,input.path);
     const result = this.drizzle
       .insert(projects)
       .values({
@@ -72,19 +76,21 @@ export class ProjectRepository {
   }
 
   list(): Project[] {
-    return this.drizzle
+    const result = this.drizzle
       .select()
       .from(projects)
       .where(eq(projects.userId, this.userId))
       .all() as Project[];
+    return result.filter(project => canUseProjectPath(this.db,this.userId,project.path));
   }
 
   getById(id: string): Project | undefined {
-    return this.drizzle
+    const result = this.drizzle
       .select()
       .from(projects)
       .where(and(eq(projects.id, id), eq(projects.userId, this.userId)))
       .get() as Project | undefined;
+    return result && canUseProjectPath(this.db, this.userId, result.path) ? result : undefined;
   }
 
   updateTemplateId(id: string, templateId: string | null): Project | undefined {
@@ -101,6 +107,8 @@ export class ProjectRepository {
   }
 
   delete(id: string): void {
+    assertRuntimeDeletionConfirmed(this.db,this.userId,"project",id);
+    if (hasDeliveryHistory(this.db,"project",id)) throw new Error("DELIVERY_HISTORY_REQUIRES_ARCHIVE");
     this.drizzle
       .delete(projects)
       .where(and(eq(projects.id, id), eq(projects.userId, this.userId)))

@@ -30,7 +30,7 @@ const getPacketInput = z.object({
 }).strict();
 
 const startPacketInput = getPacketInput.extend({
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional()
+  aiTool: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional()
 }).strict();
 
 /** Load project + work item, or a recoverable not-found marker. */
@@ -91,14 +91,14 @@ export function createProjectManagerTools(): AgentTool[] {
       }
     },
     {
-      name: "pm_start_task_packet",
+      name: "pm_prepare_task_packet",
       description:
         "Prepare a task packet and an idle linked CLI session. This does not start the CLI or submit a prompt.",
       risk: "operate",
       requiresApproval: true,
       inputSchema: startPacketInput,
       async execute(input, context) {
-        return executeAgentAction("pm_start_task_packet", startPacketInput.parse(input), context);
+        return executeAgentAction("pm_prepare_task_packet", startPacketInput.parse(input), context);
       }
     }
   ];

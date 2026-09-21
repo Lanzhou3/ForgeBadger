@@ -133,9 +133,9 @@ not included.
 
 The Project Manager Ledger is Gateway-owned ForgeBadger control-plane state. It
 does not make Feishu or terminal sessions an authority for project-manager
-state; Feishu may be referenced only as bounded collaboration metadata, and
-terminal sessions may be referenced only by safe identifiers or evidence
-references.
+state; terminal sessions may be referenced only by safe identifiers or evidence
+references. (The legacy `feishuRefs` collaboration-metadata slot was retired in
+migration `0083_drop_pm_feishu_refs`.)
 
 Phase 4 introduces migration-backed durable state in
 `packages/gateway/src/db/migrations/0022_project_manager_ledger.sql` with these
@@ -233,14 +233,15 @@ work item as `todo`. Moving it to another state requires a separate
 `PATCH /work-items/:workItemId/status` mutation so the normal transition,
 evidence, ledger, and audit guards cannot be bypassed during creation.
 
-The Web create-work-item dialog does not collect or send initial evidence or
-Feishu references. Evidence is attached later from the work-item detail and
+The Web create-work-item dialog does not collect or send initial evidence.
+Evidence is attached later from the work-item detail and
 acceptance flow through `POST /work-items/:workItemId/evidence`. The lower-level
-Gateway create contract still accepts bounded `evidenceRefs` and `feishuRefs`
+Gateway create contract still accepts bounded `evidenceRefs`
 as compatibility metadata for historical records and approved integrations;
 their database and DTO fields remain intact. These references are pointers,
-not verified evidence bodies, and Feishu metadata never becomes an authority
-for Project Manager state.
+not verified evidence bodies. The former `feishuRefs` collaboration-metadata
+slot was retired (migration `0083_drop_pm_feishu_refs`): the columns are
+dropped and no API, tool, or DTO surface accepts or returns them anymore.
 
 Task packet endpoints derive a bounded operator handoff from a work item:
 project id/name, CLI adapter, template id, prompt, acceptance criteria,
@@ -468,7 +469,7 @@ All responses use the standard `{code,data,message}` envelope and authenticated 
 
 | Endpoint | Contract |
 |---|---|
-| `POST /api/v1/copilot/conversations/:id/messages` | `{content,modelId?,projectId?,grantId?}`; returns 201 `{runId}` after durable admission, before model completion. A second active run returns 409 `COPILOT_CONVERSATION_BUSY`. |
+| `POST /api/v1/copilot/conversations/:id/messages` | `{content,modelId?,projectId?,grantId?,clientRequestId?}`; returns 201 `{runId}` after durable admission, before model completion. A new request during an active run returns 409 `COPILOT_CONVERSATION_BUSY`. Matching request-key retries return the original run, including after completion; conflicting payloads return 409 `COPILOT_REQUEST_CONFLICT`. |
 | `GET /api/v1/copilot/conversations/:id/runs` | `{runs,activeRun}`; latest 50 runs and current active run, or null. |
 | `GET /api/v1/copilot/runs/:id` | `{run,pendingActions,steps}`; run includes revision and stopReason, actions include full inputJson/inputDigest, stepId and toolCallId. Steps retain execution receipts. |
 | `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/decide` | `{approved}`; persists a single decision and returns `{resumed,runId}`. The original run continues asynchronously, including after rejection. |
@@ -599,6 +600,8 @@ adapter reports the `terminal` runtime mode; the former Codex
 - `GET /api/v1/projects/:id/workspace/file`
 - `GET /api/v1/projects/:id/git-changes`
 - `GET /api/v1/projects/:id/git-diff`
+- `GET /api/v1/projects/:id/git-branches`
+- `POST /api/v1/projects/:id/git-checkout`
 - `POST /api/v1/projects/:id/generate-config`
 - `GET /api/v1/projects/:id/agent-sequence`
 - `PUT /api/v1/projects/:id/agent-sequence`
@@ -781,9 +784,25 @@ Project workspace context:
   preview through the workspace safe-path boundary instead (git has no diff
   for untracked files). Paths are validated segment-by-segment; absolute paths
   and `..` traversal are rejected.
-- These routes are read-only. They do not store file contents, terminal
-  scrollback, or evidence blobs in SQLite; later Project Manager evidence uses
-  bounded references to these paths rather than copying raw content.
+- `GET /api/v1/projects/:id/git-branches` returns
+  `{ isGitRepo, current, branches, workingTree }`: the current branch (`null`
+  on detached HEAD), local branches with an `isCurrent` marker, and a
+  working-tree summary `{ clean, changedCount, sample }` (up to 5 changed
+  paths) so clients can warn before a checkout.
+- `POST /api/v1/projects/:id/git-checkout` switches the working tree to a
+  branch, body `{ branch, create? }`. With `create: true` the branch is
+  created from HEAD first (`git switch -c`). The project root is re-validated
+  (`validateProjectRoot`) and branch names are checked with
+  `git check-ref-format --branch` (leading `-` rejected up front). Switching
+  is refused when the working tree has any uncommitted change (tracked or
+  untracked): `409` with `details: { changedCount, sample }`. Other failures:
+  `400` invalid name / not a git repository, `404` branch not found, `409`
+  branch already exists on `create: true`. Success returns
+  `{ projectId, current, created }`.
+- These routes are read-only except `git-checkout`. They do not store file
+  contents, terminal scrollback, or evidence blobs in SQLite; later Project
+  Manager evidence uses bounded references to these paths rather than copying
+  raw content.
 
 CI usage example:
 
@@ -843,7 +862,7 @@ stored adapter hint reject creation with `400` when `aiTool` is omitted.
 Session launch is model-agnostic: sessions always run with host-environment
 credentials, and ForgeBadger injects no provider, model, or credential
 environment at launch. Model/provider setup is per-CLI and user-global
-(cc-switch style) through the CLI Config API below; each CLI process reads its
+through the CLI Config API below; each CLI process reads its
 own global config files when it starts. `POST /:id/start` re-launches the
 adapter the same way and never restores a ForgeBadger-managed provider
 environment.
@@ -873,7 +892,7 @@ returned, and work items with unparseable details are skipped.
 
 ### CLI Config and Provider Apply
 
-cc-switch style management of each code CLI's global config files
+Management of each code CLI's global config files
 (Kimi `~/.kimi-code/config.toml`, Claude `~/.claude/settings.json`,
 Codex `~/.codex/config.toml` + `~/.codex/auth.json`,
 OpenCode `$XDG_CONFIG_HOME/opencode/opencode.json`;
@@ -923,7 +942,7 @@ the same body:
 }
 ```
 
-Model selection is adapter-specific (cc-switch parity):
+Model selection is adapter-specific:
 
 - **Claude**: `modelProfileId` is the primary model (`ANTHROPIC_MODEL`).
   `modelMapping` pins the alias roles `opus` / `sonnet` / `haiku` (unset roles
@@ -965,7 +984,7 @@ hooks into `.claude/settings.local.json` before Session Server launch.
 OpenAI is a normal verified provider. Applying a provider to Codex writes
 `model`, `model_provider`, and a `model_providers.<id>` entry with `base_url`,
 `wire_api = "responses"`, and `experimental_bearer_token` (the API key) into
-`~/.codex/config.toml` — the cc-switch Codex 0.149+ layout, where third-party
+`~/.codex/config.toml` — the Codex 0.149+ provider-table layout, where third-party
 credentials live in the provider table. The legacy `OPENAI_API_KEY` slot is
 removed from `~/.codex/auth.json` (other existing `auth.json` fields such as
 ChatGPT login tokens are preserved); an `auth.json` left empty by that removal
@@ -1068,8 +1087,8 @@ four CLIs. Historical `PROVIDER_IN_USE_BY_BINDING` /
 by pre-decoupling records; those references remain intact.
 
 The web console ships a static, client-side list of provider presets
-(endpoints, auth type, API format) that prefill the add-provider form,
-cc-switch style. Presets never carry model lists, there is no server-side
+(endpoints, auth type, API format) that prefill the add-provider form.
+Presets never carry model lists, there is no server-side
 preset catalog API, and no models are seeded at creation — the model list is
 always synced live from the configured provider endpoint.
 
@@ -1708,6 +1727,31 @@ at most 100 newest records for that tenant, explicitly selecting only `id`,
 claim token, peer IDs and provider message IDs are never returned. The UI labels
 unknown outcomes as uncertain and offers no resend action.
 
+### Copilot request identity and context
+
+`clientRequestId` is optional, nonempty, and at most 128 characters. Its unique
+scope is `(userId, conversationId, clientRequestId)`. Use a fresh key for each
+intentional message; preserve it when retrying an uncertain response. The digest
+covers content, explicit model/project, effective Grant, source, and admission
+mode. Current user, conversation, project, channel and Grant scope are rechecked
+before any cached run is returned. The key deduplicates message admission, not
+conversation creation. Legacy callers without a key retain existing behavior.
+
+The full Copilot chat offers explicit project context. The Gateway verifies
+ownership and any bound Grant, then includes the selected ID/name in the model
+context. Selection grants no additional tool authority. JSON/SSE model replies
+must be structurally valid; partial or unsuccessful tool batches are not committed.
+Text deltas may be tentative until the durable run reaches a terminal state.
+
+The model-only `read_tool_result({messageId,offset?,length?})` tool returns up to
+6,000 UTF-16 characters of a persisted redacted receipt in the current conversation.
+It verifies the source run/step, current/original authority, current source-tool
+visibility and referenced resources. Deleted, unrelated, legacy unassociated,
+external MCP, Skill and nested readback receipts are rejected. This retrieves only
+saved content; it cannot recover output already discarded by the original 48 KiB
+receipt cap. `nextOffset`, `totalChars` and `originalOutputTruncated` describe paging
+and retained evidence. No additional HTTP endpoint is introduced.
+
 ### Persistent Copilot grants
 
 `POST /api/v1/copilot/grants` requires explicit `expiresAt` and `maxActions`.
@@ -1749,3 +1793,594 @@ shows whether a current, valid identity/grant route exists and provides an expli
 “启用飞书远程操作” action after selection. Creating a project grant alone does not
 bind it to Feishu. Previously rejected messages are not replayed on activation;
 send a new message after binding.
+
+### Copilot Playbooks and CLI Skills (2026-09-17)
+
+Copilot operating guides are managed as Skills at `/api/v1/copilot/skills`.
+The legacy `/api/v1/copilot/playbooks` bridge uses the same versioned service; `/api/v1/skills` and
+project Skill selection are exclusively for CLI packages. Both retain the normal
+API envelope. A UUID from one runtime target cannot read or mutate the other.
+
+| Method | Path | Contract |
+| --- | --- | --- |
+| GET | `/api/v1/copilot/playbooks` | `{ playbooks }`: ID, name, description, content, stored `version`, `currentVersion`, `isEnabled`, `requiredTools`, `available`, `unavailableReason`, `reviewRequired`, `editable` |
+| PUT | `/api/v1/copilot/playbooks/:id` | `{ content, version }`, where `version` is the current bundled version explicitly reviewed by the owner; returns `{ playbook }`; stale version is 409 |
+| PUT | `/api/v1/copilot/playbooks/:id/enabled` | `{ enabled }`; returns `{ playbook }`; enabling an unreviewed version is 409 |
+
+`list_playbooks` and `load_playbook({ id })` list/load only enabled, reviewed
+playbooks whose required tools are currently available. Grant-bound turns may
+load only exact canonical bundled names, descriptions and bodies; edited or
+shared global instructions cannot acquire Grant trust. `/playbooks` uses the
+same query policy, including owner tool switches and scheduled read-only limits.
+The old `/skills` chat command returns an explanation pointing to the separate
+surfaces. `list_skills` and `load_skill` are retired native Copilot tool names.
+
+`pm_prepare_task_packet` replaces `pm_start_task_packet` and only prepares a task
+packet/linked idle session. It does not start a CLI or submit instructions.
+`dispatch_task_to_session` is not advertised by Copilot or MCP because autonomous
+CLI dispatch remains unavailable. The capability settings list reports it with
+`available: false`, `unavailableReason: "ADAPTER_AUTONOMY_UNVERIFIED"` and
+`effectiveEnabled: false`; attempts to toggle retired/unavailable names return
+404. `enabled` is a configured preference, `available` is runtime availability,
+and `authorization` describes `read`, `approval_or_grant`, or `unavailable`.
+Actual resource authorization is always checked again during execution.
+
+CLI Skill rows expose `runtimeTarget: "cli"` and nullable `resourceManifest`.
+A null manifest denotes Markdown-only content, including remote Markdown imports;
+it does not assert that referenced scripts/assets were installed. Local supported
+packages snapshot up to 64 additional UTF-8 text files, 128 KiB per file, 1 MiB
+combined, at most eight nested directory levels. Binary files, resource symlinks,
+escapes and oversized packages are rejected whole and reported in
+`discovery.rejectedSkills` (`path`, `reason`). Export preserves frontmatter and
+literal template syntax, copies supported text resources, rejects path collisions,
+and records `.forgebadger-skill.json` for obsolete-file review. Script execution,
+executable-bit installation and binary asset packaging are outside this text
+resource contract. Rejected refreshes block export of affected enabled snapshots.
+
+### Copilot extension management (2026-09-18)
+
+All routes below use JWT active-owner authentication and the standard API envelope.
+IDs and revisions are tenant-scoped; stale updates fail rather than overwrite.
+The Web entrypoint `/copilot/extensions` contains Skills and Connections tabs.
+
+| Method | Path below `/api/v1/copilot` | Request / response data |
+| --- | --- | --- |
+| GET | `/skills` | `{ skills }` summaries, without full bundle content |
+| POST | `/skills/imports` | `{ source: { kind: "paste" or "upload", label? }, files: [{ path, content }] }` or `{ source: { kind: "url", url } }`; returns `{ skill }`, initially disabled |
+| GET | `/skills/:id` | `{ skill }` with current revision and all files |
+| PUT | `/skills/:id` | `{ expectedRevisionId, files, reviewedVersion? }`; returns `{ skill }` |
+| PUT | `/skills/:id/enabled` | `{ expectedRevisionId, enabled }`; returns `{ skill }` |
+| GET | `/skills/:id/revisions` | `{ revisions }`, newest 100 retained revision summaries |
+| GET | `/skills/:id/revisions/:revisionId` | `{ revision }`, including files |
+| POST | `/skills/:id/rollback` | `{ expectedRevisionId, revisionId }`; appends a new revision and returns `{ skill }` |
+| GET | `/connections` | `{ connections }`, builtin `forgebadger` plus owner MCP connections |
+| POST | `/connections` | `{ name, endpoint, bearerToken? }`; `{ connection }`, initially disabled with no selected tools |
+| PUT | `/connections/:id` | `{ revision, name?, endpoint?, bearerToken?, enabled?, enabledTools? }`; `{ connection }` |
+| POST | `/connections/:id/discover` | `{ revision }`; atomically refreshed `{ connection }` |
+| DELETE | `/connections/:id?revision=N` | `{ deleted: true }`; stale existing revision is 409 |
+
+Skill summaries include `revisionId`, `source`, `kind`, `isEnabled`, `available`,
+`unavailableReason`, `compatible`, `incompatibilityReasons`, `requiredTools`,
+`reviewRequired`, `version` and `currentVersion`. Installation accepts up to 65
+UTF-8 files, 128 KiB per file and 1 MiB combined, including root `SKILL.md`.
+Paths, YAML and UTF-8 are validated; a rejected import writes nothing. Up to 32
+non-builtin packages may be installed per owner. URL imports retrieve only the
+single public HTTPS raw Markdown file; references must be supplied in a file bundle.
+Unsupported executable packages remain disabled and report their incompatibility.
+`read_skill_resource({ skillId, revisionId, relativePath, offset?, length? })` reads bounded
+current-revision resources under the same availability and Grant policy as
+`load_playbook`. Old function names and historical approval digests are preserved.
+
+Connections expose `hasCredential`, never a credential value. Omitting
+`bearerToken` retains it, a string replaces it, and `null` explicitly removes it.
+Public HTTPS endpoints cannot include credentials, query parameters or fragments.
+There are at most 20 connections and 100 discovered tools per connection.
+Unsupported JSON Schemas are marked incompatible and cannot be selected.
+Discovery alone does not enable tools; changed definitions are deselected.
+External execution always requires exact interactive owner approval, regardless
+of server annotations. Grants, scheduled and reactive turns cannot use these tools.
+Indeterminate external writes are not replayed automatically.
+
+The builtin connection is managed through existing `/capabilities` APIs. Those APIs
+list platform tools only. Gateway `/mcp` token management remains the outward
+platform integration surface and is separate from these outbound connections.
+
+## Personal and small-team collaboration
+
+All endpoints below are mounted at `/api/v1/collaboration` and require the existing
+active-account authentication. The caller retains their own identity; project access
+is checked before an owner-scoped repository reads or writes shared records. Private
+projects become shared only through explicit membership. Managed backing projects do
+not appear as source projects in this facade. See [workflow guide](PERSONAL-TEAM-WORKFLOWS.md)
+and [ADR 0002](adr/0002-personal-team-delivery.md) for the trusted-host boundary.
+
+### Capabilities and request rules
+
+| Capability | Owner | Developer | Reviewer | Viewer |
+| --- | --- | --- | --- | --- |
+| Read project, task, run, committed diff and handoff | Yes | Yes | Yes | Yes |
+| Comment | Yes | Yes | Yes | No |
+| Create/edit tasks | Yes | Yes | No | No |
+| Prepare execution | Yes | Yes | No | No |
+| Edit links, recover | Own execution | Own execution | No | No |
+| Review | Yes | No | Yes | No |
+| Manage members, archive, integrate | Yes | No | No | No |
+| Close execution | Any project execution | Own execution | No | No |
+| Attach private terminal | Own ready execution | Own ready execution | No | No |
+
+Preparation respects an assigned developer. Assignment accepts active owner/developer
+accounts for `assigneeId` and active owner/reviewer accounts for `reviewerId`. Review
+must come from the assigned reviewer when present. Once another active membership
+exists, the executor cannot review their own run; a personal owner can self-review.
+An owner does not inherit another executor's terminal, attach token or session ID.
+Adding a member uses an existing active account's email; it sends no invitation.
+
+All path IDs, `verificationId` and `idempotencyKey` are UUIDs. `expectedCommit` is a
+40–64 character lowercase hexadecimal commit ID. Bodies are strict objects: unknown
+fields are rejected, and archive/close require `{}`. Task updates require
+`expectedRevision >= 1`. Refresh after
+revision conflicts instead of silently overwriting newer data.
+
+### REST endpoints
+
+Paths in this table are relative to `/api/v1/collaboration`. Successful requests use
+`{ code: 0, data: <below>, message: "" }`. Status is 200 except the three 201 create
+endpoints. Operations complete before returning. Preparation creates an idle session; it does not
+start the AI CLI or submit a prompt.
+
+| Method | Path | Request body / query | Response `data` |
+| --- | --- | --- | --- |
+| GET | `/projects` | — | `{ projects: ProjectSummary[] }` |
+| GET | `/projects/:projectId` | — | `{ project: ProjectDetail, members: Member[], tasks: Task[], events: Event[] }` |
+| POST | `/projects/:projectId/archive` | `{}` | `{ archived: true }` |
+| PUT | `/projects/:projectId/members` | `{ email, role: "developer" or "reviewer" or "viewer" }` | `{ members: Member[] }` |
+| DELETE | `/projects/:projectId/members/:userId` | — | `{ revoked: true, pendingStops: number }` |
+| POST | `/projects/:projectId/tasks` | `TaskCreate` | **201** `{ task: Task }` |
+| PATCH | `/projects/:projectId/tasks/:taskId` | `{ expectedRevision, ...partial TaskCreate }` | `{ task: Task }` |
+| GET | `/projects/:projectId/tasks/:taskId` | — | `{ task: Task, comments: Comment[], runs: Run[] }` |
+| POST | `/projects/:projectId/tasks/:taskId/comments` | `{ text }` | **201** `{ comment: Comment }` |
+| POST | `/projects/:projectId/tasks/:taskId/runs` | `{ aiTool, idempotencyKey }` | **201** `{ run: Run }` |
+| GET | `/projects/:projectId/runs/:runId` | — | `{ run: Run, git: GitState, verifications: Receipt[], reviews: Review[] }` |
+| GET | `/projects/:projectId/runs/:runId/diff` | `?path=<relative file path>` | `{ diff: string }` |
+| PATCH | `/projects/:projectId/runs/:runId/links` | `{ previewUrl: string or null, prUrl: string or null }` | `{ run: Run }` |
+| POST | `/projects/:projectId/runs/:runId/review` | `{ expectedCommit, verificationId, decision: "accepted" or "changes_requested", note }` | `{ review: Review }` |
+| POST | `/projects/:projectId/runs/:runId/integrate` | `{ expectedCommit }` | `{ run: Run }` |
+| POST | `/projects/:projectId/runs/:runId/recover` | `{ idempotencyKey }` | `{ run: Run }` for the **new** execution |
+| POST | `/projects/:projectId/runs/:runId/close` | `{}` | `{ run: Run }` |
+| GET | `/projects/:projectId/runs/:runId/handoff` | — | `{ markdown: string }` |
+
+`TaskCreate` requires trimmed `title` (1–200 characters) and `acceptanceCriteria`
+(up to 50 trimmed nonempty entries, each up to 1,000 characters). Optional
+`description` is at most 10,000 characters; optional `assigneeId`/`reviewerId` may be
+UUIDs or null.
+Comments and review notes are trimmed, nonempty and at most 5,000 characters.
+`aiTool` is `claude | opencode | codex | kimi`. An idempotency key belongs to the
+actor; reusing it with the same preparation inputs returns the prior run, while
+changing project/task/adapter/base/membership epoch conflicts. Only one active run
+per actor/task is allowed.
+
+`PUT /projects/:projectId/policy` and `POST /projects/:projectId/runs/:runId/verify`
+are removed and return 404. There is no replacement command executor. Historical
+`Policy` data (`command`, `args`, `timeoutSeconds`) and receipt DTOs remain read-only
+for compatibility. Internal enrollment/archive operations may disable execution but
+cannot configure programs or enable execution. Links must be
+HTTP(S), at most 2,048 characters, with no embedded credentials; both link fields
+are required on update, and null clears one. Links are user-supplied metadata;
+ForgeBadger does not fetch, publish, validate remote contents or mutate PRs.
+Diff paths are 1–512 characters, confined to the worktree, and only committed
+changes from the run's recorded base are shared.
+
+### Response DTOs
+
+Timestamps are Unix milliseconds. Nullable fields are returned as null. No DTO exposes
+workspace filesystem paths, host secrets or terminal history. The `sessionId` below
+is the sole conditional link to the existing private session API.
+
+| DTO | Fields |
+| --- | --- |
+| `ProjectSummary` | `id`, `name`, `description`, `role`, `memberCount` (active non-owner memberships whose accounts are active) |
+| `ProjectDetail` | `id`, `name`, `role`, `revision`, `verificationRevision`, `executionEnabled`, `verification: Policy or null` |
+| `ProjectPolicy` | `revision`, `verificationRevision`, `executionEnabled`, `verification: Policy or null` |
+| `Member` | `userId`, `email`, `displayName: string or null`, `role`, `state`, `revision`; owner is implicit with revision 0; revoked rows are omitted |
+| `Task` | `id`, `title`, `description: string or null`, `status`, `acceptanceCriteria: string[]`, `revision`, `assigneeId: string or null`, `reviewerId: string or null` |
+| `Event` | `id`, `actorId`, `actorLabel`, `kind`, `body: object`, `createdAt` |
+| `Comment` | `id`, `actorId`, `actorLabel`, `text`, `createdAt` |
+| `Run` | `id`, `taskId`, `actorId`, `actorLabel`, `state`, `branch`, `baseCommit`, `sessionId: string or null`, `previewUrl: string or null`, `prUrl: string or null`, `error: string or null`, `createdAt` |
+| `GitState` | `commit`, `dirty`, `files: { path, status }[]`, optional `error: "WORKSPACE_UNAVAILABLE"` |
+| `Receipt` | `id`, `taskRevision`, `policyRevision`, `current`, `commit`, `status`, `command`, `args: string[]`, `exitCode: number or null`, `summary`, `createdAt`, `finishedAt: number or null` |
+| `Review` | `id`, `actorId`, `actorLabel`, `commit`, `verificationId`, `taskDigest`, `taskRevision`, `policyRevision`, `decision`, `note`, `createdAt` |
+
+Task status is `todo | in_progress | blocked | ready_for_review | done | cancelled`.
+Run state is `provisioning | ready | failed | revoking | closed | integrated`.
+Receipt status is `running | passed | failed | unknown`. Membership state is
+`active | revoking | revoked` (revoking loses access immediately). Events are newest
+first, at most 200; comments are the comment subset of the most recent 200 task
+events in chronological order. Receipts and reviews are newest first, at most 50
+of each. Runs are newest first. There are no pagination parameters on these routes.
+
+Run `sessionId` is non-null only for the executor while the run is `ready`; server
+session/terminal authorization still rechecks account, policy and membership epoch.
+`GitState.error` means inspection failed, with `dirty: true` and no usable commit.
+For closed/failed/provisioning runs inspection is skipped, so the base/empty-files
+placeholder is not evidence that a workspace is clean or exists.
+
+On run detail, a receipt's `current` means the run is ready, its worktree is clean,
+its current HEAD matches the receipt, and the task digest and verification-policy
+revision still match. It does **not** mean the check passed: clients must also require
+`status === "passed"`. No new verification receipts can be created. This field is a
+read-time hint, never an authorization token. Task title/description/criteria or
+assignments changed through either task interface invalidate previous evidence.
+The API rechecks actual commit, task, policy, membership and reviewer eligibility
+before review/integration. Completed receipts and reviews are immutable; new decisions
+append records, and integration uses the latest review.
+
+### Lifecycle, fences and recovery
+
+Review and integrate acquire a persistent operation fence and the private session
+lifecycle mutex. Stop the run's CLI before those actions, and stop source project
+CLI sessions before integration. Historical receipts retain their exact-commit and
+task/policy checks; retiring verification does not bypass these gates. New test
+results should be recorded in task comments and reviewed through the CLI/Git workflow.
+
+Integration is owner-only, requires current passing verification plus current
+acceptance, and requires clean source/worktree, exact expected HEAD, unchanged base
+and source branch. It only fast-forwards; it never force-resets or automatically
+resolves conflicts. The final authorization check persists applying intent and
+freezes relevant authorization/evidence inputs until completion. After a crash,
+reconciliation inspects actual Git state instead of replaying a merge.
+
+Revocation first removes access and invalidates sessions, then stops processes.
+`pendingStops > 0` means cleanup remains outstanding; it does not restore access.
+A revoked member who rejoins receives a new membership epoch and cannot resume old
+executions. Disabling execution triggers the same stop sweep. Archive disables
+execution and reports pending stops until it can archive. Physical deletion of
+projects/tasks/sessions with delivery history is blocked by the related legacy APIs.
+
+Recover stops/fences the old execution and prepares a new run from its recorded
+**base** commit, preserving the old workspace and branch; it neither copies dirty
+files nor resumes conversation history or automatically replays completed commits.
+Close removes only a clean worktree and keeps the branch. If files cannot safely be
+removed, close returns a closed run with `error: "WORKTREE_RETAINED"`; files remain.
+Other persisted run error markers include `WORKSPACE_PREPARATION_FAILED`,
+`PREPARATION_INTERRUPTED`, `MEMBERSHIP_REVOKED`, `EXECUTION_AUTHORITY_REVOKED`,
+`RECOVERED_TO_NEW_WORKSPACE` and `INTERRUPTED_INTEGRATION_NOT_APPLIED`.
+
+Gateway restart changes interrupted verification receipts to unknown. A managed
+supervisor confirms process-group exit through durable private identity state and
+an authenticated control endpoint. If exit cannot be confirmed, an operation fence
+continues to block terminal launch, recovery and cleanup; elapsed time,
+a stale PID, or a missing state file is not exit proof. Git locks with live children
+or ambiguous spawn state also remain blocked. There is no public force-unlock or
+runner-control endpoint. No new supervisor can be started. See the workflow guide
+for operator recovery.
+
+### Errors
+
+Authentication failures use the existing HTTP 401 envelope. Collaboration-handler
+errors use `{ code: 1, message: "ERROR_CODE", details: { code: "ERROR_CODE" } }`.
+Internal paths, command output and secret-bearing exception messages are not returned.
+A non-member, disabled account/owner, archived source or inaccessible record does not
+reveal shared data. Generic internal/constraint failures become HTTP 409
+`COLLABORATION_OPERATION_FAILED`; inspect redacted server diagnostics rather than
+assuming a request was safely applied or automatically retrying a write.
+
+| HTTP | Codes | Meaning / handling |
+| --- | --- | --- |
+| 400 | `INVALID_INPUT` | Invalid body, UUID, commit, URL or verification policy. |
+| 400 | `OWNER_ROLE_IS_IMPLICIT`, `OWNER_CANNOT_BE_REVOKED` | The owner is not an editable membership. |
+| 400 | `INVALID_TASK_ASSIGNEE`, `INVALID_TASK_REVIEWER` | Assignment is not an active member with the required role. |
+| 403 | `PROJECT_CAPABILITY_DENIED`, `PRIVATE_EXECUTION_OWNER_REQUIRED`, `EXECUTOR_OR_OWNER_REQUIRED` | Caller lacks the requested role or private execution ownership. |
+| 403 | `EXECUTION_REVOKED`, `TASK_ASSIGNED_TO_ANOTHER_MEMBER` | Old execution authority or a different assigned developer. |
+| 403 | `ASSIGNED_REVIEWER_REQUIRED`, `INDEPENDENT_REVIEWER_REQUIRED` | Required reviewer/separation of duties is not satisfied. The latter can also be 409 when final integration revalidation fails. |
+| 404 | `PROJECT_NOT_FOUND`, `TASK_NOT_FOUND`, `DELIVERY_NOT_FOUND`, `VERIFICATION_NOT_FOUND`, `ACTIVE_MEMBER_ACCOUNT_NOT_FOUND` | Missing/inaccessible record or no matching active membership account. |
+| 409 | `STALE_PROJECT_REVISION`, `STALE_TASK_REVISION`, `DELIVERY_AUTHORITY_CHANGED` | Refresh state; do not overwrite a concurrent update. |
+| 409 | `MEMBER_REVOCATION_PENDING`, `REVOKE_ACTIVE_EXECUTION_BEFORE_ROLE_CHANGE` | Complete revocation/stop before rejoining or changing role. |
+| 409 | `HOST_EXECUTION_NOT_ENABLED`, `TASK_ALREADY_FINISHED`, `TASK_EXECUTION_ALREADY_ACTIVE`, `IDEMPOTENCY_KEY_CONFLICT` | Preparation policy/task/identity conflict. |
+| 409 | `PROJECT_DIRECTORY_UNAVAILABLE`, `PROJECT_DIRECTORY_CHANGED`, `PROJECT_PATH_OWNERSHIP_CONFLICT`, `WORKSPACE_ROOT_SYMLINK`, `WORKSPACE_PREPARATION_FAILED`, `WORKSPACE_NOT_READABLE` | Path safety, ownership or workspace availability failure. |
+| 409 | `COLLABORATION_WORKSPACE_BUSY`, `COLLABORATION_WORKSPACE_CONFLICT`, `COLLABORATION_GIT_FAILED` | Repository lease, exact-base/clean-tree conflict, or bounded Git failure. |
+| 409 | `EXECUTION_STOP_PENDING`, `NO_RECORDED_CHECKPOINT` | Stop is unresolved, or recovery has no recorded base. |
+| 409 | `DELIVERY_OPERATION_IN_PROGRESS`, `VERIFICATION_ALREADY_RUNNING`, `VERIFICATION_NO_LONGER_RUNNING` | An operation/receipt is concurrent or its state changed. |
+| 409 | `STOP_CLI_BEFORE_VERIFICATION_OR_DELIVERY`, `STOP_SOURCE_CLI_BEFORE_DELIVERY` | Stop the relevant live CLI before proceeding. |
+| 409 | `STALE_VERIFICATION_OR_TASK`, `PASSING_VERIFICATION_REQUIRED`, `CURRENT_ACCEPTANCE_REQUIRED`, `STALE_ACCEPTANCE` | Evidence does not authorize current delivery; verify/review the current inputs. |
+| 409 | `VERIFICATION_RUNTIME_UNRESOLVED` | Previous process exit is not confirmed; retain the fence for operator investigation. |
+| 409 | `COLLABORATION_OPERATION_FAILED` | Generic protected operation failure; no success may be inferred. |
+
+
+Run DTOs additionally include `operation: null | { kind: "verify" | "review" |
+"integrate", phase: "active" | "applying" | "interrupted" }`. While an operation
+exists, `sessionId` is null even for the executor. The Web shows active/interrupted
+state and polls until reconciliation completes; it cannot start a competing action.
+`STOP_SOURCE_CLI_BEFORE_DELIVERY` means an actual source-checkout terminal must be
+stopped before integration. `stats.acceptedDeliveries` on the dashboard counts
+integrated runs where the authenticated user owns the source or executed the run.
+
+
+### Governed Copilot development tasks and tool discovery (2026-09-20)
+
+The owner UI is `/copilot/tasks`. These authenticated Gateway reads use the normal
+envelope; project/task lookup requires the current tenant and explicit `projectId`.
+
+| Method | Path below `/api/v1/copilot` | Data |
+| --- | --- | --- |
+| GET | `/development/capability` | `{ available, reason }`; actual local sandbox probe |
+| GET | `/development/tasks?projectId=...` | `{ tasks }`, latest 50 for the project |
+| GET | `/development/tasks/:id?projectId=...` | `{ task, evidence }`, finite diff/check receipts |
+
+`submit_development_task` maps to `development.task.submit`. Input contains
+`projectId`, `goal`, explicit `sourceFiles`, `changes: [{ path, beforeSha256,
+content }]` and `checks: [{ path, sha256 }]`. Null before-hash creates a previously
+absent file; null content deletes it. Existing files require their original-byte
+SHA256. Check hashes identify their approved post-edit content. Paths are bounded,
+relative and non-hidden; symlinks, credentials, binaries and dependencies are
+excluded. Limits: 200 source files, 64 changes, 10 checks, 64 KiB per file and
+5 MiB snapshot. Test files must be `.js`, `.cjs` or `.mjs`.
+
+`cancel_development_task` / `development.task.cancel` require `{ projectId,
+taskId }`. `accept_development_task` / `development.task.accept` also require the
+exact `artifactDigest`. All three are nondelegatable owner actions through the
+existing Platform Actions preview → decide(digest) → execute → receipt API.
+Submission returns `{ taskId, recipeDigest, status: "queued" }`; duplicate approved
+execution returns its existing receipt. Acceptance records an owner's decision
+against unchanged source/workspace/evidence; it never merges or writes the source.
+
+Task states: `queued`, `running`, `checks_passed`, `checks_failed`, `failed`,
+`cancelled`, `indeterminate`, `accepted`. Check success does not prove the user's
+semantic goal or imply acceptance. Indeterminate execution is not automatically
+replayed and keeps the single host slot reserved for operator reconciliation.
+Summaries expose IDs, goal, status, revision, digests, timestamps and safe error.
+Evidence includes file hashes, diff, check path/exit/output/timing/cancel fields.
+`copilot_development_updated` events carry `taskId`, `status`, `revision`, `eventId`;
+at-least-once delivery requires clients to deduplicate or refresh by revision.
+
+Source tools: `list_project_files`, `read_project_file`; the latter reports a hash
+of the original file but paginates the fully redacted text (`offsetSpace:
+"redacted_text"`). `list_development_tasks` and `get_development_task` expose
+scoped history and bounded evidence readback. Additional management tools are
+`pm_get_goal`, `pm_get_work_item`, `pm_list_ledger`, `pm_get_management`,
+`get_session_writer`, and exact interactive owner `takeover_session`. They retain
+the existing platform-command, Grant and active-user checks.
+
+`POST /conversations/:id/messages` accepts optional `toolDiscovery: boolean`
+(default false). True starts with a small core schema set and `discover_tools`;
+successful discovery affects the next model step. Query length is 100 characters,
+at most 12 results per lookup and 32 selected tools per run. Persistent selections
+are authenticated and intersected with current visibility each round; discovery
+cannot grant execution permission. A request key cannot be reused with a different
+mode. Existing false/omitted request identities retain their prior digest behavior.
+
+## Team administration and invitation contracts
+
+The following routes use the standard `{code:0,data,message:''}` envelope and
+`{code:1,message,details:{code}}` error envelope. UUID identifiers, strict request
+objects and integer revisions are validated by the Gateway. Timestamps below are
+Unix milliseconds. System administrator and team administrator are distinct roles:
+a system administrator does not acquire access to another user's projects.
+
+`TeamRole = owner | admin | member`. `Team` is
+`{id,name,role,ownerId,revision,state:'active'|'closed',capabilities}`. Its capability
+object contains `manageMembers,manageAdmins,inviteMembers,inviteAdmins,
+transferOwner,close,enrollOwnProjects` booleans. Team owner is unique; transferring
+ownership leaves the previous owner as an administrator. Owner disable/removal is
+rejected until ownership is transferred. Administrators cannot promote/demote
+administrators, invite administrators, or remove an owner/administrator. Members
+may leave through the same confirmed offboarding workflow.
+
+`Member = {userId,email,displayName,role,state:'active'|'leaving'|'left',revision}`.
+`TeamProject = {projectId,name,logicalOwnerId,revision,role,capabilities}`.
+Project capability arrays are authoritative: `read,comment,develop,review,manage`.
+A team administrator receives `read,manage` for explicitly enrolled projects;
+`develop` and `review` require an explicit project grant or logical ownership.
+Management allows task creation/edit/assignment, membership changes,
+integration and archive, but never private execution or terminal
+attachment by another actor. A displayed role must not be treated as a substitute
+for the capability array. Project grants remain `developer | reviewer | viewer`. Every explicitly enrolled
+team project requires a reviewer different from the executor, even when only one
+member currently has a project grant; a personal project retains personal review rules.
+
+| Method and path under `/api/v1/teams` | Input | `data` |
+| --- | --- | --- |
+| GET `/` | — | `{teams:Team[]}` |
+| POST `/` | `{name}` | `{team}` (201) |
+| GET `/:teamId` | — | `{team,members,projects}` |
+| PATCH `/:teamId` | `{name,expectedRevision}` | `{team}` |
+| POST `/:teamId/transfer-owner` | `{newOwnerId,expectedRevision}` | `{team}` |
+| POST `/:teamId/close` | `{expectedRevision}` | `{team}` |
+| PATCH `/:teamId/members/:userId` | `{role:'admin'|'member',expectedRevision}` | `{member,team}` |
+| GET `/:teamId/enrollment-candidates` | — | `{projects:[{id,name,revision}]}` |
+| POST `/:teamId/projects` | `{projectId,expectedProjectRevision,expectedTeamRevision}` | `{project}` (201) |
+| POST `/:teamId/projects/:projectId/transfer-owner` | `{newOwnerId,expectedRevision}` | `{project}` |
+
+Only the current personal project owner may enroll their project; a team manager
+cannot enroll somebody else's private project. Enrolling refuses active execution,
+including ancestor/descendant path aliases and members outside the team. It
+installs source-path protection and initially disables execution. The retired
+collaboration policy endpoint cannot re-enable execution. An enrolled source
+cannot be opened through legacy private project/session routes; task worktrees
+remain private to their executor. Team closure requires enrolled projects to be
+archived and executions stopped. Existing storage tenant IDs and history never
+change during enrollment, handoff or closure.
+
+Existing `GET /api/v1/collaboration/projects` and `GET .../projects/:projectId`
+include `teamId`, `logicalOwnerId` and `capabilities`. Existing collaboration
+`PUT .../projects/:projectId/members {email,role}` and
+`DELETE .../projects/:projectId/members/:userId` manage project grants, now requiring
+active membership in the enrolled team. Logical owner permission is implicit and
+cannot be removed through the grant endpoint.
+
+### One-time invitations
+
+`Invitation = {id,email,role:'admin'|'member',state:'pending'|'used'|'revoked'|
+'expired',expiresAt,createdAt}`. The creation response returns a 32-byte random
+base64url token exactly once. Only its SHA-256 digest is stored. Lists never return
+tokens. Tokens are email-bound, expire, and are invalidated when the issuing
+administrator loses the required membership/role. Disabling an issuer permanently
+revokes their pending invitations, even if the account is later re-enabled. No
+email is sent; the operator explicitly copies a link with the token in its fragment.
+
+| Method and path | Input | `data` |
+| --- | --- | --- |
+| POST `/api/v1/teams/:teamId/invitations` | `{email,role,expiresInHours?:1..168}` (default 24) | `{invitation,token}` (201) |
+| GET `/api/v1/teams/:teamId/invitations` | — | `{invitations}` |
+| DELETE `/api/v1/teams/:teamId/invitations/:inviteId` | — | `{revoked:true}` |
+| POST `/api/v1/auth/team-invitations/inspect` | `{token}` | `{invitation:{teamName,emailHint,role,expiresAt,registrationAllowed}}` |
+| POST `/api/v1/teams/invitations/accept` | `{token}`; authenticated matching account | `{team,membership}` |
+| POST `/api/v1/auth/team-invitations/register` | `{token,email,password}` | `{token,user,team,membership}` plus opaque session cookie (201) |
+
+The `token` returned by registration is a login credential, not the consumed
+invitation. Invited registration is a separate remote account-creation capability
+on an already bootstrapped instance when registration is `open` or `invite`.
+`off` forbids new accounts; an existing active matching account may still accept.
+The ordinary registration endpoint retains its loopback/recovery-key restrictions.
+Bcrypt completes before a single transaction rechecks the invitation and creates
+the ordinary system `user`, membership and consumed token. Racing consumption
+cannot leave an account without membership. Team administrator invitations do not
+grant system administrator privileges. Credential-bearing endpoints are rate limited.
+
+### Durable offboarding and handoff repair
+
+`OffboardingPlan = {id,memberId,revision,state:'planned'|'stopping'|'completed',
+expiresAt,createdAt,pendingStops,error}`. A handoff is
+`{projectId,newOwnerId?:UUID,assigneeId:UUID|null,reviewerId:UUID|null}`.
+A new logical owner is mandatory only when the departing member owns that project.
+Task assignees/reviewers must have the corresponding project capability; null
+clears the departing member's assignment. Historical actor attribution is preserved.
+
+| Method and path under `/api/v1/teams/:teamId` | Input | `data` |
+| --- | --- | --- |
+| GET `/members/:userId/offboarding` | — | `{impact}` |
+| POST `/offboarding-plans` | `{memberId,expectedMemberRevision,expectedImpactDigest,handoffs}` | `{plan,confirmationToken}` (201) |
+| GET `/offboarding-plans` | — | `{plans}` (unfinished plans) |
+| GET `/offboarding-plans/:planId` | — | `{plan,impact?}` |
+| POST `/offboarding-plans/:planId/commit` | `{confirmationToken}` | `{plan,impact?}` |
+| PATCH `/offboarding-plans/:planId` | `{expectedPlanRevision,expectedImpactDigest,handoffs}` | `{plan}` |
+| POST `/offboarding-plans/:planId/resume` | `{}` | `{plan,impact?}` |
+
+`impact` contains `member,teamRevision,impactDigest,projects,blockers`. Each project
+includes `projectId,name,logicalOwnerId,revision,requiresOwnerTransfer,tasks,runs,
+eligibleOwners,eligibleAssignees,eligibleReviewers`. Tasks carry
+`id,title,revision,assigneeId,reviewerId`; runs carry `id,state`; eligible recipients
+carry `userId,label`; blockers carry `code,projectId?,runId?`. `impactDigest` is an
+opaque SHA-256 concurrency token: creation must match the exact displayed preview.
+Planned confirmation expires after ten minutes and is bound to the creating actor.
+Commit rechecks the complete preview before persisting `leaving`, grant revocation
+and execution revocation; only then does it attempt process shutdown.
+
+HTTP 200 with `state:'stopping'` is pending, not completed. The Gateway sweep and
+an authorized administrator's explicit resume can continue after restart. It
+cancels known verifier/PTY processes even if the source path or Git lease cannot
+be resolved; unknown Git/runtime state prevents final handoff. Failed/closed run
+history is checked for unresolved runtime residue. Team administrators can discover
+pending plans; departing members can inspect only their own plan state, not resume
+it. A new administrator may resume an existing plan without impersonating its
+original creator; completed audit records retain the original initiating actor.
+
+If a replacement account is disabled, departs or loses the necessary grant, the
+plan stays revoked and reports `TEAM_HANDOFF_TARGET_CHANGED`. An authorized
+administrator obtains the latest `impact`, explicitly confirms revised recipients
+with PATCH (both revision and impact digest required), then separately resumes.
+Repair never restores departing access. A drain begun before repair cannot apply
+its stale recipients: finalization and progress/error writes are revision-fenced.
+
+Errors include `TEAM_NOT_FOUND`, `TEAM_CAPABILITY_DENIED`,
+`STALE_TEAM_REVISION`, `STALE_MEMBER_REVISION`, `STALE_PROJECT_REVISION`,
+`TEAM_OWNER_TRANSFER_REQUIRED`, `TEAM_HAS_ACTIVE_PROJECTS`,
+`TEAM_PROJECT_HAS_EXTERNAL_MEMBERS`, `TEAM_PROJECT_EXECUTION_ACTIVE`,
+`TEAM_INVITATION_INVALID`, `TEAM_INVITATION_EMAIL_MISMATCH`,
+`REGISTRATION_DISABLED`, `TEAM_OFFBOARDING_PLAN_STALE`,
+`TEAM_OFFBOARDING_PLAN_EXPIRED`, `TEAM_CONFIRMATION_ACTOR_MISMATCH`,
+`TEAM_CONFIRMATION_INVALID`, `TEAM_CONFIRMATION_REQUIRED`,
+`TEAM_OFFBOARDING_NOT_STOPPING`, `TEAM_HANDOFF_REQUIRED`,
+`TEAM_HANDOFF_TARGET_CHANGED`, `TEAM_STOP_PENDING`, and
+`DELIVERY_INTEGRATION_IN_PROGRESS`. Missing resources generally use 404,
+insufficient capability 403, invalid input 400 and stale/state conflicts 409.
+
+### Credential revocation and delivery freshness
+
+Administrative password reset, self password change and local recovery revoke
+opaque auth sessions and increment a persisted credential epoch. HTTP and both
+WebSocket channels reject pre-reset JWTs, including legacy JWTs without an epoch;
+active sockets are invalidated. Password reset does not terminate CLI processes.
+Disable/offboard operations provide execution revocation separately.
+
+Execution authority includes team membership revision, explicit grant revision,
+logical owner/project revision and account status generation. A disable/re-enable
+or leave/rejoin cycle cannot resurrect an old worktree execution. Reviews also
+record their reviewer's authority generation; restored reviewer membership requires
+a fresh acceptance. An accepted receipt must still match the exact current commit,
+work item digest and verification policy. Team membership, ownership and account
+status mutations are rejected by durable database fences while integration is
+applying or its result is uncertain. This is trusted-host coordination, not an OS
+sandbox for arbitrary project commands.
+
+### Latest-base reconciliation and GitHub draft pull requests
+
+Authenticated endpoints use the existing `/api/v1/collaboration` envelope and project
+capability checks. A project administrator cannot act as another executor.
+
+- `POST /projects/:projectId/runs/:runId/reconcile`: `{expectedCommit,idempotencyKey}`.
+  The caller must be the original executor with current develop authority and unchanged
+  run authority epoch. Stops the old execution, preserves its files and prepares a new
+  private worktree from current source HEAD, merging the selected immutable commit.
+  Returns `{run}`. A repeat with the same key returns that run; different inputs conflict.
+  A true merge conflict is a ready workspace, not a provisioning failure. Run details
+  include `git.conflicts: string[]`. Resolve/commit in the new terminal, then obtain fresh
+  verification/review. Unknown Git process state keeps stopping pending.
+- `POST /projects/:projectId/runs/:runId/pull-request`: `{expectedCommit,verificationId,
+  repository,headBranch,baseBranch,title,body,token}`. `repository` is public GitHub
+  `owner/repo`; `expectedCommit` is a 40-character SHA; head/base must match the run's
+  branch and target. Requires the executor, a clean stopped workspace and current passed
+  receipt. The server independently checks remote head against the verified commit and
+  remote base against the recorded base. Branches must already be pushed. No push or
+  merge occurs. Returns `{pullRequest:{url,number,commit,draft},run}`.
+
+The GitHub credential is transient, never persisted or included in responses/logs. The
+request is allowed only over direct loopback or native HTTPS; spoofed forwarding headers
+are not trusted. Public HTTPS GitHub requests use the DNS-pinned network policy transport,
+bounded responses and no redirects. The API contract follows [GitHub Create a pull
+request](https://docs.github.com/en/rest/pulls/pulls#create-a-pull-request).
+
+Local `pull_request` operation fences prevent concurrent verification/terminal launch.
+Persistent `delivery_pull_requests` records distinguish checking/creating/created/unknown.
+After an uncertain POST or restart, retries perform exact remote lookup only; they do not
+repeat creation. `GITHUB_REQUEST_PENDING` means the outcome remains unresolved.
+`REMOTE_HEAD_MISMATCH`, `REMOTE_BASE_MISMATCH`, `CURRENT_VERIFICATION_REQUIRED` and
+`PULL_REQUEST_BRANCH_MISMATCH` require refreshing the corresponding local/remote evidence.
+Stored PR URLs are mutable remote artifacts, not replacements for the recorded commit SHA.
+
+
+## Unified development tasks and artifact references
+
+`/projects/:id?tab=project-manager` is the task UI; `/workspaces` is a redirect only.
+Project Manager work-item IDs remain canonical. Team delivery runs attach to those IDs,
+not to a second task list. Legacy Project Manager APIs remain under
+`/api/v1/projects/:projectId/project-manager` and use the current actor's project
+capabilities before opening tenant-scoped repositories.
+
+`GET /context` returns `{project:{id,name,description,status},access:{role,capabilities,
+teamId,logicalOwnerId},privateDetailAllowed,shared,revisionRequired,managedExecution}`.
+Load this context before mounting private project queries. `privateDetailAllowed` is
+server-derived; a display role is not a substitute. `revisionRequired` indicates governed
+shared-task mutations even when the storage owner may still read private project details.
+Task updates accept `expectedRevision`; governed requests require it and batch mutations
+check each item atomically. Content/assignment semantic revision is separate from the
+all-mutation concurrency revision; old approval cannot revive after requirements are
+changed back. Manual completion is recorded distinctly from delivery verification.
+
+Artifact paths below are relative to `/api/v1/collaboration` and require active-account
+and current project authorization:
+
+| Method | Path | Contract |
+| --- | --- | --- |
+| GET | `/projects/:projectId/tasks/:taskId/copilot-artifacts` | `{artifacts,candidates}`; read permission. Candidates are completed, digest-valid artifacts owned by the actor in this project, and require develop capability. |
+| POST | `/projects/:projectId/tasks/:taskId/copilot-artifacts` | `{developmentTaskId,artifactDigest,expectedTaskRevision,shareSummary:true}` → `{artifact}`; requires develop plus original artifact ownership. |
+
+Summary fields are `developmentTaskId,artifactDigest,status,filesCount,checksCount,
+passedChecks`. Linked records additionally expose `id,linkedAt,current,canOpen`.
+No goal, host path, diff, stdout/stderr, token or private session identity is returned.
+`status` is a snapshot at link time. `current` checks the bound task semantic digest and
+stored output digest, not the current source tree or a delivery acceptance decision.
+`canOpen` requires the original actor's current private-project access; linking does not
+broaden Copilot read/accept authority. Repeated identical links are idempotent; relinking
+an already stale binding returns 409 `ARTIFACT_LINK_STALE`. Task deletion cascades link
+rows, while artifact deletion is restricted while it is referenced. Linking does not
+change task progress, Copilot acceptance or Git state.

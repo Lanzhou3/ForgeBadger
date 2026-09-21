@@ -20,7 +20,7 @@ import { getCliBrand } from "@/lib/cli-brand";
 
 import { appliedStatusForAdapter, isProviderActiveOnAdapter } from "./shared";
 
-const CLI_ADAPTERS: RuntimeAdapterId[] = ["claude", "opencode", "codex", "kimi"];
+const CLI_ADAPTERS: RuntimeAdapterId[] = ["claude", "opencode", "codex", "kimi", "pi"];
 
 interface CliStatusSectionProps {
   provider: ProviderProfile;

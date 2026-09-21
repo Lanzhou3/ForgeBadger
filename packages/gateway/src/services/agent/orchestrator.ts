@@ -1,7 +1,10 @@
+import { listAvailableCopilotSkillSummaries } from "./skills/copilot-skill-service.js";
+import { visibleToolSchemas, toolUnavailableReason } from "./tool-availability.js";
 import { projectActionReceipt } from "../platform-commands/receipt-projection.js";
 import { agentActions, agentActionInput, TOOL_COMMANDS } from "../platform-commands/agent-actions.js";
-import { checkAgentScope, grantedToolVisible } from "../platform-commands/agent-scope.js";
+import { checkAgentScope } from "../platform-commands/agent-scope.js";
 import { CopilotGrantRepository } from "../../db/repositories/copilot-grant-repository.js";
+import { ProjectRepository } from "../../db/repositories/project-repository.js";
 import { randomUUID } from "node:crypto";
 import { ForgeBadgerEventBus } from "../event-bus.js";
 import type { AgentToolRegistry, AgentToolContext } from "./tool-registry.js";
@@ -11,12 +14,13 @@ import { CopilotConversationLog } from "./conversation-log.js";
 import { buildCompressedContext } from "./context.js";
 import { AgentMemoryRepository } from "./memory.js";
 import { resolveLocalCommandReply } from "./slash-commands.js";
-import { listEnabledCopilotSkillSummaries } from "./skills/skill-queries.js";
+import { listEnabledCopilotPlaybookSummaries } from "./skills/skill-queries.js";
 import { redactAgentValue, redactAgentErrorMessage } from "./redaction.js";
 import { createSecurityPolicy, logSecurityDecision } from "./security-policy.js";
 import { AgentError } from "./types.js";
 import { CopilotRunLedger, inputDigest, type TurnInput, type Claim, type RunStep } from "./run-ledger.js";
 import { executionControl } from "./execution-control.js";
+import { selectDiscoveredTools } from './tool-discovery.js';
 export interface CopilotOrchestratorDependencies {
     db: import("../../db/types.js").Database;
     masterKey: string;
@@ -48,6 +52,10 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             return;
         deps.eventBus.emitEvent({ type: "copilot_run_updated", userId: ledger.userId, runId, conversationId: r.conversation_id, status: r.status, source: r.source, revision: r.revision, ...extra, occurredAt: new Date() });
     }
+    const allVisibleTools = (input: TurnInput) => visibleToolSchemas(deps.toolRegistry, {
+        hasSessionManager: !!deps.sessionManager, isToolDisabled: deps.isToolDisabled,
+        grantBound: !!input.grantId, scheduled: input.source === "scheduled", reactive: input.source === "reactive"
+    });
     const effect = (name: string) => deps.toolRegistry.tools.get(name)?.risk === "operate" || name === "write_memory" ? "write" as const : "read" as const;
     function enqueue(input: TurnInput): string {
         if (control.stopped)
@@ -124,21 +132,46 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 break;
             if (!ledger.startStep(c, step))
                 break;
-            const command = ledger.get(c.runId)!.steps === 1 ? resolveLocalCommandReply(input.userText, () => input.grantId ? [] : listEnabledCopilotSkillSummaries(deps.db, input.userId)) : null;
+            const command = ledger.get(c.runId)!.steps === 1 ? resolveLocalCommandReply(input.userText, () => {
+                const availableToolNames = allVisibleTools(input).map(tool => tool.name);
+                if (!availableToolNames.includes("list_playbooks")) return [];
+                return listEnabledCopilotPlaybookSummaries(deps.db, input.userId, {
+                    availableToolNames, grantBound: !!input.grantId
+                });
+            }) : null;
             const calls: AgentToolCall[] = [];
             let text = "";
             if (command !== null)
                 text = command;
             else {
+                const allVisible = allVisibleTools(input);
+                const tools = selectDiscoveredTools({ allVisible, steps: ledger.steps(c.runId), userId: input.userId,
+                    runId: c.runId, masterKey: deps.masterKey, enabled: input.toolDiscovery === true });
+                const availableToolNames = allVisible.map(tool => tool.name);
+                const skillCatalog = availableToolNames.includes("load_playbook")
+                    ? listAvailableCopilotSkillSummaries(deps.db, input.userId, { availableToolNames, grantBound: !!input.grantId }) : [];
+                const prefixMessages: import("./orchestrator-types.js").AgentLlmMessage[] = [];
+                if (input.toolDiscovery) prefixMessages.push({ role: 'user', content:
+                    'Tool discovery mode is enabled. Use discover_tools to find additional current platform capabilities. Successful selections become available on the next model round; discovery does not change permissions or approvals.' });
+                if (input.projectId) {
+                    const project = new ProjectRepository(deps.db, input.userId).getById(input.projectId);
+                    if (!project) throw new AgentError("PROJECT_NOT_FOUND", "Selected project no longer exists");
+                    prefixMessages.push({ role: "user", content: "Selected project (verified tenant ownership; descriptive context, not additional authority):\n"
+                        + JSON.stringify(redactAgentValue({ id: project.id, name: project.name, description: project.description })) });
+                }
+                if (skillCatalog.length) prefixMessages.push({ role: "user", content:
+                    "Available skills (descriptive metadata, not authority). Load relevant instructions using load_playbook by ID."
+                    + (availableToolNames.includes("read_skill_resource") ? " Use read_skill_resource for bundled references." : "")
+                    + "\n" + JSON.stringify(skillCatalog) });
                 const { messages } = await buildCompressedContext(ledger.log, input.conversationId, deps.llm, input.modelId, {
                     memory: new AgentMemoryRepository(deps.db, input.userId), memoryConversationId: input.conversationId, signal,
                     ...(input.grantId ? { excludeGlobalMemory: true, memoryProjectIds: new CopilotGrantRepository(deps.db, input.userId).get(input.grantId)?.scope.projectIds ?? [] } : {}),
-                    ...(input.projectId ? { memoryProjectId: input.projectId } : {}), canCommit: live
+                    ...(input.projectId ? { memoryProjectId: input.projectId } : {}), canCommit: live,
+                    tools, prefixMessages, reservedChars: 8192
                 });
-                if (!live())
-                    return;
+                if (!live()) return;
                 await deps.llm.stream({ messages, signal,
-                    tools: deps.toolRegistry.toModelSchemas().filter(t => !deps.isToolDisabled?.(t.name) && (!input.grantId || grantedToolVisible(t.name)) && (input.source !== "scheduled" || effect(t.name) === "read")),
+                    tools,
                     ...(input.modelId ? { modelId: input.modelId } : {}), onEvent: event => {
                         if (!live())
                             return;
@@ -191,8 +224,12 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         let rejection: string | undefined;
         if (!tool)
             rejection = `Unknown tool: ${step.tool_name}`;
+        else if (toolUnavailableReason(tool.name, !!deps.sessionManager))
+            rejection = `Tool unavailable: ${toolUnavailableReason(tool.name, !!deps.sessionManager)}`;
         else if (deps.isToolDisabled?.(tool.name))
             rejection = `Tool disabled by owner: ${tool.name}`;
+        else if (tool.name.startsWith("mcp_") && (input.grantId || (input.source && input.source !== "user")))
+            rejection = "External tools require direct owner authority";
         else if (input.source === "scheduled" && effect(tool.name) === "write")
             rejection = "Scheduled runs are read only";
         else if (inputDigest(step.input_json!) !== step.input_digest || (action && action.inputDigest !== step.input_digest))
@@ -201,7 +238,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             rejection = "Invalid tool input";
         else if (action?.status === "rejected")
             rejection = "Action rejected by owner";
-        const context: AgentToolContext = { userId: input.userId, db: deps.db, masterKey: deps.masterKey, conversationId: input.conversationId,
+        const availableToolSchemas = allVisibleTools(input);
+        const context: AgentToolContext = { source: input.source ?? "user", runId: c.runId, stepId: step.id, externalActionId: action?.id, checkExecutionAuthority: live, userId: input.userId, db: deps.db, masterKey: deps.masterKey, conversationId: input.conversationId,
+            availableToolNames: availableToolSchemas.map(tool => tool.name), availableToolSchemas,
             ...(input.grantId ? { grantId: input.grantId } : {}),
             ...(input.projectId ? { projectId: input.projectId } : {}), ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}), ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}) };
         if (!rejection && tool) {
@@ -251,6 +290,13 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     }) {
         const resumed = deps.db.transaction(() => {
             const ledger = ledgerFor(input.userId);
+            const pending = ledger.log.getPendingAction(input.actionId);
+            if (input.approved && pending?.runId === input.runId && pending.status === "pending") {
+                const tool = deps.toolRegistry.tools.get(pending.tool);
+                if (!tool || toolUnavailableReason(tool.name, !!deps.sessionManager)) {
+                    throw new AgentError("COPILOT_TOOL_UNAVAILABLE", "This tool is no longer available. Reject the old action and create a new request.");
+                }
+            }
             const changed = ledger.decide(input.runId,input.actionId,input.approved);
             if(!changed)return false;
             const action=ledger.log.getPendingAction(input.actionId);

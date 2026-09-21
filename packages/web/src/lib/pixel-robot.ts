@@ -270,7 +270,7 @@ export function cornerOffsetPosition(
   };
 }
 
-export const ROBOT_SIZE_PX = 64;
+export const ROBOT_SIZE_PX = 88;
 export const CORNER_MARGIN_PX = 20;
 export const ROBOT_CORNER_STORAGE_KEY = "forgebadger.robotCorner";
 export const BLINK_MIN_INTERVAL_MS = 3000;

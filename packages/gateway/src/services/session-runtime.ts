@@ -55,6 +55,7 @@ export async function startSessionRuntime(deps: SessionRuntimeDeps, sessionId: s
     // concurrent starts.
     const live = deps.sessionManager.getSession(sessionId);
     const fresh = sessionRepo.getById(sessionId);
+    if (!fresh) throw new SessionNotFoundError(sessionId);
     if (live?.status === "running" || fresh?.status === "running") {
       throw new SessionConflictError("Session already running");
     }
@@ -78,13 +79,14 @@ export async function startSessionRuntime(deps: SessionRuntimeDeps, sessionId: s
       throw err;
     }
 
-    const pluginDirs = await prepareAdapterLaunchExtras(deps.db, deps.userId, adapter, dbSession.workingDir, dbSession.id);
+    const pluginDirs = await prepareAdapterLaunchExtras(deps.db, deps.userId, adapter, dbSession.workingDir);
     const launchPlan = createLaunchPlan({
       adapter,
       projectRoot: dbSession.workingDir,
       sessionId: dbSession.id,
       ...(pluginDirs.length > 0 ? { pluginDirs } : {})
     });
+    if (!sessionRepo.getById(sessionId)) throw new SessionNotFoundError(sessionId);
     const attachToken = randomUUID();
     sessionRepo.update(dbSession.id, { attachToken });
     const session = await deps.sessionManager.createSession({

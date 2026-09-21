@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import SettingsPage from "./page";
@@ -60,6 +60,21 @@ describe("SettingsPage terminal runtime", () => {
     vi.clearAllMocks();
     discoverAdaptersMock.mockResolvedValue({ adapters: [] });
     listAuditLogsMock.mockResolvedValue({ auditLogs: [] });
+  });
+
+  it("offers only the robot pet and persists the selection", () => {
+    window.localStorage.clear();
+    getDependenciesMock.mockResolvedValue({ dependencies: [] });
+    renderSettingsPage();
+    const group = screen.getByRole("radiogroup", { name: "settings.pet" });
+    const choices = within(group).getAllByRole("radio");
+    expect(choices).toHaveLength(1);
+    const robot = within(group).getByRole("radio", { name: "settings.petRobot" });
+    expect(robot.getAttribute("aria-checked")).toBe("true");
+    expect(within(group).getByText("settings.petRobot")).toBeTruthy();
+    fireEvent.click(robot);
+    expect(window.localStorage.getItem("forgebadger.pet")).toBe("robot");
+    expect(screen.getByRole("status").textContent).toBe("settings.petSaved");
   });
 
   it.each([true, false])("shows built-in terminal persistence (ready=%s)", async (ready) => {

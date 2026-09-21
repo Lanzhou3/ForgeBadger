@@ -568,6 +568,111 @@
       "when": 1789300000004,
       "tag": "0081_mcp_access_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "6",
+      "when": 1789600000000,
+      "tag": "0082_copilot_playbook_boundary",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1789600000001,
+      "tag": "0083_drop_pm_feishu_refs",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "6",
+      "when": 1789600000002,
+      "tag": "0084_copilot_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1789600000003,
+      "tag": "0085_copilot_skill_revisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "6",
+      "when": 1789776000000,
+      "tag": "0086_copilot_request_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "6",
+      "when": 1789886800000,
+      "tag": "0087_pi_adapter",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1789886800001,
+      "tag": "0088_pi_supported_adapters_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "6",
+      "when": 1789886800002,
+      "tag": "0089_personal_team_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "6",
+      "when": 1789886800003,
+      "tag": "0090_copilot_development_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "6",
+      "when": 1789886800004,
+      "tag": "0091_team_administration",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "6",
+      "when": 1789886800005,
+      "tag": "0092_delivery_pull_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "6",
+      "when": 1789886800006,
+      "tag": "0093_session_runtime_confirmations",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "6",
+      "when": 1789886800007,
+      "tag": "0094_task_artifact_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "6",
+      "when": 1789886800008,
+      "tag": "0095_task_semantic_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "6",
+      "when": 1789886800009,
+      "tag": "0096_pending_runtime_delete_guard",
+      "breakpoints": true
     }
   ]
 }

@@ -33,7 +33,7 @@ import {
   type RuntimeAdapterId,
 } from "@/lib/api";
 
-const cliAdapters: RuntimeAdapterId[] = ["claude", "opencode", "codex", "kimi"];
+const cliAdapters: RuntimeAdapterId[] = ["claude", "opencode", "codex", "kimi", "pi"];
 
 interface CliConfigSheetProps {
   open: boolean;

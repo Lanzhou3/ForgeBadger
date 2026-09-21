@@ -42,6 +42,7 @@ describe("getDashboardSummary", () => {
 
     assert.deepEqual(summary.stats, {
       projects: 0,
+      acceptedDeliveries: 0,
       sessions: 0,
       runningSessions: 0,
       skills: 0,
@@ -52,8 +53,10 @@ describe("getDashboardSummary", () => {
     assert.equal(summary.health.gateway.healthy, true);
     assert.equal(summary.health.database.healthy, true);
     assert.equal(summary.health.projectConfig.healthy, false);
-    assert.equal(summary.health.models.healthy, false);
-    assert.equal(summary.health.credentials.healthy, false);
+    assert.equal(summary.health.models.healthy, true);
+    assert.equal(summary.health.credentials.healthy, true);
+    assert.doesNotMatch(summary.health.models.message, /stored sessions/);
+    assert.doesNotMatch(summary.health.credentials.message, /stored credentials/);
     assert.equal(
       (db.prepare("SELECT COUNT(*) AS count FROM templates").get() as { count: number }).count,
       0,

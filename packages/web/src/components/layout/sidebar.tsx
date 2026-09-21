@@ -44,7 +44,7 @@ export interface NavItem {
   adminOnly?: boolean;
 }
 
-export const navItems = [
+export const navItems: NavItem[] = [
   { labelKey: "nav.dashboard", href: "/", icon: LayoutDashboard, group: "workspace" },
   { labelKey: "nav.projects", href: "/projects", icon: FolderKanban, group: "workspace" },
   { labelKey: "nav.sessions", href: "/sessions", icon: TerminalSquare, group: "workspace" },
@@ -54,7 +54,7 @@ export const navItems = [
   { labelKey: "nav.models", href: "/models", icon: Brain, group: "resources" },
   { labelKey: "nav.usage", href: "/usage", icon: BarChart3, group: "system" },
   { labelKey: "nav.history", href: "/history", icon: History, group: "system" },
-  { labelKey: "nav.members", href: "/members", icon: UsersRound, group: "system", adminOnly: true },
+  { labelKey: "nav.members", href: "/members", icon: UsersRound, group: "system" },
   { labelKey: "nav.notifications", href: "/notifications", icon: Bell, group: "system" },
   { labelKey: "nav.settings", href: "/settings", icon: Settings, group: "system" },
 ] satisfies NavItem[];

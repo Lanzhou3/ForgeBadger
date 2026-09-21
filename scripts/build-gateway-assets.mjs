@@ -15,6 +15,17 @@ export async function copyGatewayMigrations(options = {}) {
   await cp(source, target, { recursive: true });
 }
 
+// tsc does not delete outputs for removed sources. Retire old executable artifacts
+// as part of every build so upgrades cannot accidentally ship the old supervisor.
+export async function removeRetiredVerificationArtifacts(workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")) {
+  for (const name of ["verification", "verification-process", "verification-runner-entry"]) {
+    for (const extension of ["js", "js.map", "d.ts"]) {
+      await rm(path.join(workspaceRoot, "packages/gateway/dist/src/services/collaboration", `${name}.${extension}`), { force: true });
+    }
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await removeRetiredVerificationArtifacts();
   await copyGatewayMigrations();
 }

@@ -12,7 +12,8 @@ const { registerMock, replaceMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: replaceMock })
+  useRouter: () => ({ replace: replaceMock }),
+  useSearchParams: () => new URLSearchParams("next=%2Fteams")
 }));
 
 vi.mock("@/hooks/use-auth", () => ({
@@ -30,7 +31,7 @@ describe("RegisterForm", () => {
     vi.clearAllMocks();
   });
 
-  it("requires and submits the local recovery key with localized copy", async () => {
+  it("preserves return context and submits invitation with local registration", async () => {
     render(
       <LanguageProvider>
         <RegisterForm />
@@ -38,6 +39,7 @@ describe("RegisterForm", () => {
     );
 
     expect(screen.getByLabelText("恢复密钥")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("注册邀请码（如需要）"), {target:{value:"invite-code"}});
     fireEvent.change(screen.getByLabelText("电子邮箱"), {
       target: { value: "owner@example.com" }
     });
@@ -55,9 +57,10 @@ describe("RegisterForm", () => {
     await waitFor(() => expect(registerMock).toHaveBeenCalledWith({
       email: "owner@example.com",
       password: "password123",
-      recoveryKey: "fbr_registration-key"
+      recoveryKey: "fbr_registration-key",
+      inviteCode: "invite-code"
     }));
-    expect(replaceMock).toHaveBeenCalledWith("/");
+    expect(replaceMock).toHaveBeenCalledWith("/teams");
   });
 
   it("localizes an invalid recovery key without exposing the Gateway message", async () => {

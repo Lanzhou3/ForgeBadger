@@ -1,183 +1,170 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, ArrowLeft, Brain, CalendarClock, Cpu, Sparkles, Wrench } from "lucide-react";
-import type { ReactNode } from "react";
+import {
+  CalendarClock,
+  ChevronRight,
+  Cpu,
+  Puzzle,
+  Radio,
+  ShieldCheck,
+  type LucideIcon,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { CopilotSkillsCard, skillsQueryKey } from "@/components/copilot/copilot-skill-panel";
-import { CopilotMemoryPanel } from "@/components/copilot/copilot-memory-panel";
-import {
-  CapabilitiesSection,
-  copilotCapabilitiesQueryKey,
-  modelProvidersQueryKey,
-} from "@/components/copilot/copilot-runtime-panel";
+import { CopilotMemoryPanel } from "./copilot-memory-panel";
+import { modelProvidersQueryKey } from "./copilot-runtime-panel";
+import { CopilotSettingsShell } from "./copilot-settings-shell";
+import { useExtensionsCopy } from "./extensions-copy";
+import { useSettingsCopy } from "./settings-copy";
 import { useLanguage } from "@/hooks/use-language";
-import { listModelProviders, listSkills } from "@/lib/api";
-import { getCopilotCapabilities } from "@/lib/copilot-api";
+import { listModelProviders } from "@/lib/api";
+import {
+  copilotConnectionsKey,
+  copilotSkillsKey,
+  listCopilotConnections,
+  listCopilotSkills,
+} from "@/lib/copilot-extensions-api";
+import { listGrants } from "@/lib/platform-actions-api";
 
-/**
- * Copilot control panel (/copilot/settings), opened from the console's
- * top-right gear button. It exposes the self-owned Gateway runtime boundary,
- * the per-user capability switches used by the native orchestrator, and a
- * skills summary that opens a toggle dialog (full editing lives on /skills).
- */
+/** Copilot settings hub: runtime status, entries into each settings section, and memory. */
 export function CopilotSettingsPage() {
   const { t } = useLanguage();
-  const router = useRouter();
-
-  const capabilities = useQuery({
-    queryKey: copilotCapabilitiesQueryKey,
-    queryFn: getCopilotCapabilities,
-  });
-  const skills = useQuery({
-    queryKey: skillsQueryKey,
-    queryFn: listSkills,
-  });
-  const modelProviders = useQuery({
+  const copy = useSettingsCopy();
+  const extensions = useExtensionsCopy();
+  const providers = useQuery({
     queryKey: modelProvidersQueryKey,
     queryFn: listModelProviders,
+    retry: false,
   });
-
-  const tools = capabilities.data?.tools ?? [];
-  const enabledTools = tools.filter((tool) => tool.enabled).length;
-  const skillItems = skills.data?.skills ?? [];
-  const enabledSkills = skillItems.filter((skill) => skill.isEnabled).length;
-
-  const models = (modelProviders.data?.models ?? []).filter((model) => model.status !== "disabled");
+  const grants = useQuery({ queryKey: ["copilot-grants"], queryFn: listGrants, retry: false });
+  const skills = useQuery({ queryKey: copilotSkillsKey, queryFn: listCopilotSkills, retry: false });
+  const connections = useQuery({
+    queryKey: copilotConnectionsKey,
+    queryFn: listCopilotConnections,
+    retry: false,
+  });
+  const models = (providers.data?.models ?? []).filter((model) => model.status !== "disabled");
   const selected = models.find((model) => model.isDefault) ?? models[0];
-  const modelLabel = selected
-    ? `${selected.providerName} / ${selected.name}`
-    : t("copilot.followSystemDefault");
+  const modelLabel = providers.isPending
+    ? extensions.loading
+    : providers.isError
+      ? extensions.loadError
+      : selected
+        ? `${selected.providerName} / ${selected.name}`
+        : t("copilot.followSystemDefault");
+  const activeGrants = grants.data?.grants.filter((grant) => grant.status === "active").length;
+  const skillCount = skills.data?.skills.length;
+  const connectionCount = connections.data?.connections.filter((item) => item.kind === "mcp").length;
+
+  const entries: {
+    href: string;
+    icon: LucideIcon;
+    title: string;
+    description: string;
+    summary?: string;
+    delay: number;
+  }[] = [
+    {
+      href: "/copilot/settings/access",
+      icon: ShieldCheck,
+      title: copy.accessCardTitle,
+      description: copy.accessCardDescription,
+      summary: activeGrants !== undefined ? `${activeGrants} · ${copy.statusActive}` : undefined,
+      delay: 180,
+    },
+    {
+      href: "/copilot/extensions",
+      icon: Puzzle,
+      title: extensions.title,
+      description: extensions.description,
+      summary:
+        skillCount !== undefined && connectionCount !== undefined
+          ? `${skillCount} ${extensions.skills} · ${connectionCount} ${extensions.connections}`
+          : undefined,
+      delay: 240,
+    },
+    {
+      href: "/copilot/channels",
+      icon: Radio,
+      title: copy.channelsCardTitle,
+      description: copy.channelsCardDescription,
+      delay: 300,
+    },
+    {
+      href: "/copilot/automations",
+      icon: CalendarClock,
+      title: t("copilot.automationsTitle"),
+      description: t("copilot.automationsDescription"),
+      delay: 360,
+    },
+  ];
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 md:p-6">
-      <div className="flex items-start gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t("copilot.settingsBack")}
-          title={t("copilot.settingsBack")}
-          onClick={() => router.push("/copilot")}
+    <CopilotSettingsShell
+      active="general"
+      title={t("copilot.settings")}
+      description={t("copilot.settingsDescription")}
+    >
+      <div className="space-y-5">
+        <section
+          className="forgebadger-animate-in space-y-3 rounded-lg border border-border bg-card p-4"
+          style={{ animationDelay: "120ms" }}
         >
-          <ArrowLeft className="size-4" />
-        </Button>
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold">{t("copilot.settings")}</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t("copilot.settingsDescription")}</p>
-        </div>
-      </div>
-
-      <Link href="/copilot/channels" className="rounded-lg border border-border p-4 text-sm hover:bg-muted">远程渠道 · 配置飞书、确认私聊身份和项目授权 →</Link>
-
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile
-          icon={<Activity className="size-4" />}
-          label={t("copilot.overviewRuntime")}
-          value={
-            <span className="inline-flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Cpu className="size-4 text-brand" />
+            <h2 className="text-sm font-semibold">{t("copilot.runtimeTitle")}</h2>
+            <Badge variant="secondary" className="ml-auto gap-1.5">
               <span className="size-1.5 rounded-full bg-emerald-500" />
-              {t("copilot.runtimeOnline")}
-            </span>
-          }
-        />
-        <StatTile
-          icon={<Wrench className="size-4" />}
-          label={t("copilot.capabilities")}
-          value={`${enabledTools}/${tools.length}`}
-        />
-        <StatTile
-          icon={<Sparkles className="size-4" />}
-          label={t("copilot.skillsTitle")}
-          value={`${enabledSkills}/${skillItems.length}`}
-        />
-        <StatTile
-          icon={<Brain className="size-4" />}
-          label={t("copilot.currentModel")}
-          value={<span className="truncate text-sm font-medium">{modelLabel}</span>}
-        />
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="min-w-0">
-          <CapabilitiesSection active />
+              {t("copilot.nativeRuntime")}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">{t("copilot.runtimeDescription")}</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2.5">
+            <p className="min-w-0 truncate text-xs">
+              <span className="text-muted-foreground">{t("copilot.currentModel")}: </span>
+              {modelLabel}
+            </p>
+            <Button asChild variant="outline" size="sm" className="shrink-0">
+              <Link href="/models">{copy.manageModels}</Link>
+            </Button>
+          </div>
+        </section>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {entries.map((entry) => {
+            const Icon = entry.icon;
+            return (
+              <Link
+                key={entry.href}
+                href={entry.href}
+                className="forgebadger-animate-in group flex items-start gap-3 rounded-lg border border-border bg-card p-4 transition-colors hover:border-brand/40 hover:bg-muted/40"
+                style={{ animationDelay: `${entry.delay}ms` }}
+              >
+                <Icon className="mt-0.5 size-5 shrink-0 text-brand" />
+                <span className="min-w-0 flex-1 space-y-1">
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    {entry.title}
+                    {entry.summary && (
+                      <Badge variant="secondary" className="font-normal">
+                        {entry.summary}
+                      </Badge>
+                    )}
+                  </span>
+                  <span className="block text-xs leading-relaxed text-muted-foreground">
+                    {entry.description}
+                  </span>
+                </span>
+                <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+              </Link>
+            );
+          })}
         </div>
-
-        <div className="space-y-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center gap-3 space-y-0">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
-                <Cpu className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <CardTitle className="text-sm font-semibold">{t("copilot.runtimeTitle")}</CardTitle>
-                <CardDescription className="mt-1 text-xs">
-                  {t("copilot.runtimeDescription")}
-                </CardDescription>
-              </div>
-              <Badge variant="secondary" className="gap-1.5 whitespace-nowrap">
-                <span className="size-1.5 rounded-full bg-emerald-500" />
-                {t("copilot.nativeRuntime")}
-              </Badge>
-            </CardHeader>
-          </Card>
-
-          <CopilotSkillsCard />
-
+        <div className="forgebadger-animate-in" style={{ animationDelay: "420ms" }}>
           <CopilotMemoryPanel />
-
-          <Card>
-            <CardHeader className="flex flex-row items-center gap-3 space-y-0">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
-                <CalendarClock className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <CardTitle className="text-sm font-semibold">{t("copilot.automationsTitle")}</CardTitle>
-                <CardDescription className="mt-1 text-xs">
-                  {t("copilot.automationsDescription")}
-                </CardDescription>
-              </div>
-              <Button asChild variant="outline" size="sm">
-                <Link href="/copilot/automations">{t("copilot.automationsManage")}</Link>
-              </Button>
-            </CardHeader>
-          </Card>
         </div>
       </div>
-    </div>
-  );
-}
-
-function StatTile({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: ReactNode;
-}) {
-  return (
-    <Card className="gap-0 py-0">
-      <CardContent className="flex items-center gap-3 px-4 py-3.5">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
-          {icon}
-        </div>
-        <div className="min-w-0">
-          <div className="text-lg font-semibold leading-none">{value}</div>
-          <div className="mt-1.5 truncate text-xs text-muted-foreground">{label}</div>
-        </div>
-      </CardContent>
-    </Card>
+    </CopilotSettingsShell>
   );
 }

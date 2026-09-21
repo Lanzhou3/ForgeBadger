@@ -112,7 +112,7 @@ describe("cli-config apply service", () => {
       assert.equal(doc.env.ANTHROPIC_MODEL, "claude-model-1");
       // ANTHROPIC_SMALL_FAST_MODEL is deprecated upstream; never written.
       assert.equal(doc.env.ANTHROPIC_SMALL_FAST_MODEL, undefined);
-      // Unset role slots fall back to the primary model (cc-switch normalize).
+      // Unset role slots fall back to the primary model.
       assert.equal(doc.env.ANTHROPIC_DEFAULT_OPUS_MODEL, "claude-model-1");
       assert.equal(doc.env.ANTHROPIC_DEFAULT_SONNET_MODEL, "claude-model-1");
       assert.equal(doc.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, "claude-model-1");
@@ -161,7 +161,7 @@ describe("cli-config apply service", () => {
       assert.match(configToml, /\[model_providers\.codex-provider\]/u);
       assert.match(configToml, /base_url = "https:\/\/api\.deepseek\.com\/v1"/u);
       assert.match(configToml, /wire_api = "responses"/u);
-      // cc-switch semantics (Codex 0.149+): third-party keys live in the
+      // Codex 0.149+ layout: third-party keys live in the
       // provider table, not in auth.json.
       assert.match(configToml, /experimental_bearer_token = "sk-codex-secret"/u);
       const auth = JSON.parse(await readFile(path.join(root, "auth.json"), "utf8")) as Record<string, string>;
@@ -226,7 +226,7 @@ describe("cli-config apply service", () => {
         modelId: "opencode-model-2",
         contextWindow: 131072
       });
-      // The top-level model selection is user-owned (cc-switch semantics).
+      // The top-level model selection is user-owned and never touched.
       await writeFile(path.join(root, "opencode.json"), JSON.stringify({ model: "keep-me" }), "utf8");
 
       await applyCliConfigToAdapter({

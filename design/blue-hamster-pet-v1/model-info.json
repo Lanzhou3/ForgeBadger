@@ -1,0 +1,18 @@
+{
+  "blender": "5.2.1 LTS",
+  "reference": "reference.png",
+  "hair_strands": {
+    "Body | continuous rounded pear sculpt": 89145,
+    "Head | natural integrated cheeks and muzzle": 112712,
+    "Ear L | cupped cartilage": 3240,
+    "Forearm -1 | continuous tapered bent limb": 18000,
+    "Ear R | cupped cartilage": 3238,
+    "Forearm 1 | continuous tapered bent limb": 18000
+  },
+  "total_hair_strands": 244335,
+  "mesh_objects": 41,
+  "mesh_vertices": 263485,
+  "native_hair_objects": 6,
+  "rigged": false,
+  "runtime_integrated": false
+}

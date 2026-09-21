@@ -1,3 +1,4 @@
+import { useTaskAuthority } from "./TaskAuthority";
 import { Target } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -33,7 +34,10 @@ export function ProjectManagerGoalBanner({
   onEdit: () => void;
   onSave: () => void;
 }) {
-  if (isEditing) {
+  const { canEdit: edit, canManage, legacySessions } = useTaskAuthority();
+  const canEdit = canManage ?? edit;
+
+  if (isEditing && canEdit) {
     return (
       <Card>
         <CardHeader>
@@ -126,7 +130,7 @@ export function ProjectManagerGoalBanner({
           <Button
             size="sm"
             className="shrink-0 bg-brand text-brand-foreground hover:bg-brand/90"
-            onClick={onEdit}
+            disabled={!canEdit} onClick={onEdit}
           >
             {t("projects.projectManagerEditGoal")}
           </Button>
@@ -157,7 +161,7 @@ export function ProjectManagerGoalBanner({
           <span className="text-xs text-muted-foreground">
             {t("projects.projectManagerUpdated")}: {formatTimestamp(goal.updatedAt)}
           </span>
-          <Button size="sm" variant="outline" onClick={onEdit}>
+          <Button size="sm" variant="outline" disabled={!canEdit} onClick={onEdit}>
             {t("projects.projectManagerEditGoal")}
           </Button>
         </div>

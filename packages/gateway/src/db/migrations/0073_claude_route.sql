@@ -1,4 +1,4 @@
--- Claude Code protocol routing (cc-switch-style local proxy, Gateway edition):
+-- Claude Code protocol routing (Gateway loopback Anthropic-compatible proxy):
 -- OpenAI-protocol providers are applied to Claude Code through the Gateway's
 -- loopback Anthropic-compatible endpoint (/v1/messages on the Gateway port)
 -- instead of the provider's OpenAI endpoint, so the real API key never lands

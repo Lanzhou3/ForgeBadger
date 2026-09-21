@@ -1,3 +1,4 @@
+import type { RuntimeAuthorizationInvalidator } from "../services/runtime-authorization-invalidation.js";
 import type { Server } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 
@@ -18,6 +19,7 @@ export interface EventsWebSocketOptions {
   eventBus: ForgeBadgerEventBus;
   jwtSecret: string;
   db: Database;
+  runtimeAuthorizationInvalidator?: RuntimeAuthorizationInvalidator;
   maxConnections?: number;
   maxConnectionsPerUser?: number;
 }
@@ -25,6 +27,7 @@ export interface EventsWebSocketOptions {
 interface EventsClient {
   ws: WebSocket;
   userId: string;
+  token: string;
   lastPongAt: number;
 }
 
@@ -39,6 +42,13 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
   });
   const clients = new Map<WebSocket, EventsClient>();
 
+  const authorized = (client: EventsClient):boolean => {
+    try { return resolveTokenUserId(options.db,client.token,options.jwtSecret) === client.userId; } catch { return false; }
+  };
+  const unsubscribe = options.runtimeAuthorizationInvalidator?.subscribe(event => {
+    if(event.scope !== "user") return;
+    for(const client of clients.values()) if(client.userId===event.userId && !authorized(client)) client.ws.close(4401,"credentials revoked");
+  });
   options.server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "", "http://localhost");
     if (url.pathname !== "/ws/events") {
@@ -75,6 +85,7 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
       const client: EventsClient = {
         ws,
         userId,
+        token,
         lastPongAt: Date.now()
       };
       clients.set(ws, client);
@@ -108,6 +119,7 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
         limits.release(ws);
         continue;
       }
+      if(!authorized(client)) { ws.close(4401,"credentials revoked");continue; }
       ws.ping();
     }
   }, EVENTS_HEARTBEAT_INTERVAL_MS);
@@ -116,12 +128,14 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
   // Clean up interval when server closes
   options.server.on("close", () => {
     clearInterval(heartbeatInterval);
+    unsubscribe?.();
   });
 
   options.eventBus.on("event", (event: ForgeBadgerEvent) => {
     const payload = JSON.stringify({ type: event.type, payload: buildPayload(event) });
     for (const [ws, client] of clients) {
       if (ws.readyState === WebSocket.OPEN && client.userId === event.userId) {
+        if(!authorized(client)) { ws.close(4401,"credentials revoked");continue; }
         ws.send(payload);
       }
     }
@@ -185,6 +199,8 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
         message: event.message,
         created_at: event.createdAt.toISOString()
       };
+    case "copilot_development_updated":
+      return {task_id:event.taskId,status:event.status,revision:event.revision,event_id:event.eventId};
     case "copilot_run_updated":
       return {
         run_id: event.runId,
@@ -213,6 +229,7 @@ function buildNotificationMeta(event: ForgeBadgerEvent): Record<string, unknown>
   if (
     event.type === "activity_created"
     || event.type === "copilot_run_updated"
+    || event.type === "copilot_development_updated"
     || !event.notificationId
   ) {
     return {};

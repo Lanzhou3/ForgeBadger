@@ -5,7 +5,8 @@ import { describe, it } from "node:test";
 import {
   claudeProjectsRoot,
   decodeClaudeProjectDir,
-  opencodeDbPath
+  opencodeDbPath,
+  piSessionsRoot
 } from "../src/services/usage/usage-source.js";
 
 describe("usage source paths", () => {
@@ -31,6 +32,37 @@ describe("usage source paths", () => {
         env: { CLAUDE_CONFIG_DIR: "~/.claude-alt" }
       }),
       "/home/alice/.claude-alt/projects"
+    );
+  });
+
+  it("resolves PI session roots from the agent directory defaults and overrides", () => {
+    assert.equal(
+      piSessionsRoot({ platform: "linux", homeDir: "/home/alice", env: {} }),
+      "/home/alice/.pi/agent/sessions"
+    );
+    assert.equal(
+      piSessionsRoot({
+        platform: "win32",
+        homeDir: "C:\\Users\\alice",
+        env: {}
+      }),
+      path.win32.join("C:\\Users\\alice", ".pi", "agent", "sessions")
+    );
+    assert.equal(
+      piSessionsRoot({
+        platform: "linux",
+        homeDir: "/home/alice",
+        env: { PI_CODING_AGENT_DIR: "~/.pi-alt" }
+      }),
+      "/home/alice/.pi-alt/sessions"
+    );
+    assert.equal(
+      piSessionsRoot({
+        platform: "linux",
+        homeDir: "/home/alice",
+        env: { PI_CODING_AGENT_SESSION_DIR: "/var/pi-sessions" }
+      }),
+      "/var/pi-sessions"
     );
   });
 });

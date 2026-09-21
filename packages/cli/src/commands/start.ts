@@ -2,10 +2,18 @@ import type { ChildProcess } from "node:child_process";
 import path from "node:path";
 
 import {
+  inspectRuntimeConfig,
   loadOrCreateRuntimeConfig,
   type LoadRuntimeConfigOptions,
-  type RuntimeConfig
+  type RuntimeConfig,
+  type RuntimeConfigInspection
 } from "../runtime/config.js";
+import {
+  checkCliDependencies,
+  type CliCommandRunner,
+  type CliDependencyStatus,
+  type NodePtyLoader
+} from "../runtime/dependency-check.js";
 import { resolveInstalledPaths, type InstalledPaths } from "../runtime/paths.js";
 import { assertPortAvailable } from "../runtime/ports.js";
 import { installShutdownHandlers, spawnNode, type ShutdownCleanup } from "../runtime/processes.js";
@@ -25,6 +33,13 @@ interface OutputWriter {
 export interface RunStartOptions extends LoadRuntimeConfigOptions {
   openBrowser?: boolean;
   loadConfig?: (options: LoadRuntimeConfigOptions) => Promise<RuntimeConfig>;
+  inspectConfig?: (options: LoadRuntimeConfigOptions) => Promise<RuntimeConfigInspection>;
+  dependencyChecker?: (
+    runner?: CliCommandRunner,
+    loadNodePty?: NodePtyLoader
+  ) => Promise<CliDependencyStatus[]>;
+  dependencyRunner?: CliCommandRunner;
+  loadNodePty?: NodePtyLoader;
   resolvePaths?: () => InstalledPaths;
   checkPort?: (host: string, port: number) => Promise<void>;
   prepareWebRuntime?: (options: PrepareWebRuntimeOptions) => Promise<PreparedWebRuntime>;
@@ -69,6 +84,8 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
   const isTTY = options.isTTY ?? process.stdin.isTTY === true;
 
   writeForgeBadgerInstallBanner(stdout, { isTTY, env });
+
+  await maybeRunFirstStartPreflight(options, stdout);
 
   const config = await loadConfig(toRuntimeConfigOptions(options));
   const paths = resolvePaths();
@@ -119,8 +136,54 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
   }
 }
 
-function toRuntimeConfigOptions(options: RunStartOptions): LoadRuntimeConfigOptions {
-  const runtimeOptions: LoadRuntimeConfigOptions = {};
+async function maybeRunFirstStartPreflight(
+  options: RunStartOptions,
+  stdout: OutputWriter
+): Promise<void> {
+  // An injected loadConfig marks an embedded/test run; never probe the real
+  // home directory in that case. Explicitly injected inspectConfig opts in.
+  const inspectConfig =
+    options.inspectConfig ?? (options.loadConfig ? undefined : inspectRuntimeConfig);
+  if (!inspectConfig) {
+    return;
+  }
+  const inspection = await inspectConfig(toRuntimeConfigOptions(options));
+  if (inspection.initialized) {
+    return;
+  }
+
+  const checker = options.dependencyChecker ?? checkCliDependencies;
+  const dependencies = await checker(options.dependencyRunner, options.loadNodePty);
+  stdout.write(formatFirstStartPreflight(dependencies));
+}
+
+export function formatFirstStartPreflight(dependencies: CliDependencyStatus[]): string {
+  const lines: string[] = [];
+  const nodePty = dependencies.find((item) => item.required);
+  if (nodePty && !nodePty.available) {
+    lines.push(`warning: ${nodePty.error ?? "node-pty is not available"}`);
+  }
+
+  const aiClis = dependencies.filter((item) => item.group === "ai-cli");
+  const availableAiClis = aiClis.filter((item) => item.available);
+  if (aiClis.length > 0 && availableAiClis.length === 0) {
+    lines.push("No AI CLI detected on PATH. Install at least one to create sessions:");
+    for (const item of aiClis) {
+      if (item.installHint) {
+        lines.push(`  ${item.name}: ${item.installHint}`);
+      }
+    }
+  } else if (availableAiClis.length > 0) {
+    lines.push(`Detected AI CLIs: ${availableAiClis.map((item) => item.name).join(", ")}`);
+  }
+
+  if (lines.length === 0) {
+    return "";
+  }
+  return `First-run environment check:\n${lines.map((line) => ` ${line}`).join("\n")}\n`;
+}
+
+function toRuntimeConfigOptions(options: RunStartOptions): LoadRuntimeConfigOptions {  const runtimeOptions: LoadRuntimeConfigOptions = {};
   if (options.stateDir !== undefined) {
     runtimeOptions.stateDir = options.stateDir;
   }

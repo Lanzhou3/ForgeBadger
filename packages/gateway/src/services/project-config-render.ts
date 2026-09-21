@@ -1,3 +1,6 @@
+import { safeResolve } from "../lib/safe-resolve.js";
+import { BUILTIN_COPILOT_SKILLS } from "./agent/skills/copilot-skills.js";
+import { assertNoObsoleteSkillResources } from "./skill-resources.js";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
@@ -9,7 +12,7 @@ import { ProjectSkillRepository } from "../db/repositories/project-skill-reposit
 import { SkillRepository } from "../db/repositories/skill-repository.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
 import type { Database } from "../db/types.js";
-import { buildProjectConfigFiles } from "./project-config-files.js";
+import { adapterConfigRoot, buildProjectConfigFiles } from "./project-config-files.js";
 import { syncLocalSkills } from "./local-skills.js";
 
 const aiToolSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
@@ -86,9 +89,27 @@ export async function buildProjectConfigRenderPlan(
 
   const skillRepo = new ProjectSkillRepository(db, userId);
   // A plan must include the same locally discovered Skills as later compliance checks.
-  (options.syncSkills ?? syncLocalSkills)(new SkillRepository(db, userId));
+  const syncResult = (options.syncSkills ?? syncLocalSkills)(new SkillRepository(db, userId));
+  const selectedSkills = skillRepo.listByProject(project.id);
+  const rejected = z.object({staleSkillIds:z.array(z.string())}).safeParse(syncResult);
+  const stale = rejected.success ? selectedSkills.filter(skill=>skill.isEnabled && rejected.data.staleSkillIds.includes(skill.skillId)) : [];
+  if(stale.length) throw new Error(`Skill package refresh rejected; review source files before exporting stale snapshots: ${stale.map(skill=>skill.name).join(", ")}`);
 
   const adapter = adapterForTemplate(template);
+  const skillsDirectory = adapter === "codex" ? ".agents/skills" : `${adapterConfigRoot(adapter)}/skills`;
+  const legacyFiles = BUILTIN_COPILOT_SKILLS.map(skill=>`${skillsDirectory}/${skill.name}/SKILL.md`)
+    .filter(file=>existsSync(safeResolve(project.path,file)));
+  if (legacyFiles.length) {
+    throw new Error(`Possible legacy Copilot playbooks require owner review; no files removed: ${legacyFiles.join(", ")}`);
+  }
+  const templateFiles = buildProjectConfigFiles({
+    adapter,
+    templateFiles: normalizeTemplateFilesForProject(project, adapter, template.files.map((file) => ({
+      id: String(file.id), relativePath: file.filePath, content: file.content
+    }))),
+    skills: selectedSkills
+  });
+  assertNoObsoleteSkillResources(project.path, skillsDirectory, templateFiles);
   return createRenderPlan({
     projectId: project.id,
     targetRoot: project.path,
@@ -98,15 +119,7 @@ export async function buildProjectConfigRenderPlan(
       projectRoot: project.path,
       gatewayUrl: getGatewayUrl()
     },
-    templateFiles: buildProjectConfigFiles({
-      adapter,
-      templateFiles: normalizeTemplateFilesForProject(project, adapter, template.files.map((file) => ({
-        id: String(file.id),
-        relativePath: file.filePath,
-        content: file.content
-      }))),
-      skills: skillRepo.listByProject(project.id)
-    }),
+    templateFiles,
     credentialMode,
     dryRun
   });

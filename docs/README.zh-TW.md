@@ -86,7 +86,7 @@ templates/   內建 AI CLI 設定範本
 - REST API 位於 `/api/v1`；終端機流量使用 `/ws/terminal/:sessionId`。
 - 內嵌 Session Server 是終端機工作階段持久化層（唯一終端後端）。
 - 終端機歷史透過 Session Server 渲染快照恢復，不寫入 SQLite。
-- API Key 只在 Gateway 記憶體中解密（AES-256-GCM），明文不出現在日誌、事件或資料庫中；工作階段以宿主機環境憑據啟動，不注入任何 provider 密鑰。
+- CLI 工作階段以宿主機環境憑據啟動，不注入服務商密鑰。在模型中心執行「套用至 CLI」會明確寫入所選 CLI 的全域設定；平台儲存使用 AES-256-GCM 加密，日誌、事件和資料庫不包含明文密鑰。
 
 ## 環境需求
 

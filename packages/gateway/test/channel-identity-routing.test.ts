@@ -236,20 +236,37 @@ it('upgrades populated main schema, preserves route revocation and restores a pr
   const backupPath=join(directory,'before.db');
   await f.db.backup(backupPath);
   const names = (f.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '__drizzle_migrations'").all() as Array<{ name: string }>).map(row => row.name);
-  const originalColumns = names.map(name => (f.db.prepare(`PRAGMA table_info("${name.replaceAll('"','""')}")`).all() as Array<{name:string}>).map(column => `"${column.name.replaceAll('"','""')}"`).join(','));
-  const rows = (db: Sqlite.Database) => names.map((name,index) => db.prepare(`SELECT ${originalColumns[index]} FROM "${name.replaceAll('"', '""')}"`).all());
-  const before = rows(f.db);
+  const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
+  const tableColumns = (source: Sqlite.Database, table: string) =>
+    (source.prepare(`PRAGMA table_info(${quote(table)})`).all() as Array<{ name: string }>).map((column) => column.name);
+  const originalNames = names.map((name) => tableColumns(f.db, name));
+  const selectRows = (source: Sqlite.Database, columns: string[][]) =>
+    names.map((name, index) => source.prepare(`SELECT ${(columns[index] as string[]).map(quote).join(',')} FROM ${quote(name)}`).all());
+  const before = selectRows(f.db, originalNames);
   let db: Sqlite.Database = f.db;
   try {
     migrate(drizzle(db), { migrationsFolder });
-    assert.deepEqual(rows(db), before, 'all pre-existing table rows must remain unchanged');
+    // A deliberately destructive migration (e.g. 0083 dropping the retired
+    // feishu_refs_json columns) removes columns by decision; the rehearsal
+    // still requires every surviving column's rows to remain byte-identical.
+    const survivingNames = originalNames.map((columns, index) => {
+      const current = new Set(tableColumns(db, names[index] as string));
+      return columns.filter((column) => current.has(column));
+    });
+    const projectRows = (rowSets: unknown[][]) =>
+      rowSets.map((rowSet, index) =>
+        (rowSet as Array<Record<string, unknown>>).map((row) =>
+          Object.fromEntries((survivingNames[index] as string[]).map((column) => [column, row[column]]))
+        )
+      );
+    assert.deepEqual(projectRows(selectRows(db, survivingNames)), projectRows(before), 'all pre-existing table rows must remain unchanged');
     const applied=db.prepare('SELECT * FROM __drizzle_migrations').all();
     migrate(drizzle(db), { migrationsFolder });
     assert.deepEqual(db.prepare('SELECT * FROM __drizzle_migrations').all(),applied,'upgrade must be idempotent');
     cpSync(backupPath,join(directory,'restored.db'));
     const restored=new Sqlite(join(directory,'restored.db'));
     try {
-      assert.deepEqual(rows(restored),before,'restored synthetic backup must preserve every original row');
+      assert.deepEqual(selectRows(restored, originalNames),before,'restored synthetic backup must preserve every original row');
       assert.equal(restored.prepare("SELECT count(*) n FROM sqlite_master WHERE name='channel_identities'").get().n,0);
       assert.deepEqual(restored.prepare('PRAGMA foreign_key_check').all(),[]);
       assert.equal(restored.prepare('PRAGMA integrity_check').get().integrity_check,'ok');

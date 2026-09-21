@@ -1,15 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CalendarClock, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { CalendarClock, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { CopilotSettingsShell } from "./copilot-settings-shell";
 import { useLanguage } from "@/hooks/use-language";
 import {
   acceptAutomationSuggestion,
@@ -94,18 +94,13 @@ export function CopilotAutomationsPage() {
   const suggestionsList = suggestions.data?.suggestions ?? [];
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-4 overflow-y-auto p-4 md:p-6">
-      <div className="flex items-start gap-2">
-        <Button variant="ghost" size="icon" asChild aria-label={t("copilot.settingsBack")}>
-          <Link href="/copilot"><ArrowLeft className="size-4" /></Link>
-        </Button>
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold">{t("copilot.automationsTitle")}</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t("copilot.automationsDescription")}</p>
-        </div>
-      </div>
-
-      {suggestionsList.length > 0 && (
+    <CopilotSettingsShell
+      active="automations"
+      title={t("copilot.automationsTitle")}
+      description={t("copilot.automationsDescription")}
+    >
+      <div className="flex flex-col gap-4">
+        {suggestionsList.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">{t("copilot.automationsSuggestions")}</CardTitle>
@@ -200,7 +195,8 @@ export function CopilotAutomationsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </CopilotSettingsShell>
   );
 }
 

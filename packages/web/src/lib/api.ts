@@ -81,6 +81,10 @@ export type ProjectManagerTaskPacketQueueStatus =
   | "cancelled";
 
 export interface ProjectManagerWorkItem {
+  manualCompletion?: {reason: string; actorId: string; createdAt: number} | null;
+  revision?: number;
+  assigneeId?: string | null;
+  reviewerId?: string | null;
   id: string;
   projectId: string;
   title: string;
@@ -90,7 +94,6 @@ export interface ProjectManagerWorkItem {
   acceptanceCriteria: string[];
   evidenceRefCount: number;
   evidenceRefs: ProjectManagerEvidenceRef[];
-  feishuRefCount: number;
   stageId: string | null;
   createdAt: number;
   updatedAt: number;
@@ -125,7 +128,7 @@ export interface ProjectManagerStarterPack {
   id: string;
   name: string;
   description: string;
-  recommendedAdapter: "claude" | "opencode" | "codex" | "kimi";
+  recommendedAdapter: "claude" | "opencode" | "codex" | "kimi" | "pi";
   promptFrame: string;
   acceptanceChecklist: string[];
   verificationGuidance: string[];
@@ -133,16 +136,20 @@ export interface ProjectManagerStarterPack {
 }
 
 export interface ProjectManagerWorkItemInput {
+  assigneeId?: string | null;
+  reviewerId?: string | null;
   title: string;
   description?: string | null;
   priority?: number;
   acceptanceCriteria?: string[];
   evidenceRefs?: ProjectManagerEvidenceRef[];
-  feishuRefs?: ProjectManagerEvidenceRef[];
   stageId?: string | null;
 }
 
 export interface ProjectManagerWorkItemUpdateInput {
+  expectedRevision?: number;
+  assigneeId?: string | null;
+  reviewerId?: string | null;
   title?: string;
   description?: string | null;
   priority?: number;
@@ -151,6 +158,7 @@ export interface ProjectManagerWorkItemUpdateInput {
 }
 
 export interface ProjectManagerWorkItemStatusInput {
+  expectedRevision?: number;
   status: ProjectManagerWorkItemStatus;
   evidenceRefs?: ProjectManagerEvidenceRef[];
   manualCompletionReason?: string;
@@ -158,6 +166,7 @@ export interface ProjectManagerWorkItemStatusInput {
 
 export interface ProjectManagerBatchStatusInput {
   updates: Array<{
+    expectedRevision?: number;
     workItemId: string;
     status: ProjectManagerWorkItemStatus;
     evidenceRefs?: ProjectManagerEvidenceRef[];
@@ -166,10 +175,12 @@ export interface ProjectManagerBatchStatusInput {
 }
 
 export interface ProjectManagerWorkItemDeleteInput {
+  expectedRevision?: number;
   confirm: true;
 }
 
 export interface ProjectManagerEvidenceInput {
+  expectedRevision?: number;
   evidenceRefs: ProjectManagerEvidenceRef[];
 }
 
@@ -207,7 +218,6 @@ export interface ProjectManagerLedgerEvent {
   eventType: ProjectManagerLedgerEventType;
   status: ProjectManagerWorkItemStatus | null;
   evidenceRefCount: number;
-  feishuRefCount: number;
   trace?: ProjectManagerLedgerTrace;
   createdAt: number;
 }
@@ -446,6 +456,8 @@ export interface LocalDiagnosticsExport {
 }
 
 export interface Skill {
+  /** Null or absent means this entry contains Markdown only. */
+  resourceManifest?: string | null;
   id: string;
   name: string;
   source: string;
@@ -457,6 +469,7 @@ export interface Skill {
 }
 
 export interface SkillDiscovery {
+  rejectedSkills?: { path: string; reason: string }[];
   roots: string[];
   discoveredRoots?: string[];
   discoveredCount: number;
@@ -534,7 +547,7 @@ export interface ProjectSkill {
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi";
+export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi";
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 
 export interface ProviderProfile {
@@ -783,7 +796,7 @@ export interface TokenDailyPoint {
 }
 
 export interface UsageSyncResultItem {
-  adapter: "claude" | "opencode";
+  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi";
   scanned: number;
   inserted: number;
 }
@@ -794,7 +807,7 @@ export interface UsageSyncResult {
 }
 
 export interface AdapterDiscovery {
-  id: "claude" | "opencode" | "codex" | "kimi";
+  id: "claude" | "opencode" | "codex" | "kimi" | "pi";
   label: string;
   command: string;
   supportLevel: "supported" | "prototype";
@@ -943,6 +956,7 @@ export interface ConfigSyncWriteResult extends ConfigWriteResult {
 export type ConfigDecision = "skip" | "overwrite";
 
 export interface DashboardStats {
+  acceptedDeliveries?: number;
   projects: number;
   sessions: number;
   runningSessions: number;
@@ -1096,6 +1110,7 @@ function formatHttpError(res: Response): string {
  * wrong password, not a stale session, and must not trigger a redirect.
  * change-password likewise answers 401 for a wrong current password. */
 const AUTH_CREDENTIAL_PATHS = [
+  "/api/v1/auth/team-invitations/",
   "/api/v1/auth/login",
   "/api/v1/auth/register",
   "/api/v1/auth/logout",
@@ -1151,10 +1166,10 @@ export async function login(email: string, password: string) {
   });
 }
 
-export async function register(email: string, password: string, recoveryKey: string) {
+export async function register(email: string, password: string, recoveryKey: string, inviteCode?: string) {
   return fetchEnvelope<AuthPayload>("/api/v1/auth/register", {
     method: "POST",
-    body: JSON.stringify({ email, password, recoveryKey }),
+    body: JSON.stringify({ email, password, recoveryKey, ...(inviteCode ? {inviteCode}: {}) }),
   });
 }
 
@@ -1716,7 +1731,7 @@ export async function getCliConfigFieldValues(
   return fetchJson(cliConfigPath(adapter, "/field-values")) as Promise<{ values: Record<string, unknown> }>;
 }
 
-// ---- CLI config apply (cc-switch style provider application) ----
+// ---- CLI config apply (provider application to CLI global config) ----
 
 export type ClaudeModelSlot = "opus" | "sonnet" | "haiku" | "fable" | "subagent";
 export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";
@@ -1829,6 +1844,50 @@ export async function setClaudeRoute(enabled: boolean): Promise<ClaudeRouteState
   return routing;
 }
 
+// --- MCP integration (external agents connecting to this Gateway) ---
+
+export interface McpStatus {
+  enabled: boolean;
+  endpoint: string;
+}
+
+export type McpTokenScope = "read" | "operate";
+
+export interface McpToken {
+  id: string;
+  name: string;
+  scopes: McpTokenScope[];
+  createdAt: string;
+  lastUsedAt: string | null;
+  revoked: boolean;
+}
+
+export const mcpStatusKey = ["mcp-status"] as const;
+export const mcpTokensKey = ["mcp-tokens"] as const;
+
+export async function getMcpStatus(): Promise<McpStatus> {
+  return fetchJson<McpStatus>("/api/v1/mcp");
+}
+
+export async function listMcpTokens(): Promise<{ tokens: McpToken[] }> {
+  return fetchJson<{ tokens: McpToken[] }>("/api/v1/mcp/tokens");
+}
+
+export async function createMcpToken(input: {
+  name: string;
+  scopes: McpTokenScope[];
+}): Promise<{ token: McpToken; plaintext: string }> {
+  return fetchJson<{ token: McpToken; plaintext: string }>("/api/v1/mcp/tokens", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function revokeMcpToken(id: string): Promise<{ revoked: boolean }> {
+  return fetchJson<{ revoked: boolean }>(`/api/v1/mcp/tokens/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
 
 export async function getProjectWorkspaceTree(
   id: string,
@@ -2059,6 +2118,46 @@ export async function getProjectGitFileDiff(
     `/api/v1/projects/${encodeURIComponent(id)}/git-diff?${searchParams.toString()}`
   );
   return file;
+}
+
+export interface GitBranchEntry {
+  name: string;
+  isCurrent: boolean;
+}
+
+export interface ProjectGitWorkingTree {
+  clean: boolean;
+  changedCount: number;
+  sample: string[];
+}
+
+export interface ProjectGitBranches {
+  isGitRepo: boolean;
+  current: string | null;
+  branches: GitBranchEntry[];
+  workingTree: ProjectGitWorkingTree;
+}
+
+export async function getProjectGitBranches(id: string): Promise<ProjectGitBranches> {
+  const { git } = await fetchJson<{ git: ProjectGitBranches }>(
+    `/api/v1/projects/${encodeURIComponent(id)}/git-branches`
+  );
+  return git;
+}
+
+export interface ProjectGitCheckoutResult {
+  current: string;
+  created: boolean;
+}
+
+export async function checkoutProjectGitBranch(
+  id: string,
+  input: { branch: string; create?: boolean }
+): Promise<ProjectGitCheckoutResult> {
+  return fetchJson(`/api/v1/projects/${encodeURIComponent(id)}/git-checkout`, {
+    method: "POST",
+    body: JSON.stringify({ branch: input.branch, ...(input.create ? { create: true } : {}) }),
+  }) as Promise<ProjectGitCheckoutResult>;
 }
 
 export async function updateProjectAiConfigFile(
@@ -2364,27 +2463,30 @@ export async function listProjectManagerWorkItemLinks(
 export async function addProjectManagerWorkItemDependency(
   projectId: string,
   workItemId: string,
-  blockerWorkItemId: string
+  blockerWorkItemId: string,
+  expectedRevision?: number
 ): Promise<{ link: ProjectManagerWorkItemLink }> {
   return fetchJson(projectManagerPath(
     projectId,
     `/work-items/${encodeURIComponent(workItemId)}/dependencies`
   ), {
     method: "POST",
-    body: JSON.stringify({ blockerWorkItemId }),
+    body: JSON.stringify({ blockerWorkItemId, expectedRevision }),
   }) as Promise<{ link: ProjectManagerWorkItemLink }>;
 }
 
 export async function removeProjectManagerWorkItemDependency(
   projectId: string,
   workItemId: string,
-  blockerWorkItemId: string
+  blockerWorkItemId: string,
+  expectedRevision?: number
 ): Promise<Record<string, never>> {
   return fetchJson(projectManagerPath(
     projectId,
     `/work-items/${encodeURIComponent(workItemId)}/dependencies/${encodeURIComponent(blockerWorkItemId)}`
   ), {
     method: "DELETE",
+    body: JSON.stringify({expectedRevision}),
   }) as Promise<Record<string, never>>;
 }
 

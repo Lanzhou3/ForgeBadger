@@ -3,6 +3,8 @@ import type { Database } from '../../db/types.js';
 import type { InMemorySessionManager } from '../session-manager.js';
 export interface CommandContext {
     db: Database;
+    actionIntentId?: string;
+    actionOrigin?: import('../../db/repositories/platform-action-repository.js').ActionOrigin;
     authorize?: (() => void) | undefined;
     userId: string;
     sessionManager?: InMemorySessionManager;

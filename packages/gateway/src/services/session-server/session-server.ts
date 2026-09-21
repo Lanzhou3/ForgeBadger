@@ -1,3 +1,6 @@
+import {SessionNotStartedError,ProcessClaims} from './confirmed-stop.js';
+import {randomUUID} from 'node:crypto';
+import {readBirth,groupIsAbsent,confirmHandleStopped,type ProcessBirth} from './confirmed-stop.js';
 /**
  * Core Session Server — manages pty sessions for ForgeBadger.
  *
@@ -38,6 +41,11 @@ export interface AttachResult {
 
 export class SessionServer {
   private readonly sessions = new Map<string, SessionHandle>();
+  private readonly generations=new Map<string,{nonce:string;birth:ProcessBirth|undefined}>();
+  private readonly stopPromises=new Map<string,Promise<boolean>>();
+  private readonly stopReceipts=new Set<string>();
+  private readonly usedGenerations=new Set<string>();
+  private readonly processClaims=new ProcessClaims();
   /** Session IDs with a createSession call in flight (guards the await gap). */
   private readonly pendingCreates = new Set<string>();
   private readonly platformAdapter: PlatformPtyAdapter;
@@ -78,31 +86,38 @@ export class SessionServer {
 
   async createSession(input: {
     sessionId: string;
+    launchNonce?:string|undefined;
     userId: string;
     attachToken: string;
     launchPlan: LaunchPlanPayload;
   }): Promise<SessionHandle> {
     const { sessionId, userId, attachToken, launchPlan } = input;
 
-    // Claim the ID before spawning and keep it reserved until creation settles,
-    // so concurrent requests cannot create the same session twice.
-    if (this.sessions.has(sessionId) || this.pendingCreates.has(sessionId)) {
-      throw new Error(`Session already exists: ${sessionId}`);
-    }
-    this.pendingCreates.add(sessionId);
-
+    const nonce=input.launchNonce??randomUUID(),generation=sessionId+'\0'+nonce;
+    // Used generations never become admissible again, including after receipt eviction.
+    if(this.usedGenerations.has(generation))throw new Error('SESSION_RUNTIME_GENERATION_REUSED');
+    if(this.usedGenerations.size>=10000)throw new SessionNotStartedError(sessionId,nonce);
+    this.usedGenerations.add(generation);
+    let spawned=false,claimed=false;
     try {
-      return await this.spawnSession(sessionId, userId, attachToken, launchPlan);
-    } finally {
-      this.pendingCreates.delete(sessionId);
-    }
+      const existing=this.sessions.get(sessionId);
+      if(existing && (existing.status!=='exited'||!this.removeSession(sessionId)))throw new Error(`Session already exists: ${sessionId}`);
+      if(this.pendingCreates.has(sessionId))throw new Error(`Session already exists: ${sessionId}`);
+      this.pendingCreates.add(sessionId);claimed=true;
+      return await this.spawnSession(sessionId,userId,attachToken,launchPlan,nonce,()=>{spawned=true;});
+    } catch(error) {
+      if(!spawned){this.stopReceipts.add(generation);if(input.launchNonce)throw new SessionNotStartedError(sessionId,nonce);}
+      throw error;
+    } finally {if(claimed)this.pendingCreates.delete(sessionId);}
   }
 
   private async spawnSession(
     sessionId: string,
     userId: string,
     attachToken: string,
-    launchPlan: LaunchPlanPayload
+    launchPlan: LaunchPlanPayload,
+    launchNonce:string,
+    onSpawn:()=>void
   ): Promise<SessionHandle> {
     // Resolve command (Windows shim handling)
     const resolved = this.platformAdapter.resolveCommand(
@@ -121,7 +136,8 @@ export class SessionServer {
       ...buildSanitizedEnv(process.env),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
-      ...launchPlan.env
+      ...launchPlan.env,
+      FORGEBADGER_RUNTIME_NONCE:launchNonce
     };
 
     // Load this native CommonJS module lazily through its own exports. In the
@@ -136,6 +152,7 @@ export class SessionServer {
       env
     });
 
+    onSpawn();
     const handle = new SessionHandle({
       sessionId,
       userId,
@@ -145,6 +162,8 @@ export class SessionServer {
       scrollback: this.scrollback,
       screenFlowControl: this.screenFlowControl
     });
+
+    this.processClaims.register(handle,launchNonce);
 
     // Feed the headless screen and relay to attached clients in one pass.
     pty.onData((data) => {
@@ -164,24 +183,47 @@ export class SessionServer {
       this.onSessionExit?.(sessionId, exitCode);
     });
 
+    const generation:{nonce:string;birth:ProcessBirth|undefined}={nonce:launchNonce,birth:undefined};
+    this.generations.set(sessionId,generation);
     this.sessions.set(sessionId, handle);
+    for(let attempt=0;attempt<8&&handle.status==='running'&&this.processClaims.owns(handle,launchNonce);attempt++){
+      const candidate=readBirth(pty.pid,launchNonce);
+      if(candidate&&candidate.ppid===process.pid&&candidate.pgid===pty.pid){generation.birth=candidate;break;}
+      await new Promise(resolve=>setTimeout(resolve,25));
+    }
     return handle;
   }
 
   async killSession(sessionId: string): Promise<void> {
-    const handle = this.requireSession(sessionId);
-    handle.kill();
-    handle.disposeResources();
-    this.sessions.delete(sessionId);
+    const handle=this.requireSession(sessionId);
+    if(process.platform==='win32'){handle.kill();handle.disposeResources();this.sessions.delete(sessionId);return;}
+    const generation=this.generations.get(sessionId);
+    if(!generation||!await this.confirmedStop(sessionId,generation.nonce,true))throw new Error('SESSION_STOP_UNCONFIRMED');
   }
 
-  /**
-   * Remove a session from the registry without killing the pty (the pty is
-   * expected to be dead already — this is the natural-exit cleanup path).
-   */
-  removeSession(sessionId: string): void {
-    this.sessions.get(sessionId)?.disposeResources();
-    this.sessions.delete(sessionId);
+  async confirmedStop(sessionId:string,nonce:string,signal:boolean):Promise<boolean>{
+    if(process.platform==='win32')return false;
+    const key=sessionId+'\0'+nonce;if(this.stopReceipts.has(key))return true;
+    const handle=this.sessions.get(sessionId),generation=this.generations.get(sessionId);
+    if(!handle||!generation||generation.nonce!==nonce)return false;
+    const existing=this.stopPromises.get(key);if(existing)return existing;
+    const operation=(async()=>{const stopped=await confirmHandleStopped(handle,generation.birth,signal,()=>this.processClaims.owns(handle,nonce));if(stopped)this.retire(sessionId,handle,nonce);return stopped;})();
+    this.stopPromises.set(key,operation);try{return await operation;}finally{this.stopPromises.delete(key);}
+  }
+  private retire(sessionId:string,handle:SessionHandle,nonce:string):void{
+    if(this.sessions.get(sessionId)!==handle)return;
+    this.processClaims.release(handle,nonce);
+    this.stopReceipts.add(sessionId+'\0'+nonce);
+    if(this.stopReceipts.size>10000)this.stopReceipts.delete(this.stopReceipts.values().next().value!);
+    handle.disposeResources();this.sessions.delete(sessionId);this.generations.delete(sessionId);
+  }
+  /** Natural exit is only retirement proof when the original process group is gone. */
+  removeSession(sessionId: string): boolean {
+    const handle=this.sessions.get(sessionId),generation=this.generations.get(sessionId);
+    if(!handle)return true;
+    if(process.platform==='win32'){handle.disposeResources();this.sessions.delete(sessionId);return true;}
+    if(handle.status!=='exited'||!groupIsAbsent(handle.pty.pid)||!generation)return false;
+    this.retire(sessionId,handle,generation.nonce);return true;
   }
 
   listSessions(): SessionInfo[] {

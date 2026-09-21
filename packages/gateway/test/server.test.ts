@@ -20,6 +20,7 @@ const masterKey = "0123456789abcdef0123456789abcdef";
 describe("createServer", () => {
   it("mounts errorHandler after routes", () => {
     const db = new Database(":memory:");
+    migrate(drizzle(db), { migrationsFolder: path.join(path.dirname(fileURLToPath(import.meta.url)), "../src/db/migrations") });
     const app = createServer({
       db,
       jwtSecret,
@@ -134,4 +135,15 @@ describe("Gateway Feishu shutdown ordering", () => {
     assert.deepEqual(order, ["feishu-stop"]);
     assert.equal(db.open, false, "database close remains the final cleanup stage");
   });
+});
+
+describe('delivery shutdown failure',()=>{
+ it('aggregates a delivery stop error after closing ingress and still closes the database',async()=>{
+  const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:path.join(path.dirname(fileURLToPath(import.meta.url)),'../src/db/migrations')});
+  const app=createGatewayApp({sessionServerIpcPath:'/tmp/forgebadger-test-session-server.sock',jwtSecret,masterKey,db,sessionManager:new InMemorySessionManager({} as never),apiKeyStore:new InMemoryApiKeyStore({masterKey})});
+  const original=app.app.locals.stopDelivery as ()=>Promise<void>;
+  app.app.locals.stopDelivery=async()=>{await original();throw new Error('delivery-stop-injected');};
+  await assert.rejects(app.close(),(error:unknown)=>error instanceof AggregateError&&error.errors.some(item=>item instanceof Error&&item.message==='delivery-stop-injected'));
+  assert.equal(db.open,false);
+ });
 });

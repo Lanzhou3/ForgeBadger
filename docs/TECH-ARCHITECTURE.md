@@ -187,7 +187,7 @@ ForgeBadger 保留两个清晰边界：Copilot 负责对话、记忆、只读查
 - `/copilot` 与 `/api/v1/copilot/*` 是唯一助手入口，使用 Gateway 自有 provider、conversation、memory、approval、tool 与 event 服务。
 - Project Manager 的工作项与 Task Packet 继续使用现有 `/api/v1/projects/:projectId/project-manager/*` 路径和 tenant-scoped repository。
 - 新工作项始终以 `todo` 落库；创建 API 只接受省略 `status` 或显式 `todo`，其他状态必须在创建后通过独立 status mutation 按状态机、证据、Ledger 与审计约束变更。
-- Web 创建弹窗不采集或发送初始 evidence/Feishu refs；证据从工作项详情与验收流程追加。Gateway 底层创建契约仍保留 bounded `evidenceRefs` / `feishuRefs` 作为历史数据和受控集成的兼容元数据，不删除对应 DB/DTO 字段，也不使飞书成为 Project Manager 状态权威。
+- Web 创建弹窗不采集或发送初始 evidence refs；证据从工作项详情与验收流程追加。Gateway 底层创建契约仍保留 bounded `evidenceRefs` 作为历史数据和受控集成的兼容元数据，不删除对应 DB/DTO 字段，也不使飞书成为 Project Manager 状态权威。原 `feishuRefs` 协作元数据槽位已退役（migration `0083_drop_pm_feishu_refs`）：列已删除，API、平台工具与 DTO 不再接受或返回该字段。
 - Session Manager 和 Session Server 作为 CLI 生命周期与终端输入的唯一执行边界；浏览器与程序化输入都必须经过会话所有权和 runtime authorization 校验。
 - Portfolio Operations 的页面、API、仓储、worker、scheduler、event、Feishu handler 和 session fence 已退役，不得重新作为兼容层引入。
 - 已应用的 Portfolio migrations 与 schema declarations 仅为迁移连续性和数据安全保留；live runtime 不读取或写入这些表。
@@ -756,9 +756,9 @@ live 代码不再读写。Provider 只保存服务商元数据、模型与加密
 配置文件（claude `~/.claude/settings.json`、codex `~/.codex/config.toml`、
 opencode `opencode.json`、kimi `~/.kimi-code/config.toml`）。
 
-凭据按 cc-switch 方式明文写入 CLI 配置文件：写前对现有配置做 AES-256-GCM 加密
+凭据明文写入 CLI 配置文件：写前对现有配置做 AES-256-GCM 加密
 备份，使用原子 `0600` 写入，失败可 rollback；preview 掩码密钥且不落盘。
-模型选择按 CLI 分别适配（cc-switch 对齐）：claude 支持角色映射
+模型选择按 CLI 分别适配：claude 支持角色映射
 （`modelMapping: {opus, sonnet, haiku, fable?, subagent?}`，未设置的角色回退主模型；
 写入官方别名固定 `ANTHROPIC_DEFAULT_<ROLE>_MODEL` + 显示名 `*_MODEL_NAME`，
 并删除官方已废弃的 `ANTHROPIC_SMALL_FAST_MODEL`）；codex 支持
@@ -1578,3 +1578,254 @@ _毕方 🏗️ | 观全局而建 | 2026-04-24_
 ### Session Server v2 cutover (2026-09-10)
 
 The terminal runtime uses IPC protocol v2 and v2 socket, named-pipe and token names. No v1 discovery, adoption or fallback is supported. Retire old daemon sessions explicitly before cutover; a stopped CLI is never silently recreated. Database/API historical field names do not select a runtime.
+
+### Copilot / CLI knowledge boundary (2026-09-17)
+
+Native Copilot retains its durable Gateway agent, platform commands, exact
+approval/Grant gates and independent Session Server boundary. Procedural knowledge
+is a Copilot Skill (builtin guides were previously called Playbooks); it does not grant executable capability. CLI Skills remain
+adapter/project configuration assets. Migration 0082 adds `skills.runtime_target`
+and `resource_manifest`, changes name uniqueness to `(user_id, runtime_target,
+name)`, and moves known builtin Copilot rows to their own target without deleting
+IDs, user-edited content, enable choices or inert project associations. Repository
+reads and mutations always include the selected target; the default is CLI.
+
+The bundled Playbook catalog declares current versions and required tools. Exact
+unedited v1 builtin bodies/metadata can upgrade to v2 during target-scoped seed;
+modified copies remain preserved and require owner review against currentVersion.
+Grant contexts additionally require byte-equal canonical name/description/body;
+source labels alone are not trusted. Full edited/global content stays outside
+Grant model context. UI, slash listings and tool loads use the same availability
+and review policy. Old tool preference disables migrate conservatively; historical
+run inputs, approvals, action digests and receipts are never renamed. Retired
+pending actions cannot be approved; previously approved retired steps fail closed.
+
+Before rollout, back up the live database using SQLite's consistent backup API.
+Migration/reopen/restore tests use disposable populated databases and do not apply
+the migration to the running service. Rollback requires the matching old source
+and pre-upgrade backup; do not run old code against the migrated state blindly.
+
+Existing project files are not deleted by the database migration. Config planning
+reports possible old Copilot Playbooks by exact adapter-relative path and blocks
+until reviewed. For each reported file, inspect its contents and compute a digest,
+for example `shasum -a 256 -- '<project-relative-path>'` from the project directory.
+Compare against the previously exported file or a known backup, and preserve a
+copy before manually retiring it. A matching name is not proof that the file is
+unmodified or owned by ForgeBadger. User edits must be reconciled explicitly.
+New export manifests include content hashes; obsolete tracked files also block
+planning and remain untouched. Existing unmanaged/renamed copies require operator
+review because neither filename nor database target establishes their ownership.
+
+### Copilot extensions: Skills and Connections (2026-09-18)
+
+`/copilot/extensions` owns two management objects. Skills package procedural
+instructions and text references; Connections provide executable tools. Function
+calling remains the model invocation protocol, not a third installable object.
+Builtin ForgeBadger tools execute in process through the existing platform command
+and approval paths. The outward `/mcp` endpoint still exposes only platform tools;
+it does not proxy installed external servers.
+
+Skills use standard YAML-frontmatter `SKILL.md` plus a bounded UTF-8 file bundle.
+Paste, file upload and public HTTPS raw Markdown imports create disabled packages.
+Unsupported scripts, hooks, CLI tool permissions and subagents are visible as
+incompatible; installing them never creates an execution environment. Only enabled,
+compatible, dependency-satisfied metadata enters model context; full instructions
+and resources load on demand. Disabled loader tools suppress the corresponding
+catalog instructions. Resource reads bind Skill ID, current revision and safe path.
+CLI Skills retain their separate runtime target and configuration export.
+
+Migration 0085 adds immutable tenant-scoped package revisions and current heads.
+Existing guides are captured lazily without changing IDs, edits, enable choices or
+historical call digests. Edit and rollback append revisions with compare-and-swap;
+rollback never overwrites history. Builtin provenance is immutable and imported
+names cannot impersonate it. Grant-bound context accepts only exact canonical
+single-file builtin content, never imported or edited global instructions.
+
+Migration 0084 stores tenant-scoped Connections, encrypted bearer credentials,
+revisioned discovery catalogs and explicit tool selections. This iteration supports
+public HTTPS Streamable HTTP only. Stdio process launching, local/private servers,
+OAuth enrollment and Skill script execution require separate runtime designs.
+Outbound requests validate all resolved addresses and pin the socket to those
+addresses while retaining original-host TLS verification. Redirects are rejected;
+requests, response bytes, tool counts and schema complexity are bounded.
+
+Discovery saves atomically; changed tool definitions lose their selections.
+Tool names include the connection revision, so changed credentials/endpoints or
+catalogs invalidate old approval targets. Every external call requires an exact
+owner approval; platform Grants and scheduled/reactive turns cannot authorize it.
+The actual send rechecks active user, lease, approval, revision and tool selection.
+Timeout, disconnection or MCP error after attempting a write yields an indeterminate
+receipt and is never automatically replayed. Discovery annotations do not confer
+read-only trust. Credentials remain write-only and are redacted from tool output.
+
+Rollback after activation requires the matching pre-upgrade source and a consistent
+SQLite backup. Isolated migration/reopen/restore checks do not activate the live
+Gateway or migrate its database.
+
+
+### Copilot runtime request correctness
+
+The Gateway keeps its durable run/step ledger and approval fence as the execution
+boundary. Anthropic Messages and OpenAI-compatible Chat Completions request SSE,
+with validated bounded JSON fallback for compatible providers. A tool batch is
+published only after valid completion; cancellation, malformed/truncated output
+and unsuccessful finish reasons cannot become a completed run. Incremental text
+is provisional. Provider finish reason and token usage are optional result metadata,
+not a new billing or persisted usage contract.
+
+Official MiniMax HTTPS endpoints (`api.minimaxi.com`, `api.minimax.cn`,
+`api.minimax.io`) may complete an SSE body without `[DONE]`. Only these exact
+request hostnames allow clean EOF after a validated successful `finish_reason`;
+the entire stream and tool batch must still validate before tools are published.
+Reader errors, incomplete frames and unsuccessful reasons remain failures.
+Other OpenAI-compatible endpoints continue to require `[DONE]`.
+
+Context assembly budgets the serialized application representation of messages and
+tools plus 8,192 reserved characters within 96,000 characters. Skills, selected
+project and memory are included. This is a character bound, not a model-specific
+token-window guarantee. Both providers also reject the actual serialized JSON
+body above 96,000 characters before transport, covering envelope and escaping
+overhead that projection estimates cannot guarantee. Summary requests and failure fallback remain bounded;
+the newest user goal and correlated tool argument JSON are never silently cut.
+Oversized immutable context fails explicitly. Compacted receipts carry a scoped
+readback handle; only persisted redacted evidence can be retrieved. Memory recall
+interleaves bounded session, project and global candidates to avoid scope starvation.
+
+Migration 0086 adds nullable request identity/digest columns and a partial unique
+index to `copilot_runs`. Admission normalizes the effective conversation Grant,
+rechecks scope, and resolves duplicate keys before the busy check in one immediate
+transaction. Existing unkeyed runs remain valid. The Web retains one identity and
+its selected project for uncertain retries; selecting a project affects context,
+not authority. Backup/restore and reopen validation use disposable databases;
+production activation requires its own authorized migration and restart.
+
+## Trusted-host personal and small-team delivery
+
+[ADR 0002](adr/0002-personal-team-delivery.md) records the collaboration boundary.
+The Gateway `/api/v1/collaboration` facade checks the actual actor's project role,
+then uses owner-scoped shared repositories. Migration `0087_personal_team_delivery`
+adds memberships/epochs, task metadata, delivery runs, immutable verification/review
+evidence, events and durable operation fences. Existing Project Manager tasks remain
+the task source of truth; edits through either interface invalidate delivery evidence.
+The Development tasks module uses this facade while execution sessions stay private
+to their executor. See [API contract](API.md#personal-and-small-team-collaboration)
+and [workflow guide](PERSONAL-TEAM-WORKFLOWS.md).
+
+`services/collaboration` separates task authority, delivery lifecycle, Git worktree
+operations and historical evidence. Each durable run owns a `codex/task-<runId>` branch,
+a managed worktree and an actor-owned backing project/session. Canonical path and
+membership guards also protect legacy import/session/terminal entrypoints. Review
+and integration share session lifecycle locking and persistent operation fences;
+final merge authorization freezes the matching task/policy/role inputs. Integration
+is explicit fast-forward-only and restart reconciliation checks actual Git effects.
+
+The verification configuration API, verification action and independent command
+supervisor have been retired. `delivery-evidence.ts` retains historical receipt-based
+review/integration gates. `legacy-verification-recovery.ts` only reads old private
+identity/exit state and authenticates cancellation of an already-running supervisor;
+it cannot spawn a program. Uncertain process state keeps execution fenced without
+trusting stored numeric PIDs. Applied migrations and historical tables are retained.
+Builds remove retired executor artifacts and npm package verification rejects them.
+
+CLI backup uses SQLite online backup plus a versioned hash/schema/count manifest and
+restricted instance configuration needed to decrypt saved secrets. Restore validates
+integrity, foreign keys, compatible migrations and ciphertext, stages into a fresh
+state directory, rotates JWT secrets and invalidates opaque browser sessions. It does
+not back up repositories/worktrees, host CLI logins or live terminal/runtime state.
+No backup or migration activates the user's running installation by itself.
+
+
+### Controlled Copilot development runtime (2026-09-20)
+
+Copilot generates an immutable patch recipe, not autonomous CLI input. The Gateway
+copies only explicit approved source files into a private workspace, verifies the
+snapshot and runs fixed Node built-in test commands under macOS Seatbelt. Other
+platforms and unsupported Node versions fail closed. The initial backend requires
+Node >=22.8; Node permission flags alone are not a malicious-code sandbox.
+
+The OS policy allows approved workspace reads, a separate writable scratch area,
+minimal Node/dynamic-loader runtime reads and no network or child process fork.
+Source/tests are read-only; no host environment credentials, user home, Gateway
+state, dependencies, shell or shared writable links are inherited. Original UTF-8
+bytes (including BOM) remain hash-bound. The source project is never modified.
+The total test deadline is 60 seconds, output is capped at 64 KiB per check, and
+V8 heap is configured at 128 MiB. These are not hard process RSS or scratch disk
+quotas. A trusted supervisor owns the deadline and kills children on Gateway pipe
+EOF; Gateway also cleans up the private process group if the helper dies.
+
+Migration 0088 adds tenant-scoped development tasks, explicit action provenance
+and a transactional event outbox after the preserved personal/team 0087. They persist recipe,
+source/output hashes, exact owner intent origin, execution lease and finite test
+receipts. Origin is explicitly `owner_api`, `copilot` or historical `legacy`;
+missing Copilot provenance cannot become owner API authority. Queued work rechecks
+confirmed receipt identity, user status, tool switch, approval expiry, origin and
+source revision. Checks and periodic heartbeat recheck authority; cancellation or
+revocation aborts the child and cannot publish successful evidence.
+
+Database claim/fencing serializes the host across tenants. Running work with an
+expired lease becomes indeterminate and is never replayed or auto-released. A
+storage failure aborts workers, keeps the durable uncertainty, and is caught at
+both queue and worker boundaries rather than crashing the Gateway. Task changes
+and outbox records commit together; delivery retries use the same event ID. Events
+refresh task state without triggering a new model turn or incurring model cost.
+At most 100 task records per owner are retained in this initial implementation;
+there is no automatic cleanup or indeterminate-task reconciliation API yet.
+
+Acceptance requires explicit owner approval of the evidence digest, all approved
+checks successful in order, and unchanged source, output and workspace hashes.
+It records acceptance only: there is no automatic merge, source write, PM completion,
+CLI dispatch or broad-language dependency environment. Imported Skills and external
+connections keep their existing immutable revision and exact approval boundaries.
+
+Optional tool discovery reduces the provider schema set, with HMAC-bound durable
+read receipts scoped to user/run/step. The full authorized tool set remains the
+source for execution, Skills and evidence readback. Current switches and authority
+are reapplied on every round. Discovery defaults off; no read concurrency, PTC,
+cloud execution or multi-agent backend was adopted without measured benefit.
+Local fixture quality/recovery evidence and schema-size measurements do not prove
+real-model quality, token cost, arbitrary-language support or cross-platform safety.
+
+### Team administration and stable storage tenancy
+
+Migration 0089 follows the independent Copilot migration 0088 and extends
+[ADR 0002](adr/0002-personal-team-delivery.md) with explicit team authority.
+`team-repository.ts` and `team-authority.ts` are the bounded cross-tenant authority
+lookups; ordinary business repositories retain their storage `user_id` filtering.
+`team_projects.logical_owner_id` is the current steward, while
+`project_user_id` and the original project/session/task/delivery records keep their
+storage tenant. Disabling a former storage owner therefore does not disable a
+properly handed-over team project. Enrollment is explicit and checks canonical
+source/alias execution both before asynchronous liveness checks and again in its
+final transaction. Legacy private route and terminal authorization cannot bypass
+the resulting source protection.
+
+Team owner/admin/member and project developer/reviewer/viewer are separate role
+sets. API capability arrays are authoritative; administration does not confer
+private execution or review permission. User status generations, team membership
+and project grant revisions, and logical ownership revisions bind worktree runs.
+Reviewer generations bind acceptance records; every enrolled team project requires
+an independent reviewer. Interrupted integration can reconcile through an active
+effective team manager when its logical steward is disabled, with explicit system
+recovery attribution. Database integration fences prevent
+concurrent changes to these inputs after a merge starts and retain uncertainty
+until reconciliation can prove the outcome.
+
+`services/teams/invitations.ts` stores one-time, email-bound token digests and
+issuer membership revisions. Account creation and acceptance share one transaction
+after password hashing. Issuer disable permanently revokes pending invitations.
+A separate remote invited-registration capability preserves ordinary local
+bootstrap/recovery restrictions. `auth/credential-epoch.ts` revokes legacy JWTs
+as well as opaque sessions after password reset; HTTP, events and terminal sockets
+share the fresh credential check. Reset closes authenticated access without
+terminating independent Session Server processes.
+
+`services/teams/service.ts` persists offboarding preview digests, actor-bound
+confirmation and stopping plans before revocation becomes effective. It stops known
+processes, conservatively holds unresolved Git/runtime leases, then atomically
+hands over logical ownership and current task assignments. Historical attribution
+and storage IDs are unchanged. A replacement administrator can discover/resume
+plans or explicitly repair failed recipients while revoked membership remains
+revoked; plan revisions prevent an older in-flight drain applying obsolete handoffs.
+The delivery recovery sweep resumes these durable operations without replaying
+verification, CLI prompts or uncertain Git merges. See [API contracts](API.md#team-administration-and-invitation-contracts)
+and [operator workflows](PERSONAL-TEAM-WORKFLOWS.md) for request fields and states.

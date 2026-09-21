@@ -9,6 +9,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CopilotManagementPanel } from "./CopilotManagementPanel";
+import { LanguageProvider } from "@/hooks/use-language";
 import * as api from "@/lib/platform-actions-api";
 vi.mock("@/lib/platform-actions-api", () => ({
   listGrants: vi.fn(),
@@ -66,20 +67,26 @@ const grant = {
 };
 function mount(onStart = vi.fn().mockResolvedValue(undefined)) {
   render(
-    <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: {
-            queries: { retry: false },
-            mutations: { retry: false },
-          },
-        })
-      }
-    >
-      <CopilotManagementPanel boundGrantId="g1" onStartConversation={onStart} />
-    </QueryClientProvider>,
+    <LanguageProvider>
+      <QueryClientProvider
+        client={
+          new QueryClient({
+            defaultOptions: {
+              queries: { retry: false },
+              mutations: { retry: false },
+            },
+          })
+        }
+      >
+        <CopilotManagementPanel boundGrantId="g1" onStartConversation={onStart} />
+      </QueryClientProvider>
+    </LanguageProvider>,
   );
   return onStart;
+}
+async function openCreateDialog() {
+  fireEvent.click(screen.getByRole("button", { name: "新建授权" }));
+  await screen.findByLabelText("项目一");
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -125,7 +132,7 @@ it("disables revoked and expired grants", async () => {
 });
 it("creates all-operations grants by selecting projects and clicking the button",async()=>{
  vi.mocked(api.getProjectOverview).mockResolvedValue({observedAt:Date.now(),projects:[project,{...project,id:"p2",name:"Second project"}]});
- vi.mocked(api.createGrant).mockResolvedValue({grant});mount();await screen.findByLabelText("项目一");
+ vi.mocked(api.createGrant).mockResolvedValue({grant});mount();await openCreateDialog();
  fireEvent.click(screen.getByLabelText("项目一"));fireEvent.click(screen.getByLabelText("Second project"));
  fireEvent.click(screen.getByRole("button",{name:"创建授权"}));
  await waitFor(()=>expect(api.createGrant).toHaveBeenCalledWith({name:"项目一、Second project授权",projectIds:["p1","p2"],allOperations:true,expiresAt:null,maxActions:null,maxConcurrency:1}));
@@ -160,7 +167,7 @@ it("surfaces loading errors with retry controls", async () => {
   expect(await screen.findByText("授权加载失败")).toBeTruthy();
 });
 it('can opt back into finite grant limits',async()=>{
- vi.mocked(api.createGrant).mockResolvedValue({grant});mount();await screen.findByLabelText('项目一');
+ vi.mocked(api.createGrant).mockResolvedValue({grant});mount();await openCreateDialog();
  fireEvent.change(screen.getByLabelText('授权名称（可选）'),{target:{value:'finite'}});
  fireEvent.click(screen.getByLabelText('项目一'));
  fireEvent.click(screen.getByLabelText('长期有效，直到撤销'));fireEvent.click(screen.getByLabelText('不限制累计操作次数'));
@@ -174,19 +181,19 @@ it('shows perpetual grants as usable and retains revocation',async()=>{
  expect(screen.getByText(/操作次数 2\/不限/)).toBeTruthy();
 });
 it('explains missing project selection next to the submit button',async()=>{
- mount();await screen.findByLabelText('项目一');fireEvent.click(screen.getByRole('button',{name:'创建授权'}));
+ mount();await openCreateDialog();fireEvent.click(screen.getByRole('button',{name:'创建授权'}));
  expect(await screen.findByRole('alert')).toHaveProperty('textContent','请至少选择一个项目。');expect(api.createGrant).not.toHaveBeenCalled();
 });
 it('shows API failure and allows a successful retry without clearing project selection',async()=>{
- vi.mocked(api.createGrant).mockRejectedValueOnce(new Error('服务不可用')).mockResolvedValueOnce({grant});mount();await screen.findByLabelText('项目一');fireEvent.click(screen.getByLabelText('项目一'));fireEvent.click(screen.getByRole('button',{name:'创建授权'}));
+ vi.mocked(api.createGrant).mockRejectedValueOnce(new Error('服务不可用')).mockResolvedValueOnce({grant});mount();await openCreateDialog();fireEvent.click(screen.getByLabelText('项目一'));fireEvent.click(screen.getByRole('button',{name:'创建授权'}));
  expect(await screen.findByRole('alert')).toHaveProperty('textContent','服务不可用');fireEvent.click(screen.getByRole('button',{name:'创建授权'}));await screen.findByRole('status');expect(api.createGrant).toHaveBeenCalledTimes(2);
 });
 it('prevents repeated submissions while awaiting creation',async()=>{
- let finish!:(value:{grant:typeof grant})=>void;vi.mocked(api.createGrant).mockImplementation(()=>new Promise(r=>finish=r));mount();await screen.findByLabelText('项目一');fireEvent.click(screen.getByLabelText('项目一'));
+ let finish!:(value:{grant:typeof grant})=>void;vi.mocked(api.createGrant).mockImplementation(()=>new Promise(r=>finish=r));mount();await openCreateDialog();fireEvent.click(screen.getByLabelText('项目一'));
  const form=screen.getByRole('button',{name:'创建授权'}).closest('form')!;fireEvent.submit(form);fireEvent.submit(form);expect(api.createGrant).toHaveBeenCalledTimes(1);finish({grant});await screen.findByRole('status');
 });
 it('explains missing custom creation root instead of silently relying on native required validation',async()=>{
- vi.mocked(api.listGrants).mockResolvedValue({grants:[],capabilities:[{id:'project.create',capability:'project.create',effect:'external'}]});mount();await screen.findByLabelText('项目一');fireEvent.click(screen.getByLabelText('项目一'));fireEvent.click(screen.getByLabelText('允许所有当前可授权操作'));fireEvent.click(screen.getByLabelText('创建项目'));fireEvent.click(screen.getByRole('button',{name:'创建授权'}));expect(await screen.findByRole('alert')).toHaveProperty('textContent','请填写允许创建项目的目录，或切换为默认的所有操作。');expect(api.createGrant).not.toHaveBeenCalled();
+ vi.mocked(api.listGrants).mockResolvedValue({grants:[],capabilities:[{id:'project.create',capability:'project.create',effect:'external'}]});mount();await openCreateDialog();fireEvent.click(screen.getByLabelText('项目一'));fireEvent.click(screen.getByLabelText('允许所有当前可授权操作'));fireEvent.click(screen.getByLabelText('创建项目'));fireEvent.click(screen.getByRole('button',{name:'创建授权'}));expect(await screen.findByRole('alert')).toHaveProperty('textContent','请填写允许创建项目的目录，或切换为默认的所有操作。');expect(api.createGrant).not.toHaveBeenCalled();
 });
 
 it("hides revoked grants and deletes them with retry feedback", async () => {

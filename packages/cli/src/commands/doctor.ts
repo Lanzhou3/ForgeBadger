@@ -1,6 +1,8 @@
 import {
   checkCliDependencies,
+  collectEnvironmentInfo,
   type CliCommandRunner,
+  type CliEnvironmentInfo,
   type NodePtyLoader
 } from "../runtime/dependency-check.js";
 import {
@@ -17,6 +19,7 @@ interface OutputWriter {
 export interface DoctorOptions {
   dependencyRunner?: CliCommandRunner;
   loadNodePty?: NodePtyLoader;
+  collectEnvironment?: () => CliEnvironmentInfo;
   loadConfig?: () => Promise<RuntimeConfig>;
   inspectConfig?: (options: LoadRuntimeConfigOptions) => Promise<RuntimeConfigInspection>;
   stateDir?: string;
@@ -29,9 +32,15 @@ export interface DoctorOptions {
 export async function runDoctor(options: DoctorOptions = {}): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
+  const environment = (options.collectEnvironment ?? collectEnvironmentInfo)();
   const inspection = await resolveDoctorRuntimeInspection(options);
   const dependencies = await checkCliDependencies(options.dependencyRunner, options.loadNodePty);
   const requiredMissing = dependencies.filter((item) => item.required && !item.available);
+
+  stdout.write(`Environment: ${environment.platform} ${environment.arch}, Node ${environment.nodeVersion}\n`);
+  for (const note of environment.notes) {
+    stdout.write(`note: ${note}\n`);
+  }
 
   const initialization = inspection.initialized ? "" : " (not initialized)";
   stdout.write(`ForgeBadger state: ${inspection.stateDir}${initialization}\n`);
@@ -45,6 +54,19 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<number> {
     const version = item.version ? ` ${item.version}` : "";
     const error = item.error ? ` - ${item.error}` : "";
     stdout.write(`${marker} ${item.name}${version}${error}\n`);
+    if (!item.available && item.installHint) {
+      stdout.write(`  install: ${item.installHint}\n`);
+    }
+  }
+
+  const availableAiClis = dependencies.filter((item) => item.group === "ai-cli" && item.available);
+  if (availableAiClis.length === 0) {
+    stdout.write("No supported AI CLI found on PATH; install at least one to create sessions:\n");
+    for (const item of dependencies) {
+      if (item.group === "ai-cli" && item.installHint) {
+        stdout.write(`  ${item.name}: ${item.installHint}\n`);
+      }
+    }
   }
 
   if (requiredMissing.length > 0) {

@@ -1,0 +1,9 @@
+{
+  "blender": "5.2.1 LTS",
+  "mesh_objects": 74,
+  "triangles": 97164,
+  "glb_bytes": 1961632,
+  "animation_clips": 0,
+  "front_axis_blender": "-Y",
+  "note": "Procedural micro-fur bump is Blender-only; GLB contains base PBR materials."
+}

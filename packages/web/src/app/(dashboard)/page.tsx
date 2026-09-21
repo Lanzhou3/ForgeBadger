@@ -128,10 +128,12 @@ export default function DashboardPage() {
     modelsError: dashboardQuery.isError,
     projectCount,
     sessionCount,
+    acceptedDeliveries: dashboardStats?.acceptedDeliveries ?? 0,
     firstProjectId: firstProject?.id,
   });
   const showFirstRunReadiness = !activationReadiness.complete;
-  const doneStepCount = activationReadiness.steps.filter((step) => step.done).length;
+  const requiredSteps = activationReadiness.steps.filter((step) => !step.optional);
+  const doneStepCount = requiredSteps.filter((step) => step.done).length;
 
   const statusItems = [
     {
@@ -241,12 +243,12 @@ export default function DashboardPage() {
                   <div
                     className="h-full rounded-full bg-brand transition-all duration-500"
                     style={{
-                      width: `${Math.round((doneStepCount / activationReadiness.steps.length) * 100)}%`,
+                      width: `${Math.round((doneStepCount / requiredSteps.length) * 100)}%`,
                     }}
                   />
                 </div>
                 <span className="tabular-nums">
-                  {doneStepCount}/{activationReadiness.steps.length}
+                  {doneStepCount}/{requiredSteps.length}
                 </span>
               </div>
             </div>
@@ -264,7 +266,7 @@ export default function DashboardPage() {
                     <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground/40" />
                   )}
                   <div className="min-w-0">
-                    <div className="text-sm font-medium">{t(step.labelKey)}</div>
+                    <div className="text-sm font-medium">{t(step.labelKey)}{step.optional && <span className="ml-2 text-xs font-normal text-muted-foreground">{t("dashboard.activationOptional")}</span>}</div>
                     <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
                       {t(step.detailKey)}
                     </p>

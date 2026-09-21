@@ -8,6 +8,7 @@ import {
   sessionTabGroupColor,
   sessionToTab,
   setSessionTabPrompt,
+  splitSessionTabsByVisibility,
   upsertSessionTab
 } from "./session-tabs";
 
@@ -55,6 +56,143 @@ describe("session tabs", () => {
     storage.setItem("forgebadger.sessionTabs.v1", "{");
 
     expect(readSessionTabs(storage)).toEqual([]);
+  });
+
+  it("keeps the most recent tabs when storage holds more than the cap", () => {
+    const storage = new MemoryStorage();
+    const tabs = Array.from({ length: 10 }, (_, index) => ({
+      id: `s${index + 1}`,
+      label: `S${index + 1}`,
+      updatedAt: index + 1
+    }));
+    // Seed directly so storage can exceed the cap (the write path caps at 8).
+    storage.setItem("forgebadger.sessionTabs.v1", JSON.stringify(tabs));
+
+    const ids = readSessionTabs(storage).map((tab) => tab.id);
+    expect(ids).toEqual(["s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10"]);
+  });
+
+  it("keeps every running tab even when it exceeds the old cap", () => {
+    const storage = new MemoryStorage();
+    const tabs = Array.from({ length: 12 }, (_, index) => ({
+      id: `r${index + 1}`,
+      label: `R${index + 1}`,
+      status: "running",
+      updatedAt: index + 1
+    }));
+    storage.setItem("forgebadger.sessionTabs.v1", JSON.stringify(tabs));
+
+    expect(readSessionTabs(storage)).toHaveLength(12);
+  });
+
+  it("caps only the stopped tabs and preserves the original order", () => {
+    const storage = new MemoryStorage();
+    const tabs = [
+      { id: "r1", label: "R1", status: "running", updatedAt: 1 },
+      { id: "r2", label: "R2", status: "running", updatedAt: 2 },
+      { id: "i1", label: "I1", status: "stopped", updatedAt: 11 },
+      { id: "i2", label: "I2", status: "stopped", updatedAt: 12 },
+      { id: "i3", label: "I3", status: "stopped", updatedAt: 13 },
+      { id: "i4", label: "I4", status: "stopped", updatedAt: 14 },
+      { id: "i5", label: "I5", status: "stopped", updatedAt: 15 },
+      { id: "i6", label: "I6", status: "stopped", updatedAt: 16 },
+      { id: "i7", label: "I7", status: "stopped", updatedAt: 17 },
+      { id: "i8", label: "I8", status: "stopped", updatedAt: 18 },
+      { id: "i9", label: "I9", status: "stopped", updatedAt: 19 },
+      { id: "i10", label: "I10", status: "stopped", updatedAt: 20 }
+    ];
+    storage.setItem("forgebadger.sessionTabs.v1", JSON.stringify(tabs));
+
+    // Both running tabs survive; only the two oldest stopped tabs are dropped.
+    expect(readSessionTabs(storage).map((tab) => tab.id)).toEqual([
+      "r1",
+      "r2",
+      "i3",
+      "i4",
+      "i5",
+      "i6",
+      "i7",
+      "i8",
+      "i9",
+      "i10"
+    ]);
+  });
+
+  describe("splitSessionTabsByVisibility", () => {
+    it("returns nothing visible and nothing hidden for empty input", () => {
+      const { visibleIds, hiddenTabs } = splitSessionTabsByVisibility([], "x");
+
+      expect(visibleIds.size).toBe(0);
+      expect(hiddenTabs).toEqual([]);
+    });
+
+    it("shows all tabs inline when within the limit", () => {
+      const tabs = [
+        { id: "a", label: "A", updatedAt: 1 },
+        { id: "b", label: "B", updatedAt: 2 },
+      ];
+      const { visibleIds, hiddenTabs } = splitSessionTabsByVisibility(tabs, "a", 2);
+
+      expect([...visibleIds].sort()).toEqual(["a", "b"]);
+      expect(hiddenTabs).toEqual([]);
+    });
+
+    it("folds the trailing tabs past the limit into hidden, in display order", () => {
+      const tabs = [
+        { id: "a", label: "A", updatedAt: 1 },
+        { id: "b", label: "B", updatedAt: 2 },
+        { id: "c", label: "C", updatedAt: 3 },
+        { id: "d", label: "D", updatedAt: 4 },
+      ];
+      const { visibleIds, hiddenTabs } = splitSessionTabsByVisibility(tabs, "a", 2);
+
+      expect([...visibleIds].sort()).toEqual(["a", "b"]);
+      expect(hiddenTabs.map((tab) => tab.id)).toEqual(["c", "d"]);
+    });
+
+    it("does not exceed the limit when the active tab is within it", () => {
+      const tabs = [
+        { id: "a", label: "A", updatedAt: 1 },
+        { id: "b", label: "B", updatedAt: 2 },
+        { id: "c", label: "C", updatedAt: 3 },
+      ];
+      // Active b is within the limit, so it occupies a slot rather than being
+      // free — the strip never shows maxVisible + 1.
+      const { visibleIds, hiddenTabs } = splitSessionTabsByVisibility(tabs, "b", 2);
+
+      expect([...visibleIds].sort()).toEqual(["a", "b"]);
+      expect(hiddenTabs.map((tab) => tab.id)).toEqual(["c"]);
+    });
+
+    it("keeps the active tab inline even when it sits past the limit", () => {
+      const tabs = [
+        { id: "a", label: "A", updatedAt: 1 },
+        { id: "b", label: "B", updatedAt: 2 },
+        { id: "c", label: "C", updatedAt: 3 },
+        { id: "d", label: "D", updatedAt: 4 },
+      ];
+      const { visibleIds, hiddenTabs } = splitSessionTabsByVisibility(tabs, "d", 2);
+
+      // d is the 4th tab but is active, so it stays inline; a, b fill the budget.
+      expect(visibleIds.has("d")).toBe(true);
+      expect([...visibleIds].sort()).toEqual(["a", "b", "d"]);
+      expect(hiddenTabs.map((tab) => tab.id)).toEqual(["c"]);
+    });
+
+    it("folds in grouped display order (project interleaving preserved)", () => {
+      const tabs = [
+        { id: "a", label: "A", projectName: "P1", updatedAt: 1 },
+        { id: "b", label: "B", projectName: "P2", updatedAt: 2 },
+        { id: "c", label: "C", projectName: "P1", updatedAt: 3 },
+        { id: "d", label: "D", projectName: "P2", updatedAt: 4 },
+        { id: "e", label: "E", projectName: "P3", updatedAt: 5 },
+      ];
+      const { visibleIds, hiddenTabs } = splitSessionTabsByVisibility(tabs, "a", 3);
+
+      // Display order is a, c (P1) then b, d (P2) then e (P3); first 3 inline.
+      expect([...visibleIds].sort()).toEqual(["a", "b", "c"]);
+      expect(hiddenTabs.map((tab) => tab.id)).toEqual(["d", "e"]);
+    });
   });
 
   it("prunes deleted sessions", () => {

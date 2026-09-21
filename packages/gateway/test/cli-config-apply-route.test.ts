@@ -175,4 +175,34 @@ describe("cli-config apply-provider route", () => {
     const details = applied.json.details as { code?: string } | undefined;
     assert.equal(details?.code, "CLI_CONFIG_APPLY_FIELD_UNSUPPORTED");
   });
+
+  it("applies a PI provider over HTTP, writes both files, and records the pointer", async () => {
+    const piRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-apply-route-pi-"));
+    process.env.PI_CODING_AGENT_DIR = piRoot;
+    const repo = new ModelProviderRepository(db, userIdFromToken(), masterKey);
+    const provider = repo.createProviderProfile({
+      name: "Pi Relay",
+      providerKey: "pi-relay",
+      baseUrl: "https://api.example.com/v1",
+      authType: "api_key",
+      apiFormat: "openai-compatible",
+      supportedAdapters: ["pi"]
+    });
+    repo.createModelProfile({ providerProfileId: provider.id, name: "Default Model", modelId: "pi-model-1", isDefault: true });
+    repo.createCredential({ providerProfileId: provider.id, plaintextSecret: "sk-pi-route" });
+
+    const applied = await post("/api/v1/cli-config/pi/apply-provider", { providerProfileId: provider.id });
+    assert.equal(applied.status, 200, JSON.stringify(applied.json));
+
+    const models = JSON.parse(await readFile(path.join(piRoot, "models.json"), "utf8")) as {
+      providers: Record<string, { api: string; apiKey: string; models: Array<{ id: string }> }>;
+    };
+    assert.equal(models.providers["pi-relay"]?.api, "openai-completions");
+    assert.equal(models.providers["pi-relay"]?.apiKey, "sk-pi-route");
+    assert.equal(models.providers["pi-relay"]?.models[0]?.id, "pi-model-1");
+    const settings = JSON.parse(await readFile(path.join(piRoot, "settings.json"), "utf8")) as Record<string, string>;
+    assert.equal(settings.defaultProvider, "pi-relay");
+    assert.equal(settings.defaultModel, "pi-model-1");
+    assert.equal(new CliConfigAppliedProviderRepository(db, userIdFromToken()).get("pi")?.providerProfileId, provider.id);
+  });
 });

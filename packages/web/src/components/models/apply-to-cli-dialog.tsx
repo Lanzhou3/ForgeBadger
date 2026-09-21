@@ -200,6 +200,10 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
   const previewFiles = preview?.files ?? [];
   // Machine-readable route marker; the localized banner above carries the UX.
   const warnings = (preview?.warnings ?? []).filter((warning) => warning !== "OPENAI_PROTOCOL_REQUIRES_ROUTE");
+  // PI apply writes every active model of the provider into models.json; the
+  // single selection only pins the startup default (settings.json), so the
+  // label must not read as "the only model that will be applied".
+  const modelLabel = adapter === "pi" ? t("models.applyToCliDefaultModel") : t("projects.model");
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!applyMutation.isPending) onOpenChange(next); }}>
@@ -223,10 +227,10 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
           </div>
           {adapter !== "opencode" && (
             <div className="space-y-2">
-              <Label htmlFor="apply-cli-model">{t("projects.model")}</Label>
+              <Label htmlFor="apply-cli-model">{modelLabel}</Label>
               <select
                 id="apply-cli-model"
-                aria-label={t("projects.model")}
+                aria-label={modelLabel}
                 className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                 value={modelProfileId}
                 onChange={(event) => setModelProfileId(event.target.value)}
@@ -234,6 +238,9 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
                 {activeModels.length === 0 ? <option value="">{t("models.noModelsAvailable")}</option> : null}
                 {activeModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
               </select>
+              {adapter === "pi" && (
+                <p className="text-xs text-muted-foreground">{t("models.applyToCliPiHint")}</p>
+              )}
             </div>
           )}
           <div className="space-y-2">

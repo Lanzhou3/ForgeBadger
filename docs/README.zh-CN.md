@@ -86,7 +86,7 @@ templates/   内置 AI CLI 配置模板
 - REST API 位于 `/api/v1`；终端流量使用 `/ws/terminal/:sessionId`。
 - 内嵌 Session Server 是终端会话持久化层（唯一终端后端）。
 - 终端历史通过 Session Server 渲染快照恢复，不写入 SQLite。
-- API Key 只在 Gateway 内存中解密（AES-256-GCM），明文不出现在日志、事件或数据库中；会话以宿主机环境凭据启动，不注入任何 provider 密钥。
+- CLI 会话以宿主机环境凭据启动，不注入服务商密钥。在模型中心执行“应用到 CLI”会明确写入所选 CLI 的全局配置；平台存储使用 AES-256-GCM 加密，日志、事件和数据库不包含明文密钥。
 
 ## 环境要求
 

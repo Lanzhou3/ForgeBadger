@@ -1,3 +1,4 @@
+import { readSkillResourceManifest } from "./skill-resources.js";
 import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -13,6 +14,7 @@ export interface DiscoveredLocalSkill {
   version: string;
   path: string;
   root: string;
+  resourceManifest: string;
 }
 
 export interface DiscoverLocalSkillsOptions {
@@ -20,6 +22,7 @@ export interface DiscoverLocalSkillsOptions {
   cwd?: string | undefined;
   env?: NodeJS.ProcessEnv | undefined;
   maxFiles?: number | undefined;
+  onRejected?: ((path: string, reason: string) => void) | undefined;
 }
 
 export interface LocalSkillSyncResult {
@@ -30,6 +33,8 @@ export interface LocalSkillSyncResult {
   updatedCount: number;
   deletedCount: number;
   skippedCount: number;
+  rejectedSkills: Array<{path:string;reason:string}>;
+  staleSkillIds: string[];
 }
 
 const maxSkillBytes = 128 * 1024;
@@ -47,16 +52,26 @@ export function discoverLocalSkills(options: DiscoverLocalSkillsOptions = {}): D
     for (const filePath of findSkillFiles(root, maxFiles - discovered.length)) {
       if (discovered.length >= maxFiles) break;
       const realPath = safeRealpath(filePath);
-      if (!realPath || seenPaths.has(realPath)) continue;
+      if (!realPath || seenPaths.has(realPath) || !insideRoot(realPath,realRoot)) continue;
       seenPaths.add(realPath);
 
-      const skill = readSkillFile(realPath);
-      if (!skill || seenNames.has(skill.name)) continue;
+      let skill: ReturnType<typeof readSkillFile>;
+      let resourceManifest: string;
+      try {
+        skill = readSkillFile(realPath);
+        if (!skill) throw new Error("Invalid SKILL.md: expected nonempty UTF-8 text up to 128 KiB");
+        if (seenNames.has(skill.name)) continue;
+        resourceManifest = readSkillResourceManifest(realPath);
+      } catch (error) {
+        options.onRejected?.(realPath,error instanceof Error ? error.message : "Unsupported Skill package");
+        continue;
+      }
       seenNames.add(skill.name);
       discovered.push({
         ...skill,
         path: realPath,
-        root: realRoot
+        root: realRoot,
+        resourceManifest
       });
     }
   }
@@ -65,11 +80,14 @@ export function discoverLocalSkills(options: DiscoverLocalSkillsOptions = {}): D
 }
 
 export function syncLocalSkills(
-  repo: Pick<SkillRepository, "create" | "getByName" | "update">,
+  repo: Pick<SkillRepository, "create" | "getByName" | "update"> & Partial<Pick<SkillRepository, "listOwnedBySource">>,
   options: DiscoverLocalSkillsOptions = {}
 ): LocalSkillSyncResult {
   const roots = options.roots ?? defaultLocalSkillRoots(options.cwd ?? process.cwd(), options.env ?? process.env);
-  const discovered = discoverLocalSkills({ ...options, roots });
+  const rejectedSkills: Array<{path:string;reason:string}> = [];
+  const discovered = discoverLocalSkills({ ...options, roots, onRejected: (path,reason) => {
+    rejectedSkills.push({path,reason});options.onRejected?.(path,reason);
+  } });
   const result: LocalSkillSyncResult = {
     roots,
     discoveredRoots: uniqueRoots(discovered.map((skill) => skill.root)),
@@ -77,8 +95,23 @@ export function syncLocalSkills(
     createdCount: 0,
     updatedCount: 0,
     deletedCount: 0,
-    skippedCount: 0
+    skippedCount: 0,
+    rejectedSkills,
+    staleSkillIds: []
   };
+
+  for (const rejected of rejectedSkills) {
+    let name: string | undefined;
+    try { name = readSkillFile(rejected.path)?.name; } catch { /* Preserve last snapshot, mark via provenance below. */ }
+    const existing = name ? repo.getByName(name) : undefined;
+    if(existing?.source === "local") result.staleSkillIds.push(existing.id);
+    for(const owned of repo.listOwnedBySource?.("local") ?? []) {
+      try {
+        const manifest = JSON.parse(owned.resourceManifest ?? "null") as {sourcePath?:string} | null;
+        if(manifest?.sourcePath === rejected.path) result.staleSkillIds.push(owned.id);
+      } catch { /* Malformed stored manifests are rejected by the export boundary. */ }
+    }
+  }
 
   for (const skill of discovered) {
     const existing = repo.getByName(skill.name);
@@ -99,7 +132,8 @@ export function syncLocalSkills(
       description: skill.description,
       source: skill.source,
       content: skill.content,
-      version: skill.version
+      version: skill.version,
+      resourceManifest: skill.resourceManifest
     });
     result.updatedCount += 1;
   }
@@ -136,7 +170,8 @@ function skillChanged(existing: Skill, incoming: CreateSkillInput): boolean {
     existing.description !== (incoming.description ?? null) ||
     existing.source !== (incoming.source ?? "local") ||
     existing.content !== incoming.content ||
-    existing.version !== (incoming.version ?? "1.0.0")
+    existing.version !== (incoming.version ?? "1.0.0") ||
+    existing.resourceManifest !== (incoming.resourceManifest ?? null)
   );
 }
 
@@ -147,25 +182,25 @@ function findSkillFiles(root: string, limit: number): string[] {
   if (!stats?.isDirectory()) return [];
 
   const files: string[] = [];
-  walk(resolvedRoot, 0, files, limit, new Set<string>());
+  walk(resolvedRoot, 0, files, limit, new Set<string>(), resolvedRoot);
   return files;
 }
 
-function walk(current: string, depth: number, files: string[], limit: number, visitedDirs: Set<string>): void {
+function walk(current: string, depth: number, files: string[], limit: number, visitedDirs: Set<string>, approvedRoot: string): void {
   if (files.length >= limit || depth > maxSkillDepth) return;
   const realCurrent = safeRealpath(current);
-  if (!realCurrent || visitedDirs.has(realCurrent)) return;
+  if (!realCurrent || visitedDirs.has(realCurrent) || !insideRoot(realCurrent, approvedRoot)) return;
   visitedDirs.add(realCurrent);
 
   for (const entry of safeReadDir(current)) {
     if (files.length >= limit) break;
     const fullPath = path.join(current, entry.name);
     const realPath = safeRealpath(fullPath);
-    if (!realPath) continue;
+    if (!realPath || !insideRoot(realPath, approvedRoot)) continue;
     const stats = safeStat(realPath);
 
     if (stats?.isDirectory()) {
-      walk(realPath, depth + 1, files, limit, visitedDirs);
+      walk(realPath, depth + 1, files, limit, visitedDirs, approvedRoot);
       continue;
     }
 
@@ -181,13 +216,16 @@ function isSkillMarkdownFile(fileName: string): boolean {
   return false;
 }
 
-function readSkillFile(filePath: string): Omit<DiscoveredLocalSkill, "path" | "root"> | undefined {
+function readSkillFile(filePath: string): Omit<DiscoveredLocalSkill, "path" | "root" | "resourceManifest"> | undefined {
   const stats = safeStat(filePath);
   if (!stats?.isFile() || stats.size <= 0 || stats.size > maxSkillBytes) {
     return undefined;
   }
 
-  const content = readFileSync(filePath, "utf8");
+  const bytes = readFileSync(filePath);
+  if (bytes.length > maxSkillBytes) throw new Error("SKILL.md exceeds size limit");
+  const content = new TextDecoder("utf-8", {fatal:true}).decode(bytes);
+  if (content.includes("\0")) throw new Error("SKILL.md contains binary data");
   const frontmatter = parseFrontmatter(content);
   const fallbackName = path.basename(filePath) === "SKILL.md"
     ? path.basename(path.dirname(filePath))
@@ -268,4 +306,8 @@ function safeReadDir(value: string) {
   } catch {
     return [];
   }
+}
+
+function insideRoot(file: string, root: string): boolean {
+  return file === root || file.startsWith(root + path.sep);
 }

@@ -5,11 +5,14 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import http from "node:http";
 import path from "node:path";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { beforeEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { signJwt } from "../src/auth/jwt.js";
 import { TokenUsageRepository } from "../src/db/repositories/token-usage-repository.js";
+import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createUsageRoutes } from "../src/routes/usage.js";
 import type { TokenUsageRecord } from "../src/services/usage/usage-source.js";
@@ -33,16 +36,40 @@ describe("usage token routes", () => {
   let db: Database.Database;
   let token: string;
   let userId: string;
+  let root: string;
+  let projectA: string;
+  let projectB: string;
+  const sourceEnv = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "KIMI_CODE_HOME", "OPENCODE_DB"] as const;
+  let previousEnv: Array<string | undefined>;
 
   beforeEach(() => {
     db = createTestDb();
+    root = realpathSync(mkdtempSync(path.join(tmpdir(), "fb-usage-routes-")));
+    projectA = path.join(root, "a");
+    projectB = path.join(root, "b");
+    mkdirSync(projectA);
+    mkdirSync(projectB);
+    previousEnv = sourceEnv.map((key) => process.env[key]);
+    for (const key of sourceEnv) process.env[key] = path.join(root, key);
     const user = new UserRepository(db).create("usage-routes@example.com", "hash");
     userId = user.id;
+    for (const root of [projectA, projectB]) new ProjectRepository(db, userId).create({ name: "Fixture", path: root, aiTool: "claude" });
     token = signJwt({ userId: user.id, email: user.email }, secret);
     app = express();
     app.locals.jwtSecret = secret;
+    app.locals.db = db;
     app.use(express.json());
-    app.use("/api/v1/usage", createUsageRoutes(db));
+    app.use("/api/v1/usage", createUsageRoutes(db, secret));
+  });
+
+  afterEach(() => {
+    sourceEnv.forEach((key, index) => {
+      const previous = previousEnv[index];
+      if (previous === undefined) delete process.env[key];
+      else process.env[key] = previous;
+    });
+    db.close();
+    rmSync(root, { recursive: true, force: true });
   });
 
   const seed = (records: TokenUsageRecord[]): void => {
@@ -52,7 +79,7 @@ describe("usage token routes", () => {
   const fake = (overrides: Partial<TokenUsageRecord>): TokenUsageRecord => ({
     adapter: "claude",
     sessionId: "s1",
-    projectPath: "/tmp/p",
+    projectPath: projectA,
     modelId: "m1",
     requestId: "r1",
     occurredAt: new Date("2026-08-01T10:00:00.000Z"),
@@ -67,8 +94,8 @@ describe("usage token routes", () => {
 
   it("returns token summary aggregates", async () => {
     seed([
-      fake({ requestId: "r1", projectPath: "/tmp/a" }),
-      fake({ requestId: "r2", projectPath: "/tmp/b", inputTokens: 500, outputTokens: 50 })
+      fake({ requestId: "r1", projectPath: projectA }),
+      fake({ requestId: "r2", projectPath: projectB, inputTokens: 500, outputTokens: 50 })
     ]);
     const res = await makeRequest(app, "GET", "/api/v1/usage/token-summary", undefined, headers(token));
     assert.equal(res.status, 200);
@@ -99,25 +126,44 @@ describe("usage token routes", () => {
 
   it("returns project activity daily series", async () => {
     seed([
-      fake({ requestId: "r1", projectPath: "/tmp/a", occurredAt: new Date("2026-08-01T10:00:00.000Z") }),
-      fake({ requestId: "r2", projectPath: "/tmp/a", occurredAt: new Date("2026-08-01T14:00:00.000Z") }),
-      fake({ requestId: "r3", projectPath: "/tmp/b", occurredAt: new Date("2026-08-02T10:00:00.000Z") })
+      fake({ requestId: "r1", projectPath: projectA, occurredAt: new Date("2026-08-01T10:00:00.000Z") }),
+      fake({ requestId: "r2", projectPath: projectA, occurredAt: new Date("2026-08-01T14:00:00.000Z") }),
+      fake({ requestId: "r3", projectPath: projectB, occurredAt: new Date("2026-08-02T10:00:00.000Z") })
     ]);
     const res = await makeRequest(app, "GET", "/api/v1/usage/project-activity", undefined, headers(token));
     assert.equal(res.status, 200);
     assert.equal(res.body.code, 0);
     assert.equal(res.body.data.series.length, 2);
-    const a = res.body.data.series.find((row: { group: string }) => row.group === "/tmp/a");
+    const a = res.body.data.series.find((row: { group: string }) => row.group === projectA);
     assert.equal(a?.day, "2026-08-01");
     assert.equal(a?.totalTokens, 2 * (1000 + 200 + 300));
   });
 
+  it("never exposes polluted project paths or aggregates to another authenticated account", async () => {
+    const other = new UserRepository(db).create("other@fixture.test", "hash");
+    new TokenUsageRepository(db, other.id).upsertRecords([fake({})]);
+    const otherToken = signJwt({ userId: other.id, email: other.email }, secret);
+    for (const endpoint of ["token-summary", "project-activity"]) {
+      const result = await makeRequest(app, "GET", `/api/v1/usage/${endpoint}`, undefined, headers(otherToken));
+      assert.equal(result.status, 200);
+      assert.ok(!JSON.stringify(result.body).includes(projectA));
+      if (endpoint === "token-summary") assert.equal(result.body.data.summary.requestCount, 0);
+      else assert.deepEqual(result.body.data.series, []);
+    }
+  });
+
   it("sync endpoint persists scanned records", async () => {
+    const transcriptRoot = path.join(process.env.CLAUDE_CONFIG_DIR!, "projects", "encoded-ambiguous");
+    mkdirSync(transcriptRoot, { recursive: true });
+    writeFileSync(path.join(transcriptRoot, "fixture.jsonl"), JSON.stringify({
+      type: "assistant", cwd: projectA, timestamp: "2026-09-19T00:00:00Z",
+      message: { id: "fixture-request", model: "fixture", usage: { input_tokens: 20, output_tokens: 10 } }
+    }) + "\n");
     const res = await makeRequest(app, "POST", "/api/v1/usage/sync", undefined, headers(token));
     assert.equal(res.status, 200);
     assert.equal(res.body.code, 0);
-    // On an empty machine there is nothing to scan; the endpoint should still
-    // return a well-formed result rather than error.
+    assert.equal(res.body.data.result.totalInserted, 1);
+    assert.equal(new TokenUsageRepository(db, userId).getSummary().requestCount, 1);
     assert.ok(Array.isArray(res.body.data.result.byAdapter));
     assert.equal(typeof res.body.data.result.totalInserted, "number");
   });

@@ -11,6 +11,8 @@ import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { AccountSecuritySettings } from "@/components/settings/AccountSecuritySettings";
 import { ClaudeRouteSettings } from "@/components/settings/ClaudeRouteSettings";
+import { McpIntegrationSettings } from "@/components/settings/McpIntegrationSettings";
+import { PetSettings } from "@/components/settings/PetSettings";
 import {
   Card,
   CardContent,
@@ -211,6 +213,8 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
+          <PetSettings />
+
           <Card className="forgebadger-animate-in" style={{ animationDelay: "80ms" }}>
             <SettingsCardHeader
               icon={<Settings2 className="size-4" />}
@@ -368,6 +372,10 @@ export default function SettingsPage() {
 
           <div className="forgebadger-animate-in" style={{ animationDelay: "180ms" }}>
             <ClaudeRouteSettings />
+          </div>
+
+          <div className="forgebadger-animate-in" style={{ animationDelay: "200ms" }}>
+            <McpIntegrationSettings />
           </div>
         </div>
 

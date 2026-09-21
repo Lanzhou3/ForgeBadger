@@ -1,4 +1,5 @@
 "use client";
+import { useTaskAuthority } from "./TaskAuthority";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -104,6 +105,8 @@ export function ProjectManagerPipelineBoard({
   taskPackets: ProjectManagerTaskPacket[];
   workItems: ProjectManagerWorkItem[];
 }) {
+  const { canEdit, canManage, legacySessions } = useTaskAuthority();
+
   const queryClient = useQueryClient();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState({ name: "", description: "" });
@@ -192,7 +195,7 @@ export function ProjectManagerPipelineBoard({
   });
   const moveWorkItemMutation = useMutation({
     mutationFn: ({ stageId, workItemId }: { stageId: string | null; workItemId: string }) =>
-      updateProjectManagerWorkItem(projectId, workItemId, { stageId }),
+      updateProjectManagerWorkItem(projectId, workItemId, { stageId, expectedRevision: workItems.find(item => item.id === workItemId)?.revision }),
     onSuccess: async (_data, variables) => {
       setActionError(null);
       flashLaneHighlight(variables.stageId ?? BACKLOG_LANE_KEY);
@@ -219,9 +222,10 @@ export function ProjectManagerPipelineBoard({
     return { blockedBy, blocking };
   }, [links]);
 
-  const stagePending = createMutation.isPending || seedMutation.isPending || reorderMutation.isPending;
+  const stagePending = !(canManage ?? canEdit) || createMutation.isPending || seedMutation.isPending || reorderMutation.isPending;
 
   const moveStage = (stage: ProjectManagerStage, direction: -1 | 1) => {
+    if (!(canManage ?? canEdit)) return;
     const ids = stages.map((entry) => entry.id);
     const index = ids.indexOf(stage.id);
     const target = index + direction;
@@ -259,6 +263,7 @@ export function ProjectManagerPipelineBoard({
   };
 
   const moveWorkItem = (item: ProjectManagerWorkItem, stageId: string | null) => {
+    if (!canEdit) return;
     setActionError(null);
     moveWorkItemMutation.mutate({ stageId, workItemId: item.id });
   };
@@ -360,7 +365,7 @@ export function ProjectManagerPipelineBoard({
                 dependencyCounts={dependencyCounts}
                 highlighted={highlightedLaneKey === BACKLOG_LANE_KEY || dragOverLaneKey === BACKLOG_LANE_KEY}
                 items={workItems.filter((item) => item.stageId === null)}
-                movePending={moveWorkItemMutation.isPending}
+                movePending={!canEdit || moveWorkItemMutation.isPending}
                 onMoveWorkItem={moveWorkItem}
                 onViewDetails={onViewDetails}
                 sessionByWorkItemId={sessionByWorkItemId}
@@ -375,8 +380,9 @@ export function ProjectManagerPipelineBoard({
                     dependencyCounts={dependencyCounts}
                     highlighted={highlightedLaneKey === stage.id || dragOverLaneKey === stage.id}
                     items={workItems.filter((item) => item.stageId === stage.id)}
-                    movePending={moveWorkItemMutation.isPending}
+                    movePending={!canEdit || moveWorkItemMutation.isPending}
                     onDelete={() => {
+                      if (!(canManage ?? canEdit)) return;
                       setDeleteError(null);
                       setDeletingStage(stage);
                     }}
@@ -384,6 +390,7 @@ export function ProjectManagerPipelineBoard({
                     onMoveBack={index < stages.length - 1 ? () => moveStage(stage, 1) : undefined}
                     onMoveWorkItem={moveWorkItem}
                     onRename={() => {
+                      if (!(canManage ?? canEdit)) return;
                       setRenameError(null);
                       setRenameDraft(stage.name);
                       setRenamingStage(stage);
@@ -519,6 +526,7 @@ function ProjectManagerStageLane({
   t: Translate;
   title: string;
 }) {
+  const {canManage, canEdit} = useTaskAuthority();
   const laneKey = stage ? stage.id : BACKLOG_LANE_KEY;
   const { setNodeRef: setLaneDroppableRef } = useDroppable({ id: laneDroppableId(laneKey) });
 
@@ -546,7 +554,7 @@ function ProjectManagerStageLane({
         {stage && (onRename || onDelete) && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button size="xs" variant="ghost" aria-label={title}>
+              <Button disabled={!(canManage ?? canEdit)} size="xs" variant="ghost" aria-label={title}>
                 <MoreHorizontal className="size-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -809,11 +817,13 @@ export function ProjectManagerStageSelect({
   stages: ProjectManagerStage[];
   t: Translate;
 }) {
+  const { canEdit, legacySessions } = useTaskAuthority();
+
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: (stageId: string | null) =>
-      updateProjectManagerWorkItem(projectId, item.id, { stageId }),
+      updateProjectManagerWorkItem(projectId, item.id, { stageId, expectedRevision: item.revision }),
     onSuccess: async () => {
       setError(null);
       await queryClient.invalidateQueries({ queryKey: ["project-manager", projectId] });
@@ -828,7 +838,7 @@ export function ProjectManagerStageSelect({
         aria-label={t("projects.projectManagerStageAssign")}
         className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
         value={item.stageId ?? ""}
-        disabled={mutation.isPending}
+        disabled={!canEdit || mutation.isPending}
         onChange={(event) => mutation.mutate(event.target.value || null)}
       >
         <option value="">{t("projects.projectManagerStageBacklog")}</option>

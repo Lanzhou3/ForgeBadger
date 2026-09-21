@@ -22,9 +22,12 @@ import {
   type CopilotMessage,
 } from "@/lib/copilot-api";
 import { cn } from "@/lib/utils";
+import { LAST_COPILOT_CONVERSATION_KEY, readLastCopilotConversation, writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
 
 const AUTO_TITLE_MAX_CHARS = 24;
-export const ROBOT_CONVERSATION_STORAGE_KEY = "forgebadger.copilot.robot-conversation";
+// Shared with the full /copilot console — keep the same storage key so both
+// surfaces resume the conversation the user last worked in.
+export const ROBOT_CONVERSATION_STORAGE_KEY = LAST_COPILOT_CONVERSATION_KEY;
 
 interface RobotChatPanelProps {
   onClose: () => void;
@@ -33,7 +36,7 @@ interface RobotChatPanelProps {
 }
 
 /**
- * Floating quick-chat panel anchored above the pixel robot (Linear/v0-style
+ * Floating quick-chat panel anchored above the robot (Linear/v0-style
  * side assistant). Desktop: a 380x520 card pinned to the bottom-right corner;
  * small screens: a near-fullscreen bottom sheet. Conversations are created
  * lazily on the first message (no empty-conversation litter) and the active
@@ -71,9 +74,12 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
   }, []);
 
   // Restore the previous conversation on mount; a stale id (deleted on the
-  // server) is dropped so the panel falls back to a fresh draft.
+  // server) is dropped so the panel falls back to a fresh draft. Runs that
+  // finished while the panel was hidden (expanded to the console, tab
+  // switched, …) are covered by useCopilotRun's focus/online/reconnect
+  // reconciliation, which reloads the durable messages via onSettled.
   useEffect(() => {
-    const stored = window.localStorage.getItem(ROBOT_CONVERSATION_STORAGE_KEY);
+    const stored = readLastCopilotConversation();
     if (!stored) return;
     setRestoring(true);
     setConversationId(stored);
@@ -82,7 +88,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
         if (conversationIdRef.current === stored) setMessages(next);
       })
       .catch(() => {
-        window.localStorage.removeItem(ROBOT_CONVERSATION_STORAGE_KEY);
+        writeLastCopilotConversation(null);
         if (conversationIdRef.current === stored) {
           setConversationId(null);
           setMessages([]);
@@ -124,7 +130,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
         const { conversation } = await createConversation();
         id = conversation.id;
         setConversationId(id);
-        window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, id);
+        writeLastCopilotConversation(id);
         await renameConversation(id, text.slice(0, AUTO_TITLE_MAX_CHARS)).catch(() => undefined);
       }
       await startRun(id, text);
@@ -143,7 +149,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
     setMessages([]);
     setLoadError(null);
     setSendError(false);
-    window.localStorage.removeItem(ROBOT_CONVERSATION_STORAGE_KEY);
+    writeLastCopilotConversation(null);
   }, [clearActive]);
 
   const stopRun = useCallback(async () => {
@@ -194,7 +200,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
       role="dialog"
       aria-label={t("nav.copilot")}
       data-testid="robot-chat-panel"
-      className="fixed inset-x-2 bottom-2 top-14 z-40 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl shadow-black/40 md:inset-x-auto md:bottom-24 md:right-4 md:top-auto md:h-[520px] md:w-[380px]"
+      className="fixed inset-x-2 bottom-2 top-14 z-40 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl shadow-black/40 md:inset-x-auto md:bottom-32 md:right-4 md:top-auto md:h-[520px] md:w-[380px]"
     >
       <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3">
         <div className="flex min-w-0 items-center gap-2">

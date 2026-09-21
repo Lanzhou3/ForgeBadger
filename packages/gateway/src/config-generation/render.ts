@@ -12,7 +12,7 @@ export function createRenderPlan(input: CreateRenderPlanInput): RenderPlan {
     credentialMode: input.credentialMode,
     dryRun: input.dryRun,
     files: input.templateFiles.map((file) => {
-      const content = renderTemplate(file.content, input.variables);
+      const content = file.renderVariables === false ? file.content : renderTemplate(file.content, input.variables);
       const generatedFile = {
         relativePath: file.relativePath,
         content,

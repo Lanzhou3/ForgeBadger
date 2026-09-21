@@ -1,3 +1,4 @@
+import {SessionNotStartedError} from './confirmed-stop.js';
 /**
  * IPC Server — listens on a Unix Domain Socket / Named Pipe and dispatches
  * messages to the Session Server.
@@ -347,7 +348,8 @@ export class IpcServer {
       type: "hello_ok",
       protocolVersion: PROTOCOL_VERSION,
       pid: process.pid,
-      startedAt: this.startedAt
+      startedAt: this.startedAt,
+      capabilities:{confirmed_stop_v1:process.platform!=='win32'}
     });
     return true;
   }
@@ -402,6 +404,12 @@ export class IpcServer {
     switch (msg.type) {
       case "create_session":
         return this.handleCreateSession(msg);
+      case "confirmed_stop_session":
+      case "confirmed_stop_status": {
+        if(msg.expectedDaemon.pid!==process.pid||msg.expectedDaemon.startedAt!==this.startedAt)throw new Error('SESSION_SERVER_GENERATION_CHANGED');
+        const stopped=await this.sessionServer.confirmedStop(msg.sessionId,msg.launchNonce,msg.type==='confirmed_stop_session');
+        return {id:msg.id,type:'ok',data:stopped?{runtimeName:msg.sessionId,launchNonce:msg.launchNonce,daemon:{pid:process.pid,startedAt:this.startedAt},stopped:true}:null};
+      }
       case "kill_session":
         return this.handleKillSession(msg);
       case "list_sessions":
@@ -446,12 +454,19 @@ export class IpcServer {
   // ------------------------------------------------------------------
 
   private async handleCreateSession(msg: import("./ipc-protocol.js").CreateSessionRequest): Promise<ManagementResponse> {
+    if(msg.launchNonce&&(!msg.expectedDaemon||msg.expectedDaemon.pid!==process.pid||msg.expectedDaemon.startedAt!==this.startedAt||process.platform==='win32'))throw new Error('SESSION_SERVER_UPGRADE_REQUIRED');
+    try {
     await this.sessionServer.createSession({
+      ...(msg.launchNonce?{launchNonce:msg.launchNonce}:{}),
       sessionId: msg.sessionId,
       userId: msg.userId,
       attachToken: msg.attachToken,
       launchPlan: msg.launchPlan
     });
+    }catch(error){
+      if(msg.launchNonce&&error instanceof SessionNotStartedError&&error.runtimeName===msg.sessionId&&error.launchNonce===msg.launchNonce)return {id:msg.id,type:'error',message:'SESSION_CREATE_NOT_STARTED',notStarted:{runtimeName:msg.sessionId,launchNonce:msg.launchNonce,daemon:{pid:process.pid,startedAt:this.startedAt},stopped:true}};
+      throw error;
+    }
     return { id: msg.id, type: "ok" };
   }
 

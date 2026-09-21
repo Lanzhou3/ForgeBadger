@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { ArrowDown, ArrowUp, Bot, MessageSquare, PanelLeft, Square } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -18,8 +19,10 @@ import {
   indexToolResults,
 } from "@/components/copilot/copilot-message-primitives";
 import { CopilotSettings } from "@/components/copilot/copilot-settings";
-import { CopilotManagementPanel } from "@/components/copilot/CopilotManagementPanel";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
+import { listProjects, type Project } from "@/lib/api";
+import { writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
+import { listGrants, type CopilotGrant } from "@/lib/platform-actions-api";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
 import {
@@ -46,7 +49,7 @@ const AUTO_TITLE_MAX_CHARS = 24;
  * dedicated /copilot/settings page.
  */
 export function CopilotChat() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const searchParams = useSearchParams();
   // Deep link: /copilot?c=<conversationId> (e.g. "expand to full console" from
   // the robot chat panel) selects that conversation.
@@ -55,6 +58,10 @@ export function CopilotChat() {
   const [conversations, setConversations] = useState<CopilotConversation[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState("");
+  const [projectError, setProjectError] = useState(false);
+  const [grants, setGrants] = useState<CopilotGrant[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -65,16 +72,22 @@ export function CopilotChat() {
   const [editDraft, setEditDraft] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
-  const [managementOpen, setManagementOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarSheetOpen, setSidebarSheetOpen] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const lastSentRef = useRef<string>("");
+  const lastSentRef = useRef<{ conversationId: string; text: string; projectId?: string; clientRequestId: string } | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   conversationIdRef.current = conversationId;
   const requestedConversationRef = useRef<string | null>(null);
   requestedConversationRef.current = requestedConversationId;
+  // Out-of-order guard: a slow listMessages for one conversation must never
+  // overwrite the stream the user has since switched to.
+  const messageSerialRef = useRef(0);
+  // The ?c= deep link is consumed once: after it has been applied — or the
+  // user has picked a conversation manually — it must stop fighting the
+  // sidebar for the selection.
+  const deepLinkPendingRef = useRef(Boolean(requestedConversationId));
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -96,14 +109,24 @@ export function CopilotChat() {
   const selectConversation = useCallback(async (id: string) => {
     conversationIdRef.current = id;
     setConversationId(id);
+    // Shared with the floating robot panel so the next panel open resumes
+    // the conversation the user was last working in here.
+    writeLastCopilotConversation(id);
     setLoadError(null);
     setSendError(false);
+    setProjectId("");
+    lastSentRef.current = null;
+    // A user-initiated switch retires any pending deep link, so the URL can
+    // no longer pull the selection back.
+    deepLinkPendingRef.current = false;
+    const serial = ++messageSerialRef.current;
+    setMessages([]);
     try {
       const { messages: next } = await listMessages(id);
-      if (conversationIdRef.current === id) setMessages(next);
+      if (serial === messageSerialRef.current && conversationIdRef.current === id) setMessages(next);
       setPinnedToBottom(true);
     } catch {
-      setLoadError(t("copilot.loadError"));
+      if (serial === messageSerialRef.current) setLoadError(t("copilot.loadError"));
     }
   }, [t]);
 
@@ -111,23 +134,46 @@ export function CopilotChat() {
     void refreshConversations();
   }, [refreshConversations]);
 
+  const activeGrantId = conversations.find(item => item.id === conversationId)?.grantId;
+  useEffect(() => {
+    let cancelled = false;
+    setProjectError(false);
+    void Promise.all([listProjects(), activeGrantId ? listGrants() : Promise.resolve({ grants: [] })])
+      .then(([result, authority]) => {
+        if (cancelled) return;
+        setProjects(result.projects);
+        setGrants(authority.grants);
+      }).catch(() => { if (!cancelled) { setProjects([]); setGrants([]); setProjectError(true); } });
+    return () => { cancelled = true; };
+  }, [activeGrantId]);
+  const selectableProjects = activeGrantId
+    ? projects.filter(project => grants.find(grant => grant.id === activeGrantId && grant.status === "active")?.scope.projectIds.includes(project.id))
+    : projects;
+
   // Deep-link follow-up: same-page client navigation (robot panel "expand"
   // while already on /copilot) does not remount this component, so react to
   // search-param changes explicitly. If the id is not in the loaded list it
   // may simply be stale (e.g. the panel just created it server-side), so
-  // refresh the list once per requested id before giving up.
-  const deepLinkRetriedRef = useRef<string | null>(null);
+  // refresh the list once before giving up.
   useEffect(() => {
-    if (!requestedConversationId || requestedConversationId === conversationId) return;
-    if (conversations.some((item) => item.id === requestedConversationId)) {
-      void selectConversation(requestedConversationId);
+    if (!deepLinkPendingRef.current || !requestedConversationId) return;
+    if (requestedConversationId === conversationId) {
+      deepLinkPendingRef.current = false;
       return;
     }
-    if (deepLinkRetriedRef.current !== requestedConversationId) {
-      deepLinkRetriedRef.current = requestedConversationId;
-      void refreshConversations();
+    if (conversations.length === 0) return;
+    if (!conversations.some((item) => item.id === requestedConversationId)) {
+      const fallback = conversations[0];
+      if (!fallback) return;
+      // The deep-linked conversation is unknown (or was just deleted); fall
+      // back to the newest one and stop following the stale link.
+      void selectConversation(fallback.id);
+      deepLinkPendingRef.current = false;
+      return;
     }
-  }, [requestedConversationId, conversations, conversationId, selectConversation, refreshConversations]);
+    void selectConversation(requestedConversationId);
+    deepLinkPendingRef.current = false;
+  }, [requestedConversationId, conversations, conversationId, selectConversation]);
 
   // Refresh the conversation list when the reactive loop opens a fresh
   // proactive conversation, so its report becomes visible.
@@ -148,15 +194,14 @@ export function CopilotChat() {
     },
   });
 
-  const newConversation = useCallback(async (grantId?: string) => {
+  const newConversation = useCallback(async () => {
     setCreating(true);
     try {
-      const { conversation } = await createConversation(undefined, grantId);
+      const { conversation } = await createConversation();
       await refreshConversations();
       await selectConversation(conversation.id);
-    } catch (error) {
+    } catch {
       setLoadError(t("copilot.loadError"));
-      if (grantId) throw error;
     } finally {
       setCreating(false);
     }
@@ -167,12 +212,15 @@ export function CopilotChat() {
     if (conversationIdRef.current === id) setMessages(next);
   }, [refreshConversations]);
 
-  const send = useCallback(async (textOverride?: string) => {
-    const text = (textOverride ?? input).trim();
+  const send = useCallback(async (textOverride?: string, retry = false) => {
+    const prior = retry ? lastSentRef.current : null;
+    const text = (prior?.text ?? textOverride ?? input).trim();
     const id = conversationId;
     if (!text || !id || sending || (active && ["pending", "running", "awaiting_approval"].includes(active.status))) return;
-    lastSentRef.current = text;
-    setMessages((current) => [
+    if (retry && (!prior || prior.conversationId !== id)) return;
+    const request = prior ?? { conversationId: id, text, ...(projectId ? { projectId } : {}), clientRequestId: crypto.randomUUID() };
+    lastSentRef.current = request;
+    if (!retry) setMessages((current) => [
       ...current,
       {
         id: `local-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -193,7 +241,7 @@ export function CopilotChat() {
     // POST while the Gateway starts the model turn.
     markPending(id);
     try {
-      await startRun(id, text);
+      await startRun(id, text, undefined, { ...(request.projectId ? { projectId: request.projectId } : {}), clientRequestId: request.clientRequestId });
       const wasUntitled = !conversations.find((item) => item.id === id)?.title;
       if (wasUntitled) {
         await renameConversation(id, text.slice(0, AUTO_TITLE_MAX_CHARS)).catch(() => undefined);
@@ -205,7 +253,7 @@ export function CopilotChat() {
     } finally {
       setSending(false);
     }
-  }, [input, conversationId, sending, active, conversations, startRun, clearActive, markPending, reloadActiveConversation]);
+  }, [input, projectId, conversationId, sending, active, conversations, startRun, clearActive, markPending, reloadActiveConversation]);
 
   const onRename = useCallback(async (id: string, title: string) => {
     await renameConversation(id, title).catch(() => undefined);
@@ -217,6 +265,7 @@ export function CopilotChat() {
     if (conversationIdRef.current === id) {
       setConversationId(null);
       setMessages([]);
+      writeLastCopilotConversation(null);
     }
     await refreshConversations();
   }, [refreshConversations]);
@@ -315,20 +364,6 @@ export function CopilotChat() {
 
   return (
     <div className="mx-auto flex h-full w-full max-w-[1600px] gap-4 p-4 md:p-6">
-      <Sheet open={managementOpen} onOpenChange={setManagementOpen}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-2xl" aria-describedby={undefined}>
-          <SheetTitle className="px-4 pt-4">授权与项目管理</SheetTitle>
-          {managementOpen && (
-            <CopilotManagementPanel
-              boundGrantId={activeConversation?.grantId}
-              onStartConversation={async id => {
-                await newConversation(id);
-                setManagementOpen(false);
-              }}
-            />
-          )}
-        </SheetContent>
-      </Sheet>
       {sidebarOpen && (
         <Card className="hidden max-h-[calc(100vh-6rem)] w-[280px] shrink-0 flex-col overflow-hidden md:flex">
           <ConversationSidebar
@@ -377,19 +412,12 @@ export function CopilotChat() {
                 {t("copilot.running")}
               </Badge>
             ) : null}
-            <Button size="sm" variant="outline" onClick={() => setManagementOpen(true)}>授权与项目</Button>
+            <Link href="/copilot/tasks" className="rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">{language === "zh-CN" ? "开发任务" : "Development tasks"}</Link>
             <CopilotSettings />
           </div>
         </div>
 
         <CopilotStatusBar />
-        {activeConversation?.grantId && (
-          <p className="border-b px-3 py-2 text-xs text-muted-foreground">
-            此会话绑定项目授权，范围不可切换。
-            <button className="ml-2 underline" onClick={() => setManagementOpen(true)}>查看授权</button>
-          </p>
-        )}
-
         <div className="relative flex min-h-0 flex-1 flex-col">
           <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-3 py-4">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
@@ -437,7 +465,7 @@ export function CopilotChat() {
               {sendError && (
                 <div className="flex items-center gap-2">
                   <p className="text-sm text-destructive">{t("copilot.sendError")}</p>
-                  <Button variant="outline" size="sm" onClick={() => void send(lastSentRef.current)}>
+                  <Button variant="outline" size="sm" onClick={() => void send(undefined, true)}>
                     {t("copilot.retry")}
                   </Button>
                 </div>
@@ -461,6 +489,17 @@ export function CopilotChat() {
             messages out beneath the elevated input card, which lifts on hover
             and glows brand on focus. */}
         <div className="relative shrink-0 px-3 pb-3 pt-1">
+          <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <label htmlFor="copilot-project-context">{t("copilot.projectContext")}</label>
+            <select id="copilot-project-context" value={projectId}
+              disabled={isBusy || sending}
+              onChange={event => setProjectId(event.target.value)}
+              className="max-w-60 rounded-md border border-border bg-background px-2 py-1 text-foreground">
+              <option value="">{t("copilot.noProject")}</option>
+              {selectableProjects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+            {projectError ? <span role="status">{t("copilot.projectLoadError")}</span> : null}
+          </div>
           <div
             aria-hidden="true"
             className="pointer-events-none absolute inset-x-0 bottom-full h-10 bg-gradient-to-t from-card via-card/80 to-transparent"
