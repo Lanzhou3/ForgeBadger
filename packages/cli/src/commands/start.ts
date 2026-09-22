@@ -12,6 +12,7 @@ import {
   checkCliDependencies,
   type CliCommandRunner,
   type CliDependencyStatus,
+  type NativeModuleLoader,
   type NodePtyLoader
 } from "../runtime/dependency-check.js";
 import { resolveInstalledPaths, type InstalledPaths } from "../runtime/paths.js";
@@ -36,10 +37,12 @@ export interface RunStartOptions extends LoadRuntimeConfigOptions {
   inspectConfig?: (options: LoadRuntimeConfigOptions) => Promise<RuntimeConfigInspection>;
   dependencyChecker?: (
     runner?: CliCommandRunner,
-    loadNodePty?: NodePtyLoader
+    loadNodePty?: NodePtyLoader,
+    loadBetterSqlite3?: NativeModuleLoader
   ) => Promise<CliDependencyStatus[]>;
   dependencyRunner?: CliCommandRunner;
   loadNodePty?: NodePtyLoader;
+  loadBetterSqlite3?: NativeModuleLoader;
   resolvePaths?: () => InstalledPaths;
   checkPort?: (host: string, port: number) => Promise<void>;
   prepareWebRuntime?: (options: PrepareWebRuntimeOptions) => Promise<PreparedWebRuntime>;
@@ -153,15 +156,16 @@ async function maybeRunFirstStartPreflight(
   }
 
   const checker = options.dependencyChecker ?? checkCliDependencies;
-  const dependencies = await checker(options.dependencyRunner, options.loadNodePty);
+  const dependencies = await checker(options.dependencyRunner, options.loadNodePty, options.loadBetterSqlite3);
   stdout.write(formatFirstStartPreflight(dependencies));
 }
 
 export function formatFirstStartPreflight(dependencies: CliDependencyStatus[]): string {
   const lines: string[] = [];
-  const nodePty = dependencies.find((item) => item.required);
-  if (nodePty && !nodePty.available) {
-    lines.push(`warning: ${nodePty.error ?? "node-pty is not available"}`);
+  for (const item of dependencies) {
+    if (item.required && !item.available) {
+      lines.push(`warning: ${item.error ?? `${item.name} is not available`}`);
+    }
   }
 
   const aiClis = dependencies.filter((item) => item.group === "ai-cli");

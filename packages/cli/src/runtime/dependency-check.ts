@@ -31,6 +31,8 @@ export interface CliDependencyStatus {
 
 export type NodePtyLoader = () => Promise<unknown>;
 
+export type NativeModuleLoader = () => Promise<unknown>;
+
 interface CliDependencyCheck {
   name: string;
   args: string[];
@@ -126,7 +128,7 @@ export function isSupportedNodeVersion(nodeVersion: string): boolean {
   return major >= 21 && major < 25;
 }
 
-const NODE_PTY_REINSTALL_GUIDANCE =
+const NATIVE_MODULE_REINSTALL_GUIDANCE =
   "reinstall ForgeBadger to rebuild native modules (npm install -g forgebadger)";
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 3000;
@@ -140,13 +142,15 @@ interface BoundedOutput {
 
 export async function checkCliDependencies(
   runner: CliCommandRunner = runCommand,
-  loadNodePty: NodePtyLoader = loadNodePtyModule
+  loadNodePty: NodePtyLoader = loadNodePtyModule,
+  loadBetterSqlite3: NativeModuleLoader = loadBetterSqlite3Module
 ): Promise<CliDependencyStatus[]> {
-  const [nodePty, ...cliStatuses] = await Promise.all([
+  const [nodePty, betterSqlite3, ...cliStatuses] = await Promise.all([
     checkNodePtyLoadable(loadNodePty),
+    checkBetterSqlite3Loadable(loadBetterSqlite3),
     ...OPTIONAL_CLI_DEPENDENCY_CHECKS.map((check) => checkDependency(check, runner))
   ]);
-  return [nodePty, ...cliStatuses];
+  return [nodePty, betterSqlite3, ...cliStatuses];
 }
 
 export async function checkNodePtyLoadable(
@@ -162,13 +166,45 @@ export async function checkNodePtyLoadable(
       available: false,
       required: true,
       group: "runtime",
-      error: `node-pty failed to load (${detail}); ${NODE_PTY_REINSTALL_GUIDANCE}`
+      error: `node-pty failed to load (${detail}); ${NATIVE_MODULE_REINSTALL_GUIDANCE}`
+    };
+  }
+}
+
+export async function checkBetterSqlite3Loadable(
+  load: NativeModuleLoader = loadBetterSqlite3Module
+): Promise<CliDependencyStatus> {
+  try {
+    await load();
+    return { name: "better-sqlite3", available: true, required: true, group: "runtime" };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      name: "better-sqlite3",
+      available: false,
+      required: true,
+      group: "runtime",
+      error: `better-sqlite3 failed to load (${detail}); ${NATIVE_MODULE_REINSTALL_GUIDANCE}`
     };
   }
 }
 
 async function loadNodePtyModule(): Promise<unknown> {
   return import("node-pty");
+}
+
+interface BetterSqlite3Module {
+  default: new (filename: string) => { close(): void };
+}
+
+// The specifier is indirect on purpose: the CLI package does not ship
+// @types/better-sqlite3, and a static specifier would fail typecheck.
+async function loadBetterSqlite3Module(): Promise<unknown> {
+  const specifier = "better-sqlite3";
+  const module: BetterSqlite3Module = await import(specifier);
+  const db = new module.default(":memory:");
+  db.close();
+  return module;
 }
 
 async function checkDependency(

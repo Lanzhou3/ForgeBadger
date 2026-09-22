@@ -126,6 +126,9 @@ Key rules:
   sessions
 - CodeGraph (`npm install -g @colbymchenry/codegraph`) optionally, for the
   read-only project code graph
+- Windows: the bundled `better-sqlite3` ships prebuilt binaries for Node 22 and
+  24 (x64/arm64). If npm falls back to a source build, install the Visual
+  Studio C++ Build Tools first.
 
 ## Install From npm
 
@@ -146,10 +149,10 @@ are found.
 
 The npm package postinstall does not install system software. `forgebadger
 doctor` reports the platform, architecture, and Node version, then checks the
-bundled `node-pty` native module, the supported AI CLIs (Claude Code, OpenCode,
-Codex, Kimi Code), and optional tooling (`codegraph`, `git`); each missing tool
-is paired with its official install command. If `node-pty` does not load,
-reinstall ForgeBadger to rebuild native modules. `forgebadger doctor` is
+bundled native modules (`node-pty`, `better-sqlite3`), the supported AI CLIs
+(Claude Code, OpenCode, Codex, Kimi Code), and optional tooling (`codegraph`,
+`git`); each missing tool is paired with its official install command. If a
+native module does not load, reinstall ForgeBadger to rebuild it. `forgebadger doctor` is
 read-only: inspecting an empty state directory does not create config, secrets,
 databases, or directories. Install the AI CLIs you plan to use separately and
 make sure they are available on `PATH`.

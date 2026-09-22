@@ -11,6 +11,7 @@ import { isMainModule, runCli } from "../src/index.js";
 import {
   collectEnvironmentInfo,
   commandSpawnOptions,
+  checkBetterSqlite3Loadable,
   checkCliDependencies,
   checkNodePtyLoadable,
   isSupportedNodeVersion,
@@ -19,13 +20,17 @@ import {
 import type { RuntimeConfig } from "../src/runtime/config.js";
 
 describe("checkCliDependencies", () => {
-  it("reports the node-pty self-check and optional dependency statuses", async () => {
+  it("reports the native module self-checks and optional dependency statuses", async () => {
     const seen: Array<{ command: string; args: string[] }> = [];
 
-    const result = await checkCliDependencies(async (command, args) => {
-      seen.push({ command, args });
-      return { exitCode: 127, stdout: "", stderr: "not found" };
-    }, async () => ({}));
+    const result = await checkCliDependencies(
+      async (command, args) => {
+        seen.push({ command, args });
+        return { exitCode: 127, stdout: "", stderr: "not found" };
+      },
+      async () => ({}),
+      async () => ({})
+    );
 
     assert.deepEqual(seen, [
       { command: "claude", args: ["--version"] },
@@ -46,6 +51,7 @@ describe("checkCliDependencies", () => {
       })),
       [
         { name: "node-pty", available: true, required: true, group: "runtime", version: undefined, error: undefined },
+        { name: "better-sqlite3", available: true, required: true, group: "runtime", version: undefined, error: undefined },
         { name: "claude", available: false, required: false, group: "ai-cli", version: undefined, error: "not found" },
         { name: "opencode", available: false, required: false, group: "ai-cli", version: undefined, error: "not found" },
         { name: "codex", available: false, required: false, group: "ai-cli", version: undefined, error: "not found" },
@@ -57,18 +63,43 @@ describe("checkCliDependencies", () => {
   });
 
   it("attaches the official install hint to missing optional dependencies", async () => {
-    const result = await checkCliDependencies(async (command) => {
-      if (command === "codegraph") {
-        return { exitCode: 0, stdout: "codegraph 1.6.0\n", stderr: "" };
-      }
-      return { exitCode: 127, stdout: "", stderr: "not found" };
-    }, async () => ({}));
+    const result = await checkCliDependencies(
+      async (command) => {
+        if (command === "codegraph") {
+          return { exitCode: 0, stdout: "codegraph 1.6.0\n", stderr: "" };
+        }
+        return { exitCode: 127, stdout: "", stderr: "not found" };
+      },
+      async () => ({}),
+      async () => ({})
+    );
 
     const claude = result.find((item) => item.name === "claude");
     const codegraph = result.find((item) => item.name === "codegraph");
     assert.equal(claude?.installHint, "npm install -g @anthropic-ai/claude-code");
     assert.equal(codegraph?.available, true);
     assert.equal(codegraph?.installHint, undefined);
+  });
+});
+
+describe("checkBetterSqlite3Loadable", () => {
+  it("reports better-sqlite3 as available when the binding opens an in-memory database", async () => {
+    const status = await checkBetterSqlite3Loadable(async () => ({}));
+
+    assert.deepEqual(status, { name: "better-sqlite3", available: true, required: true, group: "runtime" });
+  });
+
+  it("reports better-sqlite3 as missing with reinstall guidance when the binding is absent", async () => {
+    const status = await checkBetterSqlite3Loadable(async () => {
+      throw new Error("Could not locate the bindings file");
+    });
+
+    assert.equal(status.name, "better-sqlite3");
+    assert.equal(status.available, false);
+    assert.equal(status.required, true);
+    assert.match(status.error ?? "", /better-sqlite3 failed to load/);
+    assert.match(status.error ?? "", /Could not locate the bindings file/);
+    assert.match(status.error ?? "", /npm install -g forgebadger/);
   });
 });
 
@@ -196,6 +227,7 @@ describe("runDoctor", () => {
       env: { FORGEBADGER_STATE_DIR: stateDir },
       dependencyRunner: async () => ({ exitCode: 127, stdout: "", stderr: "not found" }),
       loadNodePty: async () => ({}),
+      loadBetterSqlite3: async () => ({}),
       stdout,
       stderr
     });
@@ -219,6 +251,7 @@ describe("runDoctor", () => {
     const code = await runDoctor({
       loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       loadNodePty: async () => ({}),
+      loadBetterSqlite3: async () => ({}),
       dependencyRunner: async (command) => {
         if (command === "claude") {
           return { exitCode: 0, stdout: "claude 1.2.3\n", stderr: "" };
@@ -232,6 +265,7 @@ describe("runDoctor", () => {
     assert.equal(code, 0);
     assert.match(stdout.text, /ForgeBadger state: \/tmp\/forgebadger-state\n/);
     assert.match(stdout.text, /ok node-pty\n/);
+    assert.match(stdout.text, /ok better-sqlite3\n/);
     assert.match(stdout.text, /ok claude claude 1\.2\.3\n/);
     assert.match(stdout.text, /optional-missing opencode - not found\n/);
     assert.match(stdout.text, / {2}install: npm install -g opencode-ai\n/);
@@ -250,6 +284,7 @@ describe("runDoctor", () => {
       loadNodePty: async () => {
         throw new Error("native binding missing");
       },
+      loadBetterSqlite3: async () => ({}),
       dependencyRunner: async (command) => ({
         exitCode: 0,
         stdout: `${command} ok\n`,
@@ -265,6 +300,31 @@ describe("runDoctor", () => {
     assert.match(stderr.text, /Required dependencies are missing/);
   });
 
+  it("returns 1 and prints stderr when the better-sqlite3 binding is missing", async () => {
+    const stdout = createMemoryWriter();
+    const stderr = createMemoryWriter();
+
+    const code = await runDoctor({
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
+      loadNodePty: async () => ({}),
+      loadBetterSqlite3: async () => {
+        throw new Error("Could not locate the bindings file");
+      },
+      dependencyRunner: async (command) => ({
+        exitCode: 0,
+        stdout: `${command} ok\n`,
+        stderr: ""
+      }),
+      stdout,
+      stderr
+    });
+
+    assert.equal(code, 1);
+    assert.match(stdout.text, /missing better-sqlite3 - better-sqlite3 failed to load \(Could not locate the bindings file\)/);
+    assert.match(stdout.text, /npm install -g forgebadger/);
+    assert.match(stderr.text, /Required dependencies are missing/);
+  });
+
   it("prints environment notes from the injected environment collector", async () => {
     const stdout = createMemoryWriter();
     const stderr = createMemoryWriter();
@@ -272,6 +332,7 @@ describe("runDoctor", () => {
     const code = await runDoctor({
       loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
       loadNodePty: async () => ({}),
+      loadBetterSqlite3: async () => ({}),
       collectEnvironment: () => ({
         platform: "win32",
         arch: "x64",
