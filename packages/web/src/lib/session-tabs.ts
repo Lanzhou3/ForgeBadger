@@ -209,6 +209,20 @@ export function splitSessionTabsByVisibility(
   return { visibleIds, hiddenTabs };
 }
 
+/**
+ * The most recently touched live session — the floating bookmark's jump-back
+ * target. Only "running" tabs qualify: an idle or exited session is not
+ * something the user can return to.
+ */
+export function getLatestRunningTab(tabs: SessionTab[]): SessionTab | undefined {
+  let latest: SessionTab | undefined;
+  for (const tab of tabs) {
+    if (tab.status !== "running") continue;
+    if (!latest || tab.updatedAt > latest.updatedAt) latest = tab;
+  }
+  return latest;
+}
+
 export function pruneSessionTabs(
   allowedIds: Set<string>,
   storage: BrandStorage = window.localStorage

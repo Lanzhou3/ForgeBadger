@@ -94,5 +94,8 @@
   "0093_session_runtime_confirmations.sql": "1786d097f6a0d59725542c8b1555234841ce2042818ca57f119d902b4919c898",
   "0094_task_artifact_links.sql": "36d153cf326c31f339ccb016ef57b64bf4aa3b3857ff6fa0a1875f5141a7f63b",
   "0095_task_semantic_revision.sql": "318eb7dd3e8f4890f00daeb08066cce41e27c11f5359625ad9c3e787d23143b2",
-  "0096_pending_runtime_delete_guard.sql": "902bc323e8d9388ec4ba7f2eccffd997cade4d4eb8a4df7d28a66fdaaaa235d7"
+  "0096_pending_runtime_delete_guard.sql": "902bc323e8d9388ec4ba7f2eccffd997cade4d4eb8a4df7d28a66fdaaaa235d7",
+  "0097_telegram_channel_accounts.sql": "3bd3fc339909abab0c8c35f9113653d269fb0ca98fb37c8a6616382da5e6bb5a",
+  "0098_skill_remote_provenance.sql": "52958e27238a593739d76617acf0c54dd19868b9f1cae2040c1d2774fdf647f4",
+  "0099_runtime_settings.sql": "22419e14d9419068c859fdb88e75afe5d7b5478f663e69f341b82002d4482da2"
 }

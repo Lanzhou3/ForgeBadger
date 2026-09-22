@@ -58,5 +58,6 @@ export {
   ClientResizeMessage,
   ClientOutputMessage,
   AttachAckMessage,
-  SessionExitMessage
+  SessionExitMessage,
+  SessionNotificationMessage
 } from "./ipc-protocol.js";

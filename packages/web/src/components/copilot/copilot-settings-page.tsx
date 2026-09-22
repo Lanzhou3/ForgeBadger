@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CopilotMemoryPanel } from "./copilot-memory-panel";
+import { CopilotAutonomyPanel } from "./copilot-autonomy-panel";
 import { modelProvidersQueryKey } from "./copilot-runtime-panel";
 import { CopilotSettingsShell } from "./copilot-settings-shell";
 import { useExtensionsCopy } from "./extensions-copy";
@@ -132,6 +133,7 @@ export function CopilotSettingsPage() {
             </Button>
           </div>
         </section>
+        <CopilotAutonomyPanel />
         <div className="grid gap-3 sm:grid-cols-2">
           {entries.map((entry) => {
             const Icon = entry.icon;

@@ -66,20 +66,84 @@ export class NativeChannelInbox {
   }
 }
 
+/** Strip the leading "@bot" mention tokens a platform renders into group text. */
+function stripBotMention(text: string): string {
+  return text.replace(/^(?:@[A-Za-z0-9_]+(?:\s+|$))+/, '').trim();
+}
+
 /** The supervisor must fence this handler and derive account/revision from the active SDK connection. */
 export function createFeishuNativeIngress(input:{db:Database;userId:string;masterKey:string;accountId:string;accountRevision:number}) {
   const inbox=new NativeChannelInbox(input.db,input.userId,input.masterKey);
   const authority=new ChannelIdentityService(input.db,input.userId);
   return (envelope:unknown,context:{botOpenId:string})=>{
     const event=normalizeFeishuEvent(envelope,{accountId:input.accountId,botOpenId:context.botOpenId,eventType:'im.message.receive_v1'});
-    if(event?.kind!=='message'||event.chatType!=='p2p'||event.threadId) return {status:'ignored'} as const;
-    const peer:TrustedChannelPeer={channel:'feishu',accountId:input.accountId,accountRevision:input.accountRevision,externalUserId:event.senderOpenId,chatId:event.chatId,chatType:'p2p'};
-    if(/^\s*\/pair\b/i.test(event.text)) {
-      const match=/^\/pair ([A-Za-z0-9_-]{43})$/.exec(event.text.trim());
+    if(event?.kind!=='message'||event.threadId) return {status:'ignored'} as const;
+    const isGroup=event.chatType==='group';
+    if(event.chatType!=='p2p'&&!isGroup) return {status:'ignored'} as const;
+    if(isGroup&&event.mentionedBot!==true) return {status:'ignored'} as const;
+    const text=isGroup?stripBotMention(event.text):event.text;
+    if(!text) return {status:'ignored'} as const;
+    const peer:TrustedChannelPeer=isGroup
+      ?{channel:'feishu',accountId:input.accountId,accountRevision:input.accountRevision,externalUserId:event.senderOpenId,chatId:event.chatId,chatType:'group',mentionedBot:true}
+      :{channel:'feishu',accountId:input.accountId,accountRevision:input.accountRevision,externalUserId:event.senderOpenId,chatId:event.chatId,chatType:'p2p'};
+    if(/^\s*\/pair\b/i.test(text)) {
+      if(isGroup) return {status:'ignored'} as const;
+      const match=/^\/pair ([A-Za-z0-9_-]{43})$/.exec(text.trim());
       if(!match)throw new Error('CHANNEL_PAIRING_FORMAT_INVALID');
       const pairing=authority.claimPairing(match[1]!,peer);
       return {status:'pairing_claimed',pairingId:pairing.id} as const;
     }
-    return {status:'admitted',...inbox.receive(peer,{eventId:event.eventId,messageId:event.messageId,text:event.text})} as const;
+    return {status:'admitted',...inbox.receive(peer,{eventId:event.eventId,messageId:event.messageId,text})} as const;
+  };
+}
+
+/** Normalized Telegram message produced by the Telegram transport's event normalizer (A3). */
+export interface NativeTelegramMessageEvent {
+  kind: 'message';
+  /** Transport-scoped dedup id, e.g. `tg:<update_id>`. */
+  eventId: string;
+  messageId: string;
+  chatId: string;
+  chatType: 'p2p' | 'group';
+  senderId: string;
+  text: string;
+  /** True when the update explicitly @-mentions the bot (mention entity or /cmd@botname). */
+  mentionedBot: boolean;
+}
+
+const telegramEventSchema=z.object({
+  kind:z.literal('message'),
+  eventId:id,
+  messageId:id,
+  chatId:id,
+  chatType:z.enum(['p2p','group']),
+  senderId:id,
+  text:z.string().min(1).max(32000),
+  mentionedBot:z.boolean()
+}).strict();
+
+/** The polling supervisor must fence this handler with the active account/revision. */
+export function createTelegramNativeIngress(input:{db:Database;userId:string;masterKey:string;accountId:string;accountRevision:number}) {
+  const inbox=new NativeChannelInbox(input.db,input.userId,input.masterKey);
+  const authority=new ChannelIdentityService(input.db,input.userId);
+  return (rawEvent:unknown)=>{
+    const parsed=telegramEventSchema.safeParse(rawEvent);
+    if(!parsed.success) return {status:'ignored'} as const;
+    const event=parsed.data;
+    const isGroup=event.chatType==='group';
+    if(isGroup&&!event.mentionedBot) return {status:'ignored'} as const;
+    const text=isGroup?stripBotMention(event.text):event.text;
+    if(!text) return {status:'ignored'} as const;
+    const peer:TrustedChannelPeer=isGroup
+      ?{channel:'telegram',accountId:input.accountId,accountRevision:input.accountRevision,externalUserId:event.senderId,chatId:event.chatId,chatType:'group',mentionedBot:true}
+      :{channel:'telegram',accountId:input.accountId,accountRevision:input.accountRevision,externalUserId:event.senderId,chatId:event.chatId,chatType:'p2p'};
+    if(/^\s*\/pair\b/i.test(text)) {
+      if(isGroup) return {status:'ignored'} as const;
+      const match=/^\/pair ([A-Za-z0-9_-]{43})$/.exec(text.trim());
+      if(!match)throw new Error('CHANNEL_PAIRING_FORMAT_INVALID');
+      const pairing=authority.claimPairing(match[1]!,peer);
+      return {status:'pairing_claimed',pairingId:pairing.id} as const;
+    }
+    return {status:'admitted',...inbox.receive(peer,{eventId:event.eventId,messageId:event.messageId,text})} as const;
   };
 }

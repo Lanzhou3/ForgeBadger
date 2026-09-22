@@ -18,6 +18,13 @@ import { createTerminalPromptCapture } from "@/lib/terminal-prompt-capture";
 import { notifySessionTabsChanged, setSessionTabPrompt } from "@/lib/session-tabs";
 import { parseTerminalWebSocketMessage } from "@/lib/terminal-websocket-messages";
 import { replaceTerminalInputListener, type DisposableInputListener } from "@/lib/terminal-input-listener";
+import {
+  toastDurationFor,
+  toneAccentClassNames,
+  toneIconClassNames,
+  toneIcons,
+  type NotificationToastTone
+} from "@/lib/notification-toast";
 import { cn } from "@/lib/utils";
 import { terminalWebSocketProtocols, terminalWebSocketUrl } from "../lib/ws";
 
@@ -46,6 +53,41 @@ const RESIZE_SETTLE_DELAY_MS = 400;
 function getReconnectDelay(attempt: number): number {
   const index = Math.min(attempt, RECONNECT_DELAYS.length - 1);
   return RECONNECT_DELAYS[index] as number;
+}
+
+/** In-tab toast state for terminal-native signals (bell, OSC 9/99/777). */
+interface TerminalNotificationToast {
+  id: number;
+  tone: NotificationToastTone;
+  title: string;
+  message: string;
+}
+
+/**
+ * Tone for a terminal notification type. `toastToneFor` is shaped around the
+ * gateway event union and renders task outcomes as "info", so the in-tab toast
+ * keeps its own small mapping.
+ */
+function toneForNotificationType(notificationType: string): NotificationToastTone {
+  if (notificationType === "permission_prompt") return "warning";
+  if (notificationType === "task_failed") return "error";
+  if (notificationType === "task_completed") return "success";
+  return "info";
+}
+
+/** Minimal kitty OSC 99 parameter parse (`A=...;T=...`) for the in-tab toast. */
+function parseKittyOsc99(data: string): { alert?: string; title?: string } {
+  const result: { alert?: string; title?: string } = {};
+  for (const part of data.split(";")) {
+    const eqIndex = part.indexOf("=");
+    if (eqIndex <= 0) continue;
+    const key = part.slice(0, eqIndex).trim();
+    const value = part.slice(eqIndex + 1).trim();
+    if (!value) continue;
+    if (key === "A") result.alert = value;
+    else if (key === "T") result.title = value;
+  }
+  return result;
 }
 
 export function TerminalView({
@@ -85,6 +127,36 @@ export function TerminalView({
   const [attemptCount, setAttemptCount] = useState(0);
   const [terminalReady, setTerminalReady] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
+  const [terminalToast, setTerminalToast] = useState<TerminalNotificationToast | null>(null);
+  const terminalToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const terminalToastSeqRef = useRef(0);
+
+  const tRef = useRef(t);
+  tRef.current = t;
+
+  /** Single in-tab toast: a new signal replaces the current one and restarts
+      the auto-dismiss timer (no queue — the latest signal wins). */
+  const showTerminalToast = useCallback(
+    (notificationType: string, tone: NotificationToastTone, title: string, message?: string) => {
+      terminalToastSeqRef.current += 1;
+      setTerminalToast({
+        id: terminalToastSeqRef.current,
+        tone,
+        title,
+        message: message ?? ""
+      });
+      if (terminalToastTimerRef.current !== null) {
+        clearTimeout(terminalToastTimerRef.current);
+      }
+      terminalToastTimerRef.current = setTimeout(() => {
+        terminalToastTimerRef.current = null;
+        setTerminalToast(null);
+      }, toastDurationFor(notificationType));
+    },
+    []
+  );
+  const showTerminalToastRef = useRef(showTerminalToast);
+  showTerminalToastRef.current = showTerminalToast;
 
   /* Fire-and-forget: the session board prefers the freshest prompt, so report
      terminal input to the Gateway without blocking the input path. */
@@ -300,6 +372,10 @@ export function TerminalView({
   useEffect(() => {
     let cancelled = false;
     let scrollDisposable: { dispose(): void } | null = null;
+    let bellDisposable: { dispose(): void } | null = null;
+    let osc9Disposable: { dispose(): void } | null = null;
+    let osc99Disposable: { dispose(): void } | null = null;
+    let osc777Disposable: { dispose(): void } | null = null;
     const onWheelCapture = (event: WheelEvent) => {
       if (event.deltaY < 0) lastWheelUpAtRef.current = Date.now();
     };
@@ -352,6 +428,64 @@ export function TerminalView({
           terminalRef.current = terminal;
           fitAddonRef.current = fitAddon;
           scrollDisposable = terminal.onScroll(syncAtBottom);
+          // Terminal-native signals (bell / OSC 9/99/777) become an in-tab
+          // toast only — the main channel is the daemon-side PTY scanner that
+          // relays the same signals to the Gateway. Nice-to-have layer: it
+          // gives the focused tab an immediate cue even if the global
+          // notification channel is lagging. All handlers return true, so the
+          // sequences are consumed and never painted into the buffer.
+          bellDisposable = terminal.onBell(() => {
+            showTerminalToastRef.current(
+              "attention",
+              "warning",
+              tRef.current("terminal.notif.terminalBell")
+            );
+          });
+          osc9Disposable = terminal.parser.registerOscHandler(9, (data) => {
+            const text = data.trim();
+            if (text) {
+              showTerminalToastRef.current(
+                "permission_prompt",
+                "warning",
+                tRef.current("terminal.notif.needsAttention"),
+                text
+              );
+            }
+            return true;
+          });
+          osc99Disposable = terminal.parser.registerOscHandler(99, (data) => {
+            // Kitty feature probe (p=?): consume silently, no toast.
+            if (data.includes("p=?")) return true;
+            const { alert, title } = parseKittyOsc99(data);
+            const haystack = `${title ?? ""} ${alert ?? ""}`.toLowerCase();
+            const notificationType = /(error|fail)/.test(haystack)
+              ? "task_failed"
+              : /(complete|idle|done)/.test(haystack)
+                ? "task_completed"
+                : "permission_prompt";
+            showTerminalToastRef.current(
+              notificationType,
+              toneForNotificationType(notificationType),
+              title ?? tRef.current("terminal.notif.needsAttention"),
+              alert ?? title ?? data
+            );
+            return true;
+          });
+          osc777Disposable = terminal.parser.registerOscHandler(777, (data) => {
+            const parts = data.split(";");
+            if ((parts[0] ?? "") !== "notify") return true;
+            const title = (parts[1] ?? "").trim();
+            const body = parts.slice(2).join(";").trim();
+            if (title || body) {
+              showTerminalToastRef.current(
+                "permission_prompt",
+                "warning",
+                title || tRef.current("terminal.notif.needsAttention"),
+                body || undefined
+              );
+            }
+            return true;
+          });
           // Track upward wheel intent (incl. trackpad momentum) so output can
           // re-pin the viewport once the user has not scrolled for a while.
           host.addEventListener("wheel", onWheelCapture, { capture: true, passive: true });
@@ -370,6 +504,15 @@ export function TerminalView({
       window.clearTimeout(timer);
       setTerminalReady(false);
       scrollDisposable?.dispose();
+      bellDisposable?.dispose();
+      osc9Disposable?.dispose();
+      osc99Disposable?.dispose();
+      osc777Disposable?.dispose();
+      if (terminalToastTimerRef.current !== null) {
+        clearTimeout(terminalToastTimerRef.current);
+        terminalToastTimerRef.current = null;
+      }
+      setTerminalToast(null);
       hostRef.current?.removeEventListener("wheel", onWheelCapture, { capture: true });
       terminalRef.current?.dispose();
       terminalRef.current = null;
@@ -450,6 +593,7 @@ export function TerminalView({
         : status === "failed"
           ? "bg-red-500"
           : "bg-muted-foreground";
+  const ToastIcon = terminalToast ? toneIcons[terminalToast.tone] : null;
 
   return (
     <div
@@ -511,6 +655,25 @@ export function TerminalView({
           data-testid="terminal-host"
           className="min-h-0 flex-1 [&_.xterm-screen]:!h-full [&_.xterm-viewport]:!h-full [&_.xterm]:h-full"
         />
+        {terminalToast && ToastIcon && (
+          <div
+            key={terminalToast.id}
+            role="status"
+            aria-live="polite"
+            className={cn(
+              "absolute left-1/2 top-2 z-20 flex max-w-[80%] -translate-x-1/2 items-start gap-2 rounded-md border bg-popover px-3 py-2 text-xs shadow-lg",
+              toneAccentClassNames[terminalToast.tone]
+            )}
+          >
+            <ToastIcon aria-hidden="true" className={cn("mt-0.5 shrink-0", toneIconClassNames[terminalToast.tone])} />
+            <div className="min-w-0">
+              <p className="font-medium">{terminalToast.title}</p>
+              {terminalToast.message && (
+                <p className="mt-0.5 break-words text-muted-foreground">{terminalToast.message}</p>
+              )}
+            </div>
+          </div>
+        )}
         {!atBottom && (
           <Button
             type="button"

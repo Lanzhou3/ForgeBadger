@@ -265,6 +265,16 @@ Restore verifies file hashes, schema/migration compatibility, table counts, SQLi
 
 This backup does not contain project repositories, managed worktrees, running terminals, terminal history, host CLI login/configuration, filesystem-side CLI config rollback files or the account-recovery key. Restore those resources separately as needed; restored session metadata does not recreate processes. JWT rotation invalidates legacy JWTs, and restored opaque browser sessions are deleted; sign in again after restore. Source and backup authentication records remain unchanged. The backup is sensitive local state, not an encrypted archive.
 
+### Version and uninstall
+
+```bash
+forgebadger --version
+forgebadger uninstall            # interactive confirmation; --yes for scripts
+forgebadger uninstall --backup /private/path/new-backup   # back up state first
+```
+
+`forgebadger uninstall` removes the local state directory (`~/.forgebadger` by default): the database, the saved runtime `config.json` with the **master encryption key**, backups and runtime state. It refuses to delete a directory that does not look like ForgeBadger state, refuses to run while Gateway/Web ports are still serving (stop them first, or pass `--force`), and asks for confirmation unless `--yes` is given. The command cannot remove the globally installed npm package from inside itself — afterwards run `npm uninstall -g forgebadger` to finish. Deleting the state directory is irreversible; without the master key, encrypted provider credentials and integration secrets are unrecoverable, so consider `--backup` first.
+
 
 ## Personal and small-team delivery
 

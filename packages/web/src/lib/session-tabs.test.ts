@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getLatestRunningTab,
   groupSessionTabs,
   pruneSessionTabs,
   readSessionTabs,
@@ -295,6 +296,20 @@ describe("session tabs", () => {
 
     expect(tabs[0]?.lastPrompt).toBeUndefined();
     expect(tabs[1]?.lastPrompt).toBe("正常提示词");
+  });
+
+  it("picks the most recently touched running tab as the bookmark target", () => {
+    expect(
+      getLatestRunningTab([
+        { id: "old", label: "Old", status: "running", updatedAt: 1 },
+        { id: "stopped", label: "Stopped", status: "exited", updatedAt: 100 },
+        { id: "new", label: "New", status: "running", updatedAt: 50 },
+      ])?.id
+    ).toBe("new");
+    expect(
+      getLatestRunningTab([{ id: "stopped", label: "Stopped", status: "exited", updatedAt: 1 }])
+    ).toBeUndefined();
+    expect(getLatestRunningTab([])).toBeUndefined();
   });
 
   it("assigns stable, distinct group colors per project name", () => {

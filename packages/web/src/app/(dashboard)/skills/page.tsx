@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Eye, Pencil, Plus, RefreshCw, Save, Sparkles, Trash2, Wrench } from "lucide-react";
+import { CircleArrowUp, Eye, Github, Pencil, Plus, RefreshCw, Save, Sparkles, Trash2, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,13 +12,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
+  checkAllSkillUpdates,
+  checkSkillUpdate,
   createSkill,
   deleteSkill,
   listSkills,
   listSkillSources,
   listSkillTemplates,
+  parseSkillRemoteProvenance,
   syncLocalSkills,
   toggleSkill,
+  updateRemoteSkill,
   updateSkill,
   type Skill,
   type SkillInput,
@@ -76,6 +80,9 @@ export default function SkillsPage() {
       ? data?.skills ?? []
       : (data?.skills ?? []).filter((skill) => skill.source === sourceFilter);
   const filteredSkills = filterByVisibility(sourceFilteredSkills, visibilityFilter);
+  const remoteSkillCount = (data?.skills ?? []).filter(
+    (skill) => parseSkillRemoteProvenance(skill) !== null
+  ).length;
 
   const toggleMutation = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
@@ -127,6 +134,21 @@ export default function SkillsPage() {
 
   const syncMutation = useMutation({
     mutationFn: syncLocalSkills,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
+  });
+
+  const checkUpdateMutation = useMutation({
+    mutationFn: checkSkillUpdate,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
+  });
+
+  const checkAllUpdatesMutation = useMutation({
+    mutationFn: checkAllSkillUpdates,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
+  });
+
+  const updateRemoteMutation = useMutation({
+    mutationFn: updateRemoteSkill,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
   });
 
@@ -193,6 +215,20 @@ export default function SkillsPage() {
             <RefreshCw className={syncMutation.isPending ? "size-4 animate-spin" : "size-4"} />
             {t("skills.syncLocal")}
           </Button>
+          {remoteSkillCount > 0 && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => checkAllUpdatesMutation.mutate()}
+              disabled={checkAllUpdatesMutation.isPending}
+            >
+              <RefreshCw className={checkAllUpdatesMutation.isPending ? "size-4 animate-spin" : "size-4"} />
+              {checkAllUpdatesMutation.isPending
+                ? t("skills.checkingAllUpdates")
+                : t("skills.checkAllUpdates")}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -455,6 +491,8 @@ export default function SkillsPage() {
         <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
           {filteredSkills.map((skill, index) => {
             const isPreviewing = previewSkillId === skill.id;
+            const provenance = parseSkillRemoteProvenance(skill);
+            const updateAvailable = provenance?.lastCheck?.updateAvailable === true;
             return (
               <div key={skill.id}>
                 <div
@@ -481,6 +519,17 @@ export default function SkillsPage() {
                   <div className="hidden shrink-0 items-center gap-1.5 md:flex">
                     <Badge variant="outline">{sourceLabel(skill.source)}</Badge>
                     <Badge variant="outline">{skill.version ?? "1.0.0"}</Badge>
+                    {provenance && (
+                      <Badge variant="outline" title={`${provenance.repo}@${provenance.resolvedCommitSha}`}>
+                        <Github className="mr-1 size-3" />
+                        {provenance.repo}@{provenance.resolvedCommitSha.slice(0, 7)}
+                      </Badge>
+                    )}
+                    {updateAvailable && (
+                      <Badge variant="secondary" className="bg-amber-500/10 text-amber-600">
+                        {t("skills.updateAvailable")}
+                      </Badge>
+                    )}
                     <Badge variant="secondary">
                       {t(visibilityLabelKey(normalizeVisibility(skill.visibility)))}
                     </Badge>
@@ -491,6 +540,39 @@ export default function SkillsPage() {
                     disabled={toggleMutation.isPending}
                   />
                   <div className="flex shrink-0 items-center gap-1">
+                    {provenance && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => checkUpdateMutation.mutate(skill.id)}
+                          disabled={checkUpdateMutation.isPending || updateRemoteMutation.isPending}
+                        >
+                          <RefreshCw
+                            className={
+                              checkUpdateMutation.isPending ? "size-4 animate-spin" : "size-4"
+                            }
+                          />
+                          <span className="sr-only">{t("skills.checkUpdate")}</span>
+                        </Button>
+                        {updateAvailable && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-amber-600"
+                            onClick={() => {
+                              if (window.confirm(t("skills.updateConfirm"))) {
+                                updateRemoteMutation.mutate(skill.id);
+                              }
+                            }}
+                            disabled={updateRemoteMutation.isPending}
+                          >
+                            <CircleArrowUp className={updateRemoteMutation.isPending ? "size-4 animate-spin" : "size-4"} />
+                            <span className="sr-only">{t("skills.updateSkill")}</span>
+                          </Button>
+                        )}
+                      </>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon"

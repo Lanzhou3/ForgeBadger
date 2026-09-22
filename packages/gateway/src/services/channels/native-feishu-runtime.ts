@@ -5,8 +5,21 @@ import { FeishuSdkFactory } from '../integrations/feishu-sdk.js';
 import { FeishuConnectionSupervisor, type FeishuSupervisorAccount } from '../integrations/feishu-connection-supervisor.js';
 import { FeishuChannelRuntime } from '../integrations/feishu-channel-runtime.js';
 import { NativeChannelInbox, createFeishuNativeIngress } from './native-channel-inbox.js';
-import { NativeChannelDelivery } from './native-channel-delivery.js';
+import { NativeChannelDelivery, type NativeChannelSender } from './native-channel-delivery.js';
 import { createFeishuNativeSender } from '../integrations/feishu-native-sender.js';
+import { createTelegramNativeSender } from '../integrations/telegram-native-sender.js';
+
+export interface NativeFeishuIO {
+  sdkFactory?: Pick<FeishuSdkFactory,'createWebSocketClient'>;
+  fetch?: typeof fetch;
+  validate?: typeof import('../network-policy.js').assertResolvedPublicHttpsEndpoint;
+}
+/** Dispatch by peer channel so the Feishu worker lanes serve every native channel. */
+export function createNativeChannelSender(db:Database,userId:string,key:string,io:NativeFeishuIO={}):NativeChannelSender {
+  const feishuSender=createFeishuNativeSender(db,userId,key,io);
+  const telegramSender=createTelegramNativeSender(db,userId,key,io);
+  return async input=>input.peer.channel==='telegram'?telegramSender(input):feishuSender(input);
+}
 
 export interface NativeFeishuIO {
   sdkFactory?: Pick<FeishuSdkFactory,'createWebSocketClient'>;
@@ -52,7 +65,7 @@ export function createNativeFeishuRuntime(db:Database,key:string,io:NativeFeishu
     active.add(userId);
     try {
       new NativeChannelInbox(db,userId,key).adoptNext();
-      await new NativeChannelDelivery(db,userId,key,createFeishuNativeSender(db,userId,key,io)).runOnce(signal);
+      await new NativeChannelDelivery(db,userId,key,createNativeChannelSender(db,userId,key,io)).runOnce(signal);
     }finally{active.delete(userId);}
   })});
 }

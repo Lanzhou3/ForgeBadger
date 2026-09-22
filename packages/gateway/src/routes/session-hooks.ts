@@ -8,6 +8,7 @@ import type { Database } from "../db/types.js";
 import type { Session } from "../db/repositories/session-repository.js";
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import { recordActivity } from "../services/activity-events.js";
+import { defaultNotificationDeduper, type NotificationDeduper } from "../services/notification-dedupe.js";
 
 const claudeHookEventSchema = z.object({
   hook_event_name: z.string().optional(),
@@ -111,7 +112,8 @@ export function handleClaudeNotificationHook(
   eventBus: ForgeBadgerEventBus,
   body: unknown,
   sessionToken: string | undefined,
-  sessionIdHeader?: string | undefined
+  sessionIdHeader?: string | undefined,
+  deduper: NotificationDeduper = defaultNotificationDeduper
 ): ClaudeNotificationHookResult {
   const dbClient = drizzle(db);
   const parsed = parseClaudeHookBody(body, sessionIdHeader);
@@ -156,6 +158,10 @@ export function handleClaudeNotificationHook(
     parsed.event.notification_type,
     parsed.event.message
   );
+  if (deduper.shouldDrop(session.id, notificationType, "hook", Date.now())) {
+    traceClaudeNotificationHook("deduped", { sessionId: session.id, notificationType });
+    return { status: 200, body: { code: 0, data: { accepted: true }, message: "" } };
+  }
   const toolName = parsed.event.tool_name ?? inferPermissionToolName(parsed.event.message);
   const message = notificationMessage(parsed.event, hookEventName, notificationType, toolName);
   const activityType = notificationType;
@@ -191,6 +197,7 @@ export function handleClaudeNotificationHook(
       ...(toolName ? { toolName } : {})
     }
   });
+  deduper.record(session.id, notificationType, "hook", Date.now());
 
   return { status: 200, body: { code: 0, data: { accepted: true }, message: "" } };
 }

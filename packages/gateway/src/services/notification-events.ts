@@ -16,7 +16,8 @@ const NOTIFIED_CLI_NOTIFICATION_TYPES = new Set([
   "task_completed",
   "task_interrupted",
   "task_failed",
-  "session_ended"
+  "session_ended",
+  "attention"
 ]);
 
 export interface NotificationPersistenceOptions {

@@ -12,7 +12,8 @@ export async function getChannelRecords() {
   ]);
   return {...pairings,...identities,...routes,...deliveries};
 }
-export const createChannelPairing=(accountId:string)=>post<{pairing:ChannelPairing;token:string}>('/pairings',{channel:'feishu',accountId});
+export type ChannelPairingPlatform='feishu'|'telegram';
+export const createChannelPairing=(accountId:string,channel:ChannelPairingPlatform='feishu')=>post<{pairing:ChannelPairing;token:string}>('/pairings',{channel,accountId});
 export const confirmChannelPairing=(p:ChannelPairing)=>post(`/pairings/${encodeURIComponent(p.id)}/confirm`,{revision:p.revision,externalUserId:p.externalUserId,chatId:p.chatId});
 export const cancelChannelPairing=(id:string)=>post(`/pairings/${encodeURIComponent(id)}/cancel`);
 export const revokeChannelIdentity=(id:string)=>post(`/identities/${encodeURIComponent(id)}/revoke`);

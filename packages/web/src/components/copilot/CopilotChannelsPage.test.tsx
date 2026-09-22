@@ -8,7 +8,7 @@ import * as api from '@/lib/api';
 import * as channels from '@/lib/copilot-channels-api';
 import * as grants from '@/lib/platform-actions-api';
 vi.mock('next/navigation',()=>({useRouter:()=>({push:vi.fn()})}));
-vi.mock('@/lib/api',()=>({getFeishuChannelAccount:vi.fn(),getFeishuConnectionHealth:vi.fn(),saveFeishuChannelAccount:vi.fn(),emergencyStopFeishu:vi.fn()}));
+vi.mock('@/lib/api',()=>({getFeishuChannelAccount:vi.fn(),getFeishuConnectionHealth:vi.fn(),saveFeishuChannelAccount:vi.fn(),emergencyStopFeishu:vi.fn(),getTelegramChannelAccount:vi.fn(),getTelegramConnectionHealth:vi.fn(),saveTelegramChannelAccount:vi.fn(),getTelegramIntegrationConfig:vi.fn(),updateTelegramIntegrationConfig:vi.fn(),emergencyStopTelegram:vi.fn(),getChannelDiagnostics:vi.fn()}));
 vi.mock('@/lib/copilot-channels-api',()=>({getChannelRecords:vi.fn(),createChannelPairing:vi.fn(),confirmChannelPairing:vi.fn(),cancelChannelPairing:vi.fn(),revokeChannelIdentity:vi.fn(),createChannelRoute:vi.fn(),revokeChannelRoute:vi.fn()}));
 vi.mock('@/lib/platform-actions-api',()=>({listGrants:vi.fn(),getProjectOverview:vi.fn()}));
 vi.mock('./CopilotManagementPanel',()=>({CopilotManagementPanel:()=> <div>项目授权管理</div>}));
@@ -19,6 +19,8 @@ const grant={id:'g',name:'测试授权',status:'active',revision:1,scope:{projec
 let client:QueryClient;
 beforeEach(()=>{vi.resetAllMocks();client=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});
  vi.mocked(api.getFeishuChannelAccount).mockResolvedValue(account);vi.mocked(api.getFeishuConnectionHealth).mockResolvedValue({state:'connected',accountId:'a',configRevision:1,reconnectAttempt:0,lastConnectedAt:null,lastErrorMessage:null});
+ vi.mocked(api.getTelegramChannelAccount).mockResolvedValue(null);vi.mocked(api.getTelegramConnectionHealth).mockResolvedValue({state:'disabled',accountId:null,configRevision:null,reconnectAttempt:0,lastConnectedAt:null,lastErrorMessage:null});
+ vi.mocked(api.getTelegramIntegrationConfig).mockResolvedValue({enabled:true,emergencyDisabled:false,allowedChatIds:[]});vi.mocked(api.updateTelegramIntegrationConfig).mockImplementation(async(input)=>({enabled:true,emergencyDisabled:false,allowedChatIds:input.allowedChatIds??[]}));vi.mocked(api.getChannelDiagnostics).mockResolvedValue({channel:'feishu',generatedAt:0,checks:[]});
  vi.mocked(channels.getChannelRecords).mockResolvedValue({pairings:[pairing],identities:[identity],routes:[],deliveries:[]});
  vi.mocked(grants.listGrants).mockResolvedValue({grants:[grant],capabilities:[]});vi.mocked(grants.getProjectOverview).mockResolvedValue({projects:[],observedAt:Date.now()});
 });

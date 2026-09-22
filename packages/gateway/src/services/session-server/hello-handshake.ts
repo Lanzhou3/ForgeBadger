@@ -26,7 +26,8 @@ export interface ClientHelloResult {
 export function performClientHello(
   socket: Socket,
   token: string,
-  timeoutMs: number
+  timeoutMs: number,
+  role?: "management" | undefined
 ): Promise<ClientHelloResult> {
   socket.setEncoding("utf8");
   return new Promise<ClientHelloResult>((resolve, reject) => {
@@ -105,6 +106,6 @@ export function performClientHello(
     socket.on("data", onData);
     socket.once("error", onError);
     socket.once("close", onClose);
-    socket.write(`${JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, token })}\n`);
+    socket.write(`${JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, token, ...(role !== undefined ? { role } : {}) })}\n`);
   });
 }

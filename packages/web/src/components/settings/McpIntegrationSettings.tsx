@@ -24,17 +24,23 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
 import {
   createMcpToken,
   getMcpStatus,
+  getRuntimeSettings,
   listMcpTokens,
   mcpStatusKey,
   mcpTokensKey,
   revokeMcpToken,
+  runtimeSettingsValue,
+  updateRuntimeSettings,
   type McpToken,
   type McpTokenScope,
 } from "@/lib/api";
+import { runtimeSettingsQueryKey } from "@/components/settings/InstanceRuntimeSettings";
 import { toast } from "@/lib/toast";
 
 /**
@@ -45,6 +51,7 @@ import { toast } from "@/lib/toast";
  */
 export function McpIntegrationSettings() {
   const { t } = useLanguage();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [scopes, setScopes] = useState<McpTokenScope[]>(["read"]);
@@ -53,6 +60,27 @@ export function McpIntegrationSettings() {
 
   const status = useQuery({ queryKey: mcpStatusKey, queryFn: getMcpStatus, retry: false });
   const enabled = status.data?.enabled === true;
+  // Admins can flip FORGEBADGER_MCP_ENABLED from the UI; the route mount
+  // still needs a Gateway restart, which the saved toast communicates.
+  const runtime = useQuery({
+    queryKey: runtimeSettingsQueryKey,
+    queryFn: getRuntimeSettings,
+    retry: false,
+    enabled: user?.role === "admin",
+  });
+  const mcpSwitch =
+    user?.role === "admin" && runtime.data
+      ? runtimeSettingsValue<boolean>(runtime.data, "mcp_enabled")
+      : undefined;
+  const mcpSwitchMutation = useMutation({
+    mutationFn: (next: boolean) => updateRuntimeSettings({ mcp_enabled: next }),
+    onSuccess: (_data, next) => {
+      void queryClient.invalidateQueries({ queryKey: runtimeSettingsQueryKey });
+      void queryClient.invalidateQueries({ queryKey: mcpStatusKey });
+      toast.success(next ? t("settings.restartRequired") : t("settings.instanceSaved"));
+    },
+    onError: () => toast.error(t("settings.instanceSaveError")),
+  });
   const tokens = useQuery({
     queryKey: mcpTokensKey,
     queryFn: listMcpTokens,
@@ -132,6 +160,19 @@ export function McpIntegrationSettings() {
           <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
         ) : (
           <>
+            {mcpSwitch !== undefined && !(runtime.data?.readonly ?? false) && (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+                <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                  {t("settings.mcpToggle")}
+                  <Switch
+                    checked={mcpSwitch}
+                    onCheckedChange={(checked) => mcpSwitchMutation.mutate(checked)}
+                    disabled={mcpSwitchMutation.isPending}
+                  />
+                </span>
+                <span className="text-xs text-muted-foreground">{t("settings.restartRequired")}</span>
+              </div>
+            )}
             {enabled ? (
               <div className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
                 <span className="text-xs text-muted-foreground">{t("settings.mcpEndpoint")}</span>
@@ -150,7 +191,9 @@ export function McpIntegrationSettings() {
             ) : (
               <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
                 {t("settings.mcpDisabledHint")}
-                <span className="mt-1 block font-mono">FORGEBADGER_MCP_ENABLED=true</span>
+                {mcpSwitch === undefined && (
+                  <span className="mt-1 block font-mono">FORGEBADGER_MCP_ENABLED=true</span>
+                )}
               </div>
             )}
             {enabled && <McpTokensSection endpoint={endpoint} scopes={scopes} onToggleScope={toggleScope} onCreate={handleCreate} creating={createMutation.isPending} name={name} onNameChange={setName} tokens={tokens.data?.tokens ?? undefined} loading={tokens.isLoading} error={tokens.isError} onRevoke={setRevoking} />}

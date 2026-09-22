@@ -55,7 +55,11 @@ export type RegistrationMode = "open" | "off" | "invite";
 export interface AuthRouterOptions {
   db?: Database;
   invalidator?: RuntimeAuthorizationInvalidator | undefined;
-  registrationMode?: RegistrationMode;
+  /**
+   * Static mode or a getter resolved per request — the runtime settings page
+   * can flip registration mode without a Gateway restart.
+   */
+  registrationMode?: RegistrationMode | (() => RegistrationMode);
   accountRecovery?: LocalAccountRecovery;
 }
 
@@ -66,7 +70,11 @@ export function createAuthRouter(
 ): Router {
   const router = Router();
   const db = options.db;
-  const registrationMode: RegistrationMode = options.registrationMode ?? "open";
+  const getRegistrationMode = (): RegistrationMode => {
+    const value = options.registrationMode;
+    if (typeof value === "function") return value();
+    return value ?? "open";
+  };
 
   // Rate-limit credential-bearing endpoints by remote address: brute force
   // and credential-stuffing protection for login/register, and unbounded
@@ -76,9 +84,9 @@ export function createAuthRouter(
 
   const teamToken=z.string().regex(/^[a-zA-Z0-9_-]{43}$/);
   const invitationError=(res:Response,error:unknown)=>{const typed=error instanceof CollaborationError,invalid=error instanceof z.ZodError;const code=typed?error.code:invalid?'INVALID_INPUT':'TEAM_INVITATION_FAILED';res.status(typed?error.status:invalid?400:409).json({code:1,message:code,details:{code}});};
-  router.post('/team-invitations/inspect',authLimiter,(req,res)=>{try{if(!db)throw new CollaborationError(503,'AUTH_STORAGE_UNAVAILABLE');const b=z.object({token:teamToken}).strict().parse(req.body);res.json({code:0,data:new TeamInvitations(db).inspect(b.token,registrationMode!=='off'&&userRepository.count()>0),message:''});}catch(error){invitationError(res,error);}});
+  router.post('/team-invitations/inspect',authLimiter,(req,res)=>{try{if(!db)throw new CollaborationError(503,'AUTH_STORAGE_UNAVAILABLE');const b=z.object({token:teamToken}).strict().parse(req.body);res.json({code:0,data:new TeamInvitations(db).inspect(b.token,getRegistrationMode()!=='off'&&userRepository.count()>0),message:''});}catch(error){invitationError(res,error);}});
   router.post('/team-invitations/register',authLimiter,async(req,res)=>{try{
-   if(!db)throw new CollaborationError(503,'AUTH_STORAGE_UNAVAILABLE');if(registrationMode==='off')throw new CollaborationError(403,'REGISTRATION_DISABLED');
+   if(!db)throw new CollaborationError(503,'AUTH_STORAGE_UNAVAILABLE');if(getRegistrationMode()==='off')throw new CollaborationError(403,'REGISTRATION_DISABLED');
    const b=z.object({token:teamToken,email:z.string().email().max(254),password:z.string().min(8).max(1024)}).strict().parse(req.body),invitations=new TeamInvitations(db);
    invitations.valid(b.token);const passwordHash=await bcrypt.hash(b.password,10);
    const joined=invitations.register(b.token,b.email,passwordHash);
@@ -108,11 +116,11 @@ export function createAuthRouter(
       // The first user bootstraps the instance (and becomes admin) even when
       // registration is otherwise closed - otherwise a fresh install with
       // FORGEBADGER_REGISTRATION=off|invite would be permanently locked out.
-      if (!isFirstUser && registrationMode === "off") {
+      if (!isFirstUser && getRegistrationMode() === "off") {
         res.status(403).json({ code: 1, message: "Registration is disabled" });
         return;
       }
-      const invite = !isFirstUser && registrationMode === "invite" && db
+      const invite = !isFirstUser && getRegistrationMode() === "invite" && db
         ? requireValidInvite(db, inviteCode)
         : undefined;
 

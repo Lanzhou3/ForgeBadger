@@ -3,7 +3,7 @@ import type { Database } from '../../db/types.js';
 import { decryptSecret, encryptSecret, type EncryptedSecret } from '../../crypto/secret-box.js';
 import { ChannelDeliveryRepository, type ChannelDelivery } from '../../db/repositories/channel-delivery-repository.js';
 import { NativeChannelInbox } from './native-channel-inbox.js';
-import { CopilotRunLedger } from '../agent/run-ledger.js';
+import { CopilotRunLedger, type RunRecord } from '../agent/run-ledger.js';
 import type { TrustedChannelPeer } from './channel-identity-service.js';
 
 export type NativeChannelSender = (input: {
@@ -31,7 +31,9 @@ export class NativeChannelDelivery {
           const result=this.inbox.result(item.id,this.peer(item.id));
           text=phase==='terminal' && result.status==='completed'
             ? result.messages.filter(m=>m.role==='assistant' && m.kind==='text').slice(-1).map(m=>m.content).join('') || '任务已完成，请在 Web Copilot 查看详情。'
-            : phase.startsWith('approval:') ? '任务等待审批，请在 Web Copilot 中查看并决定。' : '任务已结束或需要核查，请在 Web Copilot 查看状态。';
+            : phase.startsWith('approval:') ? '任务等待审批，请在 Web Copilot 中查看并决定。'
+            : phase==='terminal' ? terminalNotice(run)
+            : '任务已结束或需要核查，请在 Web Copilot 查看状态。';
         } catch { /* Persist a non-sensitive phase marker; send authorization will cancel it. */ }
         this.records.enqueue(item.id,phase,JSON.stringify(encryptSecret(boundedText(channelAnswer(text)),{key:this.key})));
       }
@@ -67,6 +69,14 @@ export class NativeChannelDelivery {
       throw new Error('CHANNEL_DELIVERY_PHASE_STALE');
     }
   }
+}
+
+/** Surface a failed run's category without leaking raw error text; codes double as the category label. */
+function terminalNotice(run:RunRecord):string {
+  if(run.status!=='failed')return '任务已结束或需要核查，请在 Web Copilot 查看状态。';
+  if(run.error==='AGENT_NO_MODEL')return '任务失败：尚未配置模型，请先在 Web 控制台的 Model Center 配置模型提供商。';
+  const category=run.error && /^[A-Z][A-Z0-9_]{2,}$/.test(run.error)?run.error:'执行错误';
+  return `任务失败：${category}，请在 Web Copilot 查看详情。`;
 }
 
 /** Bound actual UTF-8 JSON content, including escaping, rather than JS character count. */

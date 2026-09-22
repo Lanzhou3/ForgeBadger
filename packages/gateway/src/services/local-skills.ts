@@ -267,7 +267,7 @@ function firstMarkdownDescription(content: string): string | undefined {
   return line?.slice(0, 240);
 }
 
-function normalizeName(value: string): string {
+export function normalizeName(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 

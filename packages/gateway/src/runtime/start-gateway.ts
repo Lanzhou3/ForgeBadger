@@ -13,6 +13,7 @@ import {
   startAndConnectSessionServer,
   type SessionServerIntegration
 } from "../services/session-server-integration.js";
+import { ingestTerminalNotification } from "../services/terminal-notification-ingestion.js";
 
 export interface StartedGateway extends GatewayApp {
   host: string;
@@ -91,8 +92,31 @@ export async function createGatewayRuntime(
       sessionServerIpcPath,
       sessionServerTokenPath: resolveSessionServerTokenPath(env.FORGEBADGER_STATE_DIR),
       mcpEnabled: env.FORGEBADGER_MCP_ENABLED,
-      pmAutoDispatchEnabled: env.FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED
+      pmAutoDispatchEnabled: env.FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED,
+      // Builds the DB-backed runtime settings store (settings page) and
+      // hot-applies changes; its initial apply also reconciles pre-existing
+      // DB overrides over the env values configured above.
+      env
     });
+
+    // Terminal-native notifications (OSC 9/99/777, bell) observed on the
+    // daemon's PTYs arrive over the management socket; ingest them as the
+    // same claude_notification events the CLI hook route produces.
+    const sessionServerClient =
+      overrides.sessionServerClient ?? sessionServerIntegration?.client;
+    if (sessionServerClient) {
+      try {
+        sessionServerClient.onSessionNotification = (sessionId, notification) => {
+          try {
+            ingestTerminalNotification({ db, eventBus, sessionId, notification });
+          } catch (error) {
+            console.warn("[gateway] terminal notification ingestion failed", error);
+          }
+        };
+      } catch (error) {
+        console.warn("[gateway] terminal notification wiring failed", error);
+      }
+    }
 
     // Attach shutdown hook: the Gateway only disconnects from the Session
     // Server daemon — the daemon (and its CLI sessions) must outlive the

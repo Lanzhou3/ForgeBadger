@@ -176,7 +176,8 @@ it('serves authenticated owner management through the mounted Gateway, without a
     assert.equal((await fetch(base + '/identities')).status, 401);
     assert.equal((await request('/deliveries')).status, 200);
     assert.deepEqual((await (await request('/deliveries', undefined, f.other.id)).json()).data.deliveries, []);
-    assert.equal((await request('/pairings', { channel: 'telegram', accountId: f.account.id })).status, 400);
+    // Telegram is a valid channel platform now; the feishu account id is unknown to it, so authority rejects it.
+    assert.equal((await request('/pairings', { channel: 'telegram', accountId: f.account.id })).status, 403);
     const issuedResponse = await request('/pairings', { channel: 'feishu', accountId: f.account.id });
     assert.equal(issuedResponse.status, 201);
     assert.equal(issuedResponse.headers.get('cache-control'), 'no-store');

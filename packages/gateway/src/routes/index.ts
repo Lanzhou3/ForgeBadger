@@ -7,6 +7,7 @@ import { createTaskArtifactLinkRoutes } from './task-artifact-links.js';
 import { createCollaborationRoutes } from './collaboration.js';
 import { DeliveryService } from '../services/collaboration/delivery-service.js';
 import { createCopilotChannelRoutes } from "./copilot-channels.js";
+import { createChannelDiagnosticsRoutes } from "./channel-diagnostics.js";
 import { createPlatformActionRoutes } from "./platform-actions.js";
 import { createProjectManagementRoutes } from "./project-management.js";
 import { PlatformActions } from "../services/platform-commands/actions.js";
@@ -30,6 +31,7 @@ import { createSessionRoutes, createGateASessionRoutes } from "./sessions.js";
 import { createTemplateRoutes } from "./templates.js";
 import { createUsageRoutes } from "./usage.js";
 import { createModelProviderRoutes } from "./model-providers.js";
+import { createCliAccountRoutes } from "./cli-accounts.js";
 import { createSkillRoutes } from "./skills.js";
 import { createApiKeyRoutes } from "./api-keys.js";
 import { createCliConfigRoutes } from "./cli-config.js";
@@ -40,12 +42,14 @@ import { createSessionHookRoutes } from "./session-hooks.js";
 import { createSnapshotRoutes } from "./snapshots.js";
 import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
+import { createTelegramIntegrationRoutes } from "./integrations-telegram.js";
 import { createCopilotRoutes } from "./copilot.js";
 import { createAutomationRoutes } from "./automations.js";
 import { createMcpRoutes } from "./mcp.js";
 import { createMcpStatusRoutes } from "./mcp-status.js";
 import { createMcpTokenRoutes } from "./mcp-tokens.js";
 import { createSystemRoutes } from "./system.js";
+import { createRuntimeSettingsRoutes } from "./runtime-settings.js";
 import { UserRepository } from "../db/repositories/user-repository.js";
 
 export function mountRoutes(app: Express, deps: ServerDeps): void {
@@ -78,6 +82,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     })
   );
   app.use("/api/v1/admin/users", createAdminUserRoutes(deps.db, deps.runtimeAuthorizationInvalidator));
+  app.use("/api/v1/runtime-settings", createRuntimeSettingsRoutes(deps.db, deps.runtimeSettings));
   app.use(
     "/api/v1/session-hooks",
     createSessionHookRoutes(deps.db, deps.eventBus)
@@ -118,10 +123,16 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/model-providers", createModelProviderRoutes(deps.db, deps.masterKey, {
     eventBus: deps.eventBus
   }));
+  app.use("/api/v1/cli-accounts", createCliAccountRoutes());
   app.use("/api/v1/integrations/feishu", createFeishuIntegrationRoutes({
     db: deps.db,
     masterKey: deps.masterKey,
     ...(deps.feishuChannelRuntime ? { channelRuntime: deps.feishuChannelRuntime } : {})
+  }));
+  app.use("/api/v1/integrations/telegram", createTelegramIntegrationRoutes({
+    db: deps.db,
+    masterKey: deps.masterKey,
+    ...(deps.telegramChannelRuntime ? { channelRuntime: deps.telegramChannelRuntime } : {})
   }));
   app.use("/api/v1", createSkillRoutes(deps.db));
   app.use("/api/v1/notifications", createNotificationRoutes(deps.db));
@@ -131,6 +142,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   }));
   app.use("/api/v1/dashboard", createDashboardRoutes(deps.db));
   app.use("/api/v1/copilot/channels", createCopilotChannelRoutes({ db: deps.db, masterKey: deps.masterKey }));
+  app.use("/api/v1/channels", createChannelDiagnosticsRoutes({ db: deps.db, masterKey: deps.masterKey }));
   app.use("/api/v1", createPlatformActionRoutes({db:deps.db,masterKey:deps.masterKey,sessionManager:deps.sessionManager,adapterCommandRunner:deps.adapterCommandRunner,eventBus:deps.eventBus}));
   app.use("/api/v1", createProjectManagementRoutes(deps.db, (userId,commandId,input) => new PlatformActions({db:deps.db,userId},createPlatformCommands()).executeOwner(commandId,input,randomUUID())));
   if (deps.copilotAgent) {

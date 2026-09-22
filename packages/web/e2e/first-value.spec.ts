@@ -65,7 +65,9 @@ test("first-value flow creates projects without CLI/template binding, runs an id
   await page.getByRole("button", { name: "Start", exact: true }).click();
   await expect(page.locator(".xterm-screen")).toBeVisible({ timeout: 10_000 });
 
+  await page.getByRole("button", { name: "Generate handoff pack" }).click();
   const exportPanel = page.getByTestId("session-handoff-export");
+  await expect(exportPanel).toBeVisible();
   await exportPanel.getByLabel("Operator notes").fill("Created the idle task session and reviewed the bounded packet.");
   await exportPanel.getByLabel("Verification notes").fill("Confirmed configuration compliance and connected the terminal manually.");
   await expect(exportPanel.getByRole("button", { name: "Copy Markdown" })).toBeVisible();

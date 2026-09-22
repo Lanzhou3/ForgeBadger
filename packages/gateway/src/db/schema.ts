@@ -349,6 +349,7 @@ export const skills = sqliteTable("skills", {
   description: text("description"),
   runtimeTarget: text("runtime_target", { enum: ["cli", "copilot"] }).notNull().default("cli"),
   resourceManifest: text("resource_manifest"),
+  remoteProvenance: text("remote_provenance"),
   source: text("source").notNull().default("local"),
   content: text("content").notNull(),
   version: text("version").notNull().default("1.0.0"),
@@ -1030,6 +1031,45 @@ export const feishuChannelAccounts = sqliteTable(
   (table) => ({
     idxFeishuChannelAccountsUser: uniqueIndex("idx_feishu_channel_accounts_user").on(table.userId),
     idxFeishuChannelAccountsApp: uniqueIndex("idx_feishu_channel_accounts_app").on(table.userId, table.appId)
+  })
+);
+
+export const telegramChannelAccounts = sqliteTable(
+  "telegram_channel_accounts",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    botTokenEncrypted: text("bot_token_encrypted").notNull(),
+    botUsername: text("bot_username"),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    connectionState: text("connection_state").notNull().default("disabled"),
+    lastConnectedAt: integer("last_connected_at", { mode: "timestamp" }),
+    lastErrorCode: text("last_error_code"),
+    lastErrorMessage: text("last_error_message"),
+    configRevision: integer("config_revision").notNull().default(1),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idxTelegramChannelAccountsUser: uniqueIndex("idx_telegram_channel_accounts_user").on(table.userId)
+  })
+);
+
+export const integrationTelegramConfigs = sqliteTable(
+  "integration_telegram_configs",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    emergencyDisabled: integer("emergency_disabled", { mode: "boolean" }).notNull().default(false),
+    allowedChatIds: text("allowed_chat_ids").notNull().default("[]"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+  },
+  (table) => ({
+    idx_integration_telegram_configs_user: uniqueIndex("idx_integration_telegram_configs_user").on(table.userId)
   })
 );
 
@@ -1966,3 +2006,9 @@ export const projectTaskArtifactLinks=sqliteTable('project_task_artifact_links',
  identity:uniqueIndex('idx_task_artifact_identity').on(t.userId,t.projectId,t.workItemId,t.developmentTaskId,t.artifactDigest),
  status:check('task_artifact_status',sql`${t.artifactStatus} IN ('checks_passed','checks_failed','accepted')`),files:check('task_artifact_files',sql`${t.filesCount}>=0`),checks:check('task_artifact_checks',sql`${t.checksCount}>=0`),passed:check('task_artifact_passed',sql`${t.passedChecks}>=0 AND ${t.passedChecks}<=${t.checksCount}`)
 }));
+
+export const runtimeSettings=sqliteTable('runtime_settings',{
+ key:text('key').primaryKey().notNull(),value:text('value').notNull(),updatedAt:integer('updated_at').notNull(),
+ /** Snapshot of the admin user id that last wrote the setting (no FK: admin deletion must not block). */
+ updatedBy:text('updated_by')
+});

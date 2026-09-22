@@ -9,6 +9,8 @@ const terminal = vi.hoisted(() => ({
   attachCustomKeyEventHandler: vi.fn(), attachCustomWheelEventHandler: vi.fn(),
   loadAddon: vi.fn(), open: vi.fn(), dispose: vi.fn(), onData: vi.fn(() => ({ dispose: vi.fn() })),
   onScroll: vi.fn(() => ({ dispose: vi.fn() })), scrollToBottom: vi.fn(),
+  onBell: vi.fn(() => ({ dispose: vi.fn() })),
+  parser: { registerOscHandler: vi.fn(() => ({ dispose: vi.fn() })) },
   buffer: { active: { type: "normal", viewportY: 0, baseY: 0 } },
 }));
 vi.mock("@xterm/xterm", () => ({ Terminal: class { constructor() { return terminal; } } }));

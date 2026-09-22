@@ -38,8 +38,9 @@ function ManagementSection() {
       <h2 className="font-semibold">多项目进度</h2>
       <p className="text-xs text-muted-foreground">
         此处是账号下的项目管理视图，不会扩大会话授权范围。CLI
-        自动下发需在 Gateway 环境变量 FORGEBADGER_CLI_AUTONOMY_ADAPTERS
-        中为对应适配器开启；未开启的适配器仍需人工在终端操作。
+        自动下发需先在“Copilot 设置 → 常规 → 派发自主权”（或 Gateway
+        环境变量 FORGEBADGER_CLI_AUTONOMY_ADAPTERS）中为对应适配器开启；
+        未开启的适配器仍需人工在终端操作。
       </p>
       {overview.isPending && <p role="status">正在加载项目…</p>}
       {overview.isError && (

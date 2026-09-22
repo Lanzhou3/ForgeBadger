@@ -390,6 +390,51 @@ export interface UpdateFeishuIntegrationConfigInput {
   commandPrefix?: string;
 }
 
+export type ChannelPlatform = "feishu" | "telegram";
+
+export interface TelegramChannelAccount {
+  id: string;
+  botUsername: string | null;
+  enabled: boolean;
+  secretConfigured: boolean;
+  connectionState: string;
+  configRevision: number;
+  lastConnectedAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  updatedAt: string;
+}
+
+export interface SaveTelegramChannelAccountInput {
+  botToken?: string;
+  enabled: boolean;
+}
+
+export interface TelegramIntegrationConfig {
+  enabled: boolean;
+  emergencyDisabled: boolean;
+  allowedChatIds: string[];
+}
+
+export interface UpdateTelegramIntegrationConfigInput {
+  enabled?: boolean;
+  emergencyDisabled?: boolean;
+  allowedChatIds?: string[];
+}
+
+export interface ChannelDiagnosticCheck {
+  key: "credentials" | "connection" | "identity" | "route" | "model" | "delivery";
+  ok: boolean;
+  detail: string;
+  fixHint: string;
+}
+
+export interface ChannelDiagnostics {
+  channel: ChannelPlatform;
+  generatedAt: number;
+  checks: ChannelDiagnosticCheck[];
+}
+
 export interface FeishuUserMapping {
   id: string;
   feishuUserId: string;
@@ -466,6 +511,48 @@ export interface Skill {
   version?: string;
   visibility?: "private" | "shared" | "admin";
   isEnabled: boolean;
+  /** JSON-serialized SkillRemoteProvenance for skills installed from a remote repository. */
+  remoteProvenance?: string | null;
+}
+
+export interface SkillRemoteProvenanceLastCheck {
+  checkedAt: string;
+  latestCommitSha: string;
+  updateAvailable: boolean;
+}
+
+export interface SkillRemoteProvenance {
+  kind: "github" | "marketplace" | string;
+  repo: string;
+  ref: string;
+  path?: string;
+  resolvedCommitSha: string;
+  contentHash: string;
+  installedAt: string;
+  marketplaceSourceId?: string;
+  pluginName?: string;
+  lastCheck?: SkillRemoteProvenanceLastCheck;
+}
+
+export function parseSkillRemoteProvenance(
+  skill: Pick<Skill, "remoteProvenance">
+): SkillRemoteProvenance | null {
+  const raw = skill.remoteProvenance;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<SkillRemoteProvenance> | null;
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof parsed.repo !== "string" ||
+      typeof parsed.resolvedCommitSha !== "string"
+    ) {
+      return null;
+    }
+    return parsed as SkillRemoteProvenance;
+  } catch {
+    return null;
+  }
 }
 
 export interface SkillDiscovery {
@@ -605,6 +692,56 @@ export interface ProviderBalanceResult {
   balances: ProviderBalanceEntry[];
   checkedAt: string;
   cached?: boolean;
+}
+
+/**
+ * Read-only view of a CLI's native login state / subscription quota, as
+ * reported by GET /cli-accounts. Mirrors the gateway cli-account types.
+ */
+export type CliAccountAdapter = "claude" | "codex" | "kimi";
+
+export type CliLoginState = "ready" | "not_authenticated" | "cli_missing" | "unknown";
+
+export interface CliLoginStatus {
+  adapter: CliAccountAdapter;
+  state: CliLoginState;
+  /** Login method, e.g. claude "claude.ai", codex "chatgpt"|"api", kimi "oauth"|"api_key". */
+  method?: string;
+  /** Human-facing account hint (e.g. email) when the CLI exposes one. */
+  accountLabel?: string;
+  /** Machine-readable qualifier for ambiguous states (e.g. "token_expired"). */
+  detailCode?: string;
+}
+
+export type CliQuotaUnsupportedReason =
+  | "keychain"
+  | "no_native_login"
+  | "api_key_mode"
+  | "token_expired"
+  | "upstream_error";
+
+export interface CliQuotaEntry {
+  label: string;
+  unit: "percent" | "count" | "currency";
+  /** 0-100 usage percentage when the endpoint reports one. */
+  usedPercent?: number;
+  remaining?: number;
+  limit?: number;
+  /** ISO timestamp when the quota window resets, when reported. */
+  resetsAt?: string;
+}
+
+export interface CliQuotaResult {
+  supported: boolean;
+  unsupportedReason?: CliQuotaUnsupportedReason;
+  planLabel?: string;
+  entries: CliQuotaEntry[];
+  fetchedAt: string;
+}
+
+export interface CliAccountOverview {
+  login: CliLoginStatus;
+  quota?: CliQuotaResult;
 }
 
 export interface AppliedProviderInfo {
@@ -873,6 +1010,66 @@ export interface SkillSourcePreviewInput {
   url: string;
   skillId?: string;
   timeoutMs?: number;
+}
+
+export interface GitHubSkillSourcePreviewInput {
+  /** "owner/repo" or "owner/repo/sub/path" shorthand. */
+  repo: string;
+  ref?: string;
+}
+
+export interface GitHubSkillInstallInput {
+  repo: string;
+  ref?: string;
+  path: string;
+}
+
+export interface GitHubSkillPreviewEntry {
+  path: string;
+  name: string;
+  description?: string;
+  version?: string;
+}
+
+export interface GitHubSkillSourcePreview {
+  sha: string;
+  /** Normalized "owner/repo" of the previewed source (may differ from the input shorthand). */
+  repo?: string;
+  skills: GitHubSkillPreviewEntry[];
+}
+
+export interface SkillUpdateCheckResult {
+  updateAvailable: boolean;
+  currentSha: string;
+  latestSha: string;
+}
+
+export interface SkillUpdateCheckEntry {
+  skillId: string;
+  name: string;
+  updateAvailable: boolean;
+  currentSha: string;
+  latestSha: string;
+  error?: string;
+}
+
+export interface SkillUpdateCheckSummary {
+  results: SkillUpdateCheckEntry[];
+}
+
+export interface MarketplaceRefreshInput {
+  /** "owner/repo" shorthand of a GitHub marketplace repository. */
+  repo: string;
+  label?: string;
+  timeoutMs?: number;
+}
+
+export interface MarketplaceRefreshResult {
+  source: CatalogSource;
+  items: CatalogItem[];
+  skipped?: { name: string; reason: string }[];
+  sha?: string;
+  marketplaceName?: string | null;
 }
 
 export interface ApiKeySummary {
@@ -1253,11 +1450,20 @@ export async function saveFeishuAppAccount(input: {
   return data.account;
 }
 
+const CONNECTION_HEALTH_FALLBACK: FeishuConnectionHealth = {
+  state: "disabled",
+  accountId: null,
+  configRevision: null,
+  reconnectAttempt: 0,
+  lastConnectedAt: null,
+  lastErrorMessage: null
+};
+
 export async function getFeishuChannelAccount(): Promise<FeishuChannelAccount | null> {
   const data = await fetchJson<{ account: FeishuChannelAccount | null }>("/api/v1/integrations/feishu/account", {
     cache: "no-store"
   });
-  return data.account;
+  return data.account ?? null;
 }
 
 export async function saveFeishuChannelAccount(input: {
@@ -1276,7 +1482,7 @@ export async function getFeishuConnectionHealth(): Promise<FeishuConnectionHealt
   const data = await fetchJson<{ health: FeishuConnectionHealth }>("/api/v1/integrations/feishu/health", {
     cache: "no-store"
   });
-  return data.health;
+  return data.health ?? CONNECTION_HEALTH_FALLBACK;
 }
 
 export async function emergencyStopFeishu(): Promise<void> {
@@ -1315,6 +1521,62 @@ export async function replaceFeishuUserMappings(
     body: JSON.stringify({ mappings })
   });
   return data.mappings;
+}
+
+export async function getTelegramChannelAccount(): Promise<TelegramChannelAccount | null> {
+  const data = await fetchJson<{ account: TelegramChannelAccount | null }>("/api/v1/integrations/telegram/account", {
+    cache: "no-store"
+  });
+  return data.account ?? null;
+}
+
+export async function saveTelegramChannelAccount(
+  input: SaveTelegramChannelAccountInput
+): Promise<TelegramChannelAccount> {
+  const data = await fetchJson<{ account: TelegramChannelAccount }>("/api/v1/integrations/telegram/account", {
+    method: "PUT",
+    body: JSON.stringify(input)
+  });
+  return data.account;
+}
+
+export async function getTelegramConnectionHealth(): Promise<FeishuConnectionHealth> {
+  const data = await fetchJson<{ health: FeishuConnectionHealth }>("/api/v1/integrations/telegram/health", {
+    cache: "no-store"
+  });
+  return data.health ?? CONNECTION_HEALTH_FALLBACK;
+}
+
+export async function getTelegramIntegrationConfig(): Promise<TelegramIntegrationConfig> {
+  const data = await fetchJson<{ config: TelegramIntegrationConfig }>("/api/v1/integrations/telegram/config", {
+    cache: "no-store"
+  });
+  return data.config ?? { enabled: true, emergencyDisabled: false, allowedChatIds: [] };
+}
+
+export async function updateTelegramIntegrationConfig(
+  input: UpdateTelegramIntegrationConfigInput
+): Promise<TelegramIntegrationConfig> {
+  const data = await fetchJson<{ config: TelegramIntegrationConfig }>("/api/v1/integrations/telegram/config", {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+  return data.config ?? { enabled: true, emergencyDisabled: false, allowedChatIds: [] };
+}
+
+export async function emergencyStopTelegram(): Promise<void> {
+  await fetchJson("/api/v1/integrations/telegram/emergency-stop", { method: "POST", body: "{}" });
+}
+
+export async function getChannelDiagnostics(channel: ChannelPlatform): Promise<ChannelDiagnostics> {
+  const data = await fetchJson<ChannelDiagnostics>(`/api/v1/channels/${channel}/diagnostics`, {
+    cache: "no-store"
+  });
+  return {
+    channel: data.channel ?? channel,
+    generatedAt: typeof data.generatedAt === "number" ? data.generatedAt : 0,
+    checks: Array.isArray(data.checks) ? data.checks : []
+  };
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
@@ -2600,6 +2862,15 @@ export async function refreshCatalog(data: {
   }) as Promise<{ source: CatalogSource; items: CatalogItem[] }>;
 }
 
+export async function refreshMarketplace(
+  data: MarketplaceRefreshInput
+): Promise<MarketplaceRefreshResult> {
+  return fetchJson("/api/v1/catalog/marketplace-refresh", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<MarketplaceRefreshResult>;
+}
+
 export async function installCatalogTemplate(
   itemId: string
 ): Promise<{ template: Template; catalogItem: Pick<CatalogItem, "id" | "externalId" | "sourceId"> }> {
@@ -2654,6 +2925,42 @@ export async function toggleSkill(id: string, enabled: boolean): Promise<{ skill
   return fetchJson(`/api/v1/skills/${id}/toggle`, {
     method: "POST",
     body: JSON.stringify({ enabled }),
+  }) as Promise<{ skill: Skill }>;
+}
+
+export async function previewGitHubSkillSource(
+  data: GitHubSkillSourcePreviewInput
+): Promise<GitHubSkillSourcePreview> {
+  return fetchJson("/api/v1/skills/install/github/preview", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<GitHubSkillSourcePreview>;
+}
+
+export async function installGitHubSkill(
+  data: GitHubSkillInstallInput
+): Promise<{ skill: Skill }> {
+  return fetchJson("/api/v1/skills/install/github", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<{ skill: Skill }>;
+}
+
+export async function checkSkillUpdate(id: string): Promise<SkillUpdateCheckResult> {
+  return fetchJson(`/api/v1/skills/${encodeURIComponent(id)}/check-update`, {
+    method: "POST",
+  }) as Promise<SkillUpdateCheckResult>;
+}
+
+export async function checkAllSkillUpdates(): Promise<SkillUpdateCheckSummary> {
+  return fetchJson("/api/v1/skills/check-updates", {
+    method: "POST",
+  }) as Promise<SkillUpdateCheckSummary>;
+}
+
+export async function updateRemoteSkill(id: string): Promise<{ skill: Skill }> {
+  return fetchJson(`/api/v1/skills/${encodeURIComponent(id)}/update`, {
+    method: "POST",
   }) as Promise<{ skill: Skill }>;
 }
 
@@ -2979,6 +3286,20 @@ export async function getProviderBalance(providerId: string): Promise<ProviderBa
   ) as Promise<ProviderBalanceResult>;
 }
 
+export async function getCliAccounts(): Promise<{ accounts: CliAccountOverview[] }> {
+  return fetchJson("/api/v1/cli-accounts") as Promise<{ accounts: CliAccountOverview[] }>;
+}
+
+export async function getCliAccount(adapter: CliAccountAdapter): Promise<{ overview: CliAccountOverview }> {
+  return fetchJson(`/api/v1/cli-accounts/${adapter}`) as Promise<{ overview: CliAccountOverview }>;
+}
+
+export async function refreshCliAccountQuota(adapter: CliAccountAdapter): Promise<{ overview: CliAccountOverview }> {
+  return fetchJson(`/api/v1/cli-accounts/${adapter}/quota/refresh`, {
+    method: "POST",
+  }) as Promise<{ overview: CliAccountOverview }>;
+}
+
 export async function listApiKeys(): Promise<{ apiKeys: ApiKeySummary[] }> {
   return fetchJson("/api/v1/api-keys") as Promise<{ apiKeys: ApiKeySummary[] }>;
 }
@@ -3167,4 +3488,49 @@ export async function applyTemplateSync(
       ...(options.credentialMode ? { credentialMode: options.credentialMode } : {})
     })
   }) as Promise<TemplateSyncApplyResult>;
+}
+
+// ---- Runtime settings (DB-backed overrides on top of .env defaults) ----
+
+export type RuntimeSettingKey =
+  | "registration"
+  | "mcp_enabled"
+  | "session_prefix"
+  | "cli_autonomy_adapters"
+  | "pm_auto_dispatch";
+
+export interface RuntimeSettingView {
+  key: RuntimeSettingKey;
+  value: unknown;
+  source: "env" | "settings";
+  /** false → the change needs a Gateway restart to take effect. */
+  hot: boolean;
+}
+
+export interface RuntimeSettingsState {
+  settings: RuntimeSettingView[];
+  /** true when FORGEBADGER_RUNTIME_SETTINGS_READONLY forbids writes. */
+  readonly: boolean;
+}
+
+export function runtimeSettingsValue<T>(state: RuntimeSettingsState, key: RuntimeSettingKey): T | undefined {
+  const value = state.settings.find((view) => view.key === key)?.value;
+  return value === undefined || value === null ? undefined : (value as T);
+}
+
+export function runtimeSettingsMeta(state: RuntimeSettingsState, key: RuntimeSettingKey): RuntimeSettingView | undefined {
+  return state.settings.find((view) => view.key === key);
+}
+
+export async function getRuntimeSettings(): Promise<RuntimeSettingsState> {
+  return fetchJson<RuntimeSettingsState>("/api/v1/runtime-settings");
+}
+
+export async function updateRuntimeSettings(
+  patch: Partial<Record<RuntimeSettingKey, unknown>>
+): Promise<RuntimeSettingsState> {
+  return fetchJson<RuntimeSettingsState>("/api/v1/runtime-settings", {
+    method: "PUT",
+    body: JSON.stringify(patch)
+  });
 }

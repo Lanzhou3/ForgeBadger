@@ -74,6 +74,13 @@ import {
   previewConfig,
   previewConfigSync,
   previewSkillSource,
+  previewGitHubSkillSource,
+  installGitHubSkill,
+  checkSkillUpdate,
+  checkAllSkillUpdates,
+  updateRemoteSkill,
+  refreshMarketplace,
+  parseSkillRemoteProvenance,
   rotateApiKey,
   resetPassword,
   markAllNotificationsRead,
@@ -678,6 +685,81 @@ describe("api client", () => {
       "http://127.0.0.1:48731/api/v1/catalog/items/catalog-skill-1/install",
       expect.objectContaining({ method: "POST" })
     );
+  });
+
+  it("installs and manages GitHub-backed remote Skills", async () => {
+    await previewGitHubSkillSource({ repo: "anthropics/skills", ref: "main" });
+    await installGitHubSkill({ repo: "anthropics/skills", path: "skills/pdf/SKILL.md" });
+    await checkSkillUpdate("skill-1");
+    await checkAllSkillUpdates();
+    await updateRemoteSkill("skill-1");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:48731/api/v1/skills/install/github/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ repo: "anthropics/skills", ref: "main" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:48731/api/v1/skills/install/github",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ repo: "anthropics/skills", path: "skills/pdf/SKILL.md" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:48731/api/v1/skills/skill-1/check-update",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:48731/api/v1/skills/check-updates",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:48731/api/v1/skills/skill-1/update",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("refreshes a GitHub marketplace into the catalog", async () => {
+    await refreshMarketplace({ repo: "anthropics/skills", label: "Anthropic Skills" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/catalog/marketplace-refresh",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ repo: "anthropics/skills", label: "Anthropic Skills" }),
+      })
+    );
+  });
+
+  it("parses Skill remote provenance and tolerates invalid JSON", () => {
+    expect(
+      parseSkillRemoteProvenance({
+        remoteProvenance: JSON.stringify({
+          kind: "github",
+          repo: "anthropics/skills",
+          ref: "main",
+          resolvedCommitSha: "abc123def456",
+          contentHash: "sha256:deadbeef",
+          installedAt: "2026-09-22T00:00:00Z",
+          lastCheck: {
+            checkedAt: "2026-09-22T01:00:00Z",
+            latestCommitSha: "def456abc123",
+            updateAvailable: true,
+          },
+        }),
+      })
+    ).toMatchObject({ repo: "anthropics/skills", lastCheck: { updateAvailable: true } });
+    expect(parseSkillRemoteProvenance({ remoteProvenance: null })).toBeNull();
+    expect(parseSkillRemoteProvenance({ remoteProvenance: "not-json" })).toBeNull();
+    expect(parseSkillRemoteProvenance({ remoteProvenance: JSON.stringify({ kind: "github" }) })).toBeNull();
   });
 
   it("creates, lists, and rotates API keys without response plaintext expectations", async () => {

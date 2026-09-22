@@ -21,6 +21,7 @@ import { createPlatformAdapter, disposePty, type PlatformPtyAdapter } from "./pl
 import { SessionHandle } from "./session-handle.js";
 import { buildSanitizedEnv } from "./env-policy.js";
 import type { LaunchPlanPayload, PaneSnapshot, SessionInfo } from "./ipc-protocol.js";
+import type { TerminalNotification } from "./terminal-notification-scanner.js";
 
 const require = createRequire(import.meta.url);
 
@@ -32,6 +33,7 @@ export interface SessionServerOptions {
   screenFlowControl?: { highWaterBytes: number; lowWaterBytes: number };
   onSessionExit?: ((sessionId: string, exitCode: number) => void) | undefined;
   onSessionOutput?: ((sessionId: string, clientId: string, data: string) => void) | undefined;
+  onSessionNotification?: ((sessionId: string, notification: TerminalNotification) => void) | undefined;
 }
 
 export interface AttachResult {
@@ -55,6 +57,8 @@ export class SessionServer {
   private _onSessionExit?: ((sessionId: string, exitCode: number) => void) | undefined;
   /** Callback for session output events — settable via setter for IpcServer wiring. */
   private _onSessionOutput?: ((sessionId: string, clientId: string, data: string) => void) | undefined;
+  /** Callback for terminal notifications — settable via setter for IpcServer wiring. */
+  private _onSessionNotification?: ((sessionId: string, notification: TerminalNotification) => void) | undefined;
 
   constructor(options: SessionServerOptions = {}) {
     this.platformAdapter = options.platformAdapter ?? createPlatformAdapter();
@@ -62,6 +66,7 @@ export class SessionServer {
     this.screenFlowControl = options.screenFlowControl;
     this._onSessionExit = options.onSessionExit;
     this._onSessionOutput = options.onSessionOutput;
+    this._onSessionNotification = options.onSessionNotification;
   }
 
   get onSessionExit(): ((sessionId: string, exitCode: number) => void) | undefined {
@@ -78,6 +83,14 @@ export class SessionServer {
 
   set onSessionOutput(value: ((sessionId: string, clientId: string, data: string) => void) | undefined) {
     this._onSessionOutput = value;
+  }
+
+  get onSessionNotification(): ((sessionId: string, notification: TerminalNotification) => void) | undefined {
+    return this._onSessionNotification;
+  }
+
+  set onSessionNotification(value: ((sessionId: string, notification: TerminalNotification) => void) | undefined) {
+    this._onSessionNotification = value;
   }
 
   // ------------------------------------------------------------------
@@ -160,7 +173,10 @@ export class SessionServer {
       ownerSessionId: launchPlan.env.FORGEBADGER_SESSION_ID,
       pty,
       scrollback: this.scrollback,
-      screenFlowControl: this.screenFlowControl
+      screenFlowControl: this.screenFlowControl,
+      onNotification: (notification) => {
+        this.onSessionNotification?.(sessionId, notification);
+      }
     });
 
     this.processClaims.register(handle,launchNonce);

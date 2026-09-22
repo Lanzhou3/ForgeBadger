@@ -11,6 +11,7 @@ import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { AccountSecuritySettings } from "@/components/settings/AccountSecuritySettings";
 import { ClaudeRouteSettings } from "@/components/settings/ClaudeRouteSettings";
+import { InstanceRuntimeSettings } from "@/components/settings/InstanceRuntimeSettings";
 import { McpIntegrationSettings } from "@/components/settings/McpIntegrationSettings";
 import { PetSettings } from "@/components/settings/PetSettings";
 import {
@@ -371,10 +372,14 @@ export default function SettingsPage() {
           </Card>
 
           <div className="forgebadger-animate-in" style={{ animationDelay: "180ms" }}>
-            <ClaudeRouteSettings />
+            <InstanceRuntimeSettings />
           </div>
 
           <div className="forgebadger-animate-in" style={{ animationDelay: "200ms" }}>
+            <ClaudeRouteSettings />
+          </div>
+
+          <div className="forgebadger-animate-in" style={{ animationDelay: "220ms" }}>
             <McpIntegrationSettings />
           </div>
         </div>

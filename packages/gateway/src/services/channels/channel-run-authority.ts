@@ -8,10 +8,5 @@ export function assertChannelConversationAuthority(db: Database, userId: string,
   const route = records.conversationRoute(conversationId);
   if (!route && !records.conversationIsChannelOwned(conversationId)) return;
   if (!route) throw new ChannelIdentityError();
-  const identity = records.identity(route.identityId);
-  if (!identity) throw new ChannelIdentityError();
-  new ChannelIdentityService(db,userId).admit(route.id, {
-    channel: 'feishu', accountId: identity.accountId, accountRevision: identity.accountRevision,
-    externalUserId: identity.externalUserId, chatId: identity.chatId, chatType: 'p2p'
-  });
+  new ChannelIdentityService(db,userId).admitRoute(route.id);
 }

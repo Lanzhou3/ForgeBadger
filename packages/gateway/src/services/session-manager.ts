@@ -151,7 +151,7 @@ export class InMemorySessionManager {
   private readonly writerGenerations = new Map<string, number>();
   private readonly sessions = new Map<string, GateASession>();
   private readonly sessionOutputs = new Map<string, SessionOutputRing>();
-  private readonly sessionPrefix: string;
+  private sessionPrefix: string;
   private readonly runtimeInputAuthorizer: ((session: Readonly<GateASession>) => void) | undefined;
   private readonly programmaticSubmitSettleMs: Readonly<Record<AdapterId, number>>;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -175,6 +175,15 @@ export class InMemorySessionManager {
     };
     this.sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     this.detectBackendRestart = options.detectBackendRestart;
+  }
+
+  /**
+   * Update the runtime session name prefix (runtime settings page).
+   * Affects newly created sessions only; existing sessions keep the name
+   * they were started with.
+   */
+  setSessionPrefix(prefix: string): void {
+    this.sessionPrefix = normalizeSessionPrefix(prefix);
   }
 
   /**

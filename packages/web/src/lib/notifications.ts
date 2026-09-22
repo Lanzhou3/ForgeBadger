@@ -49,6 +49,7 @@ const NOTIFIED_CLI_NOTIFICATION_TYPES = new Set([
   "task_interrupted",
   "task_failed",
   "session_ended",
+  "attention",
 ]);
 
 export function createNotificationFromEvent(
@@ -228,6 +229,7 @@ function cliNotificationTitleKey(
   if (notificationType === "task_completed") return "notifications.taskCompleted";
   if (notificationType === "task_failed") return "notifications.taskFailed";
   if (notificationType === "session_ended") return "notifications.sessionEnded";
+  if (notificationType === "attention") return "notifications.needsAttention";
   return "notifications.taskInterrupted";
 }
 

@@ -12,21 +12,40 @@ const strictEnvBoolean = z
 
 const cliAdapterId = z.enum(["claude", "opencode", "codex", "kimi", "pi"]);
 
+// Shared with the runtime-settings service so the settings page validates
+// against exactly the same shapes the process env accepts.
+export const registrationModeSchema = z.enum(["open", "off", "invite"]);
+export const cliAdapterIdSchema = cliAdapterId;
+export const sessionPrefixSchema = z
+  .string()
+  .regex(/^[a-zA-Z0-9_-]+$/)
+  .max(32);
+export const cliAutonomyAdaptersSchema = z
+  .union([z.string(), z.array(cliAdapterId)])
+  .transform((value) => (typeof value === "string" ? value.split(",").map((entry) => entry.trim()).filter(Boolean) : value))
+  .pipe(z.array(cliAdapterId));
+const runtimeSettingsBoolean = z
+  .union([z.boolean(), z.enum(["true", "false"])])
+  .default(false)
+  .transform((value) => value === true || value === "true");
+
 const envSchema = z.object({
   FORGEBADGER_PORT: z.coerce.number().int().positive().default(3000),
   FORGEBADGER_HOST: z.string().default("127.0.0.1"),
   FORGEBADGER_STATE_DIR: z.string(),
   FORGEBADGER_DB_PATH: z.string(),
   FORGEBADGER_JWT_SECRET: z.string().min(32),
-  FORGEBADGER_SESSION_PREFIX: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("fb-"),
-  FORGEBADGER_REGISTRATION: z.enum(["open", "off", "invite"]).default("open"),
+  FORGEBADGER_SESSION_PREFIX: sessionPrefixSchema.default("fb-"),
+  FORGEBADGER_REGISTRATION: registrationModeSchema.default("open"),
   FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: strictEnvBoolean,
-  FORGEBADGER_CLI_AUTONOMY_ADAPTERS: z
-    .union([z.string(), z.array(cliAdapterId)])
-    .default("")
-    .transform((value) => (typeof value === "string" ? value.split(",").map((entry) => entry.trim()).filter(Boolean) : value))
-    .pipe(z.array(cliAdapterId)),
+  FORGEBADGER_CLI_AUTONOMY_ADAPTERS: cliAutonomyAdaptersSchema.default(""),
   FORGEBADGER_MCP_ENABLED: strictEnvBoolean,
+  /**
+   * Operator escape hatch: when true the runtime-settings API rejects writes
+   * and the console renders the settings page read-only (.env stays the only
+   * source of truth).
+   */
+  FORGEBADGER_RUNTIME_SETTINGS_READONLY: runtimeSettingsBoolean,
   FORGEBADGER_MASTER_KEY: z.string().refine((value) => isValidMasterKey(value), {
     message: "FORGEBADGER_MASTER_KEY must be 32 bytes or 64 hex characters"
   }),

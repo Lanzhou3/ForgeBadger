@@ -1246,6 +1246,11 @@ agent directory during project config generation: `.claude/agents/*.md`,
 - `POST /api/v1/skills`
 - `POST /api/v1/skills/install/preview`
 - `POST /api/v1/skills/install`
+- `POST /api/v1/skills/install/github/preview`
+- `POST /api/v1/skills/install/github`
+- `POST /api/v1/skills/check-updates`
+- `POST /api/v1/skills/:id/check-update`
+- `POST /api/v1/skills/:id/update`
 - `GET /api/v1/skills/:id`
 - `PUT /api/v1/skills/:id`
 - `DELETE /api/v1/skills/:id`
@@ -1294,11 +1299,80 @@ created/updated/skipped counts.
 `POST /api/v1/skills/local-sync` runs the same discovery explicitly for the Web
 console rescan action.
 
+#### Remote GitHub Skills
+
+GitHub-backed install fetches single-file `SKILL.md` content through the
+GitHub REST API (no git client) and pins every install to a resolved commit
+SHA. All requests are HTTPS-only, validated against the outbound host
+blocklist (including every redirect hop), bounded by a ≤30s timeout, and
+limited to `api.github.com` / `raw.githubusercontent.com`. Repositories whose
+git tree exceeds 1000 entries (or is truncated) are rejected. `GITHUB_TOKEN`
+may be configured to raise the anonymous 60 req/h API limit; ForgeBadger sends
+it as a Bearer token on every GitHub request.
+
+- `POST /api/v1/skills/install/github/preview` accepts
+  `{ repo: "owner/repo[/sub/path]" | https://github.com/owner/repo[/tree/<ref>/<path>], ref?, timeoutMs? }`
+  and returns `{ sha, ref, repo, skills: [{ path, name }] }`. Discovery follows
+  ecosystem conventions: repository root, `skills/`, `.claude/skills/`,
+  `.agents/skills/`, and directories referenced by
+  `.claude-plugin/marketplace.json`.
+- `POST /api/v1/skills/install/github` accepts `{ repo, ref?, path, enable?, timeoutMs? }`,
+  fetches the `SKILL.md` at the resolved commit, creates the Skill row with
+  `source: "github:<owner>/<repo>"` (disabled unless `enable: true`), mirrors
+  the file into `${AGENTS_HOME}/skills/<slug>/` with a
+  `.forgebadger-managed.json` marker, and returns the Skill plus its
+  `remoteProvenance`. A name conflict returns 409.
+- `POST /api/v1/skills/:id/check-update` resolves the latest commit for the
+  provenance ref, persists `lastCheck` on the Skill, and returns
+  `{ updateAvailable, currentSha, latestSha }`. Non-remote Skills return 400.
+- `POST /api/v1/skills/check-updates` runs the same check serially for every
+  remote Skill owned by the user and returns `{ results }` (per-Skill errors
+  are reported inline instead of failing the batch).
+- `POST /api/v1/skills/:id/update` re-fetches the `SKILL.md` at the latest
+  commit, refreshes content/version/`resolvedCommitSha`/`contentHash` in the DB
+  row and the managed mirror file, and preserves the current enablement state.
+  If the upstream Skill was renamed, the update is refused (400) and the Skill
+  must be uninstalled and reinstalled.
+- `DELETE /api/v1/skills/:id` additionally removes the managed
+  `${AGENTS_HOME}/skills/<name>` directory, but only when the
+  `.forgebadger-managed.json` marker is present; user-owned directories are
+  never deleted.
+
+Remote Skills carry a `remoteProvenance` JSON column:
+
+```json
+{
+  "kind": "github" | "marketplace",
+  "repo": "owner/repo",
+  "ref": "main",
+  "path": "skills/pdf/SKILL.md",
+  "resolvedCommitSha": "abc123...",
+  "contentHash": "sha256:...",
+  "installedAt": "ISO-8601",
+  "marketplaceSourceId": "claude-plugins-official",
+  "pluginName": "document-skills",
+  "lastCheck": { "checkedAt": "ISO-8601", "latestCommitSha": "def456...", "updateAvailable": true }
+}
+```
+
+`ref`, `marketplaceSourceId`, `pluginName`, and `lastCheck` are omitted when not
+applicable.
+
+Known limitations:
+
+- Single-file install only: Skills with `scripts/`, `references/`, or other
+  auxiliary files install just the `SKILL.md`; auxiliary files are not fetched.
+- GitHub anonymous API access is rate-limited to 60 req/h; configure
+  `GITHUB_TOKEN` when checking many Skills for updates.
+- Manual edits to managed files under `~/.agents/skills` are not synced back
+  into the database (local discovery skips non-local sources).
+
 ### Remote Catalogs
 
 - `GET /api/v1/catalog/sources`
 - `GET /api/v1/catalog/items`
 - `POST /api/v1/catalog/refresh`
+- `POST /api/v1/catalog/marketplace-refresh`
 - `POST /api/v1/catalog/items/:id/install`
 
 Catalog refresh accepts `{ type, sourceId, label, url, timeoutMs? }`, fetches a
@@ -1306,6 +1380,20 @@ remote manifest with timeout and size limits, stores source refresh metadata,
 and stores Skill or template catalog item metadata separately from installed
 local content. Refresh never installs a Skill or imports a template; install
 remains an explicit user action.
+
+`POST /api/v1/catalog/marketplace-refresh` accepts `{ repo: "owner/repo", label?, timeoutMs? }`
+and imports a Claude Code plugin marketplace from GitHub. When the repository
+contains `.claude-plugin/marketplace.json`, its plugins become `itemType:
+"skill"` catalog items under a source named after the marketplace, with
+`metadata.marketplace` (`repo`, `sha`, `pluginName`, optional `ref` and
+`skillPath`) instead of embedded content. Plugins using `npm`, `archive`, or
+`command` sources are skipped and reported in the response `skipped` list.
+When no marketplace manifest exists, the repository is scanned as a plain Skill
+repo (same discovery rules as the GitHub install preview) and every discovered
+`SKILL.md` becomes an item. Curated seed marketplaces are exposed via the Web
+console (`anthropics/claude-plugins-official`, `anthropics/skills`,
+`anthropics/claude-plugins-community`); nothing is fetched automatically at
+startup.
 
 Template catalog items use `itemType: "template"` and carry a `templatePackage`
 metadata object with the same shape as template export/import packages.
@@ -1315,7 +1403,13 @@ scoped.
 
 Skill catalog items use `itemType: "skill"` and carry a `skillPackage`
 metadata object with name, description, version, and content. Install creates a
-tenant-owned Skill row with `source: "catalog:<sourceId>"`.
+tenant-owned Skill row with `source: "catalog:<sourceId>"`. Marketplace skill
+items (carrying `metadata.marketplace`) instead re-fetch the `SKILL.md` from
+the pinned GitHub commit at install time, create the Skill with
+`source: "catalog:<sourceId>"`, `remoteProvenance.kind: "marketplace"`, and
+mirror the file into `${AGENTS_HOME}/skills` like a direct GitHub install;
+plugins without a declared `skillPath` resolve it only when the repository
+contains exactly one Skill.
 
 ### Audit Logs
 

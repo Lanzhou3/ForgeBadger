@@ -32,6 +32,8 @@ export interface RunRecord {
     revision: number;
     lease_owner: string | null;
     lease_expires_at: number | null;
+    stop_reason: string | null;
+    error: string | null;
     runtime_version: number;
 }
 export interface RunStep {

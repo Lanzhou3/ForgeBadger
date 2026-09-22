@@ -1,7 +1,8 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { FileCode2, ShieldCheck, TriangleAlert } from "lucide-react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { FileCode2, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
 
 import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { CliBrandIcon } from "@/components/cli-brand-icon";
@@ -11,13 +12,26 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useLanguage } from "@/hooks/use-language";
 import {
   discoverAdapters,
+  getCliAccounts,
   getAppliedProviders,
   getClaudeRoute,
+  refreshCliAccountQuota,
+  type CliAccountAdapter,
+  type CliAccountOverview,
+  type CliLoginStatus,
   type ProviderProfile,
   type RuntimeAdapterId,
 } from "@/lib/api";
 import { getCliBrand } from "@/lib/cli-brand";
+import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 
+import {
+  CliQuotaSummary,
+  LOGIN_HINT_KEYS,
+  loginMethodLabel,
+  type Translate,
+} from "./cli-quota";
 import { appliedStatusForAdapter, isProviderActiveOnAdapter } from "./shared";
 
 const CLI_ADAPTERS: RuntimeAdapterId[] = ["claude", "opencode", "codex", "kimi", "pi"];
@@ -53,10 +67,30 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
     retry: false,
     staleTime: 60_000,
   });
+  const cliAccountsQuery = useQuery({
+    queryKey: ["cli-accounts"],
+    queryFn: getCliAccounts,
+    retry: false,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
 
   const discovered = new Map((adaptersQuery.data?.adapters ?? []).map((adapter) => [adapter.id, adapter]));
   const statuses = appliedQuery.data?.adapters;
   const routeState = routeQuery.data;
+  const cliAccounts = new Map<string, CliAccountOverview>(
+    (cliAccountsQuery.data?.accounts ?? []).map((account) => [account.login.adapter, account])
+  );
+
+  const queryClient = useQueryClient();
+  const [refreshingAdapter, setRefreshingAdapter] = useState<CliAccountAdapter | null>(null);
+  const handleRefreshQuota = (adapter: CliAccountAdapter) => {
+    setRefreshingAdapter(adapter);
+    refreshCliAccountQuota(adapter)
+      .then(() => queryClient.invalidateQueries({ queryKey: ["cli-accounts"] }))
+      .catch(() => toast.error(t("models.cliAccountQuotaRefreshFailed")))
+      .finally(() => setRefreshingAdapter(null));
+  };
 
   return (
     <Card data-testid="cli-status-section">
@@ -79,6 +113,8 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
               adapter === "claude" &&
               routeState?.enabled === true &&
               routeState.assignment?.providerProfileId === provider.id;
+            const account = cliAccounts.get(adapter);
+            const login = account?.login ?? null;
             return (
               <div
                 key={adapter}
@@ -105,6 +141,7 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
                           ? t("models.cliStatusCheckFailed")
                           : t("models.sdkMissing")}
                     </Badge>
+                    {login ? <CliLoginBadge login={login} t={t} /> : null}
                   </span>
                 </div>
 
@@ -129,6 +166,34 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
                     </div>
                   ) : null}
                 </div>
+
+                {login ? (
+                  <div className="space-y-1.5">
+                    {login.state === "not_authenticated" ? (
+                      <div className="flex items-center gap-1.5">
+                        <p
+                          className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+                          title={t(LOGIN_HINT_KEYS[login.adapter])}
+                        >
+                          {t(LOGIN_HINT_KEYS[login.adapter])}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-6 shrink-0 text-muted-foreground"
+                          disabled={refreshingAdapter === login.adapter}
+                          aria-label={t("models.cliAccountQuotaRefresh")}
+                          title={t("models.cliAccountQuotaRefresh")}
+                          onClick={() => handleRefreshQuota(login.adapter)}
+                        >
+                          <RefreshCw className={cn("size-3", refreshingAdapter === login.adapter && "animate-spin")} />
+                        </Button>
+                      </div>
+                    ) : null}
+                    <CliQuotaSummary quota={account?.quota} t={t} />
+                  </div>
+                ) : null}
 
                 <div className="mt-auto flex items-center gap-1.5 pt-1">
                   <Button
@@ -165,5 +230,35 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Native login badge for the claude/codex/kimi cards. cli_missing renders
+ * nothing (the install badge already says so); unknown degrades to a muted
+ * badge instead of an error state.
+ */
+function CliLoginBadge({ login, t }: { login: CliLoginStatus; t: Translate }) {
+  if (login.state === "cli_missing") return null;
+  if (login.state === "ready") {
+    const method = loginMethodLabel(login.method, t);
+    return (
+      <Badge variant="default" className="text-[10px]">
+        {t("models.cliAccountLoggedIn")}
+        {method ? ` · ${method}` : ""}
+      </Badge>
+    );
+  }
+  if (login.state === "not_authenticated") {
+    return (
+      <Badge variant="outline" className="text-[10px]">
+        {t("models.cliAccountNotLoggedIn")}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="text-[10px] text-muted-foreground">
+      {t("models.cliAccountDetectFailed")}
+    </Badge>
   );
 }

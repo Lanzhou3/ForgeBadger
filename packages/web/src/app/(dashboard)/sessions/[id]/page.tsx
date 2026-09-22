@@ -4,7 +4,15 @@ import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Square, ClipboardList, Copy, Download, ExternalLink, History, Maximize2, Minimize2 } from "lucide-react";
+import { ArrowLeft, Square, ClipboardList, Copy, Download, ExternalLink, FileText, History, Maximize2, Minimize2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -62,7 +70,7 @@ export default function TerminalPage() {
   const authToken = getToken() ?? "";
   const attachTokenOverride = searchParams.get("attachToken");
 
-  const { data: sessionData } = useQuery({
+  const sessionQuery = useQuery({
     queryKey: ["session", id],
     queryFn: () => getSession(id),
     enabled: !!id,
@@ -77,8 +85,27 @@ export default function TerminalPage() {
     },
   });
 
-  const session = connectMutation.data?.session ?? sessionData?.session;
-  const attachToken = attachTokenOverride ?? connectMutation.data?.session.attachToken ?? "";
+  // Tab switching does not remount this page — the same instance re-renders
+  // with a new `id`. Clear any connect request still in flight for the previous
+  // tab so a stale pending/error never bleeds into the new tab, then let the
+  // auto-connect effect below decide (with a fresh idle state) whether this tab
+  // should connect. Keyed on `id` only: `useMutation` returns a new object every
+  // render, so `connectMutation` must NOT be a dependency (reset() is a no-op
+  // unless there is in-flight/stale state to clear).
+  useEffect(() => {
+    connectMutation.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  // Guard connect results by id: the mutation above is reset on tab change,
+  // but for one render before that reset commits its state, `connectMutation.data`
+  // can still hold the previous tab's session/attachToken. Never apply those to
+  // the new tab.
+  const connectedSession =
+    connectMutation.data && connectMutation.data.session.id === id ? connectMutation.data.session : undefined;
+  const session = connectedSession ?? sessionQuery.data?.session;
+  const attachToken =
+    attachTokenOverride ?? connectedSession?.attachToken ?? sessionQuery.data?.session?.attachToken ?? "";
 
   const { data: taskPacketData, error: taskPacketError, isFetching: isTaskPacketFetching } = useQuery({
     queryKey: ["project-manager", session?.projectId, "task-packets", { limit: 50, sessionId: id }],
@@ -122,10 +149,15 @@ export default function TerminalPage() {
 
   const connectSessionMutation = connectMutation.mutate;
   const isConnecting = connectMutation.isPending;
-  const connectedSession = connectMutation.data;
   const sessionTaskPacket = findSessionTaskPacket(taskPacketData?.taskPackets ?? [], id);
 
   useEffect(() => {
+    // Only auto-connect a running session. `connect` 409s for anything else, so
+    // a stopped/exited session must resolve through the GET query instead —
+    // firing connect here would just surface a 409 error in the error branch.
+    if (session?.status !== "running") {
+      return;
+    }
     if (
       !shouldAutoConnectSession({
         sessionId: id,
@@ -147,6 +179,7 @@ export default function TerminalPage() {
     connectedSession,
     id,
     isConnecting,
+    session?.status,
   ]);
 
   useEffect(() => {
@@ -166,71 +199,106 @@ export default function TerminalPage() {
     return () => document.body.removeAttribute("data-session-focus-mode");
   }, [focusMode]);
 
-  const missing: string[] = [];
-  if (!authToken) missing.push("login token");
-  if (!attachToken) missing.push("attach token");
+  // Rendering is driven by what we actually have to show, not by the connect
+  // round-trip in flight. The terminal stays mounted across tab switches, so
+  // switching never unmounts xterm into a "preparing" fallback.
+  const hasAttachToken = attachToken.length > 0;
+  const sessionRunning = session?.status === "running";
+  const connectFailed = connectMutation.isError;
+  const connectError =
+    connectMutation.error instanceof Error ? connectMutation.error.message : "";
 
-  if (
-    shouldShowSessionPreparing({
-      hasAuthToken: authToken.length > 0,
-      hasAttachTokenOverride: attachTokenOverride !== null,
-      connectStatus: connectMutation.status,
-      hasConnectError: connectMutation.isError,
-    })
-  ) {
+  // 1. No login token: nothing authenticated can be shown. (The dashboard
+  //    layout normally redirects to /login before we get here.)
+  if (!authToken) {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <SessionFallbackHeader sessionId={id} />
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          {t("sessions.preparing")}
-        </div>
-      </div>
+      <SessionProblemPanel
+        sessionId={id}
+        title={t("sessions.cannotOpen")}
+        message={t("sessions.returnToList")}
+      />
     );
   }
 
-  if (missing.length > 0 || connectMutation.isError) {
-    const errorMessage =
-      connectMutation.error instanceof Error
-        ? connectMutation.error.message
-        : `Missing ${missing.join(" and ")}`;
+  // 2. Session is known but not connectable and we hold no attach token: a
+  //    stopped/exited session. Offer an explicit Start instead of a terminal
+  //    that can never attach.
+  if (session && !sessionRunning && !hasAttachToken) {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <SessionFallbackHeader sessionId={id} />
-        <div className="flex flex-1 items-center justify-center">
-          <div className="max-w-md rounded-lg border border-destructive/50 bg-destructive/10 p-6 text-center">
-            <h2 className="text-lg font-semibold text-destructive">
-              {t("sessions.cannotOpen")}
-            </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {errorMessage}. {t("sessions.returnToList")}
-            </p>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              {session && session.status !== "running" && (
-                <Button
-                  size="sm"
-                  onClick={() => startMutation.mutate()}
-                  disabled={startMutation.isPending}
-                >
-                  {t("common.start")}
-                </Button>
-              )}
-              <Button asChild variant="outline" size="sm">
-                <Link href="/sessions">
-                  {t("sessions.backToSessions")}
-                </Link>
-              </Button>
-              <Button asChild variant="outline" size="sm">
-                <Link href="/settings">
-                  {t("sessions.openSettings")}
-                </Link>
-              </Button>
-            </div>
+      <SessionProblemPanel
+        sessionId={id}
+        title={t("sessions.cannotOpen")}
+        message={t("sessions.notConnectable")}
+        action={
+          <Button
+            size="sm"
+            onClick={() => startMutation.mutate()}
+            disabled={startMutation.isPending}
+          >
+            {t("common.start")}
+          </Button>
+        }
+      />
+    );
+  }
+
+  // 3. Session unknown: distinguish "resolved but gone" (404/deleted) from
+  //    "a connect attempt failed" from "still fetching".
+  if (!session) {
+    if (sessionQuery.isError) {
+      return (
+        <SessionProblemPanel
+          sessionId={id}
+          title={t("sessions.cannotOpen")}
+          message={t("sessions.notFound")}
+        />
+      );
+    }
+    if (connectFailed) {
+      return (
+        <SessionProblemPanel
+          sessionId={id}
+          title={t("sessions.cannotOpen")}
+          message={connectError}
+        />
+      );
+    }
+    if (
+      shouldShowSessionPreparing({
+        hasAuthToken: true,
+        hasAttachTokenOverride: attachTokenOverride !== null,
+        connectStatus: connectMutation.status,
+        hasConnectError: connectMutation.isError,
+        hasSession: false,
+      })
+    ) {
+      return (
+        <div className="flex h-full min-h-0 flex-col overflow-hidden">
+          <SessionFallbackHeader sessionId={id} />
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            {t("sessions.preparing")}
           </div>
         </div>
-      </div>
+      );
+    }
+  }
+
+  // 4. A connectable session that has no token yet and whose connect attempt
+  //    failed (e.g. the live PTY was lost after a gateway restart): surface
+  //    the error instead of a terminal spinning on "connecting" forever.
+  if (connectFailed && !hasAttachToken) {
+    return (
+      <SessionProblemPanel
+        sessionId={id}
+        title={t("sessions.cannotOpen")}
+        message={connectError}
+      />
     );
   }
 
+  // 5. Main UI: running (token may still be in flight — TerminalView shows a
+  //    transient "connecting" strip until it lands) or any session with a
+  //    token (override / connect / GET).
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Single chrome row: session tabs on the left, session actions on the right */}
@@ -332,6 +400,46 @@ function SessionFallbackHeader({ sessionId }: { sessionId: string }) {
   );
 }
 
+/**
+ * Shared error/terminal-less state: the back header plus a centered card that
+ * explains why no terminal can be shown. Used for the stopped, 404, and
+ * connect-failed cases so they don't each hand-roll the same layout.
+ */
+function SessionProblemPanel({
+  sessionId,
+  title,
+  message,
+  action,
+}: {
+  sessionId: string;
+  title: string;
+  message: string;
+  action?: React.ReactNode;
+}) {
+  const { t } = useLanguage();
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <SessionFallbackHeader sessionId={sessionId} />
+      <div className="flex flex-1 items-center justify-center">
+        <div className="max-w-md rounded-lg border border-destructive/50 bg-destructive/10 p-6 text-center">
+          <h2 className="text-lg font-semibold text-destructive">{title}</h2>
+          {message ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              {message} {t("sessions.returnToList")}
+            </p>
+          ) : null}
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {action}
+            <Button asChild variant="outline" size="sm">
+              <Link href="/sessions">{t("sessions.backToSessions")}</Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SessionSidePanel({
   projectId,
   session,
@@ -421,34 +529,37 @@ function SessionTaskPacketPanel({
       <p className="mt-2 text-xs leading-5 text-muted-foreground">
         {t("sessions.taskPacketHandoffDescription")}
       </p>
-      <div className="mt-3 space-y-2">
-        <SessionTaskPacketDatum label={t("sessions.taskPacketWorkItem")} value={taskPacket.title} />
-        <SessionTaskPacketDatum label={t("sessions.taskPacketRuntime")} value={`${taskPacket.runtime.adapter} / ${taskPacket.runtime.templateId}`} />
-        <SessionTaskPacketDatum
-          label={t("sessions.taskPacketLinkedSession")}
-          value={taskPacket.sessionLink
-            ? `${taskPacket.sessionLink.sessionId} / ${taskPacket.sessionLink.status}`
-            : "-"}
-        />
-      </div>
       <div className="mt-3">
-        <div className="text-xs text-muted-foreground">{t("sessions.taskPacketPrompt")}</div>
-        <pre className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap rounded-md border border-border/70 bg-muted/20 p-2 text-xs leading-5">
-          {taskPacket.prompt}
-        </pre>
+        <SessionTaskPacketDatum label={t("sessions.taskPacketWorkItem")} value={taskPacket.title} />
       </div>
-      <SessionTaskPacketList
-        title={t("sessions.taskPacketAcceptanceCriteria")}
-        values={taskPacket.acceptanceCriteria}
-      />
-      <SessionTaskPacketList
-        title={t("sessions.taskPacketExpectedVerification")}
-        values={taskPacket.expectedVerification}
-      />
-      <SessionTaskPacketList
-        title={t("sessions.taskPacketEvidenceRequirements")}
-        values={taskPacket.evidenceRequirements}
-      />
+      {taskPacket.prompt.trim() ? (
+        <details className="mt-3">
+          <summary className="cursor-pointer select-none text-xs text-muted-foreground">
+            {t("sessions.taskPacketPrompt")}
+          </summary>
+          <pre className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap rounded-md border border-border/70 bg-muted/20 p-2 text-xs leading-5">
+            {taskPacket.prompt}
+          </pre>
+        </details>
+      ) : null}
+      {taskPacket.acceptanceCriteria.length > 0 ? (
+        <SessionTaskPacketList
+          title={t("sessions.taskPacketAcceptanceCriteria")}
+          values={taskPacket.acceptanceCriteria}
+        />
+      ) : null}
+      {taskPacket.expectedVerification.length > 0 ? (
+        <SessionTaskPacketList
+          title={t("sessions.taskPacketExpectedVerification")}
+          values={taskPacket.expectedVerification}
+        />
+      ) : null}
+      {taskPacket.evidenceRequirements.length > 0 ? (
+        <SessionTaskPacketList
+          title={t("sessions.taskPacketEvidenceRequirements")}
+          values={taskPacket.evidenceRequirements}
+        />
+      ) : null}
       <Button asChild variant="outline" size="sm" className="mt-3 w-full justify-start">
         <Link href={sessionTaskPacketProjectManagerHref(taskPacket)}>
           <ExternalLink className="mr-2 size-3" />
@@ -456,16 +567,13 @@ function SessionTaskPacketPanel({
         </Link>
       </Button>
       {session && (
-        <SessionHandoffExportPanel
-          session={session}
-          taskPacket={taskPacket}
-        />
+        <SessionHandoffDialog session={session} taskPacket={taskPacket} />
       )}
     </section>
   );
 }
 
-function SessionHandoffExportPanel({
+function SessionHandoffDialog({
   session,
   taskPacket,
 }: {
@@ -473,12 +581,15 @@ function SessionHandoffExportPanel({
   taskPacket: ProjectManagerTaskPacket;
 }) {
   const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  // Notes live in the panel-scoped dialog component so they survive closing
+  // and reopening the dialog; they are still not persisted server-side.
   const [operatorNotes, setOperatorNotes] = useState("");
   const [verificationNotes, setVerificationNotes] = useState("");
   const [openReviewItems, setOpenReviewItems] = useState("");
   const [exportActionError, setExportActionError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [generatedAt] = useState(() => new Date().toISOString());
+  const [generatedAt, setGeneratedAt] = useState(() => new Date().toISOString());
   const exportInput = useMemo(() => ({
     generatedAt,
     openReviewItems,
@@ -519,61 +630,81 @@ function SessionHandoffExportPanel({
   };
 
   return (
-    <div className="mt-4 border-t border-border/70 pt-3" data-testid="session-handoff-export">
-      <div className="text-sm font-medium">{t("sessions.handoffExport")}</div>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-        {t("sessions.handoffExportDescription")}
-      </p>
-      <div className="mt-3 space-y-3">
-        <SessionHandoffTextField
-          label={t("sessions.handoffOperatorNotes")}
-          value={operatorNotes}
-          onChange={setOperatorNotes}
-        />
-        <SessionHandoffTextField
-          label={t("sessions.handoffVerificationNotes")}
-          value={verificationNotes}
-          onChange={setVerificationNotes}
-        />
-        <SessionHandoffTextField
-          label={t("sessions.handoffOpenReviewItems")}
-          value={openReviewItems}
-          onChange={setOpenReviewItems}
-        />
-      </div>
-      {auditIssues.length > 0 ? (
-        <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-2">
-          <div className="text-xs font-medium text-destructive">{t("sessions.handoffAuditBlocked")}</div>
-          <ul className="mt-2 space-y-1">
-            {auditIssues.map((issue) => (
-              <li key={issue} className="text-xs text-destructive">
-                {t(handoffAuditIssueKey(issue))}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        <div className="mt-3 rounded-md border border-border/70 bg-muted/10 p-2">
-          <div className="text-xs font-medium">{t("sessions.handoffMarkdownReady")}</div>
-          <Textarea
-            className="mt-2 min-h-56 font-mono text-xs"
-            readOnly
-            value={markdown}
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) {
+          setGeneratedAt(new Date().toISOString());
+        }
+        setOpen(nextOpen);
+      }}
+    >
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="w-full justify-start"
+        onClick={() => setOpen(true)}
+      >
+        <FileText className="mr-2 size-3" />
+        {t("sessions.handoffGenerate")}
+      </Button>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl" data-testid="session-handoff-export">
+        <DialogHeader>
+          <DialogTitle>{t("sessions.handoffExport")}</DialogTitle>
+          <DialogDescription>{t("sessions.handoffExportDescription")}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <SessionHandoffTextField
+            label={t("sessions.handoffOperatorNotes")}
+            value={operatorNotes}
+            onChange={setOperatorNotes}
           />
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={() => void copyMarkdown()}>
-              <Copy className="mr-2 size-3" />
-              {copied ? t("sessions.handoffCopied") : t("sessions.handoffCopy")}
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={downloadMarkdown}>
-              <Download className="mr-2 size-3" />
-              {t("sessions.handoffDownload")}
-            </Button>
-            {exportActionError && <span className="text-xs text-destructive">{exportActionError}</span>}
-          </div>
+          <SessionHandoffTextField
+            label={t("sessions.handoffVerificationNotes")}
+            value={verificationNotes}
+            onChange={setVerificationNotes}
+          />
+          <SessionHandoffTextField
+            label={t("sessions.handoffOpenReviewItems")}
+            value={openReviewItems}
+            onChange={setOpenReviewItems}
+          />
         </div>
-      )}
-    </div>
+        {auditIssues.length > 0 ? (
+          <div className="rounded-md border border-destructive/50 bg-destructive/10 p-2">
+            <div className="text-xs font-medium text-destructive">{t("sessions.handoffAuditBlocked")}</div>
+            <ul className="mt-2 space-y-1">
+              {auditIssues.map((issue) => (
+                <li key={issue} className="text-xs text-destructive">
+                  {t(handoffAuditIssueKey(issue))}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <div className="rounded-md border border-border/70 bg-muted/10 p-2">
+            <div className="text-xs font-medium">{t("sessions.handoffMarkdownReady")}</div>
+            <Textarea
+              className="mt-2 max-h-72 min-h-40 font-mono text-xs"
+              readOnly
+              value={markdown}
+            />
+          </div>
+        )}
+        <DialogFooter>
+          {exportActionError && <span className="mr-auto text-xs text-destructive">{exportActionError}</span>}
+          <Button type="button" variant="outline" size="sm" onClick={() => void copyMarkdown()} disabled={auditIssues.length > 0}>
+            <Copy className="mr-2 size-3" />
+            {copied ? t("sessions.handoffCopied") : t("sessions.handoffCopy")}
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={downloadMarkdown} disabled={auditIssues.length > 0}>
+            <Download className="mr-2 size-3" />
+            {t("sessions.handoffDownload")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -608,22 +739,16 @@ function SessionTaskPacketDatum({ label, value }: { label: string; value: string
 }
 
 function SessionTaskPacketList({ title, values }: { title: string; values: string[] }) {
-  const { t } = useLanguage();
-
   return (
     <div className="mt-3">
       <div className="text-xs text-muted-foreground">{title}</div>
-      {values.length === 0 ? (
-        <p className="mt-1 text-xs text-muted-foreground">{t("sessions.taskPacketNoItems")}</p>
-      ) : (
-        <ul className="mt-1 space-y-1">
-          {values.map((value) => (
-            <li key={value} className="break-words rounded-md border border-border/70 bg-muted/10 px-2 py-1 text-xs">
-              {value}
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul className="mt-1 space-y-1">
+        {values.map((value) => (
+          <li key={value} className="break-words rounded-md border border-border/70 bg-muted/10 px-2 py-1 text-xs">
+            {value}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

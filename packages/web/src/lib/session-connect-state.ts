@@ -14,6 +14,10 @@ interface SessionPreparingInput {
   hasAttachTokenOverride: boolean;
   connectStatus: SessionConnectStatus;
   hasConnectError: boolean;
+  /** True when a session is already available (from a settled connect or a
+   *  resolved GET). When we already have content to show there is no reason to
+   *  block on the terminal behind a "preparing" fallback. */
+  hasSession: boolean;
 }
 
 interface LoadSessionActivitiesInput {
@@ -37,6 +41,7 @@ export function shouldShowSessionPreparing(input: SessionPreparingInput): boolea
     input.hasAuthToken &&
     !input.hasAttachTokenOverride &&
     !input.hasConnectError &&
+    !input.hasSession &&
     (input.connectStatus === "idle" || input.connectStatus === "pending")
   );
 }

@@ -114,6 +114,16 @@ npm 包的 postinstall 不安裝系統軟體；`forgebadger start` / `init` 也�
 `forgebadger doctor` 只讀檢查依賴：檢查空狀態目錄不會建立設定、密鑰、資料庫或目錄。
 Claude Code、OpenCode、Codex 或 Kimi Code 需另外安裝並放入 `PATH`。
 
+### 版本與解除安裝
+
+```bash
+forgebadger --version
+forgebadger uninstall            # 互動式確認；腳本場景用 --yes
+forgebadger uninstall --backup /private/path/new-backup   # 先備份再刪除
+```
+
+`forgebadger uninstall` 會刪除本機狀態目錄（預設 `~/.forgebadger`）：資料庫、儲存的執行時 `config.json`（含**主加密密鑰**）、備份與執行時狀態。目錄不像 ForgeBadger 狀態目錄時會拒絕刪除；Gateway/Web 連接埠仍在服務時會拒絕執行（先停止處理程序，或用 `--force` 略過）；未傳 `--yes` 時需要互動確認。該命令無法從處理程序內部刪除全域安裝的 npm 套件——之後請再執行 `npm uninstall -g forgebadger` 完成解除安裝。刪除狀態目錄不可逆：沒有主密鑰，已加密的 Provider 憑證與整合密鑰將無法復原，建議先使用 `--backup`。
+
 ## 從原始碼開發
 
 安裝依賴：

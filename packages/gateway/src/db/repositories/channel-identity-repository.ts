@@ -17,6 +17,10 @@ export interface ChannelRoute {
 const pairingColumns = 'id,channel,account_id AS accountId,account_revision AS accountRevision,status,revision,external_user_id AS externalUserId,chat_id AS chatId,expires_at AS expiresAt,created_at AS createdAt';
 const identityColumns = 'id,channel,account_id AS accountId,account_revision AS accountRevision,external_user_id AS externalUserId,chat_id AS chatId,status,revision,created_at AS createdAt';
 const routeColumns = 'id,identity_id AS identityId,grant_id AS grantId,grant_revision AS grantRevision,conversation_id AS conversationId,status,revision,created_at AS createdAt';
+// Table names are picked from a closed literal set, never from request input.
+function channelAccountTable(channel: string): 'feishu_channel_accounts' | 'telegram_channel_accounts' {
+  return channel === 'telegram' ? 'telegram_channel_accounts' : 'feishu_channel_accounts';
+}
 
 export class ChannelIdentityRepository {
   constructor(private readonly db: Database, private readonly userId: string) {}
@@ -76,8 +80,9 @@ export class ChannelIdentityRepository {
   route(id: string): ChannelRoute | undefined {
     return this.db.prepare(`SELECT ${routeColumns} FROM channel_routes WHERE user_id=? AND id=?`).get(this.userId, id) as ChannelRoute | undefined;
   }
-  accountMetadata(accountId: string): { enabled: boolean; configRevision: number } | undefined {
-    const row = this.db.prepare('SELECT enabled,config_revision AS configRevision FROM feishu_channel_accounts WHERE user_id=? AND id=?').get(this.userId,accountId) as {enabled:number;configRevision:number}|undefined;
+  accountMetadata(channel: string, accountId: string): { enabled: boolean; configRevision: number } | undefined {
+    const table = channelAccountTable(channel);
+    const row = this.db.prepare(`SELECT enabled,config_revision AS configRevision FROM ${table} WHERE user_id=? AND id=?`).get(this.userId,accountId) as {enabled:number;configRevision:number}|undefined;
     return row ? {...row,enabled:row.enabled===1} : undefined;
   }
   conversationRoute(conversationId: string): ChannelRoute | undefined {
@@ -86,10 +91,14 @@ export class ChannelIdentityRepository {
   conversationIsChannelOwned(conversationId: string): boolean {
     return (this.db.prepare('SELECT channel_owned FROM copilot_conversations WHERE user_id=? AND id=?').get(this.userId,conversationId) as {channel_owned:number}|undefined)?.channel_owned===1;
   }
-  peerRoute(peer: {channel:string;accountId:string;accountRevision:number;externalUserId:string;chatId:string}): ChannelRoute | undefined {
+  peerRoute(peer: {channel:string;accountId:string;accountRevision:number;externalUserId:string;chatId:string;chatType?:string}): ChannelRoute | undefined {
+    // Group peers deliver to the group chatId but bind to the pairing user's private-chat identity.
+    const group = peer.chatType === 'group';
     const row = this.db.prepare(`SELECT r.id FROM channel_routes r JOIN channel_identities i ON i.user_id=r.user_id AND i.id=r.identity_id
-      WHERE r.user_id=? AND r.status='active' AND i.status='active' AND i.channel=? AND i.account_id=? AND i.account_revision=? AND i.external_user_id=? AND i.chat_id=?`)
-      .get(this.userId,peer.channel,peer.accountId,peer.accountRevision,peer.externalUserId,peer.chatId) as {id:string}|undefined;
+      WHERE r.user_id=? AND r.status='active' AND i.status='active' AND i.channel=? AND i.account_id=? AND i.account_revision=? AND i.external_user_id=?${group ? '' : ' AND i.chat_id=?'}`)
+      .get(...(group
+        ? [this.userId,peer.channel,peer.accountId,peer.accountRevision,peer.externalUserId]
+        : [this.userId,peer.channel,peer.accountId,peer.accountRevision,peer.externalUserId,peer.chatId])) as {id:string}|undefined;
     return row ? this.route(row.id) : undefined;
   }
   createRoute(input: { identityId: string; grantId: string; grantRevision: number; conversationId: string }): ChannelRoute {

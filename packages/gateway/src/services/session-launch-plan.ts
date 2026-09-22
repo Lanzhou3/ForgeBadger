@@ -9,6 +9,11 @@ import {
   ensurePiNotificationSettings
 } from "./cli-notification-settings.js";
 import { ensureForgeBadgerOpenCodePlugin } from "./opencode-notification-settings.js";
+import {
+  ensureClaudeTerminalNotificationSettings,
+  ensureKimiTerminalNotificationSettings,
+  ensureOpenCodeTerminalNotificationSettings
+} from "./terminal-notification-settings.js";
 
 export interface LaunchPlanInput {
   adapter: AdapterId;
@@ -27,6 +32,13 @@ export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
     FORGEBADGER_SESSION_ID: input.sessionId,
     FORGEBADGER_GATEWAY_URL: getGatewayUrl()
   };
+  if (input.adapter === "kimi") {
+    // Kimi Code upgrades its bare BEL notifications to rich OSC 9 text only
+    // when TERM_PROGRAM hits its allowlist (iTerm.app/WezTerm/ghostty/
+    // WarpTerminal). A user-set TERM_PROGRAM survives the Session Server env
+    // sanitization allowlist, so only fall back to WezTerm when none is set.
+    env.TERM_PROGRAM = process.env.TERM_PROGRAM?.trim() || "WezTerm";
+  }
   return createAdapterLaunchPlan({
     adapter: input.adapter,
     projectRoot: input.projectRoot,
@@ -43,8 +55,14 @@ export async function prepareAdapterLaunchExtras(
   adapter: AdapterId,
   projectRoot: string
 ): Promise<string[]> {
+  const hooksDisabled = disabledCliHookAdapters();
   if (adapter === "opencode") {
-    await ensureForgeBadgerOpenCodePlugin(projectRoot);
+    // Native terminal notification config always runs — it is plain config,
+    // not a hook, so FORGEBADGER_DISABLE_CLI_HOOKS does not gate it.
+    await ensureOpenCodeTerminalNotificationSettings();
+    if (!hooksDisabled.has("opencode")) {
+      await ensureForgeBadgerOpenCodePlugin(projectRoot);
+    }
     return [];
   }
   if (adapter === "codex") {
@@ -52,7 +70,10 @@ export async function prepareAdapterLaunchExtras(
     return [];
   }
   if (adapter === "kimi") {
-    await ensureKimiNotificationSettings(projectRoot);
+    await ensureKimiTerminalNotificationSettings();
+    if (!hooksDisabled.has("kimi")) {
+      await ensureKimiNotificationSettings(projectRoot);
+    }
     return [];
   }
   if (adapter === "pi") {
@@ -61,8 +82,30 @@ export async function prepareAdapterLaunchExtras(
     await ensurePiNotificationSettings();
     return [];
   }
-  await ensureClaudeNotificationSettings(projectRoot, getGatewayUrl());
+  await ensureClaudeTerminalNotificationSettings();
+  if (!hooksDisabled.has("claude")) {
+    await ensureClaudeNotificationSettings(projectRoot, getGatewayUrl());
+  }
   return [];
+}
+
+/**
+ * FORGEBADGER_DISABLE_CLI_HOOKS: comma-separated adapter names whose hook
+ * injection is skipped because the terminal-native channel (OSC 9/99/BEL
+ * interception) covers them. Only claude/kimi/opencode have a terminal
+ * channel; codex/pi are silently ignored (they must keep their hooks).
+ */
+export function disabledCliHookAdapters(
+  value: string | undefined = process.env.FORGEBADGER_DISABLE_CLI_HOOKS
+): Set<"claude" | "kimi" | "opencode"> {
+  const disabled = new Set<"claude" | "kimi" | "opencode">();
+  for (const entry of value?.split(",") ?? []) {
+    const name = entry.trim();
+    if (name === "claude" || name === "kimi" || name === "opencode") {
+      disabled.add(name);
+    }
+  }
+  return disabled;
 }
 
 export function normalizeAdapter(value: string): AdapterId | undefined {

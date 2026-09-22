@@ -4,15 +4,22 @@ import type { Database } from '../../db/types.js';
 import { ChannelIdentityRepository, type ChannelIdentity } from '../../db/repositories/channel-identity-repository.js';
 import { CopilotGrantRepository } from '../../db/repositories/copilot-grant-repository.js';
 import { FeishuIntegrationRepository } from '../../db/repositories/feishu-integration-repository.js';
+import { TelegramIntegrationRepository } from '../../db/repositories/telegram-integration-repository.js';
 import { ProjectRepository } from '../../db/repositories/project-repository.js';
 import { AuditLogRepository } from '../../db/repositories/audit-log-repository.js';
 import { CopilotConversationLog } from '../agent/conversation-log.js';
 
 const id = z.string().trim().min(1).max(128);
-export const channelPairingInput = z.object({ channel: z.literal('feishu'), accountId: id }).strict();
+export const channelPlatforms = ['feishu', 'telegram'] as const;
+export type ChannelPlatform = typeof channelPlatforms[number];
+export const channelPairingInput = z.object({ channel: z.enum(channelPlatforms), accountId: id }).strict();
 export const channelConfirmationInput = z.object({ revision: z.number().int().positive(), externalUserId: id, chatId: id }).strict();
 export const channelRouteInput = z.object({ identityId: id, grantId: id }).strict();
-const peerSchema = channelPairingInput.extend({ accountRevision: z.number().int().positive(), externalUserId: id, chatId: id, chatType: z.literal('p2p') }).strict();
+const peerBase = { channel: z.enum(channelPlatforms), accountId: id, accountRevision: z.number().int().positive(), externalUserId: id, chatId: id };
+const peerSchema = z.discriminatedUnion('chatType', [
+  z.object({ ...peerBase, chatType: z.literal('p2p') }).strict(),
+  z.object({ ...peerBase, chatType: z.literal('group'), mentionedBot: z.literal(true) }).strict()
+]);
 /** Only SDK-authenticated, normalized transport events may populate this input. Never accept it from HTTP/model JSON. */
 export type TrustedChannelPeer = z.infer<typeof peerSchema>;
 export class ChannelIdentityError extends Error {
@@ -20,6 +27,11 @@ export class ChannelIdentityError extends Error {
 }
 const requireAuthority = (condition: unknown): void => { if (!condition) throw new ChannelIdentityError(); };
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
+
+/** Integration-config gate shared by every channel platform. */
+interface ChannelIntegrationGate {
+  getConfig(): { enabled: boolean; emergencyDisabled: boolean; allowedChatIds: string[] };
+}
 
 export class ChannelIdentityService {
   readonly records: ChannelIdentityRepository;
@@ -112,6 +124,21 @@ export class ChannelIdentityService {
     });
   }
 
+  /** Durable route revalidation without a presenting peer (run ledger and effect fences). The chat allowlist only gates presenting peers, not the route itself. */
+  admitRoute(routeId: string) {
+    id.parse(routeId);
+    return this.records.transaction(() => {
+      const route = this.records.route(routeId); requireAuthority(route?.status === 'active');
+      const identity = this.currentIdentity(route!.identityId);
+      const grant = this.currentGrant(route!.grantId);
+      requireAuthority(grant.revision === route!.grantRevision && this.conversations.getConversation(route!.conversationId)?.status === 'active'
+        && this.grants.binding(route!.conversationId) === grant.id);
+      return { userId: this.userId, actorUserId: this.userId, routeId: route!.id, routeRevision: route!.revision,
+        identityId: identity.id, identityRevision: identity.revision, grantId: grant.id, grantRevision: grant.revision,
+        conversationId: route!.conversationId, projectIds: grant.scope.projectIds };
+    });
+  }
+
   /** Point-in-time routing decision, not an execution or disclosure permit. Revalidate before each effect/delivery. */
   admit(routeId: string, rawPeer: TrustedChannelPeer, operation?: { capability: string; projectIds: string[] }) {
     id.parse(routeId);
@@ -122,7 +149,8 @@ export class ChannelIdentityService {
       const route = this.records.route(routeId); requireAuthority(route?.status === 'active');
       const identity = this.currentIdentity(route!.identityId);
       requireAuthority(identity.channel === peer.channel && identity.accountId === peer.accountId
-        && identity.accountRevision === peer.accountRevision && identity.externalUserId === peer.externalUserId && identity.chatId === peer.chatId);
+        && identity.accountRevision === peer.accountRevision && identity.externalUserId === peer.externalUserId
+        && (peer.chatType === 'group' || identity.chatId === peer.chatId));
       const grant = this.currentGrant(route!.grantId);
       requireAuthority(grant.revision === route!.grantRevision && this.conversations.getConversation(route!.conversationId)?.status === 'active'
         && this.grants.binding(route!.conversationId) === grant.id);
@@ -134,23 +162,33 @@ export class ChannelIdentityService {
   }
 
   private actor(): void { requireAuthority(this.records.actorActive()); }
-  private account(channel: string, accountId: string) {
-    this.actor(); requireAuthority(channel === 'feishu');
-    const account = this.records.accountMetadata(accountId);
-    const config = new FeishuIntegrationRepository(this.db, this.userId).getConfig();
+  private integrationFor(channel: ChannelPlatform): ChannelIntegrationGate {
+    return channel === 'telegram'
+      ? new TelegramIntegrationRepository(this.db, this.userId)
+      : new FeishuIntegrationRepository(this.db, this.userId);
+  }
+  private account(channel: ChannelPlatform, accountId: string) {
+    this.actor();
+    const account = this.records.accountMetadata(channel, accountId);
+    const config = this.integrationFor(channel).getConfig();
     requireAuthority(account?.enabled && config.enabled && !config.emergencyDisabled);
     return account!;
   }
   private checkPeer(peer: TrustedChannelPeer): void {
     requireAuthority(this.account(peer.channel, peer.accountId).configRevision === peer.accountRevision);
-    const allowed = new FeishuIntegrationRepository(this.db, this.userId).getConfig().allowedChatIds;
-    requireAuthority(allowed.length === 0 || allowed.includes(peer.chatId));
+    const allowed = this.integrationFor(peer.channel).getConfig().allowedChatIds;
+    // p2p keeps the legacy "empty = unrestricted" semantics; group chats default
+    // to deny and must be present in the integration allowlist.
+    requireAuthority(peer.chatType === 'group' ? allowed.includes(peer.chatId) : allowed.length === 0 || allowed.includes(peer.chatId));
   }
   private currentIdentity(identityId: string): ChannelIdentity {
     const identity = this.records.identity(identityId); requireAuthority(identity?.status === 'active');
-    this.checkPeer(peerSchema.parse({ channel: identity!.channel, accountId: identity!.accountId, accountRevision: identity!.accountRevision,
-      externalUserId: identity!.externalUserId, chatId: identity!.chatId, chatType: 'p2p' }));
+    this.checkIdentityAccount(identity!);
     return identity!;
+  }
+  /** Account fence for a stored identity: enabled/config/emergency plus revision. The chat allowlist is enforced on the presenting peer, never on the identity's own private chat. */
+  private checkIdentityAccount(identity: ChannelIdentity): void {
+    requireAuthority(this.account(identity.channel as ChannelPlatform, identity.accountId).configRevision === identity.accountRevision);
   }
   private currentGrant(grantId: string) {
     this.actor(); const grant = this.grants.get(grantId);

@@ -17,6 +17,7 @@ vi.mock("@/lib/copilot-extensions-api", () => ({
   listCopilotConnections: vi.fn().mockResolvedValue({ connections: [] }),
 }));
 vi.mock("./copilot-memory-panel", () => ({ CopilotMemoryPanel: () => <div>Memory</div> }));
+vi.mock("./copilot-autonomy-panel", () => ({ CopilotAutonomyPanel: () => null }));
 function mount() {
   render(
     <LanguageProvider>
