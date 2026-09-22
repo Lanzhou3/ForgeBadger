@@ -3,6 +3,8 @@ import { ProjectRepository } from "../../db/repositories/project-repository.js";
 import { ProjectManagerRepository, PROJECT_MANAGER_WORK_ITEM_STATUSES } from "../../db/repositories/project-manager-repository.js";
 import { ProjectManagementRepository, type ManagementEvidenceRow } from "../../db/repositories/project-management-repository.js";
 import type { CommandContext, PlatformCommand } from "../platform-commands/types.js";
+import type { AdapterId } from "../adapter-discovery.js";
+import { getAdapterAutonomy } from "../adapter-autonomy.js";
 import { ConflictError } from "../../middleware/errors.js";
 
 export const managementPatchSchema = z.object({
@@ -71,6 +73,6 @@ export function projectManagementOverview(context: CommandContext, allowedProjec
     return { id: project.id, name: project.name, management, counts,
       goal: goal ? { summary: goal.summary, status: goal.status } : null,
       evidenceFreshness: evidenceFreshness(rows, management.freshnessHours, now),
-      autonomy: "manual_only" as const };
+      autonomy: getAdapterAutonomy(project.aiTool as AdapterId).mode };
   }), observedAt: now };
 }

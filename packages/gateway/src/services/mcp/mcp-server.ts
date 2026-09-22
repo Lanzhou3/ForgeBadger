@@ -40,6 +40,9 @@ import { agentActionInput, agentActions, TOOL_COMMANDS } from "../platform-comma
 import { checkAgentScope } from "../platform-commands/agent-scope.js";
 import type { InMemorySessionManager } from "../session-manager.js";
 
+/** CLI-control tools stay Copilot-only: MCP tokens never dispatch into terminals. */
+const MCP_EXCLUDED_TOOLS = new Set(["dispatch_task_to_session", "pm_execute_task_packet"]);
+
 export interface McpBridgeDeps {
   db: Database;
   masterKey: string;
@@ -54,7 +57,7 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
   const preferences = new CopilotToolPreferenceRepository(deps.db, deps.userId);
   const canOperate = deps.scopes.includes("operate");
   const tools = createPlatformTools().filter(
-    (tool) => (tool.risk === "read" || canOperate) && preferences.isEnabled(tool.name) && !toolUnavailableReason(tool.name, !!deps.sessionManager)
+    (tool) => (tool.risk === "read" || canOperate) && preferences.isEnabled(tool.name) && !toolUnavailableReason(tool.name, !!deps.sessionManager) && !MCP_EXCLUDED_TOOLS.has(tool.name)
   );
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
 
@@ -106,7 +109,8 @@ async function executeMcpTool(tool: AgentTool, rawInput: unknown, deps: McpBridg
     availableToolNames: createPlatformTools().filter(candidate =>
       (candidate.risk === "read" || deps.scopes.includes("operate")) &&
       new CopilotToolPreferenceRepository(deps.db, deps.userId).isEnabled(candidate.name) &&
-      !toolUnavailableReason(candidate.name, !!deps.sessionManager)
+      !toolUnavailableReason(candidate.name, !!deps.sessionManager) &&
+      !MCP_EXCLUDED_TOOLS.has(candidate.name)
     ).map(candidate=>candidate.name),
     ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}),
     ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})

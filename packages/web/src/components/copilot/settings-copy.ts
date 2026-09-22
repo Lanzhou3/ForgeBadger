@@ -7,8 +7,10 @@ const capabilityZh: Record<string, string> = {
   "pm.work_item.metadata": "更新工作项资料",
   "pm.management.update": "更新负责人及下一步",
   "pm.task.prepare": "准备任务",
+  "pm.task.execute": "下发并执行任务",
   "session.start": "启动会话",
   "session.stop": "停止会话",
+  "session.dispatch": "向会话下发指令",
   "memory.write": "写入记忆",
 };
 const capabilityEn: Record<string, string> = {
@@ -18,8 +20,10 @@ const capabilityEn: Record<string, string> = {
   "pm.work_item.metadata": "Update work item metadata",
   "pm.management.update": "Update owner and next step",
   "pm.task.prepare": "Prepare tasks",
+  "pm.task.execute": "Dispatch and execute tasks",
   "session.start": "Start sessions",
   "session.stop": "Stop sessions",
+  "session.dispatch": "Dispatch instructions to sessions",
   "memory.write": "Write memory",
 };
 const capabilityZhTW: Record<string, string> = {
@@ -29,8 +33,10 @@ const capabilityZhTW: Record<string, string> = {
   "pm.work_item.metadata": "更新工作項目資料",
   "pm.management.update": "更新負責人及下一步",
   "pm.task.prepare": "準備任務",
+  "pm.task.execute": "下發並執行任務",
   "session.start": "啟動工作階段",
   "session.stop": "停止工作階段",
+  "session.dispatch": "向工作階段下發指令",
   "memory.write": "寫入記憶",
 };
 

@@ -11,7 +11,8 @@ export function createPlatformManagementTools(): AgentTool[] {
         { name: 'pm_update_management', description: 'Update project management mode, owner and next action at the expected revision.', schema: createManagementCommands()[0]!.inputSchema },
         { name: 'update_project', description: 'Update project name or description.', schema: z.object({ projectId: z.string().min(1), name: z.string().min(1).max(200).optional(), description: z.string().max(2000).optional() }).strict() },
         { name: 'start_session', description: 'Start an existing CLI session for manual operation. Does not submit a task.', schema: z.object({ sessionId: z.string().min(1) }).strict() },
-        { name: 'stop_session', description: 'Stop a tenant-owned CLI session.', schema: z.object({ sessionId: z.string().min(1) }).strict() }
+        { name: 'stop_session', description: 'Stop a tenant-owned CLI session.', schema: z.object({ sessionId: z.string().min(1) }).strict() },
+        { name: 'dispatch_task_to_session', description: 'Programmatically submit a task message to a running CLI session (bracketed paste + single Enter) with delivery confirmation. Requires the session adapter to be autonomy-enabled (FORGEBADGER_CLI_AUTONOMY_ADAPTERS) and the composer to be ready.', schema: z.object({ sessionId: z.string().min(1).max(128), message: z.string().min(1).max(4000) }).strict() }
     ];
     return [{ name: 'pm_overview', description: 'Read project progress, manual/CLI planning mode, owner, next action and evidence freshness.', risk: 'read', requiresApproval: false, inputSchema: z.object({}).strict(), async execute(_input, ctx) {
                 const g = typeof ctx.grantId === 'string' ? new CopilotGrantRepository(ctx.db, ctx.userId).get(ctx.grantId) : undefined;

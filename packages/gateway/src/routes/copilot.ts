@@ -91,12 +91,6 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
         authorization: tool.risk === "read" ? "read" : "approval_or_grant"
       };
     });
-    tools.push({
-      name: "dispatch_task_to_session", description: "Autonomous CLI task dispatch is unavailable; use the terminal manually.",
-      risk: "operate", requiresApproval: true, enabled: preferences.isEnabled("dispatch_task_to_session"),
-      available: false, unavailableReason: "ADAPTER_AUTONOMY_UNVERIFIED", effectiveEnabled: false,
-      authorization: "unavailable"
-    });
     res.json(ok({ tools }));
   });
 

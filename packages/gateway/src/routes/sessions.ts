@@ -8,6 +8,7 @@ import { z } from "zod";
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { createClaudeLaunchPlan, type LaunchPlan } from "../adapters/claude.js";
 import { getAdapterLaunchStatus } from "../services/adapter-discovery.js";
+import { getAdapterAutonomy } from "../services/adapter-autonomy.js";
 import type { CommandRunner } from "../lib/dependency-check.js";
 import { validateProjectRoot } from "../lib/safe-resolve.js";
 import { ProjectRepository } from "../db/repositories/project-repository.js";
@@ -348,13 +349,15 @@ export function createSessionRoutes(
 
   router.get("/:id/writer", (req, res) => {
     const userId=(req as unknown as AuthenticatedRequest).userId;
-    if(!new SessionRepository(db,userId).getById(req.params.id)) return res.status(404).json({code:1,message:"Session not found"});
+    const session = new SessionRepository(db,userId).getById(req.params.id);
+    if(!session) return res.status(404).json({code:1,message:"Session not found"});
     let mode: "manual" | "automated" = "manual";
     if(sessionManager.getSession(req.params.id)) {
       try { sessionManager.assertManualInputAllowed(userId,req.params.id); }
       catch(error) { if(error instanceof Error&&error.message==="SESSION_WRITER_BUSY")mode="automated";else return res.status(409).json({code:1,message:error instanceof Error?error.message:"Writer unavailable"}); }
     }
-    return res.json({code:0,data:{sessionId:req.params.id,mode,autonomy:"manual_only"},message:""});
+    const adapter = normalizeAdapter(session.aiTool);
+    return res.json({code:0,data:{sessionId:req.params.id,mode,autonomy:adapter?getAdapterAutonomy(adapter).mode:"manual_only"},message:""});
   });
 
   for (const action of ["start", "stop", "takeover"] as const) {

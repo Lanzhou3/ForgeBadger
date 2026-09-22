@@ -55,7 +55,7 @@ export interface ManagedProject {
     cancelled: number;
   };
   goal: { summary: string; status: string } | null;
-  autonomy: "manual_only";
+  autonomy: "manual_only" | "supervised";
   evidenceFreshness: {
     status: "unknown" | "stale" | "fresh";
     fresh: number;
@@ -119,7 +119,7 @@ export function getSessionWriter(id: string) {
   return fetchJson<{
     sessionId: string;
     mode: "manual" | "automated";
-    autonomy: "manual_only";
+    autonomy: "manual_only" | "supervised";
   }>(`/api/v1/sessions/${encodeURIComponent(id)}/writer`);
 }
 export function takeoverSession(id: string) {

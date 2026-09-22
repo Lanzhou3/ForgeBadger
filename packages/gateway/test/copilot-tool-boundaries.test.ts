@@ -4,16 +4,20 @@ import { createPlatformTools } from '../src/services/agent/tools/index.js';
 import { TOOL_COMMANDS } from '../src/services/platform-commands/tool-commands.js';
 
 describe('Copilot active tool boundaries', () => {
-  it('exposes task preparation and does not advertise retired dispatch or CLI skill tools', () => {
+  it('exposes task preparation and programmatic dispatch, and does not advertise retired CLI skill tools', () => {
     const tools = createPlatformTools();
     const names = tools.map(tool => tool.name);
     assert.ok(names.includes('pm_prepare_task_packet'));
+    assert.ok(names.includes('pm_execute_task_packet'));
+    assert.ok(names.includes('dispatch_task_to_session'));
     assert.ok(names.includes('list_playbooks'));
     assert.ok(names.includes('load_playbook'));
-    for (const retired of ['pm_start_task_packet', 'dispatch_task_to_session', 'list_skills', 'load_skill']) {
+    for (const retired of ['pm_start_task_packet', 'list_skills', 'load_skill']) {
       assert.equal(names.includes(retired), false, retired);
     }
     assert.equal(TOOL_COMMANDS.pm_prepare_task_packet, 'pm.task.prepare');
+    assert.equal(TOOL_COMMANDS.pm_execute_task_packet, 'pm.task.execute');
+    assert.equal(TOOL_COMMANDS.dispatch_task_to_session, 'session.dispatch');
     assert.match(tools.find(tool => tool.name === 'pm_prepare_task_packet')!.description, /does not start the CLI/i);
   });
 });

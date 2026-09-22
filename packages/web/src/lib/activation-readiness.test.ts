@@ -51,26 +51,11 @@ describe("buildActivationReadiness", () => {
       { done: false, detailKey: "dashboard.activationAdapterMissing" },
     );
   });
-  it("does not block native host CLI use when Model Center fails or is loading", () => {
-    for (const models of [
-      { modelsError: true },
-      { modelsLoading: true },
-      { modelsHealthy: false },
-    ]) {
-      const readiness = buildActivationReadiness({ ...prepared, ...models });
-      expect(readiness.currentStepId).toBe("delivery");
-      expect(readiness.steps.find((step) => step.id === "model")).toMatchObject(
-        {
-          done: false,
-          optional: true,
-          detailKey: "dashboard.activationModelReady",
-        },
-      );
-      expect(readiness.primaryAction).toEqual({
-        href: "/projects",
-        labelKey: "dashboard.activationStartDelivery",
-      });
-    }
+  it("does not include a host CLI model settings step", () => {
+    const readiness = buildActivationReadiness(prepared);
+    expect(readiness.steps.map((step) => step.id as string)).not.toContain(
+      "model",
+    );
   });
   it("routes users without a project to create or import one", () => {
     const readiness = buildActivationReadiness({
@@ -86,9 +71,10 @@ describe("buildActivationReadiness", () => {
       { href: "/projects/import", labelKey: "projects.import" },
     ]);
   });
-  it("starts the task delivery flow without requiring a separate private session first", () => {
+  it("completes readiness without requiring a session or delivery first", () => {
     const readiness = buildActivationReadiness(prepared);
-    expect(readiness.currentStepId).toBe("delivery");
+    expect(readiness.complete).toBe(true);
+    expect(readiness.currentStepId).toBeNull();
     expect(readiness.steps.find((step) => step.id === "session")).toMatchObject(
       {
         optional: true,
@@ -99,24 +85,27 @@ describe("buildActivationReadiness", () => {
     expect(readiness.steps.map((step) => step.id)).toEqual([
       "runtime",
       "adapter",
-      "model",
       "project",
       "session",
       "delivery",
     ]);
+    expect(readiness.primaryAction).toEqual({
+      href: "/projects",
+      labelKey: "dashboard.activationContinueDelivery",
+    });
   });
-  it("never equates an existing session with a completed first development", () => {
+  it("keeps the first-delivery guidance optional and undone without a delivery", () => {
     const readiness = buildActivationReadiness({
       ...prepared,
       sessionCount: 10,
       acceptedDeliveries: 0,
     });
-    expect(readiness.complete).toBe(false);
-    expect(readiness.currentStepId).toBe("delivery");
+    expect(readiness.complete).toBe(true);
     expect(
       readiness.steps.find((step) => step.id === "delivery"),
     ).toMatchObject({
       done: false,
+      optional: true,
       detailKey: "dashboard.activationDeliveryMissing",
     });
   });
@@ -125,14 +114,15 @@ describe("buildActivationReadiness", () => {
       ...prepared,
       sessionCount: 1,
     });
-    expect(readiness.complete).toBe(false);
+    expect(
+      readiness.steps.find((step) => step.id === "delivery"),
+    ).toMatchObject({ done: false });
   });
-  it("marks first delivery complete only after server-reported safe integration", () => {
+  it("marks the delivery step done after server-reported safe integration", () => {
     const readiness = buildActivationReadiness({
       ...prepared,
       sessionCount: 1,
       acceptedDeliveries: 1,
-      modelsError: true,
     });
     expect(readiness.complete).toBe(true);
     expect(readiness.currentStepId).toBeNull();

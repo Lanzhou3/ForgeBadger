@@ -10,6 +10,8 @@ const strictEnvBoolean = z
   .default(false)
   .transform((value) => value === true || value === "true");
 
+const cliAdapterId = z.enum(["claude", "opencode", "codex", "kimi", "pi"]);
+
 const envSchema = z.object({
   FORGEBADGER_PORT: z.coerce.number().int().positive().default(3000),
   FORGEBADGER_HOST: z.string().default("127.0.0.1"),
@@ -19,6 +21,11 @@ const envSchema = z.object({
   FORGEBADGER_SESSION_PREFIX: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("fb-"),
   FORGEBADGER_REGISTRATION: z.enum(["open", "off", "invite"]).default("open"),
   FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: strictEnvBoolean,
+  FORGEBADGER_CLI_AUTONOMY_ADAPTERS: z
+    .union([z.string(), z.array(cliAdapterId)])
+    .default("")
+    .transform((value) => (typeof value === "string" ? value.split(",").map((entry) => entry.trim()).filter(Boolean) : value))
+    .pipe(z.array(cliAdapterId)),
   FORGEBADGER_MCP_ENABLED: strictEnvBoolean,
   FORGEBADGER_MASTER_KEY: z.string().refine((value) => isValidMasterKey(value), {
     message: "FORGEBADGER_MASTER_KEY must be 32 bytes or 64 hex characters"

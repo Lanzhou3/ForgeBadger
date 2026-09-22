@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Wrench } from "lucide-react";
 
@@ -21,7 +21,15 @@ export const modelProvidersQueryKey = ["model-providers"] as const;
 export const copilotCapabilitiesQueryKey = ["copilot", "capabilities"] as const;
 
 /** Thin status strip for the self-owned Gateway runtime and its default model. */
-export function CopilotStatusBar() {
+export function CopilotStatusBar({
+  modelId,
+  onModelChange,
+}: {
+  /** Selected model profile id; null follows the platform default. */
+  modelId?: string | null;
+  /** When provided, the model label becomes a picker. */
+  onModelChange?: (modelId: string | null) => void;
+}) {
   const { t } = useLanguage();
   const modelProviders = useQuery({
     queryKey: modelProvidersQueryKey,
@@ -33,13 +41,39 @@ export function CopilotStatusBar() {
     ? `${selected.providerName} / ${selected.name}`
     : t("copilot.followSystemDefault");
 
+  // Self-heal a stored selection whose profile was deleted or disabled.
+  useEffect(() => {
+    if (!modelProviders.data || !modelId || !onModelChange) return;
+    if (!models.some((model) => model.id === modelId)) onModelChange(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelProviders.data, modelId, onModelChange]);
+
   return (
     <div
       className="flex items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground"
       data-testid="copilot-status-bar"
     >
       <span className="shrink-0">{t("copilot.currentModel")}</span>
-      <span className="truncate">{modelLabel}</span>
+      {onModelChange ? (
+        <select
+          aria-label={t("copilot.currentModel")}
+          className="max-w-64 truncate rounded border border-border bg-background px-1 py-0.5 text-xs text-foreground"
+          value={modelId ?? ""}
+          onChange={(event) => onModelChange(event.target.value || null)}
+        >
+          <option value="">
+            {t("copilot.followSystemDefault")}
+            {selected ? `（${modelLabel}）` : ""}
+          </option>
+          {models.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.providerName} / {model.name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className="truncate">{modelLabel}</span>
+      )}
       <Badge variant="secondary" className="ml-auto gap-1.5 whitespace-nowrap">
         <span className="size-1.5 rounded-full bg-emerald-500" />
         {t("copilot.nativeRuntime")}

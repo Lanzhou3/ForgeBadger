@@ -306,6 +306,27 @@ describe("CopilotChat console layout", () => {
     expect(statusBar.textContent).toContain("Gateway 原生");
   });
 
+  it("sends the picked model with the message and persists the choice", async () => {
+    listModelProvidersMock.mockResolvedValue({
+      ...baseModels,
+      models: [
+        baseModels.models[0]!,
+        { ...baseModels.models[0]!, id: "model-2", name: "claude-opus", modelId: "claude-opus-4", providerName: "Anthropic", isDefault: false },
+      ],
+    });
+    renderChat();
+
+    await waitForConversationLoaded();
+    const picker = await screen.findByLabelText("当前模型");
+    fireEvent.change(picker, { target: { value: "model-2" } });
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "换个模型" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
+    expect(sendMessageMock.mock.calls[0]![2]).toBe("model-2");
+    expect(window.localStorage.getItem("forgebadger.copilot.model")).toBe("model-2");
+  });
+
   it("collapses the conversation sidebar via the header toggle", async () => {
     renderChat();
 

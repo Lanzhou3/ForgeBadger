@@ -9,6 +9,24 @@
  * into the console bundle — the panel is lazy-loaded precisely for that.
  */
 export const LAST_COPILOT_CONVERSATION_KEY = "forgebadger.copilot.robot-conversation";
+export const COPILOT_MODEL_KEY = "forgebadger.copilot.model";
+
+export function readCopilotModelPreference(): string | null {
+  try {
+    return window.localStorage.getItem(COPILOT_MODEL_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function writeCopilotModelPreference(modelId: string | null): void {
+  try {
+    if (modelId) window.localStorage.setItem(COPILOT_MODEL_KEY, modelId);
+    else window.localStorage.removeItem(COPILOT_MODEL_KEY);
+  } catch {
+    // Storage unavailable: the picker simply falls back to the system default.
+  }
+}
 
 export function readLastCopilotConversation(): string | null {
   try {

@@ -6,7 +6,6 @@ const retiredTools = new Set(['pm_start_task_packet', 'list_skills', 'load_skill
 
 /** Availability is distinct from owner preferences and per-action authorization. */
 export function toolUnavailableReason(name: string, hasSessionManager: boolean): string | null {
-  if (name === 'dispatch_task_to_session') return 'ADAPTER_AUTONOMY_UNVERIFIED';
   if (retiredTools.has(name)) return 'TOOL_RETIRED';
   if (sessionRuntimeTools.has(name) && !hasSessionManager) return 'SESSION_RUNTIME_UNAVAILABLE';
   return null;

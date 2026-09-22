@@ -166,6 +166,10 @@ async function start(ctx: CommandContext, sessionId: string) {
         throw error;
     }
 }
+/** Shared runtime launch path: session.start and pm.task.execute both spawn the CLI through here. */
+export async function startSessionRuntime(ctx: CommandContext, sessionId: string) {
+    return start(ctx, sessionId);
+}
 async function stop(ctx: CommandContext, sessionId: string) {
     const { db, userId, eventBus, adapterCommandRunner } = ctx;
     const sessionManager = ctx.sessionManager;
@@ -221,8 +225,7 @@ async function stop(ctx: CommandContext, sessionId: string) {
         throw error;
     }
 }
-function recordSessionActivity(db: Database, eventBus: ForgeBadgerEventBus | undefined, userId: string, session: Session, type: string, status: "info" | "success" | "warning" | "error", message: string, metadata?: unknown): void {
-    recordActivity({
+function recordSessionActivity(db: Database, eventBus: ForgeBadgerEventBus | undefined, userId: string, session: Session, type: string, status: "info" | "success" | "warning" | "error", message: string, metadata?: unknown): void {    recordActivity({
         db,
         eventBus,
         userId,

@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  ProjectManagerRepository,
   type ProjectManagerWorkItem,
   type ProjectManagerWorkItemStatus
 } from "../../db/repositories/project-manager-repository.js";
@@ -204,6 +205,29 @@ export function withTaskPacketSessionLink(
 export function createTaskPacketSessionName(title: string): string {
   const normalized = title.trim() || "Task";
   return `Task: ${normalized}`.slice(0, 256);
+}
+
+/** Stamp the task packet as programmatically dispatched (supervisor gate). */
+export function withTaskPacketDispatchedAt(
+  details: Record<string, unknown>,
+  dispatchedAt: string
+): Record<string, unknown> {
+  return {
+    ...details,
+    taskPacket: { ...readTaskPacketDetails(details), dispatchedAt }
+  };
+}
+
+/** Reverse lookup: the work item whose task packet links to this session. */
+export function findWorkItemByTaskPacketSession(
+  db: Database,
+  userId: string,
+  projectId: string,
+  sessionId: string
+): ProjectManagerWorkItem | undefined {
+  return new ProjectManagerRepository(db, userId)
+    .listWorkItems(projectId, { limit: 200 })
+    .find((item) => readTaskPacketSessionId(item) === sessionId);
 }
 
 export function createTaskPacketContext(workItem: ProjectManagerWorkItem, project: Project): Record<string, unknown> {

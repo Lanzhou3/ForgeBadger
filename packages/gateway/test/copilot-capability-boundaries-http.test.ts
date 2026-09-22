@@ -10,7 +10,7 @@ import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { signJwt } from '../src/auth/jwt.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 
-it('reports unavailable dispatch separately and refuses enabling retired tools', async () => {
+it('reports dispatch as a normal approval-or-grant tool and refuses enabling retired tools', async () => {
   const db = new Database(':memory:');
   migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations/',import.meta.url).pathname});
   const user = new UserRepository(db).create('capability@test.dev','hash');
@@ -27,15 +27,19 @@ it('reports unavailable dispatch separately and refuses enabling retired tools',
     assert.equal(response.status,200);
     const body = await response.json() as {data:{tools:Array<{name:string;available:boolean;effectiveEnabled:boolean;unavailableReason:string|null;authorization:string}>}};
     const dispatch = body.data.tools.find(tool=>tool.name==='dispatch_task_to_session')!;
-    assert.equal(dispatch.available,false);assert.equal(dispatch.effectiveEnabled,false);
-    assert.equal(dispatch.unavailableReason,'ADAPTER_AUTONOMY_UNVERIFIED');
-    assert.equal(dispatch.authorization,'unavailable');
+    // Availability is no longer hard-blocked; the adapter autonomy gate is
+    // enforced at preview/execute time per session adapter.
+    assert.equal(dispatch.available,true);
+    assert.equal(dispatch.unavailableReason,null);
+    assert.equal(dispatch.authorization,'approval_or_grant');
     assert.ok(body.data.tools.some(tool=>tool.name==='pm_prepare_task_packet'));
+    assert.ok(body.data.tools.some(tool=>tool.name==='pm_execute_task_packet'));
     const output = body.data.tools.find(tool=>tool.name==='get_session_output')!;
     assert.equal(output.unavailableReason,'SESSION_RUNTIME_UNAVAILABLE');
-    for (const name of ['pm_start_task_packet','dispatch_task_to_session','list_skills','load_skill']) {
+    for (const name of ['pm_start_task_packet','list_skills','load_skill']) {
       assert.equal((await fetch(base+`/capabilities/${name}/enabled`,{method:'PUT',headers,body:JSON.stringify({enabled:true})})).status,404);
     }
+    assert.equal((await fetch(base+'/capabilities/dispatch_task_to_session/enabled',{method:'PUT',headers,body:JSON.stringify({enabled:true})})).status,200);
     assert.equal((await fetch(base+'/capabilities/list_playbooks/enabled',{method:'PUT',headers,body:JSON.stringify({enabled:false})})).status,200);
   } finally {server.close();await once(server,'close');db.close();}
 });

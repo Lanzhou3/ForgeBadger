@@ -16,6 +16,8 @@ import type { LocalAccountRecovery } from "./services/local-account-recovery.js"
 import type { AgentStackDeps } from "./services/agent/agent-stack.js";
 import { startAutomationScheduler, type AutomationScheduler } from "./services/automation/scheduler.js";
 import { startCopilotRuntime } from "./services/agent/runtime.js";
+import { attachDispatchSupervisor, type DispatchSupervisor } from "./services/agent/dispatch-supervisor.js";
+import { cliAutonomyAdapters } from "./services/adapter-autonomy.js";
 import { RuntimeAuthorizationInvalidator } from "./services/runtime-authorization-invalidation.js";
 
 import { mountRoutes } from "./routes/index.js";
@@ -77,6 +79,8 @@ export interface GatewayAppOptions {
   llmFetch?: typeof fetch | undefined;
   /** Mounts the external MCP endpoint (/mcp) and its token management routes. */
   mcpEnabled?: boolean | undefined;
+  /** Enables the dispatch supervisor: hook-driven PM work-item auto-advance for programmatically dispatched tasks. */
+  pmAutoDispatchEnabled?: boolean | undefined;
 }
 
 export function createServer(deps: ServerDeps): express.Express {
@@ -158,6 +162,12 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const automationScheduler: AutomationScheduler | undefined = copilotAgent
     ? startAutomationScheduler(copilotAgent)
     : undefined;
+  // The dispatch supervisor advances grant-dispatched PM work items on CLI
+  // completion hooks; it requires both the operator opt-ins.
+  const dispatchSupervisor: DispatchSupervisor | undefined =
+    options.pmAutoDispatchEnabled && cliAutonomyAdapters().length > 0
+      ? attachDispatchSupervisor({ db: options.db, eventBus })
+      : undefined;
 
   // The Session Server is the single terminal backend; the terminal
   // WebSocket handler relays browser I/O to it over IPC.
@@ -201,6 +211,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
       await runShutdownStage(failures, () => typeof app.locals.stopDelivery === "function" ? app.locals.stopDelivery() : undefined);
       await runShutdownStage(failures, () => feishuChannelRuntime.stop());
       automationScheduler?.stop();
+      dispatchSupervisor?.stop();
       await runShutdownStage(failures, () => copilotRuntime.stop());
       const httpResult = await httpCloseResult;
       if (!httpResult.ok) {

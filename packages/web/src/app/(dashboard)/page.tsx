@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -27,6 +28,10 @@ import {
   listSessions,
 } from "@/lib/api";
 import { buildActivationReadiness } from "@/lib/activation-readiness";
+import {
+  readActivationDismissed,
+  writeActivationDismissed,
+} from "@/lib/activation-dismissal";
 import { normalizeSessionStatus } from "@/lib/session-status";
 import {
   getTerminalRuntimeRemediation,
@@ -123,15 +128,20 @@ export default function DashboardPage() {
     adapters,
     adaptersLoading: adaptersQuery.isLoading,
     adaptersError: adaptersQuery.isError,
-    modelsHealthy: dashboardHealth?.models.healthy,
-    modelsLoading: dashboardQuery.isLoading,
-    modelsError: dashboardQuery.isError,
     projectCount,
     sessionCount,
     acceptedDeliveries: dashboardStats?.acceptedDeliveries ?? 0,
     firstProjectId: firstProject?.id,
   });
-  const showFirstRunReadiness = !activationReadiness.complete;
+  const [activationDismissed, setActivationDismissed] = useState(true);
+  useEffect(() => {
+    setActivationDismissed(readActivationDismissed());
+  }, []);
+  const dismissActivation = () => {
+    writeActivationDismissed();
+    setActivationDismissed(true);
+  };
+  const showFirstRunReadiness = !activationReadiness.complete && !activationDismissed;
   const requiredSteps = activationReadiness.steps.filter((step) => !step.optional);
   const doneStepCount = requiredSteps.filter((step) => step.done).length;
 
@@ -290,6 +300,14 @@ export default function DashboardPage() {
                   <Link href={action.href}>{t(action.labelKey)}</Link>
                 </Button>
               ))}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={dismissActivation}
+              >
+                {t("dashboard.activationDismiss")}
+              </Button>
             </div>
           </CardContent>
         </Card>

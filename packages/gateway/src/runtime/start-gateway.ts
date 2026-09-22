@@ -3,6 +3,7 @@ import type { Server } from "node:http";
 import type { GatewayEnv } from "../config/env.js";
 import { loadEnv } from "../config/env.js";
 import { createGatewayApp, type GatewayApp } from "../server.js";
+import { configureCliAutonomyAdapters } from "../services/adapter-autonomy.js";
 import { startupGateway } from "../services/startup.js";
 import type { TerminalBackendClient } from "../services/terminal-backend.js";
 import { createLocalAccountRecovery } from "../services/local-account-recovery.js";
@@ -33,6 +34,7 @@ export async function createGatewayRuntime(
   overrides: GatewayRuntimeOverrides = {}
 ): Promise<GatewayApp> {
   const env = resolveGatewayEnv(input);
+  configureCliAutonomyAdapters(env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS);
   const accountRecovery = createLocalAccountRecovery(env.FORGEBADGER_STATE_DIR);
 
   // The Session Server is the single terminal backend:
@@ -88,7 +90,8 @@ export async function createGatewayRuntime(
       registrationMode: env.FORGEBADGER_REGISTRATION,
       sessionServerIpcPath,
       sessionServerTokenPath: resolveSessionServerTokenPath(env.FORGEBADGER_STATE_DIR),
-      mcpEnabled: env.FORGEBADGER_MCP_ENABLED
+      mcpEnabled: env.FORGEBADGER_MCP_ENABLED,
+      pmAutoDispatchEnabled: env.FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED
     });
 
     // Attach shutdown hook: the Gateway only disconnects from the Session

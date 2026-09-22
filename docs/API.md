@@ -500,7 +500,7 @@ unsupported grant capabilities are rejected.
 | `POST /platform-actions/:id/execute` | `{receipt}`; requires a currently valid approved intent. Duplicate confirmed execution returns the stored receipt. |
 | `GET /project-manager/overview?grantId=...` | `{projects,observedAt}`; an unavailable, revoked or expired requested grant returns 403. Omitted grant lists the owner's projects. |
 | `PATCH /projects/:id/project-manager/management` | `{expectedRevision,mode?,ownerLabel?,nextAction?,freshnessHours?}` → `{management}`. Mode is `manual` or `cli`; stale revisions conflict. |
-| `GET /sessions/:id/writer` | `{sessionId,mode,autonomy}`; mode is `manual` or `automated`, autonomy is currently `manual_only`. |
+| `GET /sessions/:id/writer` | `{sessionId,mode,autonomy}`; mode is `manual` or `automated`; autonomy is `manual_only` unless the session adapter is listed in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` (then `supervised`). |
 | `POST /sessions/:id/takeover` | `{sessionId,takenOver}`; invalidates the old automatic writer before manual input resumes. |
 
 Grant scope contains explicit project IDs, capabilities and canonical allowed
@@ -526,12 +526,22 @@ execution claims expire after 30 seconds without their 10-second renewal; expire
 claims recover conservatively, while late confirmed receipts retain actual outcomes.
 Copilot pending approvals reference this same intent and resume the original run.
 
-The first delegatable commands are `project.create`, `project.metadata.update`,
+The delegatable commands are `project.create`, `project.metadata.update`,
 `pm.work_item.create`, `pm.work_item.metadata`, `pm.task.prepare`,
-`pm.management.update`, `memory.write`, `session.start`, and `session.stop`.
+`pm.task.execute`, `pm.management.update`, `memory.write`, `session.start`,
+`session.stop`, and `session.dispatch`.
 Task preparation creates/links an idle session and never launches or submits a
-prompt. `pm.task.execute` and `session.dispatch` reject with
-`CLI_AUTONOMY_MANUAL_ONLY` before an effect; all four adapters remain manual-only.
+prompt. `pm.task.execute` composes prepare + session start + programmatic
+prompt delivery and marks the work item in progress; `session.dispatch`
+delivers a message into a live session. Both require the target adapter to be
+listed in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` (default empty) — otherwise they
+reject with `ADAPTER_AUTONOMY_UNVERIFIED` before any effect. Delivery uses
+bracketed-paste staging plus a single Enter with consumption confirmation;
+indeterminate delivery surfaces as `COPILOT_DELIVERY_UNCONFIRMED` and is never
+auto-retried. When `FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED` is also
+on, a dispatch supervisor advances grant-dispatched work items to
+`ready_for_review` (task completed) or `blocked` (task failed) from session
+hook notifications; acceptance to `done` stays with the owner.
 Explicit owner lifecycle actions remain available. Persistent Copilot memory
 writes use `memory.write`, including the memory-entry HTTP creation endpoint;
 automatic post-turn memory curation is disabled.
@@ -1480,9 +1490,11 @@ The tool surface reuses the native Copilot platform tools
 `pm_overview`, `pm_list_task_packets`, `pm_get_task_packet`,
 `project_graph_*`) are available to every token; operate tools
 (`create_project`, `update_project`, `start_session`, `stop_session`,
-`dispatch_task_to_session`, `pm_create_work_item`, `pm_update_work_item`,
-`pm_update_management`, `pm_start_task_packet`, `write_memory`) require the
-`operate` scope and are hidden from `tools/list` without it. The `operate`
+`pm_create_work_item`, `pm_update_work_item`,
+`pm_update_management`, `pm_prepare_task_packet`, `write_memory`) require the
+`operate` scope and are hidden from `tools/list` without it. CLI-control tools
+(`dispatch_task_to_session`, `pm_execute_task_packet`) are never exposed over
+MCP, regardless of scope. The `operate`
 scope is the owner's standing authorization: platform command intents are
 previewed and approved inline with `owner_action` authority (the interactive
 approval loop does not exist for MCP callers), and every call still passes zod
@@ -1817,12 +1829,14 @@ surfaces. `list_skills` and `load_skill` are retired native Copilot tool names.
 
 `pm_prepare_task_packet` replaces `pm_start_task_packet` and only prepares a task
 packet/linked idle session. It does not start a CLI or submit instructions.
-`dispatch_task_to_session` is not advertised by Copilot or MCP because autonomous
-CLI dispatch remains unavailable. The capability settings list reports it with
-`available: false`, `unavailableReason: "ADAPTER_AUTONOMY_UNVERIFIED"` and
-`effectiveEnabled: false`; attempts to toggle retired/unavailable names return
+`pm_execute_task_packet` additionally starts the linked session and delivers the
+packet prompt. `dispatch_task_to_session` submits a message into a live session;
+both are gated per adapter by `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` at
+preview/execute time (`ADAPTER_AUTONOMY_UNVERIFIED` when not enabled) and are
+never exposed over MCP. The capability settings list reports every tool with
+`available`/`unavailableReason`; attempts to toggle retired/unknown names return
 404. `enabled` is a configured preference, `available` is runtime availability,
-and `authorization` describes `read`, `approval_or_grant`, or `unavailable`.
+and `authorization` describes `read` or `approval_or_grant`.
 Actual resource authorization is always checked again during execution.
 
 CLI Skill rows expose `runtimeTarget: "cli"` and nullable `resourceManifest`.

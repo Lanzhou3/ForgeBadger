@@ -11,9 +11,11 @@ import { SessionRepository } from '../../db/repositories/session-repository.js';
 import { ProjectManagerRepository } from '../../db/repositories/project-manager-repository.js';
 import { TemplateRepository } from '../../db/repositories/template-repository.js';
 import { AgentMemoryRepository } from '../agent/memory.js';
-import { buildTaskPacket, createTaskPacketContext, createTaskPacketSessionName, resolveTaskPacketSession, withTaskPacketSessionLink, toTaskPacketSessionDto } from '../project-manager/task-packets.js';
-import { createSessionCommands } from './session-commands.js';
+import { buildTaskPacket, createTaskPacketContext, createTaskPacketSessionName, findWorkItemByTaskPacketSession, resolveTaskPacketSession, withTaskPacketDispatchedAt, withTaskPacketSessionLink, toTaskPacketSessionDto } from '../project-manager/task-packets.js';
+import { createSessionCommands, startSessionRuntime } from './session-commands.js';
 import { assertAdapterAutonomy } from '../adapter-autonomy.js';
+import { dispatchSessionInput } from '../agent/platform-access.js';
+import { normalizeAdapter } from '../session-launch-plan.js';
 import { canonical, canonicalRoot } from './actions.js';
 import type { CommandContext, PlatformCommand } from './types.js';
 const id = z.string().min(1).max(128);
@@ -24,6 +26,7 @@ const evidenceRef = z.object({ kind: z.string().trim().min(1).max(64).refine(val
 const workItemWithEvidence = workItemCreateInput.extend({assigneeId:id.nullable().optional(),reviewerId:id.nullable().optional(), status: z.literal('todo').optional(), evidenceRefs: z.array(evidenceRef).max(20).optional() });
 export const workItemUpdateInput = z.object({expectedRevision:z.number().int().positive().optional(),assigneeId:id.nullable().optional(),reviewerId:id.nullable().optional(), projectId: id, workItemId: id, title: z.string().min(1).max(256).optional(), description: z.string().max(4000).nullable().optional(), priority: z.number().int().min(0).max(100).optional(), acceptanceCriteria: z.array(z.string().max(1000)).max(50).optional(), stageId: id.nullable().optional() }).strict();
 export const taskPrepareInput = z.object({ projectId: id, workItemId: id, aiTool: z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).optional() }).strict();
+export const sessionDispatchInput = z.object({ sessionId: id, message: z.string().min(1).max(4000) }).strict();
 export const memoryWriteInput = z.object({ kind: z.enum(['fact', 'preference', 'decision', 'project_note']), scope: z.enum(['global', 'project', 'session']), text: z.string().min(1).max(8192), projectId: id.optional(), conversationId: id.optional(), metadata: z.record(z.unknown()).optional() }).strict();
 function project(ctx: CommandContext, id: string) {
     const p = new ProjectRepository(ctx.db, ctx.userId).getById(id);
@@ -130,17 +133,84 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 }
                 return { taskPacket: buildTaskPacket({ project: p, workItem: item, session }), session: toTaskPacketSessionDto(session), existed };
             } }),
-        command({ id: 'pm.task.execute', effect: 'external', delegatable: false, inputSchema: taskPrepareInput, resolve(ctx, input) {
-                itemResources(ctx, input);
-                assertAdapterAutonomy(taskPrepareInput.parse(input).aiTool ?? 'claude');
-            }, execute() {
-                throw new Error('CLI_AUTONOMY_MANUAL_ONLY');
+        command({ id: 'pm.task.execute', effect: 'external', delegatable: true, inputSchema: taskPrepareInput,
+            resolve(ctx, input) {
+                const resources = itemResources(ctx, input);
+                const v = taskPrepareInput.parse(input);
+                const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(v.aiTool ?? project(ctx, v.projectId).aiTool);
+                assertAdapterAutonomy(adapter);
+                return resources;
+            },
+            async prepare(ctx, input) {
+                const v = taskPrepareInput.parse(input);
+                assertLegacyTaskExecution(ctx.db,v.projectId);
+                const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(v.aiTool ?? project(ctx, v.projectId).aiTool);
+                const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
+                if (!status.launchEnabled)
+                    throw new Error(`${status.label} is not available for launch`);
+            },
+            async execute(ctx, input) {
+                const v = taskPrepareInput.parse(input);
+                assertLegacyTaskExecution(ctx.db,v.projectId);
+                const p = project(ctx, v.projectId);
+                const repo = new ProjectManagerRepository(ctx.db, ctx.userId);
+                const sessionRepo = new SessionRepository(ctx.db, ctx.userId);
+                let item = repo.getWorkItem(v.projectId, v.workItemId)!;
+                let session = resolveTaskPacketSession(ctx.db, ctx.userId, p.id, item);
+                if (!session) {
+                    const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(v.aiTool ?? p.aiTool);
+                    session = sessionRepo.create({ projectId: p.id, name: createTaskPacketSessionName(item.title), aiTool: adapter, workingDir: p.path, credentialMode: 'host_environment' });
+                    item = repo.updateWorkItem(p.id, item.id, { details: withTaskPacketSessionLink(item.details, session, p, createTaskPacketContext(item, p)) });
+                }
+                const adapter = normalizeAdapter(session.aiTool);
+                if (!adapter)
+                    throw new Error('Unsupported session adapter');
+                const manager = ctx.sessionManager;
+                if (!manager)
+                    throw new Error('Session runtime unavailable');
+                const live = manager.getSession(session.id);
+                const running = live?.status === 'running' || (session.status === 'running' && await manager.hasLiveTerminal(session.id, session.runtimeSessionName ?? undefined));
+                if (!running) {
+                    await startSessionRuntime(ctx, session.id);
+                    session = sessionRepo.getById(session.id)!;
+                }
+                const receipt = await dispatchSessionInput(manager, session.id, adapter, buildTaskPacket({ project: p, workItem: item, session }).prompt);
+                const dispatchedAt = new Date().toISOString();
+                item = repo.updateWorkItem(p.id, item.id, { details: withTaskPacketDispatchedAt(repo.getWorkItem(p.id, item.id)!.details, dispatchedAt) });
+                if (item.status === 'todo')
+                    item = repo.updateWorkItemStatus(p.id, item.id, { status: 'in_progress' });
+                return { taskPacket: buildTaskPacket({ project: p, workItem: item, session }), session: toTaskPacketSessionDto(session), dispatch: receipt };
             } }),
-        command({ id: 'session.dispatch', effect: 'external', delegatable: false, inputSchema: z.object({ sessionId: id, message: z.string().min(1).max(4000) }).strict(), resolve(ctx, input) {
-                sessionResources(ctx, input);
-                assertAdapterAutonomy('claude');
-            }, execute() {
-                throw new Error('CLI_AUTONOMY_MANUAL_ONLY');
+        command({ id: 'session.dispatch', effect: 'external', delegatable: true, inputSchema: sessionDispatchInput,
+            resolve(ctx, input) {
+                const resources = sessionResources(ctx, input);
+                const { sessionId } = sessionDispatchInput.parse(input);
+                const adapter = normalizeAdapter(new SessionRepository(ctx.db, ctx.userId).getById(sessionId)!.aiTool);
+                if (!adapter)
+                    throw new Error('Unsupported session adapter');
+                assertAdapterAutonomy(adapter);
+                return resources;
+            },
+            async execute(ctx, input) {
+                const { sessionId, message } = sessionDispatchInput.parse(input);
+                const sessionRepo = new SessionRepository(ctx.db, ctx.userId);
+                const session = sessionRepo.getById(sessionId)!;
+                const adapter = normalizeAdapter(session.aiTool);
+                if (!adapter)
+                    throw new Error('Unsupported session adapter');
+                const manager = ctx.sessionManager;
+                if (!manager)
+                    throw new Error('Session runtime unavailable');
+                ctx.authorize?.();
+                const receipt = await dispatchSessionInput(manager, sessionId, adapter, message);
+                const item = findWorkItemByTaskPacketSession(ctx.db, ctx.userId, session.projectId, sessionId);
+                if (item) {
+                    const repo = new ProjectManagerRepository(ctx.db, ctx.userId);
+                    const fresh = repo.updateWorkItem(session.projectId, item.id, { details: withTaskPacketDispatchedAt(item.details, new Date().toISOString()) });
+                    if (fresh.status === 'todo')
+                        repo.updateWorkItemStatus(session.projectId, item.id, { status: 'in_progress' });
+                }
+                return receipt;
             } }),
         command({ id: 'memory.write', effect: 'database', delegatable: true, inputSchema: memoryWriteInput,
             resolve(ctx, input) {

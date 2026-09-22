@@ -38,7 +38,8 @@ function ManagementSection() {
       <h2 className="font-semibold">多项目进度</h2>
       <p className="text-xs text-muted-foreground">
         此处是账号下的项目管理视图，不会扩大会话授权范围。CLI
-        模式用于任务规划；当前 CLI 自动执行权限未验证，仍需人工操作。
+        自动下发需在 Gateway 环境变量 FORGEBADGER_CLI_AUTONOMY_ADAPTERS
+        中为对应适配器开启；未开启的适配器仍需人工在终端操作。
       </p>
       {overview.isPending && <p role="status">正在加载项目…</p>}
       {overview.isError && (
@@ -93,8 +94,8 @@ function ManagementRow({ project }: { project: ManagedProject }) {
           {project.name}
         </a>
         <span className="text-xs">
-          {project.management.mode === "manual" ? "人工项目" : "CLI 规划"} ·
-          人工执行
+          {project.management.mode === "manual" ? "人工项目" : "CLI 规划"}{" · "}
+          {project.autonomy === "supervised" ? "自动执行已开启" : "人工执行"}
         </span>
       </div>
       <p className="text-xs text-muted-foreground">

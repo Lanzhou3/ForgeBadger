@@ -100,6 +100,17 @@ export function createProjectManagerTools(): AgentTool[] {
       async execute(input, context) {
         return executeAgentAction("pm_prepare_task_packet", startPacketInput.parse(input), context);
       }
+    },
+    {
+      name: "pm_execute_task_packet",
+      description:
+        "Prepare (if needed), start the linked CLI session, and programmatically deliver the task packet prompt to it, then mark the work item in progress. Requires the adapter to be autonomy-enabled (FORGEBADGER_CLI_AUTONOMY_ADAPTERS).",
+      risk: "operate",
+      requiresApproval: true,
+      inputSchema: startPacketInput,
+      async execute(input, context) {
+        return executeAgentAction("pm_execute_task_packet", startPacketInput.parse(input), context);
+      }
     }
   ];
 }

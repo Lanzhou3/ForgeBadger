@@ -21,7 +21,7 @@ import {
 import { CopilotSettings } from "@/components/copilot/copilot-settings";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
 import { listProjects, type Project } from "@/lib/api";
-import { writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
+import { writeLastCopilotConversation, readCopilotModelPreference, writeCopilotModelPreference } from "@/lib/copilot-conversation-storage";
 import { listGrants, type CopilotGrant } from "@/lib/platform-actions-api";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
@@ -74,9 +74,14 @@ export function CopilotChat() {
   const [editError, setEditError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarSheetOpen, setSidebarSheetOpen] = useState(false);
+  const [modelId, setModelId] = useState<string | null>(() => readCopilotModelPreference());
+  const onModelChange = useCallback((next: string | null) => {
+    setModelId(next);
+    writeCopilotModelPreference(next);
+  }, []);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const lastSentRef = useRef<{ conversationId: string; text: string; projectId?: string; clientRequestId: string } | null>(null);
+  const lastSentRef = useRef<{ conversationId: string; text: string; projectId?: string; modelId?: string; clientRequestId: string } | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   conversationIdRef.current = conversationId;
   const requestedConversationRef = useRef<string | null>(null);
@@ -218,7 +223,7 @@ export function CopilotChat() {
     const id = conversationId;
     if (!text || !id || sending || (active && ["pending", "running", "awaiting_approval"].includes(active.status))) return;
     if (retry && (!prior || prior.conversationId !== id)) return;
-    const request = prior ?? { conversationId: id, text, ...(projectId ? { projectId } : {}), clientRequestId: crypto.randomUUID() };
+    const request = prior ?? { conversationId: id, text, ...(projectId ? { projectId } : {}), ...(modelId ? { modelId } : {}), clientRequestId: crypto.randomUUID() };
     lastSentRef.current = request;
     if (!retry) setMessages((current) => [
       ...current,
@@ -241,7 +246,7 @@ export function CopilotChat() {
     // POST while the Gateway starts the model turn.
     markPending(id);
     try {
-      await startRun(id, text, undefined, { ...(request.projectId ? { projectId: request.projectId } : {}), clientRequestId: request.clientRequestId });
+      await startRun(id, text, request.modelId, { ...(request.projectId ? { projectId: request.projectId } : {}), clientRequestId: request.clientRequestId });
       const wasUntitled = !conversations.find((item) => item.id === id)?.title;
       if (wasUntitled) {
         await renameConversation(id, text.slice(0, AUTO_TITLE_MAX_CHARS)).catch(() => undefined);
@@ -253,7 +258,7 @@ export function CopilotChat() {
     } finally {
       setSending(false);
     }
-  }, [input, projectId, conversationId, sending, active, conversations, startRun, clearActive, markPending, reloadActiveConversation]);
+  }, [input, projectId, modelId, conversationId, sending, active, conversations, startRun, clearActive, markPending, reloadActiveConversation]);
 
   const onRename = useCallback(async (id: string, title: string) => {
     await renameConversation(id, title).catch(() => undefined);
@@ -417,7 +422,7 @@ export function CopilotChat() {
           </div>
         </div>
 
-        <CopilotStatusBar />
+        <CopilotStatusBar modelId={modelId} onModelChange={onModelChange} />
         <div className="relative flex min-h-0 flex-1 flex-col">
           <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-3 py-4">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
