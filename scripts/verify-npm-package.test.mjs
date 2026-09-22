@@ -191,6 +191,38 @@ describe("verifyNpmPackage", () => {
 
     assert.deepEqual(result, { ok: true, errors: [] });
   });
+
+  it("rejects relative Markdown links in the package README", async () => {
+    const root = await createPackageTree();
+    await writeFile(path.join(root, "README.md"), "[简体中文](docs/README.zh-CN.md)\n");
+
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /README\.md contains a relative Markdown link \(docs\/README\.zh-CN\.md\)/);
+  });
+
+  it("rejects parent-relative Markdown links in translated package READMEs", async () => {
+    const root = await createPackageTree();
+    await writeFile(path.join(root, "docs", "README.zh-CN.md"), "[English](../README.md)\n");
+
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /docs\/README\.zh-CN\.md contains a relative Markdown link \(\.\.\/README\.md\)/);
+  });
+
+  it("accepts absolute links and anchors in package READMEs", async () => {
+    const root = await createPackageTree();
+    await writeFile(
+      path.join(root, "README.md"),
+      "[简体中文](https://github.com/Lanzhou3/ForgeBadger/blob/main/docs/README.zh-CN.md)\n[Section](#section)\n[Mail](mailto:trial@example.com)\n"
+    );
+
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+
+    assert.deepEqual(result, { ok: true, errors: [] });
+  });
 });
 
 async function createPackageTree(options = {}) {

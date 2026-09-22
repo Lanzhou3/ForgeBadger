@@ -76,6 +76,7 @@ export async function verifyNpmPackage(options = {}) {
     errors.push("packages/cli/package.json files whitelist does not match npm package artifacts");
   }
   verifyReadmeBrandAssetUrls(cliPackageRoot, errors);
+  verifyReadmeRelativeLinks(cliPackageRoot, errors);
   verifyForbiddenRuntimeDependencies(packageJson, errors);
   verifyGatewayRuntimeDependencies(packageJson, gatewayPackageRoot, errors);
 
@@ -196,6 +197,23 @@ function verifyReadmeBrandAssetUrls(cliPackageRoot, errors) {
     if (relativeBrandAssetPattern.test(readFileSync(absolute, "utf8"))) {
       errors.push(
         `packages/cli/${readme} uses a relative brand asset URL; build-npm-package must rewrite it to the raw GitHub URL`
+      );
+    }
+  }
+}
+
+function verifyReadmeRelativeLinks(cliPackageRoot, errors) {
+  const readmes = ["README.md", "docs/README.zh-CN.md", "docs/README.zh-TW.md"];
+  const relativeLinkPattern = /\[[^\]]*\]\((?!(?:[a-z][a-z0-9+.-]*:|#))([^)\s]+)\)/i;
+  for (const readme of readmes) {
+    const absolute = path.join(cliPackageRoot, readme);
+    if (!existsSync(absolute)) {
+      continue;
+    }
+    const match = relativeLinkPattern.exec(readFileSync(absolute, "utf8"));
+    if (match) {
+      errors.push(
+        `packages/cli/${readme} contains a relative Markdown link (${match[1]}); build-npm-package must rewrite it to an absolute GitHub URL`
       );
     }
   }

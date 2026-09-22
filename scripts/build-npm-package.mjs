@@ -23,6 +23,7 @@ const copyTreeOptions = { recursive: true, dereference: true };
 // and the monorepo `directory` field would resolve them wrongly anyway).
 const brandAssetRawBaseUrl =
   "https://raw.githubusercontent.com/Lanzhou3/ForgeBadger/main/packages/web/public/brand/";
+const githubBlobBaseUrl = "https://github.com/Lanzhou3/ForgeBadger/blob/main/";
 
 const restoreWebNextEnv = await preserveFile(webNextEnv);
 
@@ -64,11 +65,35 @@ try {
 
 async function copyReadmeForNpm(sourcePath, targetPath) {
   const content = await readFile(sourcePath, "utf8");
-  const rewritten = content.replace(
-    /(src=")(?:\.\.\/)*packages\/web\/public\/brand\//g,
-    `$1${brandAssetRawBaseUrl}`
+  const rewritten = rewriteRelativeMarkdownLinks(
+    content.replace(
+      /(src=")(?:\.\.\/)*packages\/web\/public\/brand\//g,
+      `$1${brandAssetRawBaseUrl}`
+    ),
+    sourcePath
   );
   await writeFile(targetPath, rewritten);
+}
+
+// Relative Markdown links (docs/..., LICENSE, ../README.md) resolve against the
+// source file's location in the repo and become absolute GitHub blob URLs: the
+// npm tarball deliberately has no repository field (the monorepo `directory`
+// would misresolve them), so npmjs.com cannot fix up relative links itself.
+function rewriteRelativeMarkdownLinks(content, sourcePath) {
+  const sourceDir = path.dirname(sourcePath);
+  return content.replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, (match, label, target) => {
+    if (/^(?:[a-z][a-z0-9+.-]*:|#)/i.test(target)) {
+      return match;
+    }
+    const hashIndex = target.indexOf("#");
+    const filePart = hashIndex === -1 ? target : target.slice(0, hashIndex);
+    const anchor = hashIndex === -1 ? "" : target.slice(hashIndex);
+    const repoRelative = path.relative(workspaceRoot, path.resolve(sourceDir, filePart));
+    if (repoRelative === "" || repoRelative.startsWith("..") || path.isAbsolute(repoRelative)) {
+      return match;
+    }
+    return `[${label}](${githubBlobBaseUrl}${repoRelative.split(path.sep).join("/")}${anchor})`;
+  });
 }
 
 function run(command, args) {
