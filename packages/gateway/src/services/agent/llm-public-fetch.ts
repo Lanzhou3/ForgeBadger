@@ -9,6 +9,7 @@ import { MAX_RESPONSE_BYTES, withAbort } from "./llm-response.js";
 interface PublicFetchOptions {
   resolveHost?: OutboundHostResolver;
   allowPlaintextHttp?: boolean;
+  allowPrivateNetworks?: boolean;
   /** External socket boundary for tests; production selects Node HTTP(S) by protocol. */
   requestImpl?: typeof httpsRequest;
 }
@@ -19,7 +20,7 @@ async function validatedAddresses(url: URL, options: PublicFetchOptions, signal:
     await withAbort(assertResolvedPublicHttpsEndpoint(url.href, async (hostname, lookupOptions) => {
       addresses = options.resolveHost ? await options.resolveHost(hostname, lookupOptions) : await lookup(hostname, { all: true });
       return addresses;
-    }, { allowPlaintextHttp: options.allowPlaintextHttp }), signal);
+    }, { allowPlaintextHttp: options.allowPlaintextHttp, allowPrivateNetworks: options.allowPrivateNetworks }), signal);
     if (url.hash || url.search) throw new Error("Ambiguous provider endpoint");
     return addresses;
   } catch (error) {

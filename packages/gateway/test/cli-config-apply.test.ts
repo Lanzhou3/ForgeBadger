@@ -875,6 +875,35 @@ describe("cli-config apply service", () => {
       assert.equal(existsSync(path.join(root, "settings.json")), false);
     });
 
+    it("applies a loopback endpoint at apply time when allowPrivateNetworks is trusted", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-local-net@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-local-net-");
+      const repo = new ModelProviderRepository(db, user.id, masterKey);
+      const provider = repo.createProviderProfile({
+        name: "Ollama",
+        providerKey: "ollama",
+        anthropicBaseUrl: "http://127.0.0.1:1234/anthropic",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"],
+        allowPlaintextHttp: true,
+        allowPrivateNetworks: true
+      });
+      repo.createModelProfile({ providerProfileId: provider.id, name: "Default", modelId: "claude-model-1", isDefault: true });
+      repo.createCredential({ providerProfileId: provider.id, plaintextSecret: "sk-claude-secret" });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: provider.id, resolveHost: publicResolver
+      });
+
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(doc.env.ANTHROPIC_BASE_URL, "http://127.0.0.1:1234/anthropic");
+    });
+
     it("rejects unknown providers, unsupported adapters, and cross-tenant profiles", async () => {
       const db = createTestDb();
       const users = new UserRepository(db);

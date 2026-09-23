@@ -443,7 +443,14 @@ export function TerminalView({
           });
           osc9Disposable = terminal.parser.registerOscHandler(9, (data) => {
             const text = data.trim();
-            if (text) {
+            // A bare-integer first segment is an auxiliary OSC 9 sub-command
+            // (kitty-style `9;4` progress bars — Kimi Code emits these
+            // continuously on WezTerm), not a notification message. Kept in
+            // lockstep with the gateway's isOsc9AuxiliaryPayload
+            // (packages/gateway/src/services/session-server/terminal-notification-scanner.ts);
+            // the web and gateway packages cannot share code, so both copies
+            // must change together.
+            if (text && !/^\d+$/.test(text.split(";", 1)[0] ?? "")) {
               showTerminalToastRef.current(
                 "permission_prompt",
                 "warning",

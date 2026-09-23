@@ -7,6 +7,7 @@ import { LanguageProvider } from "@/hooks/use-language";
 import { CopilotChat } from "@/components/copilot/copilot-chat";
 import { LAST_COPILOT_CONVERSATION_KEY } from "@/lib/copilot-conversation-storage";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
+import type { CopilotPreferences } from "@/lib/copilot-api";
 
 const {
   pushMock,
@@ -23,6 +24,8 @@ const {
   listProjectsMock,
   getRunMock,
   listRunsMock,
+  getCopilotPreferencesMock,
+  updateCopilotPreferencesMock,
 } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   listConversationsMock: vi.fn(),
@@ -38,6 +41,8 @@ const {
   listProjectsMock: vi.fn(),
   getRunMock: vi.fn(),
   listRunsMock: vi.fn(),
+  getCopilotPreferencesMock: vi.fn(),
+  updateCopilotPreferencesMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -60,6 +65,8 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     getCopilotCapabilities: getCopilotCapabilitiesMock,
     getRun: getRunMock,
     listConversationRuns: listRunsMock,
+    getCopilotPreferences: getCopilotPreferencesMock,
+    updateCopilotPreferences: updateCopilotPreferencesMock,
   };
 });
 
@@ -134,6 +141,10 @@ const baseCapabilities = {
   ],
 };
 
+// In-memory stand-in for the server-side preference store: PUTs merge into it
+// and the subsequent GET (via query invalidation) returns the merged value.
+let preferencesState: CopilotPreferences = { modelId: null, thinkingEffort: "medium" };
+
 function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
@@ -183,6 +194,14 @@ describe("CopilotChat console layout", () => {
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
+    preferencesState = { modelId: null, thinkingEffort: "medium" };
+    getCopilotPreferencesMock.mockImplementation(async () => preferencesState);
+    updateCopilotPreferencesMock.mockImplementation(
+      async (patch: { modelId?: string | null; thinkingEffort?: CopilotPreferences["thinkingEffort"] }) => {
+        preferencesState = { ...preferencesState, ...patch };
+        return preferencesState;
+      }
+    );
     listRunsMock.mockResolvedValue({ runs: [], activeRun: null });
     window.localStorage.clear();
     window.history.replaceState({}, "", "/copilot");
@@ -306,7 +325,7 @@ describe("CopilotChat console layout", () => {
     expect(statusBar.textContent).toContain("Gateway 原生");
   });
 
-  it("sends the picked model with the message and persists the choice", async () => {
+  it("sends the picked model with the message and persists the choice to the server", async () => {
     listModelProvidersMock.mockResolvedValue({
       ...baseModels,
       models: [
@@ -324,7 +343,48 @@ describe("CopilotChat console layout", () => {
 
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
     expect(sendMessageMock.mock.calls[0]![2]).toBe("model-2");
-    expect(window.localStorage.getItem("forgebadger.copilot.model")).toBe("model-2");
+    await waitFor(() => expect(updateCopilotPreferencesMock).toHaveBeenCalledWith({ modelId: "model-2" }, expect.anything()));
+    // The invalidation refetch lands and the picker keeps the persisted choice.
+    await waitFor(() => expect((picker as HTMLSelectElement).value).toBe("model-2"));
+  });
+
+  it("degrades the preference pickers while loading, then persists the thinking effort", async () => {
+    const blocked = deferred<CopilotPreferences>();
+    getCopilotPreferencesMock.mockReturnValueOnce(blocked.promise);
+    renderChat();
+
+    const modelPicker = screen.getByLabelText("当前模型") as HTMLSelectElement;
+    const effortPicker = (await screen.findByLabelText("思考强度")) as HTMLSelectElement;
+    // Both pickers are disabled while the preference is still in flight.
+    expect(modelPicker.disabled).toBe(true);
+    expect(effortPicker.disabled).toBe(true);
+
+    await act(async () => {
+      blocked.resolve({ modelId: null, thinkingEffort: "high" });
+    });
+
+    await waitFor(() => expect(effortPicker.disabled).toBe(false));
+    expect(modelPicker.disabled).toBe(false);
+    expect(effortPicker.value).toBe("high");
+    expect(Array.from(effortPicker.options).map((option) => option.value)).toEqual(["off", "low", "medium", "high"]);
+
+    fireEvent.change(effortPicker, { target: { value: "low" } });
+    await waitFor(() => expect(updateCopilotPreferencesMock).toHaveBeenCalledWith({ thinkingEffort: "low" }, expect.anything()));
+    // The invalidation refetch lands and the picker follows the server value.
+    await waitFor(() => expect(effortPicker.value).toBe("low"));
+  });
+
+  it("clears a stale model preference that no longer exists in the model list", async () => {
+    preferencesState = { modelId: "model-gone", thinkingEffort: "medium" };
+    renderChat();
+
+    await waitForConversationLoaded();
+    const picker = await screen.findByLabelText("当前模型");
+    // The picker falls back to the default option and the stale id is cleared
+    // on the server.
+    await waitFor(() => expect((picker as HTMLSelectElement).value).toBe(""));
+    await waitFor(() => expect(updateCopilotPreferencesMock).toHaveBeenCalledWith({ modelId: null }, expect.anything()));
+    expect(preferencesState.modelId).toBeNull();
   });
 
   it("collapses the conversation sidebar via the header toggle", async () => {

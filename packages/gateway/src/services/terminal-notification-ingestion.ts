@@ -21,6 +21,7 @@ import type { Session } from "../db/repositories/session-repository.js";
 import type { ForgeBadgerEventBus } from "./event-bus.js";
 import { recordActivity } from "./activity-events.js";
 import type { TerminalNotification } from "./session-server/terminal-notification-scanner.js";
+import { isOsc9AuxiliaryPayload } from "./session-server/terminal-notification-scanner.js";
 import {
   defaultNotificationDeduper,
   type NotificationDeduper
@@ -129,6 +130,12 @@ function mapTerminalNotification(
       return { type: "attention", message: `${label} needs your attention` };
     case "osc":
       if (notification.code === 9) {
+        // Defense in depth: the daemon scanner already drops auxiliary OSC 9
+        // sub-commands (e.g. `9;4` progress bars); guard again in case a
+        // future path bypasses it.
+        if (isOsc9AuxiliaryPayload(notification.text)) {
+          return undefined;
+        }
         const text = notification.text.trim();
         return {
           type: "permission_prompt",

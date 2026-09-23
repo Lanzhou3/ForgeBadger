@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -12,7 +13,7 @@ import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 
 it('reports dispatch as a normal approval-or-grant tool and refuses enabling retired tools', async () => {
   const db = new Database(':memory:');
-  migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations/',import.meta.url).pathname});
+  migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations/',import.meta.url))});
   const user = new UserRepository(db).create('capability@test.dev','hash');
   const jwtSecret = 'fixture-secret-'.repeat(3);
   const app = express();app.use(express.json());app.locals.db=db;app.locals.jwtSecret=jwtSecret;

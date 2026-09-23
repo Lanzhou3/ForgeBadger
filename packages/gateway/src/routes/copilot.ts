@@ -29,11 +29,13 @@ import { createPlatformTools } from "../services/agent/tools/index.js";
 import { CopilotRunLedger } from "../services/agent/run-ledger.js";
 import { AgentError } from "../services/agent/types.js";
 import { CopilotToolPreferenceRepository } from "../db/repositories/copilot-tool-preference-repository.js";
+import { CopilotPreferencesRepository } from "../db/repositories/copilot-preferences-repository.js";
 
 const idSchema = z.string().trim().min(1).max(128);
 const titleSchema = z.string().trim().min(1).max(200).optional();
 const renameConversationSchema = z.object({ title: z.string().trim().min(1).max(200) }).strict();
 const modelIdSchema = z.string().trim().min(1).max(128).optional();
+const preferencesSchema = z.object({ modelId: z.string().trim().min(1).max(128).nullish(), thinkingEffort: z.enum(["off", "low", "medium", "high"]).optional() }).strict();
 const createConversationSchema = z.object({ title: titleSchema, grantId: idSchema.optional() }).strict();
 const sendMessageSchema = z.object({
   content: z.string().trim().min(1).max(32 * 1024),
@@ -103,6 +105,20 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     }
     new CopilotToolPreferenceRepository(deps.db, userId(req)).setEnabled(toolName, value.enabled);
     res.json(ok({ toolName, enabled: value.enabled }));
+  }));
+  // Server-side Copilot model + thinking-strength preferences: every
+  // entry point (web console, chat bots, automations) resolves the same
+  // model the user picked instead of the browser's localStorage.
+  router.get("/preferences", (req, res) => {
+    res.json(ok(new CopilotPreferencesRepository(deps.db, userId(req), deps.masterKey).get()));
+  });
+
+  router.put("/preferences", (req, res) => withBody(req.body, preferencesSchema, res, (value) => {
+    const repository = new CopilotPreferencesRepository(deps.db, userId(req), deps.masterKey);
+    res.json(ok(repository.set({
+      ...(value.modelId !== undefined ? { modelId: value.modelId } : {}),
+      ...(value.thinkingEffort !== undefined ? { thinkingEffort: value.thinkingEffort } : {})
+    })));
   }));
 
   router.post("/conversations", (req, res) => withBody(req.body, createConversationSchema, res, (value) => {

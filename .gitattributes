@@ -1,0 +1,5 @@
+# Migration SQL files are covered by a sha256 checksum manifest
+# (meta/migration-checksums.json). Keep their on-disk bytes stable on every
+# platform: always store and check them out with LF line endings so the
+# local `pnpm validate:db-migrations` gate matches CI.
+packages/gateway/src/db/migrations/*.sql text eol=lf

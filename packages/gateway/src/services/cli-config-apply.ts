@@ -446,7 +446,7 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
   // (the forwarder re-checks per request regardless).
   const providerEndpoint = endpointForAdapter(provider, input.adapter);
   try {
-    await assertResolvedPublicHttpsEndpoint(providerEndpoint, input.resolveHost, { allowPlaintextHttp: provider.allowPlaintextHttp });
+    await assertResolvedPublicHttpsEndpoint(providerEndpoint, input.resolveHost, { allowPlaintextHttp: provider.allowPlaintextHttp, allowPrivateNetworks: provider.allowPrivateNetworks });
   } catch (error) {
     throw new CliConfigApplyError(
       "CLI_CONFIG_APPLY_ENDPOINT_UNSAFE",

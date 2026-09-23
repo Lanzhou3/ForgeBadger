@@ -288,5 +288,6 @@ export function providerPresetToForm(preset: ProviderPreset): CustomProviderForm
     openaiBaseUrl: preset.openaiBaseUrl ?? "",
     supportedAdapters: [...preset.supportedAdapters],
     allowPlaintextHttp: false,
+    allowPrivateNetworks: false,
   };
 }

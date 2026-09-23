@@ -109,4 +109,34 @@ describe("model provider repository", () => {
     }), /private or loopback/iu);
   });
 
+  it("persists the private-networks trust flag and allows loopback endpoints with it", () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("private-net@example.com", "hash");
+    const repo = new ModelProviderRepository(db, user.id, masterKey);
+
+    // The flag alone must not relax the protocol requirement.
+    assert.throws(() => repo.createProviderProfile({
+      name: "Ollama no protocol trust", providerKey: "ollama-np", baseUrl: "http://127.0.0.1:11434/v1",
+      authType: "api_key", apiFormat: "openai-compatible", supportedAdapters: ["opencode"], allowPrivateNetworks: true
+    }), /public HTTPS endpoint/u);
+
+    // Both flags together accept the loopback endpoint and the flag round-trips.
+    const provider = repo.createProviderProfile({
+      name: "Ollama", providerKey: "ollama", baseUrl: "http://127.0.0.1:11434/v1",
+      authType: "api_key", apiFormat: "openai-compatible", supportedAdapters: ["opencode"],
+      allowPlaintextHttp: true, allowPrivateNetworks: true
+    });
+    assert.equal(repo.getProviderProfile(provider.id)?.allowPrivateNetworks, true);
+    assert.equal(repo.listProviderProfiles().find((item) => item.id === provider.id)?.allowPrivateNetworks, true);
+
+    // Default stays false; updates round-trip both ways on a public endpoint.
+    const publicProvider = repo.createProviderProfile({
+      name: "DeepSeek", providerKey: "deepseek-flagless2", baseUrl: "https://api.deepseek.com",
+      authType: "api_key", apiFormat: "openai-compatible", supportedAdapters: ["opencode"]
+    });
+    assert.equal(repo.getProviderProfile(publicProvider.id)?.allowPrivateNetworks, false);
+    assert.equal(repo.updateProviderProfile(publicProvider.id, { allowPrivateNetworks: true })?.allowPrivateNetworks, true);
+    assert.equal(repo.updateProviderProfile(publicProvider.id, { allowPrivateNetworks: false })?.allowPrivateNetworks, false);
+  });
+
 });

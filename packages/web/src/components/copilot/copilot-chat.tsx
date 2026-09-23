@@ -21,7 +21,7 @@ import {
 import { CopilotSettings } from "@/components/copilot/copilot-settings";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
 import { listProjects, type Project } from "@/lib/api";
-import { writeLastCopilotConversation, readCopilotModelPreference, writeCopilotModelPreference } from "@/lib/copilot-conversation-storage";
+import { writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
 import { listGrants, type CopilotGrant } from "@/lib/platform-actions-api";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
@@ -74,10 +74,11 @@ export function CopilotChat() {
   const [editError, setEditError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarSheetOpen, setSidebarSheetOpen] = useState(false);
-  const [modelId, setModelId] = useState<string | null>(() => readCopilotModelPreference());
+  // null = follow the server-side preference / platform default; the status
+  // bar back-fills this mirror whenever the effective preference changes.
+  const [modelId, setModelId] = useState<string | null>(null);
   const onModelChange = useCallback((next: string | null) => {
     setModelId(next);
-    writeCopilotModelPreference(next);
   }, []);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -422,7 +423,7 @@ export function CopilotChat() {
           </div>
         </div>
 
-        <CopilotStatusBar modelId={modelId} onModelChange={onModelChange} />
+        <CopilotStatusBar onModelChange={onModelChange} controlsDisabled={isBusy || sending} />
         <div className="relative flex min-h-0 flex-1 flex-col">
           <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-3 py-4">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">

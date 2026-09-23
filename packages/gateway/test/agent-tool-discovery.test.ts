@@ -4,6 +4,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
 import express from 'express';
 import Database from 'better-sqlite3';
@@ -26,7 +27,7 @@ import { signJwt } from '../src/auth/jwt.js';
 
 function database(filename = ':memory:') {
   const db = new Database(filename);
-  migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations/', import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations/', import.meta.url)) });
   return db;
 }
 function fixture(t: TestContext, filename?: string) {
@@ -67,7 +68,7 @@ it('discovers through a real tool receipt and activates it only on the next mode
 });
 
 it('restores discovery from durable receipts after file DB close and reopen', async t => {
-  const root = await mkdtemp(path.join(tmpdir(), 'copilot-discovery-')); t.after(() => rm(root, { recursive: true, force: true }));
+  const root = await mkdtemp(path.join(tmpdir(), 'copilot-discovery-'));
   const filename = path.join(root, 'state.db'); const f = fixture(t, filename); let turns = 0;
   const initial = f.makeOrchestrator(async request => {
     if (++turns === 1) request.onEvent({ type: 'tool_call', toolCall: { id: 'discover-call', name: 'discover_tools', arguments: '{"query":"get_project","limit":1}' } });
@@ -76,7 +77,7 @@ it('restores discovery from durable receipts after file DB close and reopen', as
   });
   const runId = await initial.runTurn({ userId: f.userId, conversationId: f.conversationId, userText: 'inspect', toolDiscovery: true });
   f.db.prepare('UPDATE copilot_runs SET lease_expires_at=0 WHERE id=?').run(runId); f.db.close();
-  const reopened = database(filename); t.after(() => reopened.close());
+  const reopened = database(filename); t.after(() => reopened.close()); t.after(() => rm(root, { recursive: true, force: true }));
   let resumed = false;
   await f.makeOrchestrator(async request => {
     resumed = true; assert.ok(request.tools.some(tool => tool.name === 'get_project'));

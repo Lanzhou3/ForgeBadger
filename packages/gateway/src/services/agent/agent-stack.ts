@@ -12,6 +12,7 @@ import type { ForgeBadgerEventBus } from "../event-bus.js";
 import type { CommandRunner } from "../../lib/dependency-check.js";
 import type { InMemorySessionManager } from "../session-manager.js";
 import { ModelProviderRepository } from "../../db/repositories/model-provider-repository.js";
+import { CopilotPreferencesRepository } from "../../db/repositories/copilot-preferences-repository.js";
 import { CopilotToolPreferenceRepository } from "../../db/repositories/copilot-tool-preference-repository.js";
 import { CopilotConversationLog } from "./conversation-log.js";
 import { AgentMemoryRepository } from "./memory.js";
@@ -51,6 +52,7 @@ export function buildAgentStack(
   const modelRepo = new ModelProviderRepository(deps.db, userId, deps.masterKey);
   const llm = createAgentLlmClient({
     modelProviderRepository: modelRepo,
+    preferences: new CopilotPreferencesRepository(deps.db, userId, deps.masterKey),
     ...(deps.llmFetch !== undefined ? { fetchImpl: deps.llmFetch } : {})
   });
   const toolRegistry = options?.toolRegistry ?? createConnectionToolRegistry(createPlatformTools(), deps.db, userId, deps.masterKey);

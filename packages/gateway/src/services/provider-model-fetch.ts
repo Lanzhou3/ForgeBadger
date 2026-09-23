@@ -21,6 +21,7 @@ export interface FetchProviderModelsInput {
   fetchImpl?: typeof fetch | undefined;
   resolveHost?: CheckModelEndpointInput["resolveHost"] | undefined;
   allowPlaintextHttp?: boolean | undefined;
+  allowPrivateNetworks?: boolean | undefined;
 }
 
 interface ModelsResponse {
@@ -105,7 +106,8 @@ export async function fetchProviderModels(input: FetchProviderModelsInput): Prom
 
   for (const endpoint of candidates) {
     const validationError = await validatePublicHttpsEndpointUrl(endpoint, resolveHost, {
-      allowPlaintextHttp: input.allowPlaintextHttp
+      allowPlaintextHttp: input.allowPlaintextHttp,
+      allowPrivateNetworks: input.allowPrivateNetworks
     });
     if (validationError) throw new Error(validationError);
 

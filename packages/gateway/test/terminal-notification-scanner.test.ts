@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  isOsc9AuxiliaryPayload,
   isTerminalNotification,
   TerminalNotificationScanner,
 } from "../src/services/session-server/terminal-notification-scanner.js";
@@ -49,6 +50,29 @@ describe("TerminalNotificationScanner", () => {
     const scanner = new TerminalNotificationScanner();
     const events = scanner.push("\x1b]9;\x07");
     assert.deepEqual(events, [{ kind: "osc", code: 9, text: "" }]);
+  });
+
+  it("drops kitty-style OSC 9 auxiliary sub-commands (progress bars)", () => {
+    const scanner = new TerminalNotificationScanner();
+    // `9;4` is the kitty progress sub-command; CLIs such as Kimi Code emit
+    // these continuously when TERM_PROGRAM is on their progress allowlist.
+    assert.deepEqual(scanner.push("\x1b]9;4;1\x07"), []);
+    assert.deepEqual(scanner.push("\x1b]9;4;2;100;bash\x07"), []);
+    assert.deepEqual(scanner.push("\x1b]9;4;3\x07"), []);
+    assert.deepEqual(scanner.push("\x1b]9;4\x07"), []);
+    // A real notification message (text first segment) still passes.
+    assert.deepEqual(
+      scanner.push("\x1b]9;Kimi Code approval required: bash\x07"),
+      [{ kind: "osc", code: 9, text: "Kimi Code approval required: bash" }]
+    );
+  });
+
+  it("classifies OSC 9 auxiliary payloads", () => {
+    assert.equal(isOsc9AuxiliaryPayload("4;3"), true);
+    assert.equal(isOsc9AuxiliaryPayload("4"), true);
+    assert.equal(isOsc9AuxiliaryPayload("4;2;100;tag"), true);
+    assert.equal(isOsc9AuxiliaryPayload("Kimi Code approval required: bash"), false);
+    assert.equal(isOsc9AuxiliaryPayload(""), false);
   });
 
   it("detects an OSC 99 payload with A and T fields", () => {

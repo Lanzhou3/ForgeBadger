@@ -16,6 +16,7 @@ export interface CustomProviderForm {
   openaiBaseUrl: string;
   supportedAdapters: ProviderSupportedAdapter[];
   allowPlaintextHttp: boolean;
+  allowPrivateNetworks: boolean;
 }
 
 export interface CredentialForm {
@@ -49,6 +50,7 @@ export const emptyCustomProvider: CustomProviderForm = {
   openaiBaseUrl: "",
   supportedAdapters: ["claude"],
   allowPlaintextHttp: false,
+  allowPrivateNetworks: false,
 };
 
 export function slugifyProviderKey(name: string): string {
@@ -66,6 +68,35 @@ export function customProviderHasEndpoint(form: CustomProviderForm): boolean {
 export function customProviderHasPlaintextHttp(form: CustomProviderForm): boolean {
   const urls = [form.anthropicBaseUrl.trim(), form.openaiBaseUrl.trim()].filter(Boolean);
   return urls.some((url) => url.toLowerCase().startsWith("http://"));
+}
+
+/** True when any configured endpoint points at a loopback / private / single-label host. */
+export function customProviderHasPrivateNetworkUrl(form: CustomProviderForm): boolean {
+  const urls = [form.anthropicBaseUrl.trim(), form.openaiBaseUrl.trim()].filter(Boolean);
+  return urls.some((url) => {
+    let host: string;
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      return false;
+    }
+    if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+    if (host === "localhost" || host === "::1") return true;
+    if (host.startsWith("fd") || host.startsWith("fc")) return true; // IPv6 unique-local
+    if (host.endsWith(".local")) return true;
+    if (!host.includes(".")) return true; // single-label: mDNS / LAN / docker service name
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+      const octets = host.split(".").map((segment) => Number.parseInt(segment, 10));
+      const a = octets[0] ?? 0;
+      const b = octets[1] ?? 0;
+      if (a === 127 || a === 10 || a === 0) return true;
+      if (a === 192 && b === 168) return true;
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      if (a === 169 && b === 254) return true;
+      if (a === 100 && b >= 64 && b <= 127) return true;
+    }
+    return false;
+  });
 }
 
 export const emptyCredential: CredentialForm = {

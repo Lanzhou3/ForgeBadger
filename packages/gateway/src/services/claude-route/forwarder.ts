@@ -168,7 +168,8 @@ export async function forwardClaudeMessages(
   const anthropic = target.provider.apiFormat === "anthropic";
   try {
     await assertResolvedPublicHttpsEndpoint(target.baseUrl, deps.resolveHost, {
-      allowPlaintextHttp: target.provider.allowPlaintextHttp
+      allowPlaintextHttp: target.provider.allowPlaintextHttp,
+      allowPrivateNetworks: target.provider.allowPrivateNetworks
     });
   } catch (error) {
     const failed = anthropicError(
@@ -363,7 +364,8 @@ export async function forwardClaudeCountTokens(
   }
   try {
     await assertResolvedPublicHttpsEndpoint(target.baseUrl, deps.resolveHost, {
-      allowPlaintextHttp: target.provider.allowPlaintextHttp
+      allowPlaintextHttp: target.provider.allowPlaintextHttp,
+      allowPrivateNetworks: target.provider.allowPrivateNetworks
     });
   } catch {
     // Counting is best-effort; degrade to a local estimate.

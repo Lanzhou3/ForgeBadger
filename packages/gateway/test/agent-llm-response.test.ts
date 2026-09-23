@@ -257,3 +257,35 @@ for (const format of ["openai", "anthropic"] as const) {
     assert.equal(requests.length, 2);
   });
 }
+
+it("openai tolerates a repeated identical finish_reason after stop", async (t) => {
+  const { run } = setup(t, "openai", sse(
+    frame(choice({ content: "okay" }, "stop")) + frame(choice({}, "stop")) + frame("[DONE]"),
+  ));
+  const result = await run();
+  assert.equal(result.message, "okay");
+});
+
+it("openai tolerates a bare empty-delta frame after stop", async (t) => {
+  const { run } = setup(t, "openai", sse(
+    frame(choice({ content: "okay" }, "stop")) + frame(choice({})) + frame("[DONE]"),
+  ));
+  const result = await run();
+  assert.equal(result.message, "okay");
+});
+
+const rejectedPostTerminationFrames: [string, string][] = [
+  ["reasoning_content after stop", frame(choice({ reasoning_content: "more" }))],
+  ["tool_calls after stop", frame(choice({ tool_calls: [{ index: 0, ...openaiTool() }] }))],
+  ["a different finish_reason after stop", frame(choice({}, "length"))],
+];
+
+for (const [label, afterFrame] of rejectedPostTerminationFrames) {
+  it(`openai rejects ${label}`, async (t) => {
+    const { run, events } = setup(t, "openai", sse(
+      frame(choice({ content: "okay" }, "stop")) + afterFrame + frame("[DONE]"),
+    ));
+    await assert.rejects(run(), { code: "AGENT_LLM_INVALID_RESPONSE" });
+    assert.equal(events.some(e => e.type === "tool_call" || e.type === "done"), false);
+  });
+}

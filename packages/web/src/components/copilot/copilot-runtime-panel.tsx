@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Wrench } from "lucide-react";
 
@@ -11,7 +11,10 @@ import { useLanguage } from "@/hooks/use-language";
 import { listModelProviders } from "@/lib/api";
 import {
   getCopilotCapabilities,
+  getCopilotPreferences,
   setCopilotToolEnabled,
+  updateCopilotPreferences,
+  type CopilotThinkingEffort,
   type CopilotToolInfo,
 } from "@/lib/copilot-api";
 import { copilotSkillsKey } from "@/lib/copilot-extensions-api";
@@ -19,34 +22,72 @@ import type { TranslationKey } from "@/lib/i18n";
 
 export const modelProvidersQueryKey = ["model-providers"] as const;
 export const copilotCapabilitiesQueryKey = ["copilot", "capabilities"] as const;
+export const copilotPreferencesQueryKey = ["copilot", "preferences"] as const;
 
-/** Thin status strip for the self-owned Gateway runtime and its default model. */
+const THINKING_EFFORT_OPTIONS: CopilotThinkingEffort[] = ["off", "low", "medium", "high"];
+
+/**
+ * Thin status strip for the self-owned Gateway runtime and its model
+ * preferences. The server-side preference (per user) is the source of truth:
+ * reads go through the preferences query and both pickers write back with a
+ * mutation. The parent's modelId mirror stays in sync via onModelChange.
+ */
 export function CopilotStatusBar({
-  modelId,
   onModelChange,
+  controlsDisabled,
 }: {
-  /** Selected model profile id; null follows the platform default. */
-  modelId?: string | null;
   /** When provided, the model label becomes a picker. */
   onModelChange?: (modelId: string | null) => void;
+  /** Disables both pickers, e.g. while a run is in flight. */
+  controlsDisabled?: boolean;
 }) {
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
   const modelProviders = useQuery({
     queryKey: modelProvidersQueryKey,
     queryFn: listModelProviders,
   });
+  const preferences = useQuery({
+    queryKey: copilotPreferencesQueryKey,
+    queryFn: getCopilotPreferences,
+    retry: false,
+  });
   const models = (modelProviders.data?.models ?? []).filter((model) => model.status !== "disabled");
-  const selected = models.find((model) => model.isDefault) ?? models[0];
-  const modelLabel = selected
-    ? `${selected.providerName} / ${selected.name}`
+  const preferencesReady = preferences.isSuccess;
+  const defaultModel = models.find((model) => model.isDefault) ?? models[0];
+  const storedModelId = preferences.data?.modelId ?? null;
+  const storedModel = storedModelId ? models.find((model) => model.id === storedModelId) : undefined;
+  const effectiveModel = storedModel ?? defaultModel;
+  const modelLabel = effectiveModel
+    ? `${effectiveModel.providerName} / ${effectiveModel.name}`
     : t("copilot.followSystemDefault");
+  const defaultLabel = defaultModel ? `${defaultModel.providerName} / ${defaultModel.name}` : null;
 
-  // Self-heal a stored selection whose profile was deleted or disabled.
+  const preferencesMutation = useMutation({
+    mutationFn: updateCopilotPreferences,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: copilotPreferencesQueryKey });
+    },
+  });
+
+  // Self-heal a stored selection whose profile was deleted or disabled:
+  // clear the parent's mirror and write modelId: null to the server. The ref
+  // avoids hammering the server while the write keeps failing.
+  const healAttemptedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!modelProviders.data || !modelId || !onModelChange) return;
-    if (!models.some((model) => model.id === modelId)) onModelChange(null);
+    // Wait for the model list to load; healing against an empty (still
+    // loading) list would wrongly clear a valid preference.
+    if (!modelProviders.data || !storedModelId || !onModelChange) return;
+    if (models.some((model) => model.id === storedModelId)) {
+      healAttemptedRef.current = null;
+      return;
+    }
+    if (healAttemptedRef.current === storedModelId) return;
+    healAttemptedRef.current = storedModelId;
+    onModelChange(null);
+    void preferencesMutation.mutate({ modelId: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelProviders.data, modelId, onModelChange]);
+  }, [modelProviders.data, storedModelId, onModelChange]);
 
   return (
     <div
@@ -58,12 +99,17 @@ export function CopilotStatusBar({
         <select
           aria-label={t("copilot.currentModel")}
           className="max-w-64 truncate rounded border border-border bg-background px-1 py-0.5 text-xs text-foreground"
-          value={modelId ?? ""}
-          onChange={(event) => onModelChange(event.target.value || null)}
+          value={storedModelId ?? ""}
+          disabled={!preferencesReady || controlsDisabled}
+          onChange={(event) => {
+            const next = event.target.value || null;
+            onModelChange(next);
+            void preferencesMutation.mutate({ modelId: next });
+          }}
         >
           <option value="">
             {t("copilot.followSystemDefault")}
-            {selected ? `（${modelLabel}）` : ""}
+            {defaultLabel ? `（${defaultLabel}）` : ""}
           </option>
           {models.map((model) => (
             <option key={model.id} value={model.id}>
@@ -74,6 +120,22 @@ export function CopilotStatusBar({
       ) : (
         <span className="truncate">{modelLabel}</span>
       )}
+      <span className="shrink-0">{t("copilot.thinkingEffort")}</span>
+      <select
+        aria-label={t("copilot.thinkingEffort")}
+        className="rounded border border-border bg-background px-1 py-0.5 text-xs text-foreground"
+        value={preferences.data?.thinkingEffort ?? "off"}
+        disabled={!preferencesReady || controlsDisabled}
+        onChange={(event) => {
+          void preferencesMutation.mutate({ thinkingEffort: event.target.value as CopilotThinkingEffort });
+        }}
+      >
+        {THINKING_EFFORT_OPTIONS.map((effort) => (
+          <option key={effort} value={effort}>
+            {t(`copilot.thinking${effort.charAt(0).toUpperCase()}${effort.slice(1)}` as TranslationKey)}
+          </option>
+        ))}
+      </select>
       <Badge variant="secondary" className="ml-auto gap-1.5 whitespace-nowrap">
         <span className="size-1.5 rounded-full bg-emerald-500" />
         {t("copilot.nativeRuntime")}

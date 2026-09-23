@@ -180,6 +180,7 @@ export default function ModelsPage() {
         ...(openaiBaseUrl ? { openaiBaseUrl } : {}),
         supportedAdapters: customProvider.supportedAdapters,
         ...(customProvider.allowPlaintextHttp ? { allowPlaintextHttp: true } : {}),
+        ...(customProvider.allowPrivateNetworks ? { allowPrivateNetworks: true } : {}),
       });
       const secret = setupCredentialForm.plaintextSecret.trim();
       const credential =
@@ -236,6 +237,7 @@ export default function ModelsPage() {
         ...(openaiBaseUrl ? { openaiBaseUrl } : {}),
         supportedAdapters: customProvider.supportedAdapters,
         ...(customProvider.allowPlaintextHttp ? { allowPlaintextHttp: true } : {}),
+        ...(customProvider.allowPrivateNetworks ? { allowPrivateNetworks: true } : {}),
       });
     },
     onSuccess: async () => {
@@ -475,6 +477,7 @@ export default function ModelsPage() {
       openaiBaseUrl: provider.openaiBaseUrl ?? "",
       supportedAdapters: [...provider.supportedAdapters],
       allowPlaintextHttp: provider.allowPlaintextHttp ?? false,
+      allowPrivateNetworks: provider.allowPrivateNetworks ?? false,
     });
     setSetupCredentialForm(emptyCredential);
     setProviderDialogOpen(true);

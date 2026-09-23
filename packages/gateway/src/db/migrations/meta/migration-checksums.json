@@ -98,5 +98,7 @@
   "0097_telegram_channel_accounts.sql": "3bd3fc339909abab0c8c35f9113653d269fb0ca98fb37c8a6616382da5e6bb5a",
   "0098_skill_remote_provenance.sql": "52958e27238a593739d76617acf0c54dd19868b9f1cae2040c1d2774fdf647f4",
   "0099_runtime_settings.sql": "22419e14d9419068c859fdb88e75afe5d7b5478f663e69f341b82002d4482da2",
-  "0100_runtime_confirmation_revocation.sql": "5d07144a876953ae56dda22dc0d3c1cd494e89e87ebab8d8a1ca147dff1b6ac4"
+  "0100_runtime_confirmation_revocation.sql": "5d07144a876953ae56dda22dc0d3c1cd494e89e87ebab8d8a1ca147dff1b6ac4",
+  "0101_provider_private_networks.sql": "b7c921430cf0f863f90fc3d96f5cdae0e3e90ed6e3053694fb71c1cab9007359",
+  "0102_copilot_preferences.sql": "e13567345bc8ff0d32b3bac1bdfec1d5cae5d9532583a072b89b59bcd05ca3cd"
 }

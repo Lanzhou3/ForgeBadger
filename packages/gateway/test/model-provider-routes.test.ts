@@ -97,6 +97,34 @@ describe("model provider routes", () => {
     assert.equal(preview.status, 404);
   });
 
+  it("creates a loopback provider when private network trust is enabled", async () => {
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      name: "Ollama",
+      providerKey: "ollama",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      openaiBaseUrl: "http://127.0.0.1:11434/v1",
+      authType: "api_key",
+      apiFormat: "openai-compatible",
+      supportedAdapters: ["claude"],
+      allowPlaintextHttp: true,
+      allowPrivateNetworks: true
+    }, authHeaders());
+    assert.equal(created.status, 201);
+    assert.equal(created.body.data.provider.allowPrivateNetworks, true);
+
+    // Without the trust flag the same endpoint is refused.
+    const rejected = await makeRequest(app, "POST", "/api/v1/model-providers", {
+      name: "Ollama untrusted",
+      providerKey: "ollama-untrusted",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      authType: "api_key",
+      apiFormat: "openai-compatible",
+      supportedAdapters: ["claude"],
+      allowPlaintextHttp: true
+    }, authHeaders());
+    assert.equal(rejected.status, 400);
+  });
+
   it("previews a Kimi provider apply in user-global scope without a project root", async () => {
     const created = await makeRequest(app, "POST", "/api/v1/model-providers", {
       name: "Volcengine",

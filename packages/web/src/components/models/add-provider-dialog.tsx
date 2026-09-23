@@ -29,6 +29,7 @@ import {
   authTypeLabel,
   customProviderHasEndpoint,
   customProviderHasPlaintextHttp,
+  customProviderHasPrivateNetworkUrl,
   slugifyProviderKey,
   type CredentialForm,
   type CustomProviderForm,
@@ -89,6 +90,7 @@ export function AddProviderDialog({
   const requiresCredential = customProvider.authType !== "none";
   const hasEndpoint = customProviderHasEndpoint(customProvider);
   const hasPlaintextHttp = hasEndpoint && customProviderHasPlaintextHttp(customProvider);
+  const hasPrivateNetwork = hasEndpoint && customProviderHasPrivateNetworkUrl(customProvider);
   const canSubmit =
     !isCreating &&
     customProvider.name.trim().length > 0 &&
@@ -281,6 +283,23 @@ export function AddProviderDialog({
                 <span>{t("models.allowPlaintextHttp")}</span>
               </label>
               <p className="pl-6 text-xs text-muted-foreground">{t("models.allowPlaintextHttpHint")}</p>
+            </div>
+          )}
+
+          {hasPrivateNetwork && (
+            <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4 accent-brand"
+                  checked={customProvider.allowPrivateNetworks}
+                  onChange={(event) =>
+                    onCustomProviderChange({ ...customProvider, allowPrivateNetworks: event.target.checked })
+                  }
+                />
+                <span>{t("models.allowPrivateNetworks")}</span>
+              </label>
+              <p className="pl-6 text-xs text-muted-foreground">{t("models.allowPrivateNetworksHint")}</p>
             </div>
           )}
 

@@ -80,10 +80,33 @@ function appendTools(value: unknown, tools: Map<number, ToolAssembly>): void {
   }
 }
 
+/** True when a post-termination frame carries real content: non-empty text/reasoning deltas,
+ * tool deltas, or a finish_reason different from the one already recorded. Empty deltas and
+ * repeated finish_reasons are framing noise tolerated after termination. */
+function choiceHasSubstance(choice: Record<string, unknown>, finishReason: string): boolean {
+  const delta = choice.delta === undefined || choice.delta === null ? {} : record(choice.delta);
+  if (deltaHasText(delta.content) || deltaHasText(delta.reasoning_content)) return true;
+  if (delta.reasoning_details !== undefined && delta.reasoning_details !== null) return true;
+  if (delta.tool_calls !== undefined && delta.tool_calls !== null) return true;
+  return choice.finish_reason !== null && choice.finish_reason !== undefined && choice.finish_reason !== finishReason;
+}
+
+function deltaHasText(value: unknown): boolean {
+  if (typeof value === "string") return value.length > 0;
+  return value !== undefined && value !== null;
+}
+
 function applyChoice(value: unknown, completion: LlmCompletion, tools: Map<number, ToolAssembly>, emit: LlmEmit, reasoningDetailsMode?: ReasoningDetailsMode): void {
   const choice = record(value);
   if (choice.index !== undefined && choice.index !== 0) invalidResponse("unsupported choice index");
-  if (completion.finishReason !== undefined) invalidResponse("choice after termination");
+  // Some OpenAI-compatible proxies append trailing frames after the termination frame: an empty
+  // delta with a repeated finish_reason, or a usage/statistics-only frame (those arrive with an
+  // empty choices array and never reach here). Tolerate the empty ones; any real content after
+  // termination is still an invalid response.
+  if (completion.finishReason !== undefined) {
+    if (!choiceHasSubstance(choice, completion.finishReason)) return;
+    invalidResponse("choice after termination");
+  }
   const delta = record(choice.delta);
   if (delta.role !== undefined && delta.role !== "assistant") invalidResponse("invalid message role");
   const text = optionalText(delta.content);

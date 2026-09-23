@@ -60,6 +60,7 @@ describe("providerPresetToForm", () => {
       openaiBaseUrl: "https://api.kimi.com/coding/v1",
       supportedAdapters: ["claude", "opencode", "kimi", "pi"],
       allowPlaintextHttp: false,
+      allowPrivateNetworks: false,
     });
   });
 

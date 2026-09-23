@@ -260,6 +260,28 @@ export function getCopilotCapabilities() {
   return fetchJson<{ tools: CopilotToolInfo[] }>("/api/v1/copilot/capabilities");
 }
 
+export type CopilotThinkingEffort = "off" | "low" | "medium" | "high";
+
+export interface CopilotPreferences {
+  /** Preferred model profile id; null follows the platform default. */
+  modelId: string | null;
+  thinkingEffort: CopilotThinkingEffort;
+}
+
+export function getCopilotPreferences() {
+  return fetchJson<CopilotPreferences>("/api/v1/copilot/preferences");
+}
+
+export function updateCopilotPreferences(patch: {
+  modelId?: string | null;
+  thinkingEffort?: CopilotThinkingEffort;
+}) {
+  return fetchJson<CopilotPreferences>("/api/v1/copilot/preferences", {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
+}
+
 /** Toggle one Copilot tool for the current user (owner switch). */
 export function setCopilotToolEnabled(toolName: string, enabled: boolean) {
   return fetchJson<{ toolName: string; enabled: boolean }>(

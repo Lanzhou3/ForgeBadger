@@ -27,6 +27,7 @@ describe("session connection state helpers", () => {
         hasAttachTokenOverride: false,
         connectStatus: "idle",
         hasConnectError: true,
+        hasSession: false,
       })
     ).toBe(false);
   });

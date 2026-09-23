@@ -220,7 +220,9 @@ export class TerminalNotificationScanner {
     const code = this.code;
     this.consumeResult =
       code === 9
-        ? { kind: "osc", code, text: value }
+        ? isOsc9AuxiliaryPayload(value)
+          ? undefined
+          : { kind: "osc", code, text: value }
         : code === 99
           ? value.includes("p=?")
             ? undefined
@@ -229,6 +231,20 @@ export class TerminalNotificationScanner {
             ? buildOsc777(value)
             : undefined;
   }
+}
+
+/**
+ * OSC 9 is overloaded: alongside plain-text notifications (iTerm2/Ghostty)
+ * it carries numeric sub-commands — most notably kitty-style `9;4` progress
+ * bars that CLIs such as Kimi Code emit continuously when the terminal is on
+ * their progress allowlist (which ForgeBadger triggers via TERM_PROGRAM). A
+ * real notification message starts with text, so payloads whose first
+ * `;`-separated segment is a bare integer are auxiliary sequences, not
+ * notifications.
+ */
+export function isOsc9AuxiliaryPayload(payload: string): boolean {
+  const first = payload.split(";", 1)[0] ?? "";
+  return /^\d+$/.test(first);
 }
 
 function buildOsc777(value: string): { kind: "osc"; code: 777; title: string; body: string } | undefined {

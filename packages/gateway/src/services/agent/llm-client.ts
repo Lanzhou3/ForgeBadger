@@ -10,7 +10,8 @@ import type { ProviderReplay } from "./llm-replay.js";
  * with tool calling. Secrets are decrypted in memory and never logged.
  */
 import { lookup } from "node:dns/promises";
-import type { ModelProviderRepository, ProviderApiFormat } from "../../db/repositories/model-provider-repository.js";
+import type { ModelProviderRepository, ModelProfile, ProviderApiFormat } from "../../db/repositories/model-provider-repository.js";
+import type { CopilotPreferences, ThinkingEffort } from "../../db/repositories/copilot-preferences-repository.js";
 import { assertResolvedPublicHttpsEndpoint } from "../network-policy.js";
 import { AgentError } from "./types.js";
 import { redactAgentErrorMessage } from "./redaction.js";
@@ -66,6 +67,7 @@ export interface AgentLlmProviderResolution {
   authType: "api_key" | "bearer_token" | "oauth" | "none";
   defaultHeaders: Record<string, string>;
   allowPlaintextHttp?: boolean;
+  allowPrivateNetworks?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -77,6 +79,12 @@ export function createAgentLlmClient(input: {
   fetchImpl?: AgentFetch;
   resolveHost?: (hostname: string, options: { all: true }) => Promise<Array<{ address: string; family: number }>>;
   timeoutMs?: number;
+  /**
+   * The user's Copilot preferences (model + thinking strength). When a
+   * request carries no explicit modelId, the preferred model is the first
+   * fallback before the system default.
+   */
+  preferences?: { get(): CopilotPreferences } | undefined;
 }) {
   const resolveHost = input.resolveHost ?? lookup;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -88,12 +96,32 @@ export function createAgentLlmClient(input: {
 
   /** Resolve a model profile to a concrete provider resolution. */
   function resolveProvider(modelId?: string): AgentLlmProviderResolution {
-    const cacheKey = modelId ?? "__default__";
-    const cached = resolutionCache.get(cacheKey);
-    if (cached) return cached;
-
     const repo = input.modelProviderRepository;
-    const profile = modelId ? repo.getModelProfile(modelId) : repo.listModelProfiles().find((m) => m.isDefault) ?? repo.listModelProfiles()[0];
+    let profile: ModelProfile | undefined;
+    let fromPreference = false;
+    if (modelId) {
+      profile = repo.getModelProfile(modelId);
+    } else {
+      // Preference fallback: the user's chosen Copilot model, resolved fresh
+      // on every call because it can change at any time (never cached).
+      const preferredModelId = input.preferences?.get().modelId;
+      if (preferredModelId) {
+        const preferred = repo.getModelProfile(preferredModelId);
+        if (preferred && preferred.status === "active") {
+          profile = preferred;
+          fromPreference = true;
+        }
+      }
+      if (!profile) {
+        const profiles = repo.listModelProfiles();
+        profile = profiles.find((m) => m.isDefault) ?? profiles[0];
+      }
+    }
+    const cacheKey = modelId ?? "__default__";
+    if (profile && !fromPreference) {
+      const cached = resolutionCache.get(cacheKey);
+      if (cached) return cached;
+    }
     if (!profile) throw new AgentError("AGENT_NO_MODEL", "No model provider configured");
     if (profile.status !== "active") throw new AgentError("AGENT_MODEL_INACTIVE", "Model is not active");
     const provider = repo.getProviderProfile(profile.providerProfileId);
@@ -113,14 +141,26 @@ export function createAgentLlmClient(input: {
       apiKey,
       authType: provider.authType,
       defaultHeaders: provider.defaultHeaders,
-      allowPlaintextHttp: provider.allowPlaintextHttp
+      allowPlaintextHttp: provider.allowPlaintextHttp,
+      allowPrivateNetworks: provider.allowPrivateNetworks
     };
-    resolutionCache.set(cacheKey, resolution);
+    if (!fromPreference) resolutionCache.set(cacheKey, resolution);
     return resolution;
   }
 
   /** Stream one model request; emits text/tool deltas. Resolves on completion. */
   async function stream(request: AgentLlmRequest): Promise<LlmResult> {
+    return streamInternal(request, true);
+  }
+
+  /**
+   * Internal stream implementation. `applyPreferencesThinking` gates the
+   * user's thinking-strength preference: the main conversational request
+   * applies it, while the auxiliary calls (summarize / title / memory
+   * proposal) keep their requests lean. The model fallback to the preference
+   * applies on every path — only the thinking parameters are gated.
+   */
+  async function streamInternal(request: AgentLlmRequest, applyPreferencesThinking: boolean): Promise<LlmResult> {
     const resolution = resolveProvider(request.modelId);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -128,27 +168,42 @@ export function createAgentLlmClient(input: {
     if (outer?.aborted) controller.abort();
     const abort = () => controller.abort();
     outer?.addEventListener("abort", abort, { once: true });
+    // Declared before the try so the 400-compatibility retry in the catch
+    // below can see whether thinking parameters were applied to this request.
+    const thinkingEffort = applyPreferencesThinking ? input.preferences?.get().thinkingEffort ?? null : null;
     try {
       controller.signal.throwIfAborted();
       if (input.fetchImpl) {
         try {
-          await withAbort(assertResolvedPublicHttpsEndpoint(resolution.baseUrl, resolveHost, { allowPlaintextHttp: resolution.allowPlaintextHttp }), controller.signal);
+          await withAbort(assertResolvedPublicHttpsEndpoint(resolution.baseUrl, resolveHost, { allowPlaintextHttp: resolution.allowPlaintextHttp, allowPrivateNetworks: resolution.allowPrivateNetworks }), controller.signal);
         } catch (error) {
           if (controller.signal.aborted) throw error;
           throw new AgentError("AGENT_HOST_BLOCKED", "Provider endpoint failed public-network validation");
         }
       }
-      const fetchImpl = input.fetchImpl ?? createAgentPublicFetch({ resolveHost, allowPlaintextHttp: resolution.allowPlaintextHttp ?? false });
-
+      const fetchImpl = input.fetchImpl ?? createAgentPublicFetch({ resolveHost, allowPlaintextHttp: resolution.allowPlaintextHttp ?? false, allowPrivateNetworks: resolution.allowPrivateNetworks ?? false });
       const result = resolution.apiFormat === "anthropic"
-        ? await streamAnthropic(resolution, request, fetchImpl, controller.signal)
-        : await streamOpenAi(resolution, request, fetchImpl, controller.signal);
+        ? await streamAnthropic(resolution, request, fetchImpl, controller.signal, thinkingEffort)
+        : await streamOpenAi(resolution, request, fetchImpl, controller.signal, thinkingEffort);
       if (result.assistant) {
         result.assistant.providerReplay ??= { format: resolution.apiFormat === 'anthropic' ? 'anthropic' : 'openai' };
         result.assistant.providerReplay.identity = replayIdentity(resolution);
       }
       return result;
     } catch (error) {
+      // Protocol-level compatibility fallback (COPILOT-MODEL-SELECTION-PLAN
+      // §4.1): providers 400 on thinking parameters when the model does not
+      // support them (non-reasoning OpenAI-compatible models, Anthropic
+      // max_tokens caps, thinking+tools restrictions). A 400 arrives before
+      // any streamed byte, so retrying once with thinking disabled degrades
+      // the turn to plain mode instead of failing it. A user-visible notice
+      // ships with the model-declared thinking levels; the retry is silent.
+      if (
+        thinkingEffort !== null && thinkingEffort !== "off"
+        && error instanceof AgentError && error.code === "AGENT_HTTP_ERROR" && error.message.includes("HTTP 400")
+      ) {
+        return streamInternal(request, false);
+      }
       if (error instanceof AgentError) throw error;
       throw new AgentError("AGENT_LLM_FAILED", redactAgentErrorMessage(error instanceof Error ? error.message : "LLM request failed"));
     } finally {
@@ -160,7 +215,7 @@ export function createAgentLlmClient(input: {
   /** Fold a message list into a concise summary (non-streaming; used for context compression). */
   async function summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal }): Promise<string> {
     let text = "";
-    await stream({
+    await streamInternal({
       messages: input.messages.map(withoutPrivateReplay),
       tools: [],
       system: SUMMARY_SYSTEM_PROMPT,
@@ -169,7 +224,7 @@ export function createAgentLlmClient(input: {
       onEvent: (event) => {
         if (event.type === "text_delta") text += event.text ?? "";
       }
-    });
+    }, false);
     return text.trim();
   }
 
@@ -182,7 +237,7 @@ export function createAgentLlmClient(input: {
    */
   async function generateTitle(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<string> {
     let text = "";
-    await stream({
+    await streamInternal({
       messages: [
         { role: "user", content: input.userText },
         { role: "assistant", content: input.assistantText }
@@ -194,7 +249,7 @@ export function createAgentLlmClient(input: {
       onEvent: (event) => {
         if (event.type === "text_delta") text += event.text ?? "";
       }
-    });
+    }, false);
     return sanitizeTitle(text);
   }
 
@@ -210,7 +265,7 @@ export function createAgentLlmClient(input: {
     projectId?: string;
   }>> {
     let text = "";
-    await stream({
+    await streamInternal({
       messages: [
         { role: "user", content: input.userText },
         { role: "assistant", content: input.assistantText }
@@ -222,7 +277,7 @@ export function createAgentLlmClient(input: {
       onEvent: (event) => {
         if (event.type === "text_delta") text += event.text ?? "";
       }
-    });
+    }, false);
     return parseMemoryProposals(text);
   }
 
@@ -246,6 +301,31 @@ function pickBaseUrl(format: ProviderApiFormat, anthropicUrl: string | null, ope
   return openaiUrl ?? anthropicUrl;
 }
 
+// Anthropic thinking budgets per strength; "off" applies nothing.
+const THINKING_BUDGET_TOKENS: Record<Exclude<ThinkingEffort, "off">, number> = {
+  low: 2048,
+  medium: 4096,
+  high: 8192
+};
+
+/**
+ * Map the user's thinking-strength preference onto the provider request body.
+ * "off" (or no preference) leaves the body untouched. OpenAI-compatible
+ * endpoints get `reasoning_effort`; Anthropic gets an enabled thinking budget
+ * block plus a `max_tokens` large enough to cover the budget (thinking tokens
+ * count against `max_tokens`).
+ */
+function applyThinkingPreference(body: Record<string, unknown>, format: "openai" | "anthropic", effort: ThinkingEffort | null): void {
+  if (effort === null || effort === "off") return;
+  if (format === "anthropic") {
+    const budgetTokens = THINKING_BUDGET_TOKENS[effort];
+    body.thinking = { type: "enabled", budget_tokens: budgetTokens };
+    body.max_tokens = budgetTokens + 8192;
+    return;
+  }
+  body.reasoning_effort = effort;
+}
+
 function authHeaders(resolution: AgentLlmProviderResolution): Record<string, string> {
   const headers: Record<string, string> = {};
   if (resolution.authType === "none") return headers;
@@ -258,7 +338,8 @@ async function streamAnthropic(
   resolution: AgentLlmProviderResolution,
   request: AgentLlmRequest,
   fetchImpl: AgentFetch,
-  signal: AbortSignal
+  signal: AbortSignal,
+  thinkingEffort: ThinkingEffort | null
 ): Promise<LlmResult> {
   const system = request.system ?? SYSTEM_PROMPT;
   const apiMessages: Array<{ role: "user" | "assistant"; content: Array<Record<string, unknown>> }> = [];
@@ -285,6 +366,7 @@ async function streamAnthropic(
     messages: apiMessages,
     tools: request.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema }))
   };
+  applyThinkingPreference(body, "anthropic", thinkingEffort);
 
   const response = await withAbort(fetchImpl(`${resolution.baseUrl}/v1/messages`, {
     method: "POST",
@@ -308,7 +390,8 @@ async function streamOpenAi(
   resolution: AgentLlmProviderResolution,
   request: AgentLlmRequest,
   fetchImpl: AgentFetch,
-  signal: AbortSignal
+  signal: AbortSignal,
+  thinkingEffort: ThinkingEffort | null
 ): Promise<LlmResult> {
   const mapped = request.messages.map((original) => {
     const m = original.providerReplay && !matchingReplay(original, resolution) ? withoutPrivateReplay(original) : original;
@@ -338,6 +421,7 @@ async function streamOpenAi(
     messages: apiMessages,
     tools: request.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }))
   };
+  applyThinkingPreference(body, "openai", thinkingEffort);
 
   const endpoint = new URL(`${resolution.baseUrl}/chat/completions`);
   const response = await withAbort(fetchImpl(endpoint.href, {

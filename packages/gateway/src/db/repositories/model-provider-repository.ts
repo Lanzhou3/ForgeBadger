@@ -25,6 +25,7 @@ export interface ProviderProfile {
   defaultHeaders: Record<string, string>;
   opencodeNpm: string | null;
   allowPlaintextHttp: boolean;
+  allowPrivateNetworks: boolean;
   status: string;
   createdAt: number | null;
   updatedAt: number | null;
@@ -77,6 +78,7 @@ export interface CreateProviderProfileInput {
   defaultHeaders?: Record<string, string>;
   opencodeNpm?: string | null;
   allowPlaintextHttp?: boolean;
+  allowPrivateNetworks?: boolean;
 }
 
 export interface CreateModelProfileInput {
@@ -118,6 +120,7 @@ interface ProviderProfileRow {
   default_headers: string;
   opencode_npm: string | null;
   allow_plaintext_http: number;
+  allow_private_networks: number;
   status: string;
   created_at: number | null;
   updated_at: number | null;
@@ -171,8 +174,8 @@ export class ModelProviderRepository {
       INSERT INTO model_provider_profiles (
         id, user_id, provider_key, name, base_url, anthropic_base_url, openai_base_url,
         region, product_type, auth_type, api_format, supported_adapters, default_headers,
-        opencode_npm, allow_plaintext_http, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+        opencode_npm, allow_plaintext_http, allow_private_networks, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
     `).run(
       id,
       this.userId,
@@ -189,6 +192,7 @@ export class ModelProviderRepository {
       JSON.stringify(input.defaultHeaders ?? {}),
       emptyToNull(input.opencodeNpm),
       input.allowPlaintextHttp ? 1 : 0,
+      input.allowPrivateNetworks ? 1 : 0,
       now,
       now
     );
@@ -242,14 +246,16 @@ export class ModelProviderRepository {
       supportedAdapters: input.supportedAdapters ?? existing.supportedAdapters,
       defaultHeaders: input.defaultHeaders ?? existing.defaultHeaders,
       opencodeNpm: input.opencodeNpm === undefined ? existing.opencodeNpm : input.opencodeNpm,
-      allowPlaintextHttp: input.allowPlaintextHttp ?? existing.allowPlaintextHttp
+      allowPlaintextHttp: input.allowPlaintextHttp ?? existing.allowPlaintextHttp,
+      allowPrivateNetworks: input.allowPrivateNetworks ?? existing.allowPrivateNetworks
     };
     assertProviderEndpointsSafe(next);
     this.db.prepare(`
       UPDATE model_provider_profiles
       SET provider_key = ?, name = ?, base_url = ?, anthropic_base_url = ?, openai_base_url = ?,
         region = ?, product_type = ?, auth_type = ?, api_format = ?, supported_adapters = ?,
-        default_headers = ?, opencode_npm = ?, allow_plaintext_http = ?, updated_at = ?
+        default_headers = ?, opencode_npm = ?, allow_plaintext_http = ?, allow_private_networks = ?,
+        updated_at = ?
       WHERE id = ? AND user_id = ?
     `).run(
       normalizeProviderKey(next.providerKey),
@@ -265,6 +271,7 @@ export class ModelProviderRepository {
       JSON.stringify(next.defaultHeaders),
       emptyToNull(next.opencodeNpm),
       next.allowPlaintextHttp ? 1 : 0,
+      next.allowPrivateNetworks ? 1 : 0,
       Date.now(),
       id,
       this.userId
@@ -467,11 +474,11 @@ export class ModelProviderRepository {
   }
 }
 
-function assertProviderEndpointsSafe(input: Pick<CreateProviderProfileInput, "authType" | "baseUrl" | "anthropicBaseUrl" | "openaiBaseUrl" | "allowPlaintextHttp">): void {
+function assertProviderEndpointsSafe(input: Pick<CreateProviderProfileInput, "authType" | "baseUrl" | "anthropicBaseUrl" | "openaiBaseUrl" | "allowPlaintextHttp" | "allowPrivateNetworks">): void {
   if (input.authType === "none") return;
   const endpoints = [input.baseUrl, input.anthropicBaseUrl, input.openaiBaseUrl].filter((value): value is string => Boolean(value));
   if (endpoints.length === 0) throw new Error("Credential-bearing providers require an endpoint");
-  for (const endpoint of endpoints) assertPublicHttpsEndpoint(endpoint, { allowPlaintextHttp: input.allowPlaintextHttp });
+  for (const endpoint of endpoints) assertPublicHttpsEndpoint(endpoint, { allowPlaintextHttp: input.allowPlaintextHttp, allowPrivateNetworks: input.allowPrivateNetworks });
 }
 
 function toProviderProfile(row: ProviderProfileRow): ProviderProfile {
@@ -491,6 +498,7 @@ function toProviderProfile(row: ProviderProfileRow): ProviderProfile {
     defaultHeaders: parseJsonObject(row.default_headers),
     opencodeNpm: row.opencode_npm,
     allowPlaintextHttp: row.allow_plaintext_http === 1,
+    allowPrivateNetworks: row.allow_private_networks === 1,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at

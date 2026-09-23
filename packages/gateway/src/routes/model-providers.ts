@@ -46,7 +46,8 @@ const createProviderSchema = z.object({
   authType: z.enum(["api_key", "bearer_token", "oauth", "none"]).optional(),
   apiFormat: z.enum(["anthropic", "openai", "openai-compatible", "google", "bedrock", "local"]).optional(),
   supportedAdapters: z.array(providerAdapterSchema).optional(),
-  allowPlaintextHttp: z.boolean().optional()
+  allowPlaintextHttp: z.boolean().optional(),
+  allowPrivateNetworks: z.boolean().optional()
 });
 const updateProviderSchema = createProviderSchema.partial();
 const createModelProfileSchema = z.object({
@@ -134,6 +135,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
         baseUrls,
         apiKey: credential ? repo.decryptCredential(credential.id) : undefined,
         allowPlaintextHttp: provider.allowPlaintextHttp,
+        allowPrivateNetworks: provider.allowPrivateNetworks,
         ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {})
       });
       return { ok: true, result };
@@ -244,6 +246,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     if (parseResult.data.apiFormat !== undefined) updateInput.apiFormat = parseResult.data.apiFormat;
     if (parseResult.data.supportedAdapters !== undefined) updateInput.supportedAdapters = parseResult.data.supportedAdapters;
     if (parseResult.data.allowPlaintextHttp !== undefined) updateInput.allowPlaintextHttp = parseResult.data.allowPlaintextHttp;
+    if (parseResult.data.allowPrivateNetworks !== undefined) updateInput.allowPrivateNetworks = parseResult.data.allowPrivateNetworks;
     const provider = repoFor(db, masterKey, req).updateProviderProfile(req.params.id, updateInput);
     if (!provider) {
       res.status(404).json({ code: 1, message: "Provider not found" });
@@ -344,6 +347,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
         apiFormat: provider.apiFormat,
         defaultHeaders: provider.defaultHeaders,
         allowPlaintextHttp: provider.allowPlaintextHttp,
+        allowPrivateNetworks: provider.allowPrivateNetworks,
         ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
       });
       const { created, backfilled } = syncFetchedModels(repo, provider, fetchedModels);
@@ -587,6 +591,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     const health = await checkModelEndpoint({
       endpoint: provider.baseUrl,
       allowPlaintextHttp: provider.allowPlaintextHttp,
+      allowPrivateNetworks: provider.allowPrivateNetworks,
       ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
     });
     res.json({ code: 0, data: { health }, message: "" });
@@ -610,7 +615,8 @@ function createCustom(repo: ModelProviderRepository, input: z.infer<typeof creat
     authType: input.authType,
     apiFormat: input.apiFormat,
     supportedAdapters: input.supportedAdapters ?? ["claude"],
-    ...(input.allowPlaintextHttp !== undefined ? { allowPlaintextHttp: input.allowPlaintextHttp } : {})
+    ...(input.allowPlaintextHttp !== undefined ? { allowPlaintextHttp: input.allowPlaintextHttp } : {}),
+    ...(input.allowPrivateNetworks !== undefined ? { allowPrivateNetworks: input.allowPrivateNetworks } : {})
   });
 }
 

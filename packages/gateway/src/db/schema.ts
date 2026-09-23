@@ -48,6 +48,7 @@ export const modelProviderProfiles = sqliteTable("model_provider_profiles", {
   defaultHeaders: text("default_headers").notNull().default("{}"),
   opencodeNpm: text("opencode_npm"),
   allowPlaintextHttp: integer("allow_plaintext_http", { mode: "boolean" }).notNull().default(false),
+  allowPrivateNetworks: integer("allow_private_networks", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("active"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
@@ -900,6 +901,9 @@ export const userSettings = sqliteTable("user_settings", {
   // EncryptedSecret JSON (master key) of the loopback route token; null until
   // routing is first enabled.
   claudeRouteToken: text("claude_route_token"),
+  // Copilot agent thinking strength preference (off|low|medium|high); null
+  // means "off". modelId above is the user's preferred Copilot model.
+  copilotThinkingEffort: text("copilot_thinking_effort"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 });

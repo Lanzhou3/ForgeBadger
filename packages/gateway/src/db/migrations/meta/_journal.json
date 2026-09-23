@@ -701,6 +701,20 @@
       "when": 1790086099921,
       "tag": "0100_runtime_confirmation_revocation",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "6",
+      "when": 1790086099922,
+      "tag": "0101_provider_private_networks",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1790145697165,
+      "tag": "0102_copilot_preferences",
+      "breakpoints": true
     }
   ]
 }

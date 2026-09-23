@@ -651,6 +651,7 @@ export interface ProviderProfile {
   supportedAdapters: ProviderSupportedAdapter[];
   opencodeNpm?: string | null;
   allowPlaintextHttp?: boolean;
+  allowPrivateNetworks?: boolean;
   status: string;
 }
 
@@ -3148,6 +3149,7 @@ export async function createModelProvider(data: {
   productType?: ProviderProductType;
   supportedAdapters?: ProviderSupportedAdapter[];
   allowPlaintextHttp?: boolean;
+  allowPrivateNetworks?: boolean;
 }): Promise<{ provider: ProviderProfile }> {
   return fetchJson("/api/v1/model-providers", {
     method: "POST",
@@ -3166,6 +3168,7 @@ export async function updateModelProvider(providerId: string, data: {
   apiFormat?: ProviderApiFormat;
   supportedAdapters?: ProviderSupportedAdapter[];
   allowPlaintextHttp?: boolean;
+  allowPrivateNetworks?: boolean;
 }): Promise<{ provider: ProviderProfile }> {
   return fetchJson(`/api/v1/model-providers/${providerId}`, {
     method: "PATCH",
