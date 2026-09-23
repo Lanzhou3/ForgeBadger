@@ -1,3 +1,5 @@
+import { matchingReplay, replayIdentity, withoutPrivateReplay } from "./llm-replay.js";
+import type { ProviderReplay } from "./llm-replay.js";
 /**
  * Provider-agnostic LLM client for the Copilot harness.
  *
@@ -21,6 +23,7 @@ import { MAX_CONTEXT_CHARS } from "./context.js";
 export interface AgentLlmMessage {
   role: "user" | "assistant" | "tool";
   content: string;
+  providerReplay?: ProviderReplay;
   /** Tool call id, when role === "tool". */
   toolCallId?: string;
   /** Tool calls emitted by the assistant, when role === "assistant". */
@@ -137,10 +140,14 @@ export function createAgentLlmClient(input: {
       }
       const fetchImpl = input.fetchImpl ?? createAgentPublicFetch({ resolveHost, allowPlaintextHttp: resolution.allowPlaintextHttp ?? false });
 
-      if (resolution.apiFormat === "anthropic") {
-        return await streamAnthropic(resolution, request, fetchImpl, controller.signal);
+      const result = resolution.apiFormat === "anthropic"
+        ? await streamAnthropic(resolution, request, fetchImpl, controller.signal)
+        : await streamOpenAi(resolution, request, fetchImpl, controller.signal);
+      if (result.assistant) {
+        result.assistant.providerReplay ??= { format: resolution.apiFormat === 'anthropic' ? 'anthropic' : 'openai' };
+        result.assistant.providerReplay.identity = replayIdentity(resolution);
       }
-      return await streamOpenAi(resolution, request, fetchImpl, controller.signal);
+      return result;
     } catch (error) {
       if (error instanceof AgentError) throw error;
       throw new AgentError("AGENT_LLM_FAILED", redactAgentErrorMessage(error instanceof Error ? error.message : "LLM request failed"));
@@ -154,7 +161,7 @@ export function createAgentLlmClient(input: {
   async function summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal }): Promise<string> {
     let text = "";
     await stream({
-      messages: input.messages,
+      messages: input.messages.map(withoutPrivateReplay),
       tools: [],
       system: SUMMARY_SYSTEM_PROMPT,
       ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
@@ -255,9 +262,13 @@ async function streamAnthropic(
 ): Promise<LlmResult> {
   const system = request.system ?? SYSTEM_PROMPT;
   const apiMessages: Array<{ role: "user" | "assistant"; content: Array<Record<string, unknown>> }> = [];
-  for (const message of request.messages) {
+  for (const original of request.messages) {
+    const message = original.providerReplay && !matchingReplay(original, resolution) ? withoutPrivateReplay(original) : original;
     const role = message.role === "assistant" ? "assistant" : "user";
-    const content: Array<Record<string, unknown>> = message.role === "tool"
+    const replay = matchingReplay(message, resolution);
+    const content: Array<Record<string, unknown>> = message.role === "assistant" && replay?.blocks
+      ? replay.blocks.map(block => ({ ...block }))
+      : message.role === "tool"
       ? [{ type: "tool_result", tool_use_id: message.toolCallId, content: message.content }]
       : [...(message.content ? [{ type: "text", text: message.content }] : []),
         ...(message.toolCalls ?? []).map((call) => ({ type: "tool_use", id: call.id, name: call.name, input: safeJsonParse(call.arguments) }))];
@@ -299,7 +310,13 @@ async function streamOpenAi(
   fetchImpl: AgentFetch,
   signal: AbortSignal
 ): Promise<LlmResult> {
-  const mapped = request.messages.map((m) => {
+  const mapped = request.messages.map((original) => {
+    const m = original.providerReplay && !matchingReplay(original, resolution) ? withoutPrivateReplay(original) : original;
+    const replay = m.role === "assistant" ? matchingReplay(m, resolution) : undefined;
+    const reasoning = replay ? {
+      ...(replay.reasoningContent === undefined ? {} : { reasoning_content: replay.reasoningContent }),
+      ...(replay.reasoningDetails === undefined ? {} : { reasoning_details: replay.reasoningDetails }),
+    } : {};
     if (m.role === "tool") {
       return { role: "tool" as const, tool_call_id: m.toolCallId, content: m.content };
     }
@@ -307,10 +324,11 @@ async function streamOpenAi(
       return {
         role: "assistant" as const,
         content: m.content || null,
+        ...reasoning,
         tool_calls: m.toolCalls.map((tc) => ({ id: tc.id, type: "function" as const, function: { name: tc.name, arguments: tc.arguments } }))
       };
     }
-    return { role: m.role as "user" | "assistant", content: m.content };
+    return { role: m.role as "user" | "assistant", content: m.content, ...reasoning };
   });
   const apiMessages = [{ role: "system" as const, content: request.system ?? SYSTEM_PROMPT }, ...mapped];
 
@@ -337,7 +355,8 @@ async function streamOpenAi(
 
   const allowFinishReasonEof = endpoint.protocol === "https:"
     && ["api.minimaxi.com", "api.minimax.cn", "api.minimax.io"].includes(endpoint.hostname);
-  return readOpenAiCompletion(response, request.onEvent, signal, { allowFinishReasonEof });
+  return readOpenAiCompletion(response, request.onEvent, signal, { allowFinishReasonEof, toolNames: request.tools.map(tool => tool.name),
+    ...(allowFinishReasonEof ? { reasoningDetailsMode: "snapshot" as const } : {}) });
 }
 
 const SYSTEM_PROMPT = [
@@ -347,11 +366,22 @@ const SYSTEM_PROMPT = [
   "- sessions: list and inspect AI CLI sessions",
   "- memory: read/write scoped memory (global, project, session)",
   "",
-  "Be concise. When you need to take an operate action, request it and it will be",
-  "authorized by a matching scoped Grant or an exact owner approval before execution.",
+  "Be concise. Use tools to complete authorized work. Routine scoped platform operations",
+  "run automatically for direct owner requests; high-risk actions require exact approval.",
+  "A scoped Grant remains a hard boundary and never falls back to owner authority.",
   "Use list_playbooks and load_playbook for Copilot operating guides. CLI Skills",
   "belong to CLI sessions and do not add tools to your runtime. Task preparation",
-  "does not start a CLI or dispatch a prompt. Autonomous dispatch is unavailable.",
+  "does not start a CLI or dispatch a prompt. Use pm_execute_task_packet to prepare,",
+  "start and deliver work through an operator-enabled CLI adapter. Never bypass native CLI permissions.",
+  "A native trust/permission prompt or PROGRAMMATIC_SUBMIT_NATIVE_APPROVAL_REQUIRED requires an owner terminal decision: stop dispatch attempts and report the blocker. Resume only after it is resolved.",
+  "Choose the tools and next steps from the user's goal and current tool results; there is no fixed workflow.",
+  "Project-management tools support work items, execution, progress and evidence-based reports.",
+  "Use pm_get_task_progress or get_session_output when evidence about an existing attempt is needed.",
+  "Do not redispatch a delivered or uncertain task. An incomplete/not_sent result means preparation",
+  "may have succeeded but the prompt was NOT delivered; inspect readiness before a new authorized attempt.",
+  "Use pm_close_task with the returned attempt and notification evidence IDs to record a completion report.",
+  "A CLI completion hook is only a completion candidate. Report actual evidence, remaining checks,",
+  "and whether acceptance is still pending; never equate it with tests passing, merge or deployment.",
   "Never claim a write happened until",
   "the tool result confirms it."
 ].join("\n");

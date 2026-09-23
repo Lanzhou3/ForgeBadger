@@ -31,6 +31,7 @@ import {
 import type { Session } from "@/lib/api";
 import {
   deleteSession,
+  GatewayApiError,
   getDependencies,
   getSessionBoard,
   startSession,
@@ -52,6 +53,7 @@ export default function SessionsPage() {
   const [selectedCliTools, setSelectedCliTools] = useState<ReadonlySet<string>>(new Set());
   const [showEmptyProjects, setShowEmptyProjects] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [forceDeleteId, setForceDeleteId] = useState<string | null>(null);
   const { data, isLoading, isFetching, isError } = useQuery({
     queryKey: ["sessions-board"],
     queryFn: getSessionBoard,
@@ -90,9 +92,23 @@ export default function SessionsPage() {
     },
   });
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteSession(id),
-    onSuccess: refreshSessions,
-    onError: (error) => {
+    mutationFn: (input: { id: string; force?: boolean }) => deleteSession(input.id, { force: input.force }),
+    onSuccess: () => {
+      setForceDeleteId(null);
+      refreshSessions();
+    },
+    onError: (error, input) => {
+      // The CLI exited but a confirmed stop receipt could not be obtained
+      // (lingering background processes or an unavailable runtime): offer the
+      // operator-gated force delete instead of a dead-end toast.
+      if (
+        !input.force &&
+        error instanceof GatewayApiError &&
+        error.details?.code === "SESSION_RUNTIME_STOP_UNCONFIRMED"
+      ) {
+        setForceDeleteId(input.id);
+        return;
+      }
       toast.error(
         error instanceof Error && error.message
           ? `${t("sessions.deleteFailed")}: ${error.message}`
@@ -189,7 +205,7 @@ export default function SessionsPage() {
     onOpenSession: openSession,
     onStartSession: (session: Session) => startMutation.mutate(session.id),
     onStopSession: (session: Session) => stopMutation.mutate(session.id),
-    onDeleteSession: (session: Session) => deleteMutation.mutate(session.id),
+    onDeleteSession: (session: Session) => deleteMutation.mutate({ id: session.id }),
   };
 
   return (
@@ -386,6 +402,32 @@ export default function SessionsPage() {
                 </Button>
               </div>
             ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={forceDeleteId !== null} onOpenChange={(open) => { if (!open) setForceDeleteId(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("sessions.forceDeleteTitle")}</DialogTitle>
+            <DialogDescription>{t("sessions.forceDeleteDescription")}</DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setForceDeleteId(null)}>
+              {t("sessions.forceDeleteCancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleteMutation.isPending}
+              onClick={() => {
+                if (forceDeleteId) {
+                  deleteMutation.mutate({ id: forceDeleteId, force: true });
+                }
+              }}
+            >
+              {t("sessions.forceDeleteConfirm")}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

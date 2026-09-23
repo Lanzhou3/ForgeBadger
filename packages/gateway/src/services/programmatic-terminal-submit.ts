@@ -3,10 +3,21 @@ import type { AdapterId } from "./adapter-discovery.js";
 const NEEDLE_LENGTH = 24;
 
 export const PROGRAMMATIC_SUBMIT_NOT_READY = "PROGRAMMATIC_SUBMIT_NOT_READY";
+export const PROGRAMMATIC_SUBMIT_NATIVE_APPROVAL_REQUIRED = 'PROGRAMMATIC_SUBMIT_NATIVE_APPROVAL_REQUIRED';
 export const PROGRAMMATIC_SUBMIT_ADAPTER_MISMATCH = "PROGRAMMATIC_SUBMIT_ADAPTER_MISMATCH";
 export const PROGRAMMATIC_SUBMIT_STAGING_FAILED = "PROGRAMMATIC_SUBMIT_STAGING_FAILED";
 export const PROGRAMMATIC_SUBMIT_UNSAFE_INPUT = "PROGRAMMATIC_SUBMIT_UNSAFE_INPUT";
 export const PROGRAMMATIC_SUBMIT_INDETERMINATE = "PROGRAMMATIC_SUBMIT_INDETERMINATE";
+
+/** Created only before the first terminal write; safe to wait and retry. */
+export class ProgrammaticSubmitNoEffectError extends Error {
+  readonly delivery = "not_sent";
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "PROGRAMMATIC_SUBMIT_PRECONDITION_FAILED", { cause });
+    this.name = "ProgrammaticSubmitNoEffectError";
+    if (cause instanceof Error && "code" in cause) Object.assign(this, { code: cause.code });
+  }
+}
 
 export interface ProgrammaticConsumptionOptions {
   timeoutMs: number;
@@ -23,7 +34,7 @@ const UNSAFE_PROGRAMMATIC_CONTROL = /[\u0000-\u0008\u000b\u000c\u000d-\u001f\u00
 
 export function assertSafeProgrammaticMessage(message: string): void {
   if (UNSAFE_PROGRAMMATIC_CONTROL.test(message)) {
-    throw new Error(PROGRAMMATIC_SUBMIT_UNSAFE_INPUT);
+    throw new ProgrammaticSubmitNoEffectError(new Error(PROGRAMMATIC_SUBMIT_UNSAFE_INPUT));
   }
 }
 
@@ -56,12 +67,14 @@ function codexComposer(lines: string[]): string {
   // While Codex is processing, the last `›` line is the submitted user turn,
   // not an editable composer. The busy footer proves there is no active
   // composer until Codex returns to its empty prompt (or opens queue input).
-  if (lines.some((line) => /(?:tab to queue message|esc to interrupt)/i.test(line))) {
+  // v0.155.1 also renders "tab to queue message" on an unsubmitted paste;
+  // that hint alone is not proof that input was consumed.
+  if (lines.some((line) => /esc to interrupt/i.test(line))) {
     return "";
   }
   const start = lastIndexMatching(lines, /^\s*›(?:\s|$)/);
   if (start < 0) return "";
-  return lines.slice(start, Math.min(lines.length, start + 4)).join("\n");
+  return lines.slice(start).join("\n");
 }
 
 function claudeComposer(lines: string[]): string {
@@ -182,7 +195,9 @@ export function isProgrammaticComposerReady(adapter: AdapterId, pane: string): b
   const composer = currentProgrammaticComposer(adapter, plain);
   switch (adapter) {
     case "codex":
-      return /›\s+Ask Codex to do anything/.test(composer);
+      // Codex renders the empty composer while its model/config is still loading.
+      // Input sent in that startup frame can be dropped before the editor is ready.
+      return !/model:\s*loading\b/i.test(plain) && /›\s+Ask Codex to do anything/.test(composer);
     case "claude":
       return /^\s*❯\s*$/m.test(composer) && /─{4,}/.test(plain);
     case "opencode":
@@ -192,6 +207,13 @@ export function isProgrammaticComposerReady(adapter: AdapterId, pane: string): b
     case "pi":
       return isPiComposerReady(plain.split("\n"));
   }
+}
+
+export function isProgrammaticNativeApprovalRequired(adapter: AdapterId, pane: string): boolean {
+  if (adapter !== 'codex') return false;
+  const plain = stripTerminalControl(pane);
+  return (/Do you trust the contents of this directory\?/.test(plain) && /Yes, continue/.test(plain))
+    || (/^\s*Hooks need review\s*$/m.test(plain) && /Trust all and continue/.test(plain));
 }
 
 export function composerContainsNeedle(adapter: AdapterId, pane: string, needle: string): boolean {

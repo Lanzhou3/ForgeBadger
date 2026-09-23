@@ -30,6 +30,12 @@ export interface ActionReceipt {
     result: unknown;
     createdAt: number;
 }
+export interface DispatchHistory {
+  intentId: string;
+  status: ActionIntent['status'];
+  receiptOutcome: ActionReceipt['outcome'] | null;
+}
+
 export class PlatformActionRepository {
     constructor(private db: Database, private userId: string) {
     }
@@ -90,6 +96,22 @@ export class PlatformActionRepository {
             return this.receipt(id)!;
         }).immediate();
     }
+/** Missing task details do not erase historical dispatch uncertainty. Return references, never prompt/results. */
+    findDispatchHistory(projectId: string, workItemId: string, sessionId?: string): DispatchHistory | null {
+  return this.db.prepare(`
+    SELECT i.id AS intentId, i.status, r.outcome AS receiptOutcome
+    FROM platform_action_intents i
+    LEFT JOIN platform_action_receipts r ON r.user_id = i.user_id AND r.intent_id = i.id
+    WHERE i.user_id = ? AND json_valid(i.input_json) AND (
+      (i.command_id = 'pm.task.execute' AND json_extract(i.input_json, '$.projectId') = ?
+        AND json_extract(i.input_json, '$.workItemId') = ?)
+      OR (i.command_id = 'session.dispatch' AND json_extract(i.input_json, '$.sessionId') = ?))
+    ORDER BY CASE WHEN i.status = 'indeterminate' OR r.outcome = 'unknown' THEN 0
+      WHEN i.status = 'executing' THEN 1 ELSE 2 END, i.created_at DESC, i.id DESC
+    LIMIT 1
+  `).get(this.userId, projectId, workItemId, sessionId ?? null) as DispatchHistory | undefined ?? null;
+}
+
     rejectRun(runId: string) {
         this.db.prepare("UPDATE platform_action_intents SET status='rejected' WHERE user_id=? AND status IN ('pending','approved') AND idempotency_key IN (SELECT id FROM copilot_run_steps WHERE user_id=? AND run_id=?)").run(this.userId,this.userId,runId);
     }

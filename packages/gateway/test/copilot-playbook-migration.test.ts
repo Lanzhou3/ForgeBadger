@@ -50,7 +50,7 @@ it('upgrades populated 0081 preserving identities, overrides, disable state, cus
   assert.equal((db.prepare('SELECT count(*) n FROM project_skills').get() as {n:number}).n,2);
   const catalog=listCopilotPlaybooks(db,user.id,{availableToolNames:[]});
   assert.equal(catalog.find(s=>s.id==='legacy-0')?.isEnabled,false);
-  assert.equal(catalog.find(s=>s.id==='legacy-0')?.version,'3.0.0');
+  assert.equal(catalog.find(s=>s.id==='legacy-0')?.version,'4.0.0');
   const custom=catalog.find(s=>s.id==='legacy-1')!;assert.equal(custom.reviewRequired,true);
   assert.equal(custom.content,LEGACY_COPILOT_SKILLS[1]!.body+'\nUser edited');
   for(const name of ['list_playbooks','load_playbook','pm_prepare_task_packet'])assert.equal((db.prepare('SELECT enabled FROM copilot_tool_preferences WHERE user_id=? AND tool_name=?').get(user.id,name) as {enabled:number}).enabled,0);

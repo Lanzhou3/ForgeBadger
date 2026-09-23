@@ -73,6 +73,20 @@ export function createSecurityPolicy(context?: SecurityPolicyContext) {
       };
     }
 
+    // These commands only mutate scoped planning records or operate an
+    // explicitly enabled CLI adapter. Resource/tenant/grant and runtime
+    // authorization are still enforced by PlatformActions at execution.
+    if (ROUTINE_PLATFORM_TOOLS.has(input.toolName)) {
+      return { action: "auto_approve", reason: "routine scoped platform operation", riskClass: "low" };
+    }
+    if (SUPERVISED_CLI_TOOLS.has(input.toolName)) {
+      return { action: "auto_approve", reason: "operator-enabled supervised CLI operation", riskClass: "medium" };
+    }
+    if (input.toolName === 'write_memory' && input.input && typeof input.input === 'object'
+        && 'scope' in input.input && ['project', 'session'].includes(String(input.input.scope))) {
+      return { action: 'auto_approve', reason: 'scoped task memory', riskClass: 'low' };
+    }
+
     return {
       action: base as SecurityDecisionAction,
       reason: base === "auto_approve" ? "tool does not require approval" : "operate tool default approval gate",
@@ -82,6 +96,14 @@ export function createSecurityPolicy(context?: SecurityPolicyContext) {
 
   return { evaluate };
 }
+
+const ROUTINE_PLATFORM_TOOLS = new Set([
+  "pm_create_work_item", "pm_update_work_item", "pm_prepare_task_packet",
+  "pm_close_task", "update_project", "pm_update_management"
+]);
+const SUPERVISED_CLI_TOOLS = new Set([
+  "start_session", "pm_execute_task_packet", "dispatch_task_to_session"
+]);
 
 // Only these exact fields on known platform tools contain inert prose. Keep
 // keys, unknown/nested fields and every path/command subject to normal checks.

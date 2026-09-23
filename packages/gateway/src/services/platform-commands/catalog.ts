@@ -1,3 +1,6 @@
+import { executeTaskPacket, assertTaskDispatchable } from '../project-manager/task-execution.js';
+import { taskCloseInput, closeTask } from '../project-manager/task-progress.js';
+import { PlatformNoEffectError } from './errors.js';
 import {mutateAssignedTask} from '../project-manager/tasks.js';
 import {assertLegacyTaskExecution} from '../project-manager/access.js';
 import { createDevelopmentCommands } from '../development/commands.js';
@@ -11,8 +14,8 @@ import { SessionRepository } from '../../db/repositories/session-repository.js';
 import { ProjectManagerRepository } from '../../db/repositories/project-manager-repository.js';
 import { TemplateRepository } from '../../db/repositories/template-repository.js';
 import { AgentMemoryRepository } from '../agent/memory.js';
-import { buildTaskPacket, createTaskPacketContext, createTaskPacketSessionName, findWorkItemByTaskPacketSession, resolveTaskPacketSession, withTaskPacketDispatchedAt, withTaskPacketSessionLink, toTaskPacketSessionDto } from '../project-manager/task-packets.js';
-import { createSessionCommands, startSessionRuntime } from './session-commands.js';
+import { buildTaskPacket, createTaskPacketContext, createTaskPacketSessionName, findWorkItemByTaskPacketSession, resolveTaskPacketSession, withTaskPacketSessionLink, toTaskPacketSessionDto } from '../project-manager/task-packets.js';
+import { createSessionCommands } from './session-commands.js';
 import { assertAdapterAutonomy } from '../adapter-autonomy.js';
 import { dispatchSessionInput } from '../agent/platform-access.js';
 import { normalizeAdapter } from '../session-launch-plan.js';
@@ -45,7 +48,7 @@ function itemResources(ctx: CommandContext, input: unknown) {
     const item = new ProjectManagerRepository(ctx.db, ctx.userId).getWorkItem(v.projectId, v.workItemId);
     if (!item)
         throw new Error('Work item not found');
-    return { projectIds: [p.id], revision: createHash('sha256').update(canonical({ p, item })).digest('hex') };
+    return { projectIds: [p.id], revision: createHash('sha256').update(canonical({ p, item, binding: (() => { const linked = resolveTaskPacketSession(ctx.db, ctx.userId, p.id, item); return linked ? { id: linked.id, projectId: linked.projectId, aiTool: linked.aiTool, workingDir: linked.workingDir } : null; })() })).digest('hex') };
 }
 function sessionResources(ctx: CommandContext, input: unknown) {
     const v = z.object({ sessionId: id }).passthrough().parse(input);
@@ -54,6 +57,14 @@ function sessionResources(ctx: CommandContext, input: unknown) {
         throw new Error('Session not found');
     project(ctx, s.projectId);
     return { projectIds: [s.projectId], revision: createHash('sha256').update(canonical(s)).digest('hex') };
+}
+function taskAdapter(ctx: CommandContext, input: z.infer<typeof taskPrepareInput>) {
+    const p = project(ctx, input.projectId);
+    const item = new ProjectManagerRepository(ctx.db, ctx.userId).getWorkItem(input.projectId, input.workItemId);
+    if (!item) throw new Error('Work item not found');
+    const session = resolveTaskPacketSession(ctx.db, ctx.userId, p.id, item);
+    if (input.aiTool && session && input.aiTool !== session.aiTool) throw new Error('Task adapter mismatch');
+    return z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(session?.aiTool ?? input.aiTool ?? p.aiTool);
 }
 function command<T>(c: Omit<PlatformCommand, 'capability'>): PlatformCommand {
     return { ...c, capability: c.id };
@@ -113,7 +124,7 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
             async prepare(ctx, input) {
                 const v = taskPrepareInput.parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
-                const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(v.aiTool ?? project(ctx, v.projectId).aiTool);
+                const adapter = taskAdapter(ctx, v);
                 const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
                 if (!status.launchEnabled)
                     throw new Error(`${status.label} is not available for launch`);
@@ -126,66 +137,46 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 let item = repo.getWorkItem(v.projectId, v.workItemId)!;
                 let session = resolveTaskPacketSession(ctx.db, ctx.userId, p.id, item);
                 const existed = !!session;
+                ctx.db.transaction(() => {
                 if (!session) {
                     const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(v.aiTool ?? p.aiTool);
                     session = new SessionRepository(ctx.db, ctx.userId).create({ projectId: p.id, name: createTaskPacketSessionName(item.title), aiTool: adapter, workingDir: p.path, credentialMode: 'host_environment' });
                     item = repo.updateWorkItem(p.id, item.id, { details: withTaskPacketSessionLink(item.details, session, p, createTaskPacketContext(item, p)) });
                 }
-                return { taskPacket: buildTaskPacket({ project: p, workItem: item, session }), session: toTaskPacketSessionDto(session), existed };
+                }).immediate();
+                return { taskPacket: buildTaskPacket({ project: p, workItem: item, session }), session: toTaskPacketSessionDto(session!), existed };
             } }),
         command({ id: 'pm.task.execute', effect: 'external', delegatable: true, inputSchema: taskPrepareInput,
             resolve(ctx, input) {
                 const resources = itemResources(ctx, input);
                 const v = taskPrepareInput.parse(input);
-                const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(v.aiTool ?? project(ctx, v.projectId).aiTool);
+                const adapter = taskAdapter(ctx, v);
                 assertAdapterAutonomy(adapter);
                 return resources;
             },
             async prepare(ctx, input) {
                 const v = taskPrepareInput.parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
-                const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(v.aiTool ?? project(ctx, v.projectId).aiTool);
+                const item = new ProjectManagerRepository(ctx.db, ctx.userId).getWorkItem(v.projectId, v.workItemId)!;
+                assertTaskDispatchable(item);
+                const adapter = taskAdapter(ctx, v);
                 const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
                 if (!status.launchEnabled)
                     throw new Error(`${status.label} is not available for launch`);
             },
             async execute(ctx, input) {
-                const v = taskPrepareInput.parse(input);
-                assertLegacyTaskExecution(ctx.db,v.projectId);
-                const p = project(ctx, v.projectId);
-                const repo = new ProjectManagerRepository(ctx.db, ctx.userId);
-                const sessionRepo = new SessionRepository(ctx.db, ctx.userId);
-                let item = repo.getWorkItem(v.projectId, v.workItemId)!;
-                let session = resolveTaskPacketSession(ctx.db, ctx.userId, p.id, item);
-                if (!session) {
-                    const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(v.aiTool ?? p.aiTool);
-                    session = sessionRepo.create({ projectId: p.id, name: createTaskPacketSessionName(item.title), aiTool: adapter, workingDir: p.path, credentialMode: 'host_environment' });
-                    item = repo.updateWorkItem(p.id, item.id, { details: withTaskPacketSessionLink(item.details, session, p, createTaskPacketContext(item, p)) });
-                }
-                const adapter = normalizeAdapter(session.aiTool);
-                if (!adapter)
-                    throw new Error('Unsupported session adapter');
-                const manager = ctx.sessionManager;
-                if (!manager)
-                    throw new Error('Session runtime unavailable');
-                const live = manager.getSession(session.id);
-                const running = live?.status === 'running' || (session.status === 'running' && await manager.hasLiveTerminal(session.id, session.runtimeSessionName ?? undefined));
-                if (!running) {
-                    await startSessionRuntime(ctx, session.id);
-                    session = sessionRepo.getById(session.id)!;
-                }
-                const receipt = await dispatchSessionInput(manager, session.id, adapter, buildTaskPacket({ project: p, workItem: item, session }).prompt);
-                const dispatchedAt = new Date().toISOString();
-                item = repo.updateWorkItem(p.id, item.id, { details: withTaskPacketDispatchedAt(repo.getWorkItem(p.id, item.id)!.details, dispatchedAt) });
-                if (item.status === 'todo')
-                    item = repo.updateWorkItemStatus(p.id, item.id, { status: 'in_progress' });
-                return { taskPacket: buildTaskPacket({ project: p, workItem: item, session }), session: toTaskPacketSessionDto(session), dispatch: receipt };
+                return executeTaskPacket(ctx, taskPrepareInput.parse(input));
             } }),
+        command({ id: 'pm.task.close', effect: 'database', delegatable: true, inputSchema: taskCloseInput, resolve: itemResources,
+            execute(ctx, input) { return closeTask(ctx, taskCloseInput.parse(input)); } }),
         command({ id: 'session.dispatch', effect: 'external', delegatable: true, inputSchema: sessionDispatchInput,
             resolve(ctx, input) {
                 const resources = sessionResources(ctx, input);
                 const { sessionId } = sessionDispatchInput.parse(input);
-                const adapter = normalizeAdapter(new SessionRepository(ctx.db, ctx.userId).getById(sessionId)!.aiTool);
+                const session = new SessionRepository(ctx.db, ctx.userId).getById(sessionId)!;
+                if (new ProjectManagerRepository(ctx.db, ctx.userId).hasTaskPacketSession(session.projectId, sessionId))
+                    throw new PlatformNoEffectError('TASK_SESSION_REQUIRES_PACKET_EXECUTION: use pm_execute_task_packet for this linked task');
+                const adapter = normalizeAdapter(session.aiTool);
                 if (!adapter)
                     throw new Error('Unsupported session adapter');
                 assertAdapterAutonomy(adapter);
@@ -202,15 +193,7 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 if (!manager)
                     throw new Error('Session runtime unavailable');
                 ctx.authorize?.();
-                const receipt = await dispatchSessionInput(manager, sessionId, adapter, message);
-                const item = findWorkItemByTaskPacketSession(ctx.db, ctx.userId, session.projectId, sessionId);
-                if (item) {
-                    const repo = new ProjectManagerRepository(ctx.db, ctx.userId);
-                    const fresh = repo.updateWorkItem(session.projectId, item.id, { details: withTaskPacketDispatchedAt(item.details, new Date().toISOString()) });
-                    if (fresh.status === 'todo')
-                        repo.updateWorkItemStatus(session.projectId, item.id, { status: 'in_progress' });
-                }
-                return receipt;
+                return dispatchSessionInput(manager, sessionId, adapter, message, { authorize: ctx.authorize });
             } }),
         command({ id: 'memory.write', effect: 'database', delegatable: true, inputSchema: memoryWriteInput,
             resolve(ctx, input) {

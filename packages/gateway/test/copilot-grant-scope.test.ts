@@ -163,7 +163,7 @@ for(const reason of ['scope','budget'] as const)it(`publishes a stable denied to
 it('chat rejection atomically rejects the underlying platform intent and cannot later execute it',async()=>{
  const {db,user,p,ledger,actions}=fixture();try{
  let turns=0;const c=ledger.log.createConversation();const orch=createCopilotOrchestrator({db,masterKey:'test',eventBus:new ForgeBadgerEventBus(),toolRegistry:createAgentToolRegistry(createPlatformTools()),llm:{async stream({onEvent}){if(turns++===0)onEvent({type:'tool_call',toolCall:{id:'reject',name:'pm_create_work_item',arguments:JSON.stringify({projectId:p.id,title:'Rejected'})}});return {message:'done'};},async summarize(){return '';},async generateTitle(){return '';}}});
- const run=await orch.runTurn({userId:user.id,conversationId:c.id,userText:'Create task'});const pending=ledger.log.listPendingActions(run)[0]!;const intent=actions.intents.byKey(pending.stepId!)!;
+ const run=await orch.runTurn({userId:user.id,conversationId:c.id,userText:'Create task',source:'reactive'});const pending=ledger.log.listPendingActions(run)[0]!;const intent=actions.intents.byKey(pending.stepId!)!;
  await orch.resumeAfterApproval({userId:user.id,runId:run,actionId:pending.id,approved:false});
  assert.equal(actions.intents.get(intent.id)?.status,'rejected');await assert.rejects(actions.execute(intent.id),/not approved|no longer active/);assert.throws(()=>actions.decide(intent.id,intent.digest,true),/already decided|no longer active/);
  }finally{db.close();}

@@ -226,8 +226,7 @@ export function findWorkItemByTaskPacketSession(
   sessionId: string
 ): ProjectManagerWorkItem | undefined {
   return new ProjectManagerRepository(db, userId)
-    .listWorkItems(projectId, { limit: 200 })
-    .find((item) => readTaskPacketSessionId(item) === sessionId);
+    .getWorkItemByTaskPacketSession(projectId, sessionId);
 }
 
 export function createTaskPacketContext(workItem: ProjectManagerWorkItem, project: Project): Record<string, unknown> {

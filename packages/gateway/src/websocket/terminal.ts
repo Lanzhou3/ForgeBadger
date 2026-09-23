@@ -327,7 +327,10 @@ async function handleTerminalSocket(
 ): Promise<void> {
   let pty: SessionServerPty | undefined;
   let ptyExited = false;
-  const inputBuffer = new TerminalInputBuffer(() => sessionManager.assertManualInputAllowed(userId, sessionId));
+  const inputBuffer = new TerminalInputBuffer(() => {
+    sessionManager.assertManualInputAllowed(userId, sessionId);
+    sessionManager.noteManualInput(userId, sessionId);
+  });
   const resizeBuffer = new TerminalResizeBuffer();
   let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
   let authorizationLease: TerminalRuntimeAuthorizationLease | undefined;

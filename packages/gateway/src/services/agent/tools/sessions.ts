@@ -1,7 +1,6 @@
 /**
  * Session tools for the Copilot harness — the "sessions" seam. Read tools
- * expose AI CLI session state; the operate tool (launch a session) is
- * approval-gated and only fires after the owner approves it.
+ * expose tenant-scoped AI CLI session state and current terminal output.
  *
  * Tenant-scoped reads and programmatic delivery live in the native Copilot
  * platform-access service.
@@ -14,6 +13,9 @@ import {
 import { SessionRepository } from "../../../db/repositories/session-repository.js";
 import type { Database } from "../../../db/types.js";
 import type { AgentTool, AgentToolContext } from "../tool-registry.js";
+import type { InMemorySessionManager } from '../../session-manager.js';
+import { SessionOutputRing } from '../../session-output-buffer.js';
+import { assertManagedSessionAccess } from '../../../db/repositories/managed-project-access.js';
 
 const listSessionsInput = z.object({
   projectId: z.string().max(128).optional(),
@@ -68,7 +70,7 @@ export function createSessionTools(): AgentTool[] {
     {
       name: "get_session_output",
       description:
-        "Read the tail of a session's buffered terminal output (last CLI screen lines). Use it to inspect progress or completion of a dispatched task. Requires the session to be live in this Gateway process.",
+        "Read the current Session Server terminal screen without requiring a browser attachment. Inspect native trust/permission prompts and progress. A cached fallback is marked live:false; missing output is not completion.",
       risk: "read",
       requiresApproval: false,
       inputSchema: getSessionOutputInput,
@@ -77,13 +79,24 @@ export function createSessionTools(): AgentTool[] {
         const { db, userId } = toolDb(context);
         const session = new SessionRepository(db, userId).getById(sessionId);
         if (!session) return { found: false, output: "" };
-        const sessionManager = context.sessionManager as
-          | { getSessionOutput(id: string): { getTail(maxLines: number): { output: string; truncated: boolean; lineCount: number } } | undefined }
-          | undefined;
-        const ring = sessionManager?.getSessionOutput(sessionId);
-        if (!ring) return { found: true, live: false, output: "", truncated: false, lineCount: 0 };
-        const tail = ring.getTail(maxLines ?? 80);
-        return { found: true, live: true, ...tail };
+        const authorizeRead = () => assertManagedSessionAccess(db, userId, sessionId, session.workingDir);
+        authorizeRead();
+        const sessionManager = context.sessionManager as InMemorySessionManager | undefined;
+        try {
+          if (sessionManager?.captureScreen) {
+            const snapshot = await sessionManager.captureScreen(userId, sessionId);
+            authorizeRead();
+            const ring = new SessionOutputRing();
+            ring.append(snapshot.output.trimEnd());
+            return { found: true, live: snapshot.live, source: 'session_server', ...ring.getTail(maxLines ?? 80) };
+          }
+        } catch {
+          // The daemon may be reconnecting; cached output cannot assert liveness.
+        }
+        authorizeRead();
+        const tail = sessionManager?.getSessionOutput(sessionId)?.getTail(maxLines ?? 80);
+        return { found: true, live: false, source: tail ? 'cached' : 'unavailable',
+          ...(tail ?? { output: '', truncated: false, lineCount: 0 }) };
       }
     }
   ];

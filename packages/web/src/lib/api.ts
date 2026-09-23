@@ -2814,8 +2814,9 @@ export async function stopSession(id: string): Promise<unknown> {
   return fetchJson(`/api/v1/sessions/${id}/stop`, { method: "POST" });
 }
 
-export async function deleteSession(id: string): Promise<unknown> {
-  return fetchJson(`/api/v1/sessions/${id}`, { method: "DELETE" });
+export async function deleteSession(id: string, options?: { force?: boolean }): Promise<unknown> {
+  const suffix = options?.force ? "?force=true" : "";
+  return fetchJson(`/api/v1/sessions/${id}${suffix}`, { method: "DELETE" });
 }
 
 export async function connectSession(id: string): Promise<{ session: Session }> {

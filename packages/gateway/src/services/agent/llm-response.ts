@@ -1,3 +1,4 @@
+import type { AssistantMessage, ProviderReplay } from "./llm-replay.js";
 import { AgentError } from "./types.js";
 import type { AgentLlmStreamEvent } from "./llm-client.js";
 
@@ -6,8 +7,8 @@ export const MAX_TOOL_ARGUMENT_BYTES = 256 * 1024;
 export const MAX_TOOL_CALLS = 64;
 export interface LlmToolCall { id: string; name: string; arguments: string }
 export interface LlmUsage { inputTokens?: number; outputTokens?: number; totalTokens?: number }
-export interface LlmResult { message: string; finishReason?: string; usage?: LlmUsage }
-export interface LlmCompletion extends LlmResult { toolCalls: LlmToolCall[]; thinking: string }
+export interface LlmResult { message: string; finishReason?: string; usage?: LlmUsage; assistant?: AssistantMessage }
+export interface LlmCompletion extends LlmResult { toolCalls: LlmToolCall[]; thinking: string; replay?: ProviderReplay }
 export type LlmEmit = (event: AgentLlmStreamEvent) => void;
 
 export function invalidResponse(reason: string): never {
@@ -41,7 +42,10 @@ export function validateCompletion(completion: LlmCompletion, format: "openai" |
   const reason = completion.finishReason;
   const tools = completion.toolCalls;
   const successful = format === "openai" ? ["stop", "tool_calls"] : ["end_turn", "stop_sequence", "tool_use"];
-  if ((requireReason && !reason) || (reason !== undefined && !successful.includes(reason))) invalidResponse("missing or unsuccessful termination");
+  if (requireReason && !reason) invalidResponse("missing termination reason");
+  if (reason !== undefined && !successful.includes(reason)) {
+    invalidResponse(reason === "length" || reason === "max_tokens" ? "token limit termination" : "unsuccessful termination");
+  }
   if (reason && ((reason === "tool_calls" || reason === "tool_use") !== (tools.length > 0))) invalidResponse("termination does not match tool batch");
   if (!completion.message.trim() && tools.length === 0) invalidResponse("empty assistant response");
   if (tools.length > MAX_TOOL_CALLS) invalidResponse("too many tool calls");
@@ -60,9 +64,15 @@ export function publishCompletion(completion: LlmCompletion, emit: LlmEmit, sign
   signal.throwIfAborted();
   for (const toolCall of completion.toolCalls) emit({ type: "tool_call", toolCall });
   const result: LlmResult = { message: completion.message,
+    assistant: { role: "assistant", content: completion.message,
+      ...(completion.toolCalls.length ? { toolCalls: completion.toolCalls } : {}),
+      ...(completion.replay ? { providerReplay: completion.replay } : {}) },
     ...(completion.finishReason === undefined ? {} : { finishReason: completion.finishReason }),
     ...(completion.usage ? { usage: completion.usage } : {}) };
-  emit({ type: "done", ...result });
+  // Private replay is returned to the runtime only, never spread into events.
+  emit({ type: "done", message: result.message,
+    ...(result.finishReason === undefined ? {} : { finishReason: result.finishReason }),
+    ...(result.usage ? { usage: result.usage } : {}) });
   return result;
 }
 

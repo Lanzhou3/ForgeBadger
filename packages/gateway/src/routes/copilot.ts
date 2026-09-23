@@ -1,3 +1,4 @@
+import { publicModelResponse } from "../db/repositories/copilot-model-response-repository.js";
 import { createCopilotDevelopmentRoutes } from './copilot-development.js';
 import { createCopilotSkillRoutes } from "./copilot-skills.js";
 import { createCopilotConnectionRoutes } from "./copilot-connections.js";
@@ -215,7 +216,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     const { log } = buildAgentStack(deps, userId(req));
     const run = log.getRun(id);
     if (!run) return notFound(res);
-    res.json(ok({ run, pendingActions: log.listPendingActions(id).map(a=>({...a,platformIntentId:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)?.id??null:null,platformIntent:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)??null:null})), steps: new CopilotRunLedger(deps.db,userId(req)).steps(id) }));
+    res.json(ok({ run, pendingActions: log.listPendingActions(id).map(a=>({...a,platformIntentId:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)?.id??null:null,platformIntent:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)??null:null})), steps: new CopilotRunLedger(deps.db,userId(req)).steps(id).map(step => step.kind === 'model' ? { ...step, result_json: publicModelResponse(step.result_json) } : step) }));
   });
 
   router.post("/runs/:id/cancel", async (req, res) => {

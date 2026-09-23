@@ -1994,7 +1994,7 @@ export const deliveryPullRequests=sqliteTable('delivery_pull_requests',{
 
 export const sessionRuntimeConfirmations=sqliteTable('session_runtime_confirmations',{
  userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),sessionId:text('session_id').notNull(),runtimeName:text('runtime_name').notNull(),launchNonce:text('launch_nonce').notNull().unique(),daemonPid:integer('daemon_pid').notNull(),daemonStartedAt:text('daemon_started_at').notNull(),status:text('status').notNull(),receiptJson:text('receipt_json'),updatedAt:integer('updated_at').notNull()
-},t=>({pk:primaryKey({columns:[t.userId,t.sessionId]}),tenant:foreignKey({columns:[t.userId,t.sessionId],foreignColumns:[sessions.userId,sessions.id]}).onDelete('cascade'),status:check('session_runtime_confirmations_status_check',sql`status IN ('pending','stopped')`),pid:check('session_runtime_confirmations_pid_check',sql`daemon_pid > 0`),receipt:check('session_runtime_confirmations_receipt_check',sql`(status='pending' AND receipt_json IS NULL) OR (status='stopped' AND receipt_json IS NOT NULL)`)}));
+},t=>({pk:primaryKey({columns:[t.userId,t.sessionId]}),tenant:foreignKey({columns:[t.userId,t.sessionId],foreignColumns:[sessions.userId,sessions.id]}).onDelete('cascade'),status:check('session_runtime_confirmations_status_check',sql`status IN ('pending','stopped','revoked')`),pid:check('session_runtime_confirmations_pid_check',sql`daemon_pid > 0`),receipt:check('session_runtime_confirmations_receipt_check',sql`(status='pending' AND receipt_json IS NULL) OR (status='stopped' AND receipt_json IS NOT NULL) OR (status='revoked' AND receipt_json IS NULL)`)}));
 
 
 export const projectTaskArtifactLinks=sqliteTable('project_task_artifact_links',{

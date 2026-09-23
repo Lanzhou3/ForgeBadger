@@ -215,6 +215,14 @@ Grant 明确项目、能力、规范化根目录、到期时间、动作次数�
 
 混合项目总览复用现有目标和工作项事实，独立管理元数据记录 manual/cli、负责人、下一动作、证据时效阈值与 revision。旧项目默认 manual；证据时效仅基于声明时间，缺失或未来时间按未知处理，不代表证据内容已验收。Web 在 `/copilot` 提供 Grant、精确预览/回执、总览与管理编辑，在终端提供 writer 状态和接管。P2 飞书/Telegram、P3 调度、真实 CLI 自治权限验收尚未启用；本地 fixture LLM 浏览器验证不能代替这些外部证据。
 
+### 0.5.10 风险审批与持久任务跟踪（2026-09-22）
+
+当前直接用户回合的低风险平台操作按策略自动批准，绑定确切 run/step/idempotency key；高风险及未知操作仍需精确确认。Grant、后台与渠道边界不因此放宽，CLI 自治仍由 operator adapter opt-in 控制。以上更新取代旧段落中“所有无 Grant 操作都确认”的描述。
+
+PM 派发采用持久 attempt 和阶段回执：首写前确定未发送可保留准备成果；staging 后未知效果绝不重放。任务语义/会话绑定跨 await 复核，自身同步准备变更在事务内更新授权基线。完成证据同时关联租户、任务、prompt digest、intent receipt、runtime identity 与通知 watermark/anchor；人工输入和接管会停止自动归因。
+
+Copilot runtime 在启动及周期扫描中恢复已派发任务，并向原对话幂等写入状态报告；跟踪既有任务不依赖“允许新派发”开关。完成只推进待验收，失败进入 blocked，不自动派下一任务或声称独立验收通过。旧无 attempt 记录保持不可自动追溯，不重写历史 unknown 回执。详见 [审查与验收说明](COPILOT-AUTONOMY-REVIEW.md)。
+
 ## 零、架构总览
 
 ### 架构模式

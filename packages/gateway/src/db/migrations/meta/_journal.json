@@ -694,6 +694,13 @@
       "when": 1789886800012,
       "tag": "0099_runtime_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "6",
+      "when": 1790086099921,
+      "tag": "0100_runtime_confirmation_revocation",
+      "breakpoints": true
     }
   ]
 }

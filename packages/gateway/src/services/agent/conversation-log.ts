@@ -40,6 +40,8 @@ interface MessageRow {
   tool_name: string | null;
   tool_input_json: string | null;
   tool_call_id: string | null;
+  run_id: string | null;
+  step_id: string | null;
   sequence: number;
   created_at: number;
 }
@@ -298,6 +300,8 @@ function toMessage(row: MessageRow): AgentMessage {
     ...(row.tool_name !== null ? { toolName: row.tool_name } : {}),
     ...(row.tool_input_json !== null ? { toolInputJson: row.tool_input_json } : {}),
     ...(row.tool_call_id !== null ? { toolCallId: row.tool_call_id } : {}),
+    ...(row.run_id ? { runId: row.run_id } : {}),
+    ...(row.step_id ? { stepId: row.step_id } : {}),
     sequence: row.sequence,
     createdAt: new Date(row.created_at)
   };

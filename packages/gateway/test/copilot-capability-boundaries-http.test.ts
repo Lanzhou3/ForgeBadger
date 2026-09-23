@@ -27,10 +27,9 @@ it('reports dispatch as a normal approval-or-grant tool and refuses enabling ret
     assert.equal(response.status,200);
     const body = await response.json() as {data:{tools:Array<{name:string;available:boolean;effectiveEnabled:boolean;unavailableReason:string|null;authorization:string}>}};
     const dispatch = body.data.tools.find(tool=>tool.name==='dispatch_task_to_session')!;
-    // Availability is no longer hard-blocked; the adapter autonomy gate is
-    // enforced at preview/execute time per session adapter.
-    assert.equal(dispatch.available,true);
-    assert.equal(dispatch.unavailableReason,null);
+    // A session runtime is needed independently of per-adapter autonomy.
+    assert.equal(dispatch.available,false);
+    assert.equal(dispatch.unavailableReason,'SESSION_RUNTIME_UNAVAILABLE');
     assert.equal(dispatch.authorization,'approval_or_grant');
     assert.ok(body.data.tools.some(tool=>tool.name==='pm_prepare_task_packet'));
     assert.ok(body.data.tools.some(tool=>tool.name==='pm_execute_task_packet'));

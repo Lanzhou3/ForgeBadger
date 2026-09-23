@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Terminal } from "lucide-react";
 
@@ -19,6 +19,14 @@ import {
 import { cn } from "@/lib/utils";
 
 const TERMINAL_ROUTE = /^\/sessions\/[^/]+/u;
+const DRAG_THRESHOLD = 5;
+// Half the 40px button plus an 8px viewport margin.
+const EDGE_OFFSET = 28;
+
+function clampPosition(y: number) {
+  const edge = Math.min(EDGE_OFFSET, window.innerHeight / 2);
+  return Math.max(edge, Math.min(y, window.innerHeight - edge));
+}
 
 /**
  * Floating edge bookmark that jumps back to the most recently used running
@@ -33,6 +41,48 @@ export function SessionBookmark() {
   // Keep the last target mounted briefly so the bookmark can slide out
   // instead of vanishing when the session stops or the user opens it.
   const [rendered, setRendered] = useState<SessionTab | null>(null);
+  const [positionY, setPositionY] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ pointerId: number; startY: number; baseY: number } | null>(null);
+  const suppressClickRef = useRef(false);
+
+  useEffect(() => {
+    const onResize = () => setPositionY((y) => y === null ? null : clampPosition(y));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  function onPointerDown(event: PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0 || dragRef.current) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    suppressClickRef.current = false;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      baseY: bounds.top + bounds.height / 2,
+    };
+  }
+
+  function onPointerMove(event: PointerEvent<HTMLButtonElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const delta = event.clientY - drag.startY;
+    if (!suppressClickRef.current && Math.abs(delta) < DRAG_THRESHOLD) return;
+    suppressClickRef.current = true;
+    setDragging(true);
+    setPositionY(clampPosition(drag.baseY + delta));
+  }
+
+  function finishDrag(event: PointerEvent<HTMLButtonElement>) {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    if (event.type !== "pointerup") suppressClickRef.current = true;
+    dragRef.current = null;
+    setDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
 
   const refresh = useCallback(() => {
     setTab(getLatestRunningTab(readSessionTabs()) ?? null);
@@ -92,17 +142,34 @@ export function SessionBookmark() {
 
   return (
     <div
+      style={positionY === null ? undefined : { top: positionY }}
       className={cn(
-        "group fixed right-0 top-1/2 z-40 -translate-y-1/2 transition-all duration-200",
-        visible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0"
+        "group fixed right-0 top-1/2 z-40 -translate-y-1/2 transition-[translate,opacity] duration-200",
+        visible ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-full opacity-0"
       )}
     >
       <button
         type="button"
         aria-label={t("sessions.activeBookmark")}
         title={t("sessions.activeBookmark")}
-        onClick={() => router.push(`/sessions/${rendered.id}`)}
-        className="relative flex size-10 items-center justify-center rounded-l-xl border border-r-0 border-border bg-card/95 text-foreground shadow-lg backdrop-blur transition-colors hover:bg-accent"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
+        onLostPointerCapture={finishDrag}
+        onClick={(event) => {
+          // Keyboard activation still works after a drag; pointer clicks must
+          // start a fresh gesture before they can navigate again.
+          if (event.detail > 0 && suppressClickRef.current) {
+            event.preventDefault();
+            return;
+          }
+          router.push(`/sessions/${rendered.id}`);
+        }}
+        className={cn(
+          "relative flex size-10 touch-none select-none items-center justify-center rounded-l-xl border border-r-0 border-border bg-card/95 text-foreground shadow-lg backdrop-blur transition-colors hover:bg-accent",
+          dragging ? "cursor-grabbing" : "cursor-grab"
+        )}
       >
         {brand.id === "unknown" ? (
           <Terminal className="size-4" />
@@ -114,7 +181,10 @@ export function SessionBookmark() {
           <span className="relative inline-flex size-2 rounded-full bg-emerald-500 ring-1 ring-card" />
         </span>
       </button>
-      <div className="pointer-events-none absolute right-full top-1/2 mr-2 w-64 -translate-y-1/2 translate-x-1 rounded-lg border border-border bg-popover p-3 opacity-0 shadow-xl transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100">
+      <div className={cn(
+        "pointer-events-none absolute right-full top-1/2 mr-2 w-64 -translate-y-1/2 translate-x-1 rounded-lg border border-border bg-popover p-3 opacity-0 shadow-xl transition-all duration-150",
+        !dragging && "group-hover:translate-x-0 group-hover:opacity-100"
+      )}>
         <div className="flex items-center gap-2">
           {brand.id === "unknown" ? (
             <Terminal className="size-3.5 shrink-0 text-muted-foreground" />

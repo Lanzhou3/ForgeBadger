@@ -1,7 +1,7 @@
 import type { AgentToolRegistry } from './tool-registry.js';
 import { grantedToolVisible } from '../platform-commands/agent-scope.js';
 
-const sessionRuntimeTools = new Set(['takeover_session', 'get_session_writer', 'get_session_output', 'start_session', 'stop_session']);
+const sessionRuntimeTools = new Set(['takeover_session', 'get_session_writer', 'get_session_output', 'start_session', 'stop_session', 'dispatch_task_to_session', 'pm_execute_task_packet']);
 const retiredTools = new Set(['pm_start_task_packet', 'list_skills', 'load_skill']);
 
 /** Availability is distinct from owner preferences and per-action authorization. */

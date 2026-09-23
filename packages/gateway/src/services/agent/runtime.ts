@@ -2,9 +2,12 @@ import { startDevelopmentRuntime } from '../development/runtime.js';
 import { PlatformActionRepository } from "../../db/repositories/platform-action-repository.js";
 import { buildAgentStack, type AgentStackDeps } from "./agent-stack.js";
 import { executionControl } from "./execution-control.js";
+import { publishTaskReports } from './task-reports.js';
+import { attachDispatchSupervisor } from './dispatch-supervisor.js';
 /** Gateway-owned recovery pump. Scans users, then uses tenant repositories. */
 export function startCopilotRuntime(deps: AgentStackDeps) {
     const development = startDevelopmentRuntime(deps);
+    const taskTracking = attachDispatchSupervisor(deps);
     const control = executionControl(deps.db);
     control.stopped = false;
     function recover(): void {
@@ -14,6 +17,7 @@ export function startCopilotRuntime(deps: AgentStackDeps) {
             id: string;
         }[];
         for (const user of users) {
+            publishTaskReports(deps, user.id);
             new PlatformActionRepository(deps.db,user.id).recoverExpired();
             const rows = deps.db.prepare("SELECT id FROM copilot_runs WHERE user_id=? AND runtime_version=1 AND status IN ('pending','running') AND (lease_expires_at IS NULL OR lease_expires_at<=?)")
                 .all(user.id, Date.now()) as {
@@ -29,6 +33,7 @@ export function startCopilotRuntime(deps: AgentStackDeps) {
     async function stop(): Promise<void> {
         control.stopped = true;
         clearInterval(timer);
+        taskTracking.stop();
         await development.stop();
         for (const { controller, stopLease } of control.active.values()) {
             stopLease();

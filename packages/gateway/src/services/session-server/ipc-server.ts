@@ -668,6 +668,8 @@ export async function startSessionServer(options: {
   token: string;
   /** Stolen-socket self-check interval in ms (POSIX). 0 disables; default 30s. */
   socketSelfCheckIntervalMs?: number;
+  /** Exited-session retirement retry interval in ms. 0 disables; default 5s. On Windows exited handles are dropped immediately, so the reaper is a no-op there. */
+  exitReaperIntervalMs?: number;
   /** How the host process exits (test hook); defaults to process.exit. */
   onExit?: (code: number) => void;
 }): Promise<{ ipcServer: IpcServer; sessionServer: SessionServer; stop: () => Promise<void> }> {
@@ -687,10 +689,12 @@ export async function startSessionServer(options: {
 
   let stopped = false;
   let stopSelfCheck: () => void = () => {};
+  let stopExitReaper: () => void = () => {};
   const shutdown = async (exitCode: number) => {
     if (stopped) return;
     stopped = true;
     stopSelfCheck();
+    stopExitReaper();
     await ipcServer.stop();
     await sessionServer.destroy();
     exit(exitCode);
@@ -716,10 +720,16 @@ export async function startSessionServer(options: {
     }
   });
 
+  const exitReaperIntervalMs = options.exitReaperIntervalMs ?? 5_000;
+  if (exitReaperIntervalMs > 0) {
+    stopExitReaper = sessionServer.startExitReaper(exitReaperIntervalMs);
+  }
+
   const stop = async () => {
     if (stopped) return;
     stopped = true;
     stopSelfCheck();
+    stopExitReaper();
     await ipcServer.stop();
     await sessionServer.destroy();
   };

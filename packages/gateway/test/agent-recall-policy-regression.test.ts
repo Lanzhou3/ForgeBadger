@@ -33,7 +33,7 @@ it('treats governed descriptive fields as data while still checking executable f
   const policy = createSecurityPolicy();
   const evaluate = (toolName: string, input: unknown) => policy.evaluate({ userId: 'fixture', toolName, toolRisk: 'operate', requiresApproval: true, input });
   assert.equal(evaluate('write_memory', { scope: 'global', kind: 'fact', text: 'Imports use ../utils; never run rm -rf here.' }).action, 'require_approval');
-  assert.equal(evaluate('pm_create_work_item', { projectId: 'p', title: 'Fix ../utils import', description: 'Document ../shared usage', acceptanceCriteria: ['Import ../utils works'] }).action, 'require_approval');
+  assert.equal(evaluate('pm_create_work_item', { projectId: 'p', title: 'Fix ../utils import', description: 'Document ../shared usage', acceptanceCriteria: ['Import ../utils works'] }).action, 'auto_approve');
   assert.equal(evaluate('create_project', { path: '/tmp/../etc', description: 'ordinary prose' }).action, 'deny');
   assert.equal(evaluate('read_skill_resource', { path: '../outside', skillId: 's', revisionId: 'r' }).action, 'deny');
   assert.equal(evaluate('write_memory', { scope: 'global', text: 'safe', metadata: { command: 'rm -rf /tmp/a' } }).action, 'deny');

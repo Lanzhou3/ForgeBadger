@@ -1,3 +1,4 @@
+import { getTaskProgress, taskCloseInput, taskProgressInput } from '../../project-manager/task-progress.js';
 import { executeAgentAction } from "../../platform-commands/agent-actions.js";
 /** Project Manager reads and governed task preparation. Preparation never launches a CLI. */
 import { z } from "zod";
@@ -49,6 +50,33 @@ function loadWorkItem(
 
 export function createProjectManagerTools(): AgentTool[] {
   return [
+    {
+      name: "pm_get_task_progress",
+      description: "Read a task's current dispatch attempt, durable CLI notification evidence, session status and next action. A CLI completion is only a review candidate. Optional bounded wait never changes task state.",
+      risk: "read", requiresApproval: false, inputSchema: taskProgressInput,
+      async execute(input, context) {
+        const parsed = taskProgressInput.parse(input);
+        const deadline = Date.now() + (parsed.waitMs ?? 0);
+        const ctx = { db: context.db as Database, userId: context.userId as string };
+        const assertActive = () => {
+          if (typeof context.checkExecutionAuthority === 'function' && !context.checkExecutionAuthority()) throw new Error('Copilot execution authority expired');
+        };
+        assertActive();
+        let result = getTaskProgress(ctx, parsed.projectId, parsed.workItemId);
+        while (Date.now() < deadline && result.found && result.taskPacket.workItemStatus === 'in_progress' && result.notifications.length === 0) {
+          await new Promise(resolve => setTimeout(resolve, Math.min(250, deadline - Date.now())));
+          assertActive();
+          result = getTaskProgress(ctx, parsed.projectId, parsed.workItemId);
+        }
+        return result;
+      }
+    },
+    {
+      name: "pm_close_task",
+      description: "Save a task closeout report using the current attempt ID and a server-provided completion notification ID. Validates the exact task, dispatch receipt and prompt. Advances at most to ready_for_review; never claims independent verification or done.",
+      risk: "operate", requiresApproval: true, inputSchema: taskCloseInput,
+      async execute(input, context) { return executeAgentAction("pm_close_task", taskCloseInput.parse(input), context); }
+    },
     {
       name: "pm_list_task_packets",
       description:

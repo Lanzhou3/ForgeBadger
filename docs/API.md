@@ -855,6 +855,7 @@ Project Agent orchestration:
 - `POST /api/v1/sessions/:id/start`
 - `POST /api/v1/sessions/:id/stop`
 - `DELETE /api/v1/sessions/:id`
+- `DELETE /api/v1/sessions/:id?force=true`
 
 Create body:
 
@@ -864,6 +865,23 @@ Create body:
   "aiTool": "codex"
 }
 ```
+
+Delete semantics: a delete requires a confirmed stop receipt from the Session
+Server daemon; while the stop is unconfirmed (the CLI exited but a descendant
+still holds the process group, or the runtime is briefly unreachable) the
+request fails with `409 SESSION_RUNTIME_STOP_UNCONFIRMED` and the row plus its
+durable stop proof are kept — retry once the leftover processes exit. A
+pending stop proof also blocks project deletion; force-delete the session
+first in that case.
+
+`?force=true` is the operator escape hatch: it is rejected with
+`409 SESSION_FORCE_DELETE_NOT_ALLOWED` while the daemon reports the runtime
+leader still `running` (or the runtime state cannot be verified — the gate
+fails closed). Once the leader has exited (`exited`/`error`, or the runtime is
+absent from the daemon), force delete revokes the pending stop confirmation,
+makes a best-effort kill, records a `session_force_deleted` activity, and
+deletes the row. Leftover descendant processes are not terminated and remain
+the operator's responsibility.
 
 Sessions launch an explicitly selected runtime CLI: the request body carries
 `aiTool` (`claude` | `opencode` | `codex` | `kimi`), and projects without a
@@ -1849,6 +1867,17 @@ context. Selection grants no additional tool authority. JSON/SSE model replies
 must be structurally valid; partial or unsuccessful tool batches are not committed.
 Text deltas may be tentative until the durable run reaches a terminal state.
 
+Complete assistant responses retain their text, tool-call batch and provider replay
+fields as one model message. Private replay is encrypted in model-step receipts,
+bound to tenant/conversation/run/step, and echoed only to the same provider endpoint,
+model and profile. Summaries and different models receive public content instead.
+The run inspector omits encrypted replay and exposes only versioned termination
+diagnostics (`type: model_response`, `finishReason`, `toolCallCount`); parser failures
+record `model_response_error` with a fixed diagnostic rather than raw provider data.
+A normal text-only model stop ends the conversation turn, not the project task.
+No fixed project-management sequence or natural-language completion heuristic is
+imposed by the runtime.
+
 The model-only `read_tool_result({messageId,offset?,length?})` tool returns up to
 6,000 UTF-16 characters of a persisted redacted receipt in the current conversation.
 It verifies the source run/step, current/original authority, current source-tool
@@ -1924,7 +1953,7 @@ surfaces. `list_skills` and `load_skill` are retired native Copilot tool names.
 `pm_prepare_task_packet` replaces `pm_start_task_packet` and only prepares a task
 packet/linked idle session. It does not start a CLI or submit instructions.
 `pm_execute_task_packet` additionally starts the linked session and delivers the
-packet prompt. `dispatch_task_to_session` submits a message into a live session;
+packet prompt. `dispatch_task_to_session` submits a message into an unlinked live session; linked Task Packets must use `pm_execute_task_packet`;
 both are gated per adapter by `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` at
 preview/execute time (`ADAPTER_AUTONOMY_UNVERIFIED` when not enabled) and are
 never exposed over MCP. The capability settings list reports every tool with
@@ -1932,6 +1961,23 @@ never exposed over MCP. The capability settings list reports every tool with
 404. `enabled` is a configured preference, `available` is runtime availability,
 and `authorization` describes `read` or `approval_or_grant`.
 Actual resource authorization is always checked again during execution.
+
+Direct user turns automatically approve routine scoped platform actions under
+the risk policy; `approval_or_grant` is the capability family, not a promise
+that every call prompts. High-risk/unknown actions keep exact approval, and
+Grant/background/channel boundaries remain enforced. `pm_get_task_progress`
+accepts `{projectId,workItemId,waitMs?}` (0-5000 ms, read-only).
+Progress includes `dispatchStatus` (`unverified`, `in_flight`, `unknown`,
+`not_sent`, `confirmed`), `evidenceStatus` (`missing_attempt`,
+`awaiting_notification`, `available`, `unverified`, `manual_intervention`), and
+nullable `dispatchHistory` (`intentId`, `status`, `receiptOutcome`). Missing
+attempts never establish non-delivery; inspect historical receipts before recovery.
+`pm_close_task` accepts `{projectId,workItemId,attemptId,notificationId,summary?}`
+and validates persisted evidence, advancing at most to `ready_for_review`.
+A PM receipt with `executionStatus: incomplete` and `dispatch.status: not_sent`
+records completed preparation only; resume requires a new authorized intent.
+Unknown delivery never auto-replays. See [task lifecycle review](COPILOT-AUTONOMY-REVIEW.md).
+
 
 CLI Skill rows expose `runtimeTarget: "cli"` and nullable `resourceManifest`.
 A null manifest denotes Markdown-only content, including remote Markdown imports;

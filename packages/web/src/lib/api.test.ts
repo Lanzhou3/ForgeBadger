@@ -11,6 +11,7 @@ import {
   createTemplate,
   createSession,
   deleteProviderCredential,
+  deleteSession,
   deleteModelProvider,
   deleteProviderModel,
   chooseDefaultRuntimeAdapter,
@@ -825,6 +826,20 @@ describe("api client", () => {
         method: "POST",
         body: JSON.stringify({ projectId: "project-1" }),
       })
+    );
+  });
+
+  it("deletes sessions through REST, with force as an opt-in query flag", async () => {
+    await deleteSession("session-1");
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/sessions/session-1",
+      expect.objectContaining({ method: "DELETE" })
+    );
+
+    await deleteSession("session-1", { force: true });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:48731/api/v1/sessions/session-1?force=true",
+      expect.objectContaining({ method: "DELETE" })
     );
   });
 

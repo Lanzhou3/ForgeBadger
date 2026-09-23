@@ -41,6 +41,9 @@ export interface AgentMessage {
   toolInputJson?: string;
   /** Provider-assigned tool call id; pairs tool_call with tool_result in the UI. */
   toolCallId?: string;
+  /** Durable execution identity, when this row belongs to a runtime step. */
+  runId?: string;
+  stepId?: string;
   sequence: number;
   createdAt: Date;
 }

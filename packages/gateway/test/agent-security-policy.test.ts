@@ -160,8 +160,8 @@ describe("security policy", () => {
       }
     });
 
-    assert.equal(decision.action, "require_approval");
-    assert.equal(decision.reason, "operate tool default approval gate");
+    assert.equal(decision.action, "auto_approve");
+    assert.equal(decision.reason, "operator-enabled supervised CLI operation");
   });
 
   it("denies real POSIX and Windows traversal in nested raw input strings", () => {
@@ -221,7 +221,7 @@ describe("security policy", () => {
       input: { message: "> Note: continue...\n\n- Review the dd documentation\n- Keep rm examples descriptive" }
     });
 
-    assert.equal(decision.action, "require_approval");
+    assert.equal(decision.action, "auto_approve");
   });
 
   it("denies destructive truncation at LF and CRLF command boundaries", () => {
@@ -248,7 +248,7 @@ describe("security policy", () => {
       input: { message: "格式说明：符号 >: 表示输出关系，不是需要执行的命令。" }
     });
 
-    assert.equal(decision.action, "require_approval");
+    assert.equal(decision.action, "auto_approve");
   });
 
   it("denies destructive commands at command-segment starts", () => {
@@ -291,7 +291,7 @@ describe("security policy", () => {
         input: { message }
       });
 
-      assert.equal(decision.action, "require_approval", message);
+      assert.equal(decision.action, "auto_approve", message);
     }
   });
 
@@ -311,7 +311,7 @@ describe("security policy", () => {
         input: { message }
       });
 
-      assert.equal(decision.action, "require_approval", message);
+      assert.equal(decision.action, "auto_approve", message);
     }
   });
 
@@ -348,7 +348,7 @@ describe("security policy", () => {
         input: { message }
       });
 
-      assert.equal(decision.action, "require_approval", message);
+      assert.equal(decision.action, "auto_approve", message);
     }
   });
 
@@ -365,7 +365,7 @@ describe("security policy", () => {
         input: { message }
       });
 
-      assert.equal(decision.action, "require_approval", message);
+      assert.equal(decision.action, "auto_approve", message);
     }
   });
 
@@ -409,7 +409,7 @@ describe("security policy", () => {
         requiresApproval: true,
         input: { message }
       });
-      assert.equal(decision.action, "require_approval", message);
+      assert.equal(decision.action, "auto_approve", message);
     }
   });
 
@@ -436,7 +436,7 @@ describe("security policy", () => {
       requiresApproval: true,
       input: { message: 'env -S "echo rm -rf /tmp/project"' }
     });
-    assert.equal(safe.action, "require_approval");
+    assert.equal(safe.action, "auto_approve");
   });
 
   it("treats GNU env split-string \\_ escapes as token separators", () => {
@@ -467,7 +467,7 @@ describe("security policy", () => {
         requiresApproval: true,
         input: { message }
       });
-      assert.equal(safe.action, "require_approval", message);
+      assert.equal(safe.action, "auto_approve", message);
     }
   });
 
@@ -509,7 +509,7 @@ describe("security policy", () => {
       requiresApproval: true,
       input: { message: "FOO+=1 echo rm -rf /tmp/project" }
     });
-    assert.equal(safe.action, "require_approval");
+    assert.equal(safe.action, "auto_approve");
   });
 
   it("consumes command -p and -- before the real command", () => {
@@ -529,7 +529,7 @@ describe("security policy", () => {
       requiresApproval: true,
       input: { message: "command -p -- echo rm -rf /tmp/project" }
     });
-    assert.equal(safe.action, "require_approval");
+    assert.equal(safe.action, "auto_approve");
   });
 
   it("treats shell -c payloads as executable scripts instead of Markdown", () => {
@@ -558,7 +558,7 @@ describe("security policy", () => {
         requiresApproval: true,
         input: { message }
       });
-      assert.equal(decision.action, "require_approval", message);
+      assert.equal(decision.action, "auto_approve", message);
     }
   });
 
@@ -594,7 +594,7 @@ describe("security policy", () => {
         requiresApproval: true,
         input: { message }
       });
-      assert.equal(decision.action, "require_approval", message);
+      assert.equal(decision.action, "auto_approve", message);
     }
   });
 
@@ -634,7 +634,7 @@ describe("security policy", () => {
         requiresApproval: true,
         input: { message }
       });
-      assert.equal(decision.action, "require_approval", message);
+      assert.equal(decision.action, "auto_approve", message);
     }
   });
 
@@ -667,7 +667,7 @@ describe("security policy", () => {
         requiresApproval: true,
         input: { message }
       });
-      assert.equal(decision.action, "require_approval", message);
+      assert.equal(decision.action, "auto_approve", message);
     }
   });
 
@@ -687,7 +687,7 @@ describe("security policy", () => {
         requiresApproval: true,
         input: { message }
       });
-      assert.equal(decision.action, "require_approval", message);
+      assert.equal(decision.action, "auto_approve", message);
     }
   });
 });

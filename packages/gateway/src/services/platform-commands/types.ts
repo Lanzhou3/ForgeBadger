@@ -6,6 +6,8 @@ export interface CommandContext {
     actionIntentId?: string;
     actionOrigin?: import('../../db/repositories/platform-action-repository.js').ActionOrigin;
     authorize?: (() => void) | undefined;
+    /** Trusted command only: checkpoint its own synchronous resource mutation. */
+    checkpointResources?: (() => void) | undefined;
     userId: string;
     sessionManager?: InMemorySessionManager;
     masterKey?: string;

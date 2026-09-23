@@ -392,24 +392,39 @@ export function createSessionRoutes(
     if (hasDeliveryHistory(db,"session",dbSession.id)) {
       res.status(409).json({code:1,message:"Session has delivery history; close its task workspace",details:{code:"DELIVERY_HISTORY_REQUIRES_ARCHIVE"}}); return;
     }
+    // force=true is the operator escape hatch for a session whose CLI leader
+    // has exited but whose confirmed-stop receipt cannot be obtained (a
+    // lingering process group, or the signing daemon is gone). The force gate
+    // fails closed while the runtime may still be alive.
+    const force = req.query.force === "true";
     try {
       await sessionManager.runExclusive(req.params.id, async () => {
-        // Stop any still-live runtime session regardless of DB status, so a
-        // delete does not leave an orphan when the DB says idle/stopped but the
-        // backend session is actually alive.
-        const live = sessionManager.getSession(req.params.id);
-        const runtimeSessionName = live?.runtimeSessionName ?? dbSession.runtimeSessionName ?? undefined;
-        if (live || runtimeSessionName) {
-          await sessionManager.stopSession(req.params.id, runtimeSessionName, userId);
+        if (force) {
+          await sessionManager.forceStopSession(req.params.id, dbSession.runtimeSessionName ?? undefined, userId);
+        } else {
+          // Stop any still-live runtime session regardless of DB status, so a
+          // delete does not leave an orphan when the DB says idle/stopped but the
+          // backend session is actually alive.
+          const live = sessionManager.getSession(req.params.id);
+          const runtimeSessionName = live?.runtimeSessionName ?? dbSession.runtimeSessionName ?? undefined;
+          if (live || runtimeSessionName) {
+            await sessionManager.stopSession(req.params.id, runtimeSessionName, userId);
+          }
         }
         // Keep the row and its durable stop proof on every uncertain outcome.
         db.transaction(() => {
-          recordSessionActivity(db, undefined, userId, dbSession, "session_deleted", "warning", `Session ${dbSession.name} deleted`);
+          recordSessionActivity(db, undefined, userId, dbSession,
+            force ? "session_force_deleted" : "session_deleted", "warning",
+            `Session ${dbSession.name} deleted`, force ? { force: true } : undefined);
           sessionRepo.delete(req.params.id);
         })();
         sessionManager.removeSessionOutput(req.params.id);
       });
-    } catch {
+    } catch (error) {
+      if (force && error instanceof Error && error.message === "SESSION_FORCE_DELETE_NOT_ALLOWED") {
+        res.status(409).json({ code: 1, message: "Session runtime is still running or cannot be verified; force delete requires the runtime leader to have exited", details: { code: "SESSION_FORCE_DELETE_NOT_ALLOWED" } });
+        return;
+      }
       res.status(409).json({ code: 1, message: "Session stop has not been confirmed; retry after the runtime is available", details: { code: "SESSION_RUNTIME_STOP_UNCONFIRMED" } });
       return;
     }

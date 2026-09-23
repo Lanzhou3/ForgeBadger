@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { randomUUID } from 'node:crypto';
 import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -24,12 +25,19 @@ it('upgrades populated0084 and retains edited/disabled builtin identity, immutab
   for(const entry of journal.entries)copyFileSync(path.join(currentMigrations,entry.tag+'.sql'),path.join(old,entry.tag+'.sql'));
   const filename=path.join(root,'state.db');db=new Database(filename);migrate(drizzle(db),{migrationsFolder:old});
   const user=new UserRepository(db).create('history-upgrade@test.dev','hash');
-  const repo=new SkillRepository(db,user.id,'copilot');
+  // Populate the historical schema directly; today's repository also writes
+  // remote_provenance (migration 0098), which does not exist at revision 0084.
+  const historicalSkill=(input:{name:string;description?:string;content:string;source?:string;version?:string;isEnabled?:boolean},target='copilot')=>{
+   const id=randomUUID();
+   db!.prepare('INSERT INTO skills(id,user_id,runtime_target,name,description,content,source,version,is_enabled) VALUES(?,?,?,?,?,?,?,?,?)')
+    .run(id,user.id,target,input.name,input.description??null,input.content,input.source??'local',input.version??'1.0.0',input.isEnabled===false?0:1);
+   return {id,...input};
+  };
   const canonical=LEGACY_COPILOT_SKILLS[0]!;
-  const untouched=repo.create({name:canonical.name,description:canonical.description,content:canonical.body,source:'builtin',version:'1.0.0',isEnabled:false});
+  const untouched=historicalSkill({name:canonical.name,description:canonical.description,content:canonical.body,source:'builtin',version:'1.0.0',isEnabled:false});
   const legacy=BUILTIN_COPILOT_SKILLS.find(row=>row.name==='safety-and-approvals')!;
-  const edited=repo.create({name:legacy.name,description:legacy.description,content:legacy.body+'\nUser retained edit',source:'builtin',version:'1.0.0',isEnabled:false});
-  const cli=new SkillRepository(db,user.id).create({name:legacy.name,content:'Retained CLI package'});
+  const edited=historicalSkill({name:legacy.name,description:legacy.description,content:legacy.body+'\nUser retained edit',source:'builtin',version:'1.0.0',isEnabled:false});
+  const cli=historicalSkill({name:legacy.name,content:'Retained CLI package'},'cli');
   const backup=path.join(root,'before-upgrade.db');await db.backup(backup);
   migrate(drizzle(db),{migrationsFolder:currentMigrations});
   assert.equal(new SkillRepository(db,user.id,'copilot').getById(edited.id)?.content,edited.content);
@@ -57,7 +65,7 @@ it('upgrades populated0084 and retains edited/disabled builtin identity, immutab
   const restored=new Database(postBackup);try{migrate(drizzle(restored),{migrationsFolder:currentMigrations});assert.deepEqual(new CopilotSkillService(restored,user.id).get(edited.id),captured);assert.deepEqual(restored.pragma('integrity_check'),[{integrity_check:'ok'}]);}finally{restored.close();}
   const original=new Database(backup);try{
    assert.equal((original.pragma('table_info(copilot_skill_heads)') as unknown[]).length,0);
-   assert.equal(new SkillRepository(original,user.id,'copilot').getById(edited.id)?.content,edited.content);
+   assert.equal((original.prepare('SELECT content FROM skills WHERE id=? AND user_id=?').get(edited.id,user.id) as {content:string}).content,edited.content);
    migrate(drizzle(original),{migrationsFolder:currentMigrations});
    const reopened=new CopilotSkillService(original,user.id).get(edited.id)!;assert.equal(reopened.id,edited.id);assert.equal(reopened.content,edited.content);assert.equal(reopened.isEnabled,false);
   }finally{original.close();}

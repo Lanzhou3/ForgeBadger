@@ -24,6 +24,7 @@ import type {
   ManagementResponse,
   LaunchPlanPayload,
   PaneSnapshot,
+  SessionInfo,
   SessionNotificationMessage
 } from "./session-server/index.js";
 import { isRecord } from "./session-server/ipc-validation.js";
@@ -433,6 +434,13 @@ export class SessionServerClient implements TerminalBackendClient {
     // Return sessionIds (runtime session names; the identity mapping above
     // keeps the historical fb-{user8}-{sessionId} shape)
     return result.map((s) => s.sessionId);
+  }
+
+  async listSessionInfos(): Promise<SessionInfo[]> {
+    return this.sendRequest<SessionInfo[]>({
+      id: randomUUID(),
+      type: "list_sessions"
+    });
   }
 
   async hasSession(name: string): Promise<boolean> {

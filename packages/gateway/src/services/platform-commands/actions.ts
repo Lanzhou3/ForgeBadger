@@ -120,9 +120,12 @@ export class PlatformActions {
         if (Object.entries(TOOL_COMMANDS).some(([tool, command]) => command === c.id && !prefs.isEnabled(tool)))
             throw new Error("Tool disabled by owner");
         const toolName = Object.entries(TOOL_COMMANDS).find(([, id]) => id === c.id)?.[0] ?? c.id;
-        const decision = createSecurityPolicy().evaluate({ userId: this.context.userId, toolName, toolRisk: "operate", requiresApproval: true, input });
+        const policyInput = c.id === 'project.create' && input && typeof input === 'object' && 'path' in input
+            ? { ...input, path: canonicalRoot(String(input.path)) } : input;
+        const decision = createSecurityPolicy().evaluate({ userId: this.context.userId, toolName, toolRisk: "operate", requiresApproval: true, input: policyInput });
         if (decision.action === "deny")
             throw new Error(`Denied by security policy: ${decision.reason}`);
+        return decision;
     }
     preview(raw: unknown): ActionIntent {
         this.activeActor();
@@ -148,6 +151,25 @@ export class PlatformActions {
         }
         const digest = createHash('sha256').update(canonical({ commandId: c.id, input, resources, authority: v.authority, grantId: g?.id, grantRevision: g?.revision, policyVersion: 1 })).digest('hex');
         return this.intents.create({ actor_user_id: this.context.userId, grant_id: g?.id ?? null, grant_revision: g?.revision ?? null, authority: v.authority, command_id: c.id, input_json: canonical(input), digest, resources_json: canonical(resources), policy_version: 1, expires_at: Math.min(Date.now() + 15 * 60000, g?.expiresAt ?? Infinity), idempotency_key: v.idempotencyKey, status: g ? 'approved' : 'pending' }, this.context.actionOrigin);
+    }
+    approveRoutine(id: string): ActionIntent {
+        const intent = this.intents.get(id);
+        if (!intent) throw new Error('Action not found');
+        const origin = this.context.actionOrigin;
+        if (origin?.kind !== 'copilot') throw new Error('Automatic approval requires a direct Copilot origin');
+        if (intent.origin_kind !== 'copilot' || intent.origin_run_id !== origin.runId
+            || intent.origin_step_id !== origin.stepId || intent.idempotency_key !== origin.stepId) {
+            throw new Error('Automatic approval origin mismatch');
+        }
+        const run = this.context.db.prepare('SELECT source FROM copilot_runs WHERE user_id=? AND id=?')
+            .get(this.context.userId, intent.origin_run_id) as { source: string } | undefined;
+        if (run?.source !== 'user' || intent.authority !== 'owner_action' || intent.grant_id) {
+            throw new Error('Automatic owner approval is unavailable for this authority');
+        }
+        const command = this.commands.get(intent.command_id);
+        if (!command) throw new Error('Command unavailable');
+        if (this.checkPolicy(command, JSON.parse(intent.input_json)).action !== 'auto_approve') return intent;
+        return this.decide(id, intent.digest, true);
     }
     decide(id: string, digest: string, approve: boolean) {
         this.activeActor();
@@ -237,23 +259,36 @@ export class PlatformActions {
             try{this.intents.renewExecution(id,checked.owner,Date.now()+30_000);}catch{clearInterval(heartbeat);}
         },10_000);
         heartbeat.unref();
+        let resourceBaseline = i.resources_json;
+        const authorize = (checkRevision = true) => {
+            this.activeActor();
+            this.intents.assertOriginActive(i.idempotency_key);
+            this.checkChannelOrigin(i.idempotency_key);
+            if (i.expires_at <= Date.now()) throw new Error('Action expired');
+            this.intents.assertExecutionOwner(id, checked.owner);
+            this.checkPolicy(checked.c, checked.input);
+            const resources = checked.c.resolve(this.context, checked.input);
+            if (checkRevision && canonical(resources) !== resourceBaseline) throw new Error('Stale resource revision');
+            if (i.grant_id && this.assertGrant(i.grant_id).revision !== i.grant_revision) {
+                throw new Error('Grant revision changed');
+            }
+            return resources;
+        };
         try {
-            const result = await checked.c.execute({ ...this.context, authorize: () => {
-                    this.activeActor();
-                    this.intents.assertOriginActive(i.idempotency_key);
-        this.checkChannelOrigin(i.idempotency_key);
-                    if (i.expires_at <= Date.now())
-                        throw new Error("Action expired");
-                    this.intents.assertExecutionOwner(id,checked.owner);
-                    this.checkPolicy(checked.c, checked.input);
-                    if (canonical(checked.c.resolve(this.context, checked.input)) !== i.resources_json)
-                        throw new Error("Stale resource revision");
-                    if (i.grant_id) {
-                        const grant = this.assertGrant(i.grant_id);
-                        if (grant.revision !== i.grant_revision)
-                            throw new Error("Grant revision changed");
+            const result = await checked.c.execute({ ...this.context, actionIntentId: id,
+                authorize: () => { authorize(); },
+                checkpointResources: () => {
+                    // Only trusted command code can checkpoint its own synchronous
+                    // mutation. Project/root authority cannot expand mid-action.
+                    const before = JSON.parse(resourceBaseline) as CommandResources;
+                    const after = authorize(false);
+                    if (canonical({ projectIds: before.projectIds, rootPaths: before.rootPaths })
+                        !== canonical({ projectIds: after.projectIds, rootPaths: after.rootPaths })) {
+                        throw new Error('Action resource scope changed');
                     }
-                } }, checked.input);
+                    resourceBaseline = canonical(after);
+                }
+            }, checked.input);
             return this.intents.finish(id, 'confirmed', result);
         }
         catch (error) {

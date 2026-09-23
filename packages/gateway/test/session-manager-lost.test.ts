@@ -18,8 +18,24 @@ import {
   type StoredSession
 } from "../src/services/session-manager.js";
 import { createDbSessionRecoveryStore } from "../src/services/db-session-recovery-store.js";
+import { SessionRuntimeConfirmationRepository } from "../src/db/repositories/session-runtime-confirmation-repository.js";
+import { randomUUID } from "node:crypto";
 import type { TerminalBackendClient } from "../src/services/terminal-backend.js";
 import type { LaunchPlan } from "../src/adapters/claude.js";
+
+function confirmationFixtureDb() {
+  const db = new Database(":memory:");
+  migrate(drizzle(db), {
+    migrationsFolder: path.join(path.dirname(fileURLToPath(import.meta.url)), "../src/db/migrations")
+  });
+  const now = Date.now();
+  db.prepare("INSERT INTO users (id, username, email, password_hash, role, status) VALUES ('u1','u1','u1@example.test','x','user','active')").run();
+  db.prepare("INSERT INTO projects (id,user_id,name,path,ai_tool,status,created_at,updated_at) VALUES ('p1','u1','P1','/tmp/p1','codex','active',?,?)").run(now, now);
+  db.prepare("INSERT INTO sessions (id,user_id,project_id,name,ai_tool,status,attach_token,working_dir,credential_mode,runtime_session_name) VALUES ('s1','u1','p1','S1','codex','running','tok','/tmp/p1','host_environment','fb-u1-s1')").run();
+  const repo = new SessionRuntimeConfirmationRepository(db, "u1");
+  const generation = { runtimeName: "fb-u1-s1", launchNonce: randomUUID(), daemon: { pid: 12345, startedAt: new Date().toISOString() } };
+  return { db, repo, generation, close() { db.close(); } };
+}
 
 const launchPlan: LaunchPlan = {
   command: "bash",
@@ -80,6 +96,44 @@ describe("reconcileSessionStatus lost semantics", () => {
     assert.deepEqual(store.lost, ["s1"]);
     assert.deepEqual(store.removed, [], "lost must not remove the recovery record");
     assert.equal(manager.getSession("s1"), undefined, "lost session leaves the in-memory registry");
+  });
+
+  it("revokes the pending runtime confirmation when marking lost, so deletion stops failing", async () => {
+    const f = confirmationFixtureDb();
+    try {
+      const store = new RecordingRecoveryStore();
+      const manager = new InMemorySessionManager(deadBackend(), store, undefined, { db: f.db });
+      const session = await manager.createSession({ userId: "u1", sessionId: "s1", launchPlan });
+      f.repo.begin("s1", { ...f.generation, runtimeName: session.runtimeSessionName });
+
+      const reconciled = await manager.reconcileSessionStatus("s1", { backendRestarted: true });
+
+      assert.equal(reconciled?.status, "lost");
+      assert.equal(f.repo.get("s1")?.status, "revoked");
+      // The revoked record no longer blocks the stop/delete path, and the
+      // absent runtime is not killed again.
+      const stopped = await manager.stopSession("s1", session.runtimeSessionName, "u1");
+      assert.equal(stopped.status, "exited");
+    } finally {
+      f.close();
+    }
+  });
+
+  it("recoverForgeBadgerSessions revokes pending confirmations for sessions missing from the daemon", async () => {
+    const f = confirmationFixtureDb();
+    try {
+      f.repo.begin("s1", f.generation);
+      const store = new RecordingRecoveryStore();
+      store.listSessions = async () => [{ id: "s1", userId: "u1", runtimeSessionName: "fb-u1-s1", launchPlan, createdAt: new Date().toISOString() }];
+      const manager = new InMemorySessionManager(deadBackend(), store, undefined, { db: f.db });
+
+      await manager.recoverForgeBadgerSessions({ userId: "system", cwd: "/tmp" });
+
+      assert.deepEqual(store.lost, ["s1"]);
+      assert.equal(f.repo.get("s1")?.status, "revoked");
+    } finally {
+      f.close();
+    }
   });
 
   it("keeps exited semantics when the backend did not restart", async () => {

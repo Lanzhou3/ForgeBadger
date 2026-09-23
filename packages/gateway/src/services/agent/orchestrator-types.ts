@@ -1,3 +1,4 @@
+import type { ProviderReplay } from "./llm-replay.js";
 /**
  * The LLM client seam the orchestrator depends on. Defined as an interface so
  * the orchestrator is decoupled from any concrete provider client; the
@@ -6,6 +7,7 @@
 export interface AgentLlmMessage {
   role: "user" | "assistant" | "tool";
   content: string;
+  providerReplay?: ProviderReplay;
   toolCallId?: string;
   toolCalls?: Array<{ id: string; name: string; arguments: string }>;
 }
@@ -37,7 +39,7 @@ export interface AgentLlmClient {
     system?: string;
     signal?: AbortSignal;
     onEvent: (event: AgentLlmStreamEvent) => void;
-  }): Promise<{ message: string }>;
+  }): Promise<import("./llm-response.js").LlmResult>;
   /** Fold a message list into a concise summary (context compression). */
   summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal }): Promise<string>;
   /** Generate a short conversation title from the first user/assistant exchange. */

@@ -7,6 +7,28 @@ function toolFromJson(value: unknown): LlmToolCall {
   return checkedTool({ id: optionalText(tool.id), name: optionalText(fn.name), arguments: optionalText(fn.arguments) });
 }
 
+type ReasoningDetailsMode = 'snapshot';
+
+function applyReasoningReplay(completion: LlmCompletion, source: Record<string, unknown>, mode?: ReasoningDetailsMode): void {
+  if (source.reasoning_content !== undefined && source.reasoning_content !== null) {
+    completion.replay = { ...completion.replay, format: 'openai', reasoningContent: completion.thinking };
+  }
+  const details = source.reasoning_details;
+  if (details === undefined || details === null) return;
+  if (!Array.isArray(details) || details.some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+    invalidResponse('invalid reasoning details');
+  }
+  const incoming = details as Array<Record<string, unknown>>;
+  const previous = completion.replay?.reasoningDetails;
+  // Only explicit provider snapshot semantics permit replacing different arrays.
+  // Generic endpoints may send one complete array, empty placeholders or repeats.
+  if (mode !== 'snapshot' && previous?.length && incoming.length && JSON.stringify(previous) !== JSON.stringify(incoming)) {
+    invalidResponse('unsupported reasoning details deltas');
+  }
+  const reasoningDetails = mode === 'snapshot' || incoming.length || !previous ? incoming : previous;
+  completion.replay = { ...completion.replay, format: 'openai', reasoningDetails };
+}
+
 function jsonCompletion(value: unknown): LlmCompletion {
   const data = record(value);
   if (data.error || !Array.isArray(data.choices) || data.choices.length !== 1) invalidResponse("missing or ambiguous choice");
@@ -18,18 +40,28 @@ function jsonCompletion(value: unknown): LlmCompletion {
     toolCalls: ((message.tool_calls ?? []) as unknown[]).map(toolFromJson),
     ...(choice.finish_reason === undefined ? {} : { finishReason: optionalText(choice.finish_reason) }),
     ...(data.usage ? { usage: usage(data.usage, "openai")! } : {}) };
+  applyReasoningReplay(completion, message);
   validateCompletion(completion, "openai", false);
   return completion;
 }
 
-function appendTools(value: unknown, tools: Map<number, LlmToolCall>): void {
+interface ToolAssembly extends LlmToolCall { compatibleName: string }
+
+function resolvedTool(tool: ToolAssembly, declaredNames: ReadonlySet<string>): LlmToolCall {
+  const normalKnown = declaredNames.has(tool.name);
+  const compatibleKnown = declaredNames.has(tool.compatibleName);
+  if (tool.name !== tool.compatibleName && normalKnown && compatibleKnown) invalidResponse("ambiguous tool name deltas");
+  return { id: tool.id, name: compatibleKnown && !normalKnown ? tool.compatibleName : tool.name, arguments: tool.arguments };
+}
+
+function appendTools(value: unknown, tools: Map<number, ToolAssembly>): void {
   if (value === undefined) return;
   if (!Array.isArray(value)) invalidResponse("invalid tool deltas");
   for (const item of value) {
     const delta = record(item);
     if (!Number.isSafeInteger(delta.index) || (delta.index as number) < 0 || (delta.index as number) >= MAX_TOOL_CALLS) invalidResponse("invalid tool index");
     const index = delta.index as number;
-    const tool = tools.get(index) ?? { id: "", name: "", arguments: "" };
+    const tool = tools.get(index) ?? { id: "", name: "", arguments: "", compatibleName: "" };
     if (delta.type !== undefined && delta.type !== "function") invalidResponse("unsupported tool type");
     if (delta.id !== undefined) {
       const id = optionalText(delta.id);
@@ -37,14 +69,18 @@ function appendTools(value: unknown, tools: Map<number, LlmToolCall>): void {
       tool.id = id;
     }
     const fn = delta.function === undefined ? {} : record(delta.function);
-    tool.name += optionalText(fn.name);
+    const name = optionalText(fn.name);
+    // Keep both interpretations until the complete name can be compared with
+    // declared tools. Equal fragments alone cannot prove a provider name repeat.
+    tool.name += name;
+    if (name !== tool.compatibleName) tool.compatibleName += name;
     tool.arguments += optionalText(fn.arguments);
-    if (tool.id.length > 256 || tool.name.length > 256 || Buffer.byteLength(tool.arguments) > MAX_TOOL_ARGUMENT_BYTES) invalidResponse("tool delta too large");
+    if (tool.id.length > 256 || (tool.name.length > 256 && tool.compatibleName.length > 256) || Buffer.byteLength(tool.arguments) > MAX_TOOL_ARGUMENT_BYTES) invalidResponse("tool delta too large");
     tools.set(index, tool);
   }
 }
 
-function applyChoice(value: unknown, completion: LlmCompletion, tools: Map<number, LlmToolCall>, emit: LlmEmit): void {
+function applyChoice(value: unknown, completion: LlmCompletion, tools: Map<number, ToolAssembly>, emit: LlmEmit, reasoningDetailsMode?: ReasoningDetailsMode): void {
   const choice = record(value);
   if (choice.index !== undefined && choice.index !== 0) invalidResponse("unsupported choice index");
   if (completion.finishReason !== undefined) invalidResponse("choice after termination");
@@ -53,15 +89,17 @@ function applyChoice(value: unknown, completion: LlmCompletion, tools: Map<numbe
   const text = optionalText(delta.content);
   const thinking = optionalText(delta.reasoning_content);
   completion.message += text; completion.thinking += thinking;
+  applyReasoningReplay(completion, delta, reasoningDetailsMode);
   if (thinking) emit({ type: "thinking_delta", text: thinking });
   if (text) emit({ type: "text_delta", text });
   appendTools(delta.tool_calls, tools);
   if (choice.finish_reason !== null && choice.finish_reason !== undefined) completion.finishReason = optionalText(choice.finish_reason);
 }
 
-async function sseCompletion(response: Response, emit: LlmEmit, signal: AbortSignal, allowFinishReasonEof: boolean): Promise<LlmCompletion> {
+async function sseCompletion(response: Response, emit: LlmEmit, signal: AbortSignal, allowFinishReasonEof: boolean, toolNames: readonly string[], reasoningDetailsMode?: ReasoningDetailsMode): Promise<LlmCompletion> {
   const completion: LlmCompletion = { message: "", thinking: "", toolCalls: [] };
-  const tools = new Map<number, LlmToolCall>();
+  const tools = new Map<number, ToolAssembly>();
+  const declaredNames = new Set(toolNames);
   let done = false;
   for await (const frame of readSse(response, signal)) {
     if (done) invalidResponse("data after terminal marker");
@@ -71,19 +109,19 @@ async function sseCompletion(response: Response, emit: LlmEmit, signal: AbortSig
     if (!Array.isArray(data.choices) || data.choices.length > 1) invalidResponse("missing or ambiguous choice");
     if (data.usage) completion.usage = usage(data.usage, "openai")!;
     if (data.choices.length === 0 && !data.usage) invalidResponse("empty stream chunk");
-    if (data.choices.length) applyChoice(data.choices[0], completion, tools, emit);
+    if (data.choices.length) applyChoice(data.choices[0], completion, tools, emit, reasoningDetailsMode);
   }
   // Some official MiniMax endpoints terminate clean HTTP bodies after the final
   // finish_reason frame. Never publish before EOF or accept an unsuccessful reason.
   if (!done && !allowFinishReasonEof) invalidResponse("missing terminal marker");
-  completion.toolCalls = [...tools.entries()].sort(([a], [b]) => a - b).map(([, tool]) => tool);
+  completion.toolCalls = [...tools.entries()].sort(([a], [b]) => a - b).map(([, tool]) => resolvedTool(tool, declaredNames));
   validateCompletion(completion, "openai", true);
   return completion;
 }
 
 export async function readOpenAiCompletion(response: Response, emit: LlmEmit, signal: AbortSignal,
-  options: { allowFinishReasonEof?: boolean } = {}): Promise<LlmResult> {
+  options: { allowFinishReasonEof?: boolean; toolNames?: readonly string[]; reasoningDetailsMode?: ReasoningDetailsMode } = {}): Promise<LlmResult> {
   const streaming = isSse(response);
-  const completion = streaming ? await sseCompletion(response, emit, signal, options.allowFinishReasonEof === true) : jsonCompletion(await readJsonResponse(response, signal));
+  const completion = streaming ? await sseCompletion(response, emit, signal, options.allowFinishReasonEof === true, options.toolNames ?? [], options.reasoningDetailsMode) : jsonCompletion(await readJsonResponse(response, signal));
   return publishCompletion(completion, emit, signal, streaming);
 }

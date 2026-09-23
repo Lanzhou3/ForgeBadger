@@ -3,11 +3,13 @@ import {SessionRuntimeConfirmationRepository} from '../db/repositories/session-r
 import type {RuntimeGeneration} from './session-server/confirmed-stop.js';
 import { assertVerificationProcessStopped } from './collaboration/legacy-verification-recovery.js';
 import { randomUUID } from "node:crypto";
+import { TaskDispatchEvidenceRepository } from '../db/repositories/task-dispatch-evidence-repository.js';
 import { basename } from "node:path";
 
 import type { LaunchPlan } from "../adapters/claude.js";
 import { isAdapterId, type AdapterId } from "./adapter-discovery.js";
 import type { TerminalBackendClient } from "./terminal-backend.js";
+import type { SessionInfo } from "./session-server/ipc-protocol.js";
 import type { ForgeBadgerEventBus } from "./event-bus.js";
 import { SessionOutputRing } from "./session-output-buffer.js";
 import { SessionWriterLeases } from "./session-writer-leases.js";
@@ -16,9 +18,12 @@ import {
   assertSafeProgrammaticMessage,
   composerContainsStagedTask,
   isProgrammaticComposerReady,
+  isProgrammaticNativeApprovalRequired,
+  PROGRAMMATIC_SUBMIT_NATIVE_APPROVAL_REQUIRED,
   PROGRAMMATIC_SUBMIT_ADAPTER_MISMATCH,
   PROGRAMMATIC_SUBMIT_INDETERMINATE,
   PROGRAMMATIC_SUBMIT_NOT_READY,
+  ProgrammaticSubmitNoEffectError,
   PROGRAMMATIC_SUBMIT_STAGING_FAILED,
   programmaticDeliveryNeedle
 } from "./programmatic-terminal-submit.js";
@@ -98,6 +103,7 @@ export interface SessionManagerOptions {
   sessionPrefix?: string;
   runtimeInputAuthorizer?: (session: Readonly<GateASession>) => void;
   programmaticSubmitSettleMs?: Partial<Record<AdapterId, number>>;
+  programmaticReadyTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
   /**
    * One-shot probe consumed once per status-correction scan: returns true
@@ -111,6 +117,8 @@ export interface SessionManagerOptions {
 export interface ProgrammaticTaskInput {
   adapter: AdapterId;
   message: string;
+  authorize?: (() => void) | undefined;
+  beforeStage?: (() => void) | undefined;
 }
 
 export interface ProgrammaticTaskStageReceipt {
@@ -154,6 +162,7 @@ export class InMemorySessionManager {
   private sessionPrefix: string;
   private readonly runtimeInputAuthorizer: ((session: Readonly<GateASession>) => void) | undefined;
   private readonly programmaticSubmitSettleMs: Readonly<Record<AdapterId, number>>;
+  private readonly programmaticReadyTimeoutMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly detectBackendRestart: (() => boolean) | undefined;
   private readonly sessionLocks = new Map<string, Promise<unknown>>();
@@ -173,6 +182,7 @@ export class InMemorySessionManager {
       ...DEFAULT_PROGRAMMATIC_SETTLE_MS,
       ...options.programmaticSubmitSettleMs
     };
+    this.programmaticReadyTimeoutMs = Math.min(15_000, Math.max(0, options.programmaticReadyTimeoutMs ?? 10_000));
     this.sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     this.detectBackendRestart = options.detectBackendRestart;
   }
@@ -410,11 +420,74 @@ export class InMemorySessionManager {
       return stopped;
     }
 
-    await this.backend.killSession(runtimeSessionName as string);
+    // A runtime the daemon no longer hosts (e.g. the daemon restarted and the
+    // pending confirmation was revoked when the session was marked lost) has
+    // nothing left to kill — skip instead of failing the delete with the
+    // daemon's "Session not found".
+    if (await this.backend.hasSession(runtimeSessionName as string)) {
+      await this.backend.killSession(runtimeSessionName as string);
+    }
     if (userId) {
       await this.recoveryStore.removeSession(id, userId);
     }
     return fallbackStoppedSession(id, runtimeSessionName as string, userId);
+  }
+
+  /**
+   * Operator-forced stop for a session whose leader process has exited but
+   * whose confirmed-stop receipt cannot be obtained (a descendant still holds
+   * the process group, or the daemon that would sign the receipt is gone).
+   * Fails closed on purpose: a transiently unreachable backend or a runtime
+   * that may still be alive rejects the force — never turn a probe failure
+   * into a bypass.
+   */
+  async forceStopSession(id: string, runtimeSessionName: string | undefined, userId: string): Promise<GateASession> {
+    const session = this.sessions.get(id);
+    const runtimeName = session?.runtimeSessionName ?? runtimeSessionName ?? '';
+    if (!this.backend.listSessionInfos) {
+      throw new Error('SESSION_FORCE_DELETE_NOT_ALLOWED');
+    }
+    let infos: SessionInfo[];
+    try {
+      infos = await this.backend.listSessionInfos();
+    } catch (error) {
+      console.error(`[session-manager] force stop gate probe failed for ${id}`, error);
+      throw new Error('SESSION_FORCE_DELETE_NOT_ALLOWED');
+    }
+    const info = infos.find((entry) => entry.sessionId === runtimeName);
+    if (info?.status === 'running') {
+      throw new Error('SESSION_FORCE_DELETE_NOT_ALLOWED');
+    }
+    this.revokePendingRuntimeConfirmation(userId, id);
+    if (info) {
+      // The leader exited but descendants linger; the daemon refuses to
+      // signal a group whose leader was reaped, so this kill may fail — the
+      // orphaned processes are left to the operator.
+      try {
+        await this.backend.killSession(runtimeName);
+      } catch (error) {
+        console.error(`[session-manager] force stop kill failed for ${id}`, error);
+      }
+    }
+    if (session) {
+      this.invalidateWriter(session);
+      const stopped = this.updateSession(id, { status: 'exited' });
+      this.sessions.delete(id);
+      await this.recoveryStore.removeSession(id, session.userId);
+      return stopped;
+    }
+    await this.recoveryStore.removeSession(id, userId);
+    return fallbackStoppedSession(id, runtimeName, userId);
+  }
+
+  /** Revokes a pending runtime confirmation; never blocks the caller. */
+  private revokePendingRuntimeConfirmation(userId: string, sessionId: string): void {
+    if (!this.db) return;
+    try {
+      new SessionRuntimeConfirmationRepository(this.db, userId).revoke(sessionId);
+    } catch (error) {
+      console.error(`[session-manager] runtime confirmation revoke failed for ${sessionId}`, error);
+    }
   }
 
   /**
@@ -438,6 +511,9 @@ export class InMemorySessionManager {
     if(!this.db)return false;
     const repository=new SessionRuntimeConfirmationRepository(this.db,userId),record=repository.get(sessionId);
     if(!record)return false;
+    // Revoked records were released by the lost-session reconciliation or an
+    // operator force delete after the runtime was verified gone/leader-dead.
+    if(record.status==='revoked')return true;
     if(record.status==='stopped'&&record.receipt)return true;
     const receipt=stop?await this.backend.confirmedStop?.(record):await this.backend.confirmedStopStatus?.(record);
     if(!receipt)return false;
@@ -505,6 +581,10 @@ export class InMemorySessionManager {
         } catch (error) {
           console.error(`[session-manager] lost DB sync failed for ${id}`, error);
         }
+        // The daemon instance that would sign the stop receipt is gone, so a
+        // pending confirmation can never be confirmed; revoke it or the
+        // session stays undeletable forever.
+        this.revokePendingRuntimeConfirmation(current.userId, id);
         this.sessions.delete(id);
         return lost;
       }
@@ -579,6 +659,7 @@ export class InMemorySessionManager {
       throw new Error("terminal backend input is not supported");
     }
     this.assertRuntimeInputAuthorized(session);
+    this.noteManualInput(session.userId, id);
     await this.backend.sendInput(session.runtimeSessionName, data);
   }
 
@@ -588,6 +669,7 @@ export class InMemorySessionManager {
   ): Promise<ProgrammaticTaskStageReceipt> {
     assertSafeProgrammaticMessage(input.message);
     const generation = this.writerGenerations.get(id) ?? 0;
+    let effectsStarted = false;
     return this.runExclusive(id, async () => {
       const session = this.requireSession(id);
       if ((this.writerGenerations.get(id) ?? 0) !== generation) throw new Error("SESSION_WRITER_FENCE_STALE");
@@ -604,9 +686,19 @@ export class InMemorySessionManager {
 
       const lease = this.writerLeases.acquire({ userId: session.userId, sessionId: id, workspace: session.launchPlan.cwd });
       try {
-        const before = await this.backend.inspectPane(session.runtimeSessionName);
-        if (before.dead || !isProgrammaticComposerReady(input.adapter, before.content)) {
-          throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
+        const deadline = Date.now() + this.programmaticReadyTimeoutMs;
+        const maxPolls = Math.ceil(this.programmaticReadyTimeoutMs / 250);
+        for (let poll = 0; ; poll++) {
+          input.authorize?.();
+          this.assertRuntimeInputAuthorized(session);
+          this.writerLeases.assertCurrent(lease);
+          const before = await this.backend.inspectPane(session.runtimeSessionName);
+          if (before.dead) throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
+          if (isProgrammaticNativeApprovalRequired(input.adapter, before.content))
+            throw new Error(PROGRAMMATIC_SUBMIT_NATIVE_APPROVAL_REQUIRED);
+          if (isProgrammaticComposerReady(input.adapter, before.content)) break;
+          if (poll >= maxPolls || Date.now() >= deadline) throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
+          await this.sleep(250);
         }
 
         const needle = programmaticDeliveryNeedle(input.message);
@@ -618,10 +710,14 @@ export class InMemorySessionManager {
         // the first terminal write, so pre-write rejection remains retry-safe.
         this.assertRuntimeInputAuthorized(session);
         this.writerLeases.assertCurrent(lease);
+        input.authorize?.();
+        input.beforeStage?.();
+        input.authorize?.();
         // Once staging starts, the backend may already have received some or
         // all bytes. Any later failure is therefore indeterminate and must
         // never be exposed as a safe-to-retry pre-write rejection.
         try {
+          effectsStarted = true;
           await this.backend.stageProgrammaticInput(session.runtimeSessionName, input.message);
           await this.sleep(this.programmaticSubmitSettleMs[input.adapter]);
 
@@ -635,6 +731,7 @@ export class InMemorySessionManager {
 
           this.assertRuntimeInputAuthorized(session);
           this.writerLeases.assertCurrent(lease);
+          input.authorize?.();
           await this.backend.pressEnter(session.runtimeSessionName);
           return { adapter: input.adapter, needle, stagedPane: staged.content };
         } catch {
@@ -643,7 +740,20 @@ export class InMemorySessionManager {
       } finally {
         this.writerLeases.release(lease);
       }
+    }).catch((error: unknown) => {
+      if (effectsStarted) throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE, { cause: error });
+      throw new ProgrammaticSubmitNoEffectError(error);
     });
+  }
+
+  async captureScreen(userId: string, id: string): Promise<{ output: string; live: boolean }> {
+    const session = this.requireOwnedSession(userId, id);
+    if (this.db) assertManagedSessionAccess(this.db, userId, id, session.launchPlan.cwd);
+    if (this.backend.inspectPane) {
+      const pane = await this.backend.inspectPane(session.runtimeSessionName);
+      return { output: pane.content, live: !pane.dead };
+    }
+    return { output: await this.captureHistory(id), live: await this.hasLiveTerminal(id) };
   }
 
   assertManualInputAllowed(userId: string, id: string): void {
@@ -656,6 +766,13 @@ export class InMemorySessionManager {
     const session = this.requireOwnedSession(userId, id);
     this.writerLeases.takeover({ userId, sessionId: id, workspace: session.launchPlan.cwd });
     this.invalidateWriter(session);
+    this.noteManualInput(userId, id);
+  }
+
+  /** Called immediately before actual manual input; hooks after it are no longer task-specific evidence. */
+  noteManualInput(userId: string, id: string): void {
+    this.requireOwnedSession(userId, id);
+    if (this.db) new TaskDispatchEvidenceRepository(this.db, userId).markManualIntervention(id);
   }
 
   cancelProgrammaticInput(userId: string, id: string): void {
@@ -689,6 +806,10 @@ export class InMemorySessionManager {
     for (const stored of indexed) {
       if (!liveNames.has(stored.runtimeSessionName)) {
         await this.recoveryStore.markSessionLost?.(stored.id, stored.userId);
+        // The runtime is verifiably absent from the daemon; a pending
+        // confirmation would block deletion forever if its daemon instance is
+        // gone, so revoke it.
+        this.revokePendingRuntimeConfirmation(stored.userId, stored.id);
       }
     }
 

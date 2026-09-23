@@ -44,7 +44,7 @@ describe('Copilot playbook boundary',()=>{
    repo.update(row.id,{version:'1.0.0',content:'custom old text'});
    assert.equal(loadCopilotPlaybook(db,user.id,row.id,options),undefined);
    const stale=listCopilotPlaybooks(db,user.id,options).find(s=>s.id===row.id)!;
-   assert.equal(stale.reviewRequired,true);assert.equal(stale.currentVersion,'3.0.0');assert.equal(stale.content,'custom old text');
+   assert.equal(stale.reviewRequired,true);assert.equal(stale.currentVersion,'4.0.0');assert.equal(stale.content,'custom old text');
    assert.equal(stale.version,'1.0.0');
    await assert.rejects(()=>load.execute({name:row.name},context));
   }finally{db.close();}

@@ -1,3 +1,5 @@
+import { CopilotModelResponseRepository } from "../../db/repositories/copilot-model-response-repository.js";
+import type { LlmResult } from "./llm-response.js";
 import { listAvailableCopilotSkillSummaries } from "./skills/copilot-skill-service.js";
 import { visibleToolSchemas, toolUnavailableReason } from "./tool-availability.js";
 import { projectActionReceipt } from "../platform-commands/receipt-projection.js";
@@ -106,6 +108,10 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 emit(ledger, runId);
                 return;
             }
+            if (error instanceof AgentError && error.code === 'AGENT_LLM_INVALID_RESPONSE') {
+                ledger.commit(claim, () => new CopilotModelResponseRepository(deps.db, userId, deps.masterKey)
+                    .recordInvalidResponse(runId, error.message));
+            }
             ledger.finish(claim, "failed", error instanceof AgentError ? error.code : redactAgentErrorMessage(error instanceof Error ? error.message : "Copilot failed"));
             emit(ledger, runId);
         }).finally(() => { clearInterval(timer); control.active.delete(runId); });
@@ -141,6 +147,8 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             }) : null;
             const calls: AgentToolCall[] = [];
             let text = "";
+            let response: LlmResult | undefined;
+            const modelResponses = new CopilotModelResponseRepository(deps.db, input.userId, deps.masterKey);
             if (command !== null)
                 text = command;
             else {
@@ -164,13 +172,14 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     + (availableToolNames.includes("read_skill_resource") ? " Use read_skill_resource for bundled references." : "")
                     + "\n" + JSON.stringify(skillCatalog) });
                 const { messages } = await buildCompressedContext(ledger.log, input.conversationId, deps.llm, input.modelId, {
+                    assistantMessages: modelResponses.list(input.conversationId),
                     memory: new AgentMemoryRepository(deps.db, input.userId), memoryConversationId: input.conversationId, signal,
                     ...(input.grantId ? { excludeGlobalMemory: true, memoryProjectIds: new CopilotGrantRepository(deps.db, input.userId).get(input.grantId)?.scope.projectIds ?? [] } : {}),
                     ...(input.projectId ? { memoryProjectId: input.projectId } : {}), canCommit: live,
                     tools, prefixMessages, reservedChars: 8192
                 });
                 if (!live()) return;
-                await deps.llm.stream({ messages, signal,
+                response = await deps.llm.stream({ messages, signal,
                     tools,
                     ...(input.modelId ? { modelId: input.modelId } : {}), onEvent: event => {
                         if (!live())
@@ -182,12 +191,23 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                         if (event.type === "tool_call" && event.toolCall)
                             calls.push({ id: event.toolCall.id, name: event.toolCall.name, input: parse(event.toolCall.arguments) });
                     } });
+                if (response.assistant && live()) {
+                    // The validated complete response is authoritative; deltas only drive display.
+                    calls.splice(0, calls.length, ...(response.assistant.toolCalls ?? []).map(call => ({
+                        id: call.id, name: call.name, input: parse(call.arguments)
+                    })));
+                }
+                if (!text && response.message && live()) {
+                    text = response.message;
+                    emit(ledger, c.runId, { textDelta: text });
+                }
             }
             if (!live())
                 return;
             let completed = false;
             ledger.commit(c, () => {
-                ledger.completeStep(step.id, text);
+                if (response?.assistant) modelResponses.complete(input.conversationId, c.runId, step.id, response);
+                else ledger.completeStep(step.id, text);
                 if (command !== null)
                     deps.db.prepare("UPDATE copilot_runs SET steps=0 WHERE user_id=? AND id=?").run(ledger.userId, c.runId);
                 if (text || calls.length === 0)
@@ -254,7 +274,13 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     let intent = actions.intents.byKey(step.id);
                     if (!intent) intent = actions.preview({ commandId: TOOL_COMMANDS[tool.name], input: agentActionInput(tool.name, raw, context), idempotencyKey: step.id,
                         authority: input.grantId ? "delegated_grant" : "owner_action", ...(input.grantId ? { grantId: input.grantId } : {}) });
-                    if (intent.status === "pending" && action?.status === "approved") intent = actions.decide(intent.id, intent.digest, true);
+                    const automaticOwnerAction = decision.action === "auto_approve"
+                        && !input.grantId && (input.source ?? "user") === "user";
+                    if (intent.status === "pending" && action?.status === "approved") {
+                        intent = actions.decide(intent.id, intent.digest, true);
+                    } else if (intent.status === "pending" && automaticOwnerAction) {
+                        intent = actions.approveRoutine(intent.id);
+                    }
                     context.platformIntentId = intent.id;
                     if (intent.status === "pending") {
                         ledger.waitApproval(c, step);

@@ -112,3 +112,4 @@ packages/gateway/scratch-*.ts
 
 !docs/PERSONAL-TEAM-WORKFLOWS.md
 !docs/adr/0002-personal-team-delivery.md
+!docs/COPILOT-AUTONOMY-REVIEW.md

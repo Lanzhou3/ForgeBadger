@@ -46,26 +46,26 @@ function notify(eventBus: ForgeBadgerEventBus, userId: string, session: Session,
 }
 
 describe('dispatch supervisor', () => {
-    it('advances a dispatched in-progress work item to ready_for_review exactly once on task_completed', () => {
+    it('does not promote a legacy timestamp-only dispatch without a confirmed attempt receipt', () => {
         const { db, user, project, pm, sessions, eventBus, supervisor } = fixture();
         try {
             const { item, session } = linkedDispatchedItem(pm, sessions, project, 'Ship it');
             notify(eventBus, user.id, session, 'task_completed');
-            assert.equal(pm.getWorkItem(project.id, item.id)?.status, 'ready_for_review');
+            assert.equal(pm.getWorkItem(project.id, item.id)?.status, 'in_progress');
             // A repeated Stop hook is a no-op: no transition back or duplicate ledger spam.
             notify(eventBus, user.id, session, 'task_completed');
-            assert.equal(pm.getWorkItem(project.id, item.id)?.status, 'ready_for_review');
+            assert.equal(pm.getWorkItem(project.id, item.id)?.status, 'in_progress');
             const ledger = pm.listLedgerEvents(project.id, { workItemId: item.id });
-            assert.equal(ledger.filter((event) => event.status === 'ready_for_review').length, 1);
+            assert.equal(ledger.filter((event) => event.status === 'ready_for_review').length, 0);
         } finally { supervisor.stop(); db.close(); }
     });
 
-    it('marks a dispatched in-progress work item blocked on task_failed', () => {
+    it('does not consume legacy failure hooks without a confirmed attempt receipt', () => {
         const { db, user, project, pm, sessions, eventBus, supervisor } = fixture();
         try {
             const { item, session } = linkedDispatchedItem(pm, sessions, project, 'Fail it');
             notify(eventBus, user.id, session, 'task_failed');
-            assert.equal(pm.getWorkItem(project.id, item.id)?.status, 'blocked');
+            assert.equal(pm.getWorkItem(project.id, item.id)?.status, 'in_progress');
         } finally { supervisor.stop(); db.close(); }
     });
 

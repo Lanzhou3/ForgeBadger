@@ -224,7 +224,10 @@ export class SessionServer {
     if(!handle||!generation||generation.nonce!==nonce)return false;
     const existing=this.stopPromises.get(key);if(existing)return existing;
     const operation=(async()=>{const stopped=await confirmHandleStopped(handle,generation.birth,signal,()=>this.processClaims.owns(handle,nonce));if(stopped)this.retire(sessionId,handle,nonce);return stopped;})();
-    this.stopPromises.set(key,operation);try{return await operation;}finally{this.stopPromises.delete(key);}
+    this.stopPromises.set(key,operation);
+    // The exit reaper may retire the session while confirmHandleStopped is
+    // still polling; the recorded receipt is the authoritative proof.
+    try{return await operation||this.stopReceipts.has(key);}finally{this.stopPromises.delete(key);}
   }
   private retire(sessionId:string,handle:SessionHandle,nonce:string):void{
     if(this.sessions.get(sessionId)!==handle)return;
@@ -240,6 +243,28 @@ export class SessionServer {
     if(process.platform==='win32'){handle.disposeResources();this.sessions.delete(sessionId);return true;}
     if(handle.status!=='exited'||!groupIsAbsent(handle.pty.pid)||!generation)return false;
     this.retire(sessionId,handle,generation.nonce);return true;
+  }
+
+  /**
+   * Retries retirement of exited sessions whose process group still had
+   * survivors when onExit fired (e.g. a background child the CLI left behind).
+   * Without this, retirement — and with it the stop receipt — depended on a
+   * later confirmedStop call racing the group's death. Only retires once the
+   * group is fully gone; running handles are never touched.
+   */
+  startExitReaper(intervalMs = 5_000): () => void {
+    const timer = setInterval(() => {
+      for (const [sessionId, handle] of [...this.sessions]) {
+        if (handle.status !== 'exited') continue;
+        try {
+          this.removeSession(sessionId);
+        } catch (error) {
+          console.error(`[session-server] exit reaper failed for ${sessionId}`, error);
+        }
+      }
+    }, intervalMs);
+    timer.unref?.();
+    return () => clearInterval(timer);
   }
 
   listSessions(): SessionInfo[] {

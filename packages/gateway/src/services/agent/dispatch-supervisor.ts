@@ -1,75 +1,33 @@
-/**
- * Dispatch supervisor — the deterministic completion-advance seam.
- *
- * When a task packet was delivered programmatically (details.taskPacket
- * .dispatchedAt set by session.dispatch / pm.task.execute) and the linked CLI
- * session reports task_completed / task_failed through its session hook, the
- * supervisor advances the work item exactly once: in_progress →
- * ready_for_review (completed) or blocked (failed). Acceptance stays with the
- * owner — ready_for_review still requires human judgement before done.
- *
- * Deliberately separate from the reactive loop: no LLM turn, no debounce, and
- * it only acts on grant-dispatched work items, so manual sessions and
- * permission/idle hook noise never move the board.
- */
-import type { Database } from "../../db/types.js";
-import { ProjectManagerRepository } from "../../db/repositories/project-manager-repository.js";
-import { SessionRepository } from "../../db/repositories/session-repository.js";
-import type { ForgeBadgerEvent, ForgeBadgerEventBus } from "../event-bus.js";
-import { recordActivity } from "../activity-events.js";
-import { findWorkItemByTaskPacketSession, readTaskPacketDetails } from "../project-manager/task-packets.js";
+/** Recoverable tracking of already-authorized task dispatches; it never launches or retries a CLI. */
+import type { Database } from '../../db/types.js';
+import type { ForgeBadgerEvent, ForgeBadgerEventBus } from '../event-bus.js';
+import { reconcilePendingTaskDispatches } from '../project-manager/task-progress.js';
 
-export interface DispatchSupervisor {
-  stop(): void;
-}
+export interface DispatchSupervisor { stop(): void; }
+const supervisors = new WeakMap<Database, { references: number; stop(): void }>();
 
 export function attachDispatchSupervisor(deps: { db: Database; eventBus: ForgeBadgerEventBus }): DispatchSupervisor {
-  function onEvent(event: ForgeBadgerEvent): void {
-    if (event.type !== "claude_notification") return;
-    if (event.notificationType !== "task_completed" && event.notificationType !== "task_failed") return;
-    try {
-      advance(deps, event);
-    } catch {
-      // The supervisor must survive a failed transition (e.g. concurrent status change).
-    }
+  let active = supervisors.get(deps.db);
+  if (!active) {
+    const reconcile = () => {
+      try { reconcilePendingTaskDispatches(deps.db); } catch { /* The next durable sweep retries transient DB failures. */ }
+    };
+    const onEvent = (event: ForgeBadgerEvent) => {
+      if (event.type === 'claude_notification' && ['task_completed', 'task_failed'].includes(event.notificationType)) reconcile();
+    };
+    deps.eventBus.on('event', onEvent);
+    // The persistent sweep covers fast hooks before receipt commit and process restarts.
+    const timer = setInterval(reconcile, 1000);
+    timer.unref();
+    active = { references: 0, stop() { clearInterval(timer); deps.eventBus.off('event', onEvent); } };
+    supervisors.set(deps.db, active);
+    reconcile();
   }
-  deps.eventBus.on("event", onEvent);
-  return {
-    stop() {
-      deps.eventBus.off("event", onEvent);
-    }
-  };
-}
-
-function advance(
-  deps: { db: Database; eventBus: ForgeBadgerEventBus },
-  event: Extract<ForgeBadgerEvent, { type: "claude_notification" }>
-): void {
-  const session = new SessionRepository(deps.db, event.userId).getById(event.sessionId);
-  if (!session) return;
-  const item = findWorkItemByTaskPacketSession(deps.db, event.userId, session.projectId, event.sessionId);
-  if (!item || item.status !== "in_progress") return;
-  if (typeof readTaskPacketDetails(item.details).dispatchedAt !== "string") return;
-
-  const nextStatus = event.notificationType === "task_completed" ? "ready_for_review" : "blocked";
-  new ProjectManagerRepository(deps.db, event.userId).updateWorkItemStatus(session.projectId, item.id, {
-    status: nextStatus,
-    details: {
-      taskPacket: {
-        ...readTaskPacketDetails(item.details),
-        autoAdvancedAt: new Date().toISOString(),
-        autoAdvanceReason: event.notificationType
-      }
-    }
-  });
-  recordActivity({
-    db: deps.db,
-    eventBus: deps.eventBus,
-    userId: event.userId,
-    sessionId: session.id,
-    projectId: session.projectId,
-    type: "pm_task_auto_advanced",
-    status: nextStatus === "blocked" ? "warning" : "success",
-    message: `Work item "${item.title}" advanced to ${nextStatus} (${event.notificationType})`
-  });
+  active.references++;
+  let stopped = false;
+  return { stop() {
+    if (stopped) return;
+    stopped = true;
+    if (--active.references === 0) { active.stop(); supervisors.delete(deps.db); }
+  } };
 }

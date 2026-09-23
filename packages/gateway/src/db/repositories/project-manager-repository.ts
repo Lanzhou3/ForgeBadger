@@ -452,6 +452,24 @@ export class ProjectManagerRepository {
     `).all(this.userId, limit) as WorkItemRow[]).map(toWorkItem);
   }
 
+  /** Exact tenant-scoped lookup; task dispatch must not depend on board pagination. */
+  getWorkItemByTaskPacketSession(projectId: string, sessionId: string): ProjectManagerWorkItem | undefined {
+    const rows = this.db.prepare(`
+      SELECT * FROM project_manager_work_items
+      WHERE user_id = ? AND project_id = ?
+        AND json_extract(details_json, '$.taskPacket.sessionId') = ?
+      LIMIT 2
+    `).all(this.userId, projectId, sessionId) as WorkItemRow[];
+    // Ambiguous links cannot authorize an automatic transition.
+    return rows.length === 1 ? toWorkItem(rows[0]!) : undefined;
+  }
+
+  hasTaskPacketSession(projectId: string, sessionId: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM project_manager_work_items
+      WHERE user_id=? AND project_id=? AND json_extract(details_json,'$.taskPacket.sessionId')=? LIMIT 1`)
+      .get(this.userId, projectId, sessionId);
+  }
+
   getWorkItem(projectId: string, workItemId: string): ProjectManagerWorkItem | undefined {
     const row = this.db.prepare(`
       SELECT *

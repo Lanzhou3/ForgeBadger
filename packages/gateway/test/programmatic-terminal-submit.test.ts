@@ -7,6 +7,7 @@ import {
   composerContainsNeedle,
   currentProgrammaticComposer,
   isProgrammaticComposerReady,
+  isProgrammaticNativeApprovalRequired,
   isProgrammaticTaskConsumed,
   programmaticDeliveryNeedle
 } from "../src/services/programmatic-terminal-submit.js";
@@ -28,6 +29,23 @@ const STAGED_PANES = {
 } as const;
 
 describe("programmatic terminal submit classifiers", () => {
+  it('distinguishes native Codex trust decisions from ordinary startup waiting', () => {
+    assert.equal(isProgrammaticNativeApprovalRequired('codex', 'Do you trust the contents of this directory?\n› 1. Yes, continue'), true);
+    assert.equal(isProgrammaticNativeApprovalRequired('codex', 'Hooks need review\n2. Trust all and continue'), true);
+    assert.equal(isProgrammaticNativeApprovalRequired('codex', READY_PANES.codex), false);
+  });
+  it("does not treat the Codex startup composer as ready before model loading finishes", () => {
+    const startup = '│ model:     loading   /model to change │\n› Ask Codex to do anything\n? for shortcuts';
+    assert.equal(isProgrammaticComposerReady('codex', startup), false);
+    assert.equal(isProgrammaticComposerReady('codex', startup.replace('loading', 'gpt-5.6')), true);
+  });
+  it('recognizes a multiline task beyond four lines without treating a queue hint as delivery', () => {
+    const message = 'Task: Implement addition\nProject: isolated acceptance\nRuntime CLI: codex\n\nContext:\nImplement add.cjs and run node tests.\nAcceptance:\nAll three original tests pass.';
+    const pane = `› ${message}\n  tab to queue message · 100% context left`;
+    const needle = programmaticDeliveryNeedle(message);
+    assert.equal(composerContainsStagedTask('codex', pane, message, needle), true);
+    assert.equal(isProgrammaticTaskConsumed('codex', `› ${message}`, pane, needle), false);
+  });
   it("accepts Unicode, tabs, and newlines in programmatic task text", () => {
     assert.doesNotThrow(() => assertSafeProgrammaticMessage("修复登录流程\n\t保留缩进"));
   });
@@ -156,7 +174,7 @@ describe("programmatic terminal submit classifiers", () => {
       true,
       "the same text in scrollback is allowed once the current composer cleared"
     );
-    const busyPane = `${STAGED_PANES.codex}\n  tab to queue message · 100% context left`;
+    const busyPane = `${STAGED_PANES.codex}\n  Working · esc to interrupt · 100% context left`;
     assert.equal(
       currentProgrammaticComposer("codex", busyPane),
       "",

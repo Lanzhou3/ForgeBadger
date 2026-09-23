@@ -32,6 +32,8 @@ export interface CompressedContext {
 export interface CompressedContextOptions {
   /** Serialized application-character bound, not a model token guarantee. */
   maxContextChars?: number;
+  /** Internal complete assistant responses, keyed by their persisted transcript rows. */
+  assistantMessages?: ReadonlyMap<string, AgentLlmMessage>;
   reservedChars?: number;
   tools?: unknown[];
   /** Immutable system-adjacent Skills/project context; returned in messages. */
@@ -69,7 +71,7 @@ export async function buildCompressedContext(
   const recall = buildRecallBlock(rows, options);
 
   const prefix = options.prefixMessages ?? [];
-  const initial = projectTranscript(rows);
+  const initial = projectTranscript(rows, options.assistantMessages);
   if (fits([...prefix, ...(recall ? [recall] : []), ...initial], options)) {
     return { messages: [...prefix, ...(recall ? [recall] : []), ...initial], compressed: false };
   }
@@ -77,7 +79,7 @@ export async function buildCompressedContext(
   // user goal cannot fit. No user instruction is silently cut.
   boundedProjection(rows, prefix, options);
   const split = splitAtBudget(rows, Math.max(0, (options.maxContextChars ?? MAX_CONTEXT_CHARS)
-    - requestSize(prefix, options) - 4096));
+    - requestSize(prefix, options) - 4096), options.assistantMessages);
   if (split === 0) return { messages: boundedProjection(rows, prefix, options, recall), compressed: true };
   const head = rows.slice(0, split);
   const tail = rows.slice(split);
@@ -156,12 +158,17 @@ function estimateChars(messages: AgentMessage[]): number {
 }
 
 /** Index of the first message to keep in the tail; everything before it is the head. */
-function splitAtBudget(messages: AgentMessage[], budget: number): number {
+function splitAtBudget(messages: AgentMessage[], budget: number, assistants?: ReadonlyMap<string, AgentLlmMessage>): number {
+  const counted = new Set<AgentLlmMessage>();
   let used = 0;
   let split = messages.length;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]!;
-    used += message.content.length + (message.toolInputJson?.length ?? 0) + 8;
+    const original = assistants?.get(message.id);
+    if (original) {
+      if (!counted.has(original)) used += JSON.stringify(original).length;
+      counted.add(original);
+    } else used += message.content.length + (message.toolInputJson?.length ?? 0) + 8;
     // Only split at complete user turns. Keep the newest turn even when it
     // alone exceeds the budget; never sever a tool invocation from its result.
     if (message.role === "user" && message.kind === "text") {
@@ -173,16 +180,23 @@ function splitAtBudget(messages: AgentMessage[], budget: number): number {
 }
 
 /** Historical incomplete batches are observations, never executable calls. */
-export function projectTranscript(rows: AgentMessage[]): AgentLlmMessage[] {
+export function projectTranscript(rows: AgentMessage[], assistants?: ReadonlyMap<string, AgentLlmMessage>): AgentLlmMessage[] {
   const messages: AgentLlmMessage[] = [];
   for (let index = 0; index < rows.length;) {
     const row = rows[index]!;
     if (row.kind !== "tool_call") {
-      if (row.kind === "text") messages.push(toLlmMessage(row));
+      if (row.kind === "text") {
+        const original = assistants?.get(row.id);
+        const followedByOwnCalls = original?.toolCalls?.length && rows[index + 1]?.kind === "tool_call"
+          && assistants?.get(rows[index + 1]!.id) === original;
+        if (!followedByOwnCalls) messages.push(original && !original.toolCalls?.length ? original : toLlmMessage(row));
+      }
       else if (row.kind === "tool_result" || row.kind === "error") messages.push(historicalObservation(row));
       index += 1;
       continue;
     }
+    const previous = rows[index - 1];
+    const original = assistants?.get(row.id);
     const calls: AgentMessage[] = [];
     while (rows[index]?.kind === "tool_call") calls.push(rows[index++]!);
     const results: AgentMessage[] = [];
@@ -192,13 +206,17 @@ export function projectTranscript(rows: AgentMessage[]): AgentLlmMessage[] {
     }
     const ids = new Set(calls.map((call) => call.toolCallId));
     const complete = ids.size === calls.length && calls.every((call) => call.toolCallId && call.toolName
-      && results.filter((result) => result.toolCallId === call.toolCallId).length === 1)
+      && results.filter((result) => result.toolCallId === call.toolCallId
+        && (!call.runId || (result.runId === call.runId && result.stepId === call.stepId))).length === 1)
       && results.length === calls.length;
     if (!complete) {
+      if (original && previous?.kind === "text" && assistants?.get(previous.id) === original) messages.push(toLlmMessage(previous));
       messages.push(...calls.map(historicalObservation), ...results.map(historicalObservation));
       continue;
     }
-    messages.push({ role: "assistant", content: "", toolCalls: calls.map((call) => ({
+    const replay = original && original.toolCalls?.length === calls.length
+      && calls.every(call => assistants?.get(call.id) === original) ? original : undefined;
+    messages.push(replay ?? { role: "assistant", content: "", toolCalls: calls.map((call) => ({
       id: call.toolCallId!, name: call.toolName!, arguments: call.toolInputJson ?? "{}"
     })) });
     messages.push(...calls.map((call): AgentLlmMessage => ({ role: "tool", toolCallId: call.toolCallId!,
@@ -226,29 +244,29 @@ function boundedProjection(rows: AgentMessage[], prefix: AgentLlmMessage[], opti
   }
   let selected = rows;
   const adjuncts = [...(recall ? [recall] : []), ...(summary ? [summary] : [])];
-  let projected = [...prefix, ...adjuncts, ...projectTranscript(selected)];
+  let projected = [...prefix, ...adjuncts, ...projectTranscript(selected, options.assistantMessages)];
   if (fits(projected, options)) return projected;
   // Reduce optional recall before touching conversation evidence.
   if (recall) adjuncts.shift();
   for (let limit = 8192; limit >= 128; limit = Math.floor(limit / 2)) {
-    projected = [...prefix, ...adjuncts, ...projectTranscript(selected.map(row => compactRow(row, latest?.id, limit)))];
+    projected = [...prefix, ...adjuncts, ...projectTranscript(selected.map(row => compactRow(row, latest?.id, limit, options.assistantMessages)), options.assistantMessages)];
     if (fits(projected, options)) return projected;
   }
   while (selected.length) {
     const next = selected.findIndex((row, index) => index > 0 && row.role === 'user' && row.kind === 'text');
     if (next < 0) break;
     selected = selected.slice(next);
-    projected = [...prefix, ...adjuncts, ...projectTranscript(selected.map(row => compactRow(row, latest?.id, 128)))];
+    projected = [...prefix, ...adjuncts, ...projectTranscript(selected.map(row => compactRow(row, latest?.id, 128, options.assistantMessages)), options.assistantMessages)];
     if (fits(projected, options)) return projected;
   }
   // Optional summaries may themselves consume the remainder. Keep the latest
   // complete tool batch and latest goal rather than sending malformed fragments.
-  projected = [...prefix, ...projectTranscript(selected.map(row => compactRow(row, latest?.id, 128)))];
+  projected = [...prefix, ...projectTranscript(selected.map(row => compactRow(row, latest?.id, 128, options.assistantMessages)), options.assistantMessages)];
   if (fits(projected, options)) return projected;
   throw new Error('COPILOT_CONTEXT_TOO_LARGE: correlated tool calls cannot fit request budget');
 }
-function compactRow(row: AgentMessage, latestId: string | undefined, limit: number): AgentMessage {
-  if (row.id === latestId || row.kind === 'tool_call' || row.content.length <= limit) return row;
+function compactRow(row: AgentMessage, latestId: string | undefined, limit: number, assistants?: ReadonlyMap<string, AgentLlmMessage>): AgentMessage {
+  if (assistants?.has(row.id) || row.id === latestId || row.kind === 'tool_call' || row.content.length <= limit) return row;
   const content = row.kind === 'tool_result'
     ? JSON.stringify({ contextTruncated: true, preview: row.content.slice(0, limit),
       readback: { tool: 'read_tool_result', messageId: row.id },
