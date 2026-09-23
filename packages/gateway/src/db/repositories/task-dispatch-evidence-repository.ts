@@ -35,7 +35,7 @@ export class TaskDispatchEvidenceRepository {
       SELECT id, rowid AS sequence, json_extract(payload, '$.notification_type') AS notificationType, message
       FROM notifications WHERE user_id = ? AND session_id = ? AND rowid > ?
         AND type = 'claude_notification' AND json_valid(payload)
-        AND json_extract(payload, '$.notification_type') IN ('task_completed', 'task_failed')
+        AND json_extract(payload, '$.notification_type') IN ('task_completed', 'task_failed', 'task_interrupted')
         AND (? IS NULL OR id = ?) ORDER BY rowid ASC LIMIT 20
     `).all(this.userId, sessionId, after, id ?? null, id ?? null) as TaskNotificationEvidence[];
   }

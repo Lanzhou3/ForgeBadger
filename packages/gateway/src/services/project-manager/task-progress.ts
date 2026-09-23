@@ -64,8 +64,11 @@ function currentAttemptGuidance(ctx: Context, attempt: TaskDispatchAttempt, stat
   const dispatchStatus = historicalStatus ?? (attempt.status === 'unknown' ? 'unknown' as const
     : attempt.status === 'preparing' || attempt.status === 'sending' ? 'in_flight' as const
     : attempt.status === 'not_sent' ? 'not_sent' as const : evidence ? 'confirmed' as const : 'unverified' as const);
+  const interruptedOnly = !!evidence?.notifications.length
+    && evidence.notifications.every(notification => notification.notificationType === 'task_interrupted');
   const evidenceStatus = attempt.manualInterventionAt ? 'manual_intervention' as const
-    : evidence ? (evidence.notifications.length ? 'available' as const : 'awaiting_notification' as const) : 'unverified' as const;
+    : evidence ? (interruptedOnly ? 'interrupted' as const
+      : evidence.notifications.length ? 'available' as const : 'awaiting_notification' as const) : 'unverified' as const;
   let nextAction = 'Follow the linked session and wait for persisted CLI evidence.';
   if (attempt.manualInterventionAt) nextAction = 'Manual input or takeover interrupted automatic evidence attribution. Inspect the session and verify the task independently.';
   else if (dispatchStatus === 'unknown' || dispatchStatus === 'in_flight') nextAction = 'Inspect delivery and the referenced dispatch intent; automatic replay is prohibited.';
@@ -74,6 +77,7 @@ function currentAttemptGuidance(ctx: Context, attempt: TaskDispatchAttempt, stat
   else if (status === 'done' || status === 'cancelled') nextAction = 'The task is closed. Review its history; do not dispatch it automatically.';
   else if (status === 'blocked') nextAction = 'Inspect the failure and existing evidence before explicitly reopening the task; do not redispatch automatically.';
   else if (!evidence) nextAction = 'Dispatch attribution is unverified. Inspect the current session and receipt; automatic replay is prohibited.';
+  else if (interruptedOnly) nextAction = 'The CLI was interrupted. Inspect the linked session and task evidence before deciding how to continue; do not redispatch automatically.';
   else if (evidence.notifications.length) nextAction = 'Review the persisted CLI lifecycle evidence and independently verify acceptance.';
   return { dispatchStatus, evidenceStatus, dispatchHistory: unresolvedHistory, nextAction };
 }
@@ -117,7 +121,8 @@ export function closeTask(ctx: CommandContext, input: z.infer<typeof taskCloseIn
 export function reconcileTaskDispatch(ctx: Context, projectId: string, workItemId: string): boolean {
   const evidence = verifiedDispatchEvidence(ctx, projectId, workItemId);
   if (!evidence || evidence.item.status !== 'in_progress' || evidence.attempt.consumedNotificationId) return false;
-  const notification = evidence.notifications[0];
+  // An interruption is observable, but does not prove task completion or failure.
+  const notification = evidence.notifications.find(entry => entry.notificationType !== 'task_interrupted');
   if (!notification) return false;
   ctx.db.transaction(() => {
     patchTaskAttempt(ctx, projectId, workItemId, { ...evidence.attempt, consumedNotificationId: notification.id, report: taskCompletionReport(notification) });
