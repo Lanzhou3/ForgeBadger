@@ -13,6 +13,7 @@ import { ProjectRepository } from "../src/db/repositories/project-repository.js"
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
 import { createSessionHookRoutes, handleClaudeNotificationHook } from "../src/routes/session-hooks.js";
+import { createNotificationDeduper } from "../src/services/notification-dedupe.js";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -362,7 +363,8 @@ describe("Claude Code session hook route", () => {
         adapter: "kimi"
       },
       "lifecycle-token",
-      session.id
+      session.id,
+      createNotificationDeduper()
     );
     const backgroundEvent = await backgroundEventPromise;
     assert.equal(backgroundEvent.type, "claude_notification");

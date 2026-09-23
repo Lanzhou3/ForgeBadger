@@ -42,7 +42,7 @@ export interface RunStep {
     run_id: string;
     ordinal: number;
     kind: "model" | "tool";
-    status: "pending" | "running" | "awaiting_approval" | "completed" | "indeterminate";
+    status: "pending" | "running" | "awaiting_approval" | "completed" | "failed" | "indeterminate";
     tool_call_id: string | null;
     tool_name: string | null;
     input_json: string | null;

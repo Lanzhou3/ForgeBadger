@@ -1969,14 +1969,19 @@ Grant/background/channel boundaries remain enforced. `pm_get_task_progress`
 accepts `{projectId,workItemId,waitMs?}` (0-5000 ms, read-only).
 Progress includes `dispatchStatus` (`unverified`, `in_flight`, `unknown`,
 `not_sent`, `confirmed`), `evidenceStatus` (`missing_attempt`,
-`awaiting_notification`, `available`, `unverified`, `manual_intervention`), and
+`awaiting_notification`, `available`, `interrupted`, `unverified`, `manual_intervention`), and
 nullable `dispatchHistory` (`intentId`, `status`, `receiptOutcome`). Missing
 attempts never establish non-delivery; inspect historical receipts before recovery.
 `pm_close_task` accepts `{projectId,workItemId,attemptId,notificationId,summary?}`
 and validates persisted evidence, advancing at most to `ready_for_review`.
 A PM receipt with `executionStatus: incomplete` and `dispatch.status: not_sent`
 records completed preparation only; resume requires a new authorized intent.
-Unknown delivery never auto-replays. See [task lifecycle review](COPILOT-AUTONOMY-REVIEW.md).
+Unknown delivery never auto-replays. An attributed `task_interrupted` notification is
+shown as `evidenceStatus: interrupted` with an inspection next step; it does not
+complete, block, or automatically redispatch the task. Tool calls containing
+credential-shaped values are rejected before a durable tool plan is created.
+CLI hook messages, notification payloads and emitted event text are redacted at
+their respective boundaries. See [task lifecycle review](COPILOT-AUTONOMY-REVIEW.md).
 
 
 CLI Skill rows expose `runtimeTarget: "cli"` and nullable `resourceManifest`.

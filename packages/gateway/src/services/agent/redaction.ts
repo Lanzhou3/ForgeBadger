@@ -29,3 +29,33 @@ export function redactAgentValue(value: unknown): unknown {
 export function redactAgentText(text: string): string {
   return redactSensitiveContent(text);
 }
+
+const credentialAssignment = /["']([A-Za-z][A-Za-z0-9_-]*)["']\s*:\s*["'][^"']+["']/g;
+
+function isCredentialField(key: string): boolean {
+  const normalized = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+  return /(?:^|[_-])(?:api[_-]?key|private[_-]?key|token|secret|credential|password|authorization)$/.test(normalized)
+    || /^(?:forgebadger|openforge|openai|anthropic|deepseek)_[a-z_]*(?:key|token|secret)$/.test(normalized);
+}
+
+function hasCredentialAssignment(text: string): boolean {
+  return [...text.matchAll(credentialAssignment)].some(match => isCredentialField(match[1]!));
+}
+
+/** Reject model-produced credentials before tool arguments become durable. */
+export function containsSensitiveAgentValue(value: unknown, depth = 0): boolean {
+  if (depth >= 16) return true;
+  if (typeof value === "string") {
+    if (redactAgentText(value) !== value || hasCredentialAssignment(value)) return true;
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return parsed === value ? false : containsSensitiveAgentValue(parsed, depth + 1);
+    } catch { return false; }
+  }
+  if (Array.isArray(value)) return value.some(child => containsSensitiveAgentValue(child, depth + 1));
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, child]) =>
+    redactAgentText(key) !== key
+      || (isCredentialField(key) && child !== null && child !== "")
+      || containsSensitiveAgentValue(child, depth + 1));
+}

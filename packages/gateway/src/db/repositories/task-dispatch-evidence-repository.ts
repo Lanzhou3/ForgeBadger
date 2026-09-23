@@ -31,13 +31,23 @@ export class TaskDispatchEvidenceRepository {
   }
 
   notifications(sessionId: string, after: number, id?: string): TaskNotificationEvidence[] {
-    return this.db.prepare(`
+    const first = this.db.prepare(`
       SELECT id, rowid AS sequence, json_extract(payload, '$.notification_type') AS notificationType, message
       FROM notifications WHERE user_id = ? AND session_id = ? AND rowid > ?
         AND type = 'claude_notification' AND json_valid(payload)
         AND json_extract(payload, '$.notification_type') IN ('task_completed', 'task_failed', 'task_interrupted')
         AND (? IS NULL OR id = ?) ORDER BY rowid ASC LIMIT 20
     `).all(this.userId, sessionId, after, id ?? null, id ?? null) as TaskNotificationEvidence[];
+    if (id || first.some(row => row.notificationType !== 'task_interrupted')) return first;
+    // The first terminal hook must remain visible even after a long run of interruptions.
+    const terminal = this.db.prepare(`
+      SELECT id, rowid AS sequence, json_extract(payload, '$.notification_type') AS notificationType, message
+      FROM notifications WHERE user_id = ? AND session_id = ? AND rowid > ?
+        AND type = 'claude_notification' AND json_valid(payload)
+        AND json_extract(payload, '$.notification_type') IN ('task_completed', 'task_failed')
+      ORDER BY rowid ASC LIMIT 1
+    `).get(this.userId, sessionId, after) as TaskNotificationEvidence | undefined;
+    return terminal ? [...first.slice(0, 19), terminal] : first;
   }
 
   pendingTasks(): Array<{ projectId: string; workItemId: string }> {

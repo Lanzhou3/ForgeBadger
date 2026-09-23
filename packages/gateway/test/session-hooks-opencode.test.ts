@@ -118,6 +118,43 @@ describe("OpenCode session hook route", () => {
     assert.equal(payload.message, "bash /tmp/x.sh");
   });
 
+  it("redacts credential-shaped hook text before event emission and persistence", async () => {
+    const session = createOpenCodeSession(db);
+    attachNotificationPersistence({ db, eventBus });
+    const marker = "sk-FAKEHOOKSECRET123456";
+    const eventPromise = waitForEvent(eventBus);
+    const res = handleClaudeNotificationHook(db, eventBus, {
+      ...openCodePermissionBody(), message: `Permission body ${marker}`,
+      title: `Permission title ${marker}`, tool_name: `Bash-${marker}`
+    }, "opencode-session-token", session.id);
+    assert.equal(res.status, 200);
+    const event = await eventPromise;
+    assert.equal(JSON.stringify(event).includes(marker), false);
+    const notification = new NotificationRepository(db, session.userId).list()[0];
+    assert.ok(notification);
+    assert.equal(JSON.stringify(notification).includes(marker), false);
+    assert.match(notification.message, /\[REDACTED\]/);
+  });
+
+  it("redacts interrupt reasons and failure errors when no message is supplied", async () => {
+    const session = createOpenCodeSession(db);
+    attachNotificationPersistence({ db, eventBus });
+    const marker = "sk-FAKEHOOKERROR123456";
+    for (const hook of [
+      { hook_event_name: "Interrupt", notification_type: "task_interrupted", reason: `Interrupted ${marker}` },
+      { hook_event_name: "StopFailure", notification_type: "task_failed", error: `Failed ${marker}` }
+    ]) {
+      const eventPromise = waitForEvent(eventBus);
+      const res = handleClaudeNotificationHook(db, eventBus, { ...hook, adapter: "opencode" },
+        "opencode-session-token", session.id);
+      assert.equal(res.status, 200);
+      assert.equal(JSON.stringify(await eventPromise).includes(marker), false);
+    }
+    const notifications = new NotificationRepository(db, session.userId).list();
+    assert.equal(notifications.length, 2);
+    assert.equal(JSON.stringify(notifications).includes(marker), false);
+  });
+
   it("falls back adapter to claude when the request omits the adapter field", async () => {
     const session = createOpenCodeSession(db);
     attachNotificationPersistence({ db, eventBus });

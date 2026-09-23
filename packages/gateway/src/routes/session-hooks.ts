@@ -9,6 +9,7 @@ import type { Session } from "../db/repositories/session-repository.js";
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import { recordActivity } from "../services/activity-events.js";
 import { defaultNotificationDeduper, type NotificationDeduper } from "../services/notification-dedupe.js";
+import { redactSensitiveContent } from "../lib/redaction.js";
 
 const claudeHookEventSchema = z.object({
   hook_event_name: z.string().optional(),
@@ -130,7 +131,7 @@ export function handleClaudeNotificationHook(
     traceClaudeNotificationHook("reject", {
       reason: "missing_session_token",
       sessionId: parsed.sessionId,
-      hookEventName: parsed.event.hook_event_name ?? "Notification"
+      hookEventName: redactSensitiveContent(parsed.event.hook_event_name ?? "Notification")
     });
     return { status: 401, body: { code: 1, message: "Missing session token" } };
   }
@@ -147,23 +148,24 @@ export function handleClaudeNotificationHook(
     traceClaudeNotificationHook("reject", {
       reason: "invalid_session_token",
       sessionId: parsed.sessionId,
-      hookEventName: parsed.event.hook_event_name ?? "Notification"
+      hookEventName: redactSensitiveContent(parsed.event.hook_event_name ?? "Notification")
     });
     return { status: 401, body: { code: 1, message: "Invalid session token" } };
   }
 
-  const hookEventName = parsed.event.hook_event_name ?? "Notification";
-  const notificationType = normalizeNotificationType(
+  const hookEventName = redactSensitiveContent(parsed.event.hook_event_name ?? "Notification");
+  const notificationType = redactSensitiveContent(normalizeNotificationType(
     hookEventName,
     parsed.event.notification_type,
     parsed.event.message
-  );
+  ));
   if (deduper.shouldDrop(session.id, notificationType, "hook", Date.now())) {
     traceClaudeNotificationHook("deduped", { sessionId: session.id, notificationType });
     return { status: 200, body: { code: 0, data: { accepted: true }, message: "" } };
   }
-  const toolName = parsed.event.tool_name ?? inferPermissionToolName(parsed.event.message);
-  const message = notificationMessage(parsed.event, hookEventName, notificationType, toolName);
+  const originalToolName = parsed.event.tool_name ?? inferPermissionToolName(parsed.event.message);
+  const toolName = originalToolName ? redactSensitiveContent(originalToolName) : undefined;
+  const message = redactSensitiveContent(notificationMessage(parsed.event, hookEventName, notificationType, toolName));
   const activityType = notificationType;
 
   const adapter = parsed.event.adapter;
@@ -172,13 +174,13 @@ export function handleClaudeNotificationHook(
     userId: session.userId,
     sessionId: session.id,
     projectId: session.projectId,
-    ...(row?.projectName ? { projectName: row.projectName } : {}),
-    sessionName: session.name,
+    ...(row?.projectName ? { projectName: redactSensitiveContent(row.projectName) } : {}),
+    sessionName: redactSensitiveContent(session.name),
     hookEventName,
     notificationType,
     message,
     adapter: adapter ?? "claude",
-    ...(parsed.event.title ? { title: parsed.event.title } : {}),
+    ...(parsed.event.title ? { title: redactSensitiveContent(parsed.event.title) } : {}),
     ...(toolName ? { toolName } : {})
   });
   recordActivity({

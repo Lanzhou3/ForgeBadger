@@ -106,6 +106,22 @@ describe('Copilot durable task reports', () => {
     assert.equal(f.enterCount(), 1);
   });
 
+  it('redacts task report text before conversation persistence and run event emission', async () => {
+    const f = fixture();
+    await f.run();
+    const item = f.notify();
+    const marker = 'sk-FAKETASKREPORT123456';
+    f.db.prepare("UPDATE project_manager_work_items SET details_json=json_set(details_json,'$.taskPacket.attempt.report',?) WHERE user_id=? AND id=?")
+      .run(`CLI report ${marker}`, f.user.id, item.id);
+    const events: unknown[] = [];
+    f.eventBus.on('event', event => events.push(event));
+    publishTaskReports(f.deps, f.user.id);
+    assert.equal(f.reports().length, 1);
+    assert.equal(f.reports()[0]?.content.includes(marker), false);
+    assert.equal(JSON.stringify(events).includes(marker), false);
+    assert.match(f.reports()[0]?.content ?? '', /\[REDACTED\]/);
+  });
+
   it('does not report a cancelled origin even after a confirmed dispatch and persisted completion', async () => {
     const f = fixture({ cancelAfterDispatch: true });
     const runId = await f.run();

@@ -17,7 +17,7 @@ import { buildCompressedContext } from "./context.js";
 import { AgentMemoryRepository } from "./memory.js";
 import { resolveLocalCommandReply } from "./slash-commands.js";
 import { listEnabledCopilotPlaybookSummaries } from "./skills/skill-queries.js";
-import { redactAgentValue, redactAgentErrorMessage } from "./redaction.js";
+import { containsSensitiveAgentValue, redactAgentValue, redactAgentText, redactAgentErrorMessage } from "./redaction.js";
 import { createSecurityPolicy, logSecurityDecision } from "./security-policy.js";
 import { AgentError } from "./types.js";
 import { CopilotRunLedger, inputDigest, type TurnInput, type Claim, type RunStep } from "./run-ledger.js";
@@ -52,7 +52,10 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         const r = ledger.get(runId);
         if (!r)
             return;
-        deps.eventBus.emitEvent({ type: "copilot_run_updated", userId: ledger.userId, runId, conversationId: r.conversation_id, status: r.status, source: r.source, revision: r.revision, ...extra, occurredAt: new Date() });
+        deps.eventBus.emitEvent({ type: "copilot_run_updated", userId: ledger.userId, runId, conversationId: r.conversation_id, status: r.status, source: r.source, revision: r.revision,
+            ...extra, ...(extra.textDelta !== undefined ? { textDelta: redactAgentText(extra.textDelta) } : {}),
+            ...(extra.message !== undefined ? { message: redactAgentText(extra.message) } : {}),
+            ...(extra.toolName !== undefined ? { toolName: redactAgentText(extra.toolName) } : {}), occurredAt: new Date() });
     }
     const allVisibleTools = (input: TurnInput) => visibleToolSchemas(deps.toolRegistry, {
         hasSessionManager: !!deps.sessionManager, isToolDisabled: deps.isToolDisabled,
@@ -112,6 +115,8 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 ledger.commit(claim, () => new CopilotModelResponseRepository(deps.db, userId, deps.masterKey)
                     .recordInvalidResponse(runId, error.message));
             }
+            ledger.commit(claim, () => deps.db.prepare("UPDATE copilot_run_steps SET status='failed',result_json=COALESCE(result_json,?),completed_at=? WHERE user_id=? AND run_id=? AND kind='model' AND status='running' AND fence=?")
+                .run(error instanceof AgentError ? error.code : null, Date.now(), userId, runId, claim.fence));
             ledger.finish(claim, "failed", error instanceof AgentError ? error.code : redactAgentErrorMessage(error instanceof Error ? error.message : "Copilot failed"));
             emit(ledger, runId);
         }).finally(() => { clearInterval(timer); control.active.delete(runId); });
@@ -186,7 +191,6 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                             return;
                         if (event.type === "text_delta") {
                             text += event.text ?? "";
-                            emit(ledger, c.runId, { textDelta: event.text ?? "" });
                         }
                         if (event.type === "tool_call" && event.toolCall)
                             calls.push({ id: event.toolCall.id, name: event.toolCall.name, input: parse(event.toolCall.arguments) });
@@ -199,11 +203,23 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 }
                 if (!text && response.message && live()) {
                     text = response.message;
-                    emit(ledger, c.runId, { textDelta: text });
                 }
             }
             if (!live())
                 return;
+            // Tool input is durable for approval and crash recovery. Reject
+            // secret-shaped values before writing any call or command intent.
+            if (calls.some(call => containsSensitiveAgentValue(call.id) || containsSensitiveAgentValue(call.name)
+                || containsSensitiveAgentValue(call.input))) {
+                throw new AgentError('COPILOT_SENSITIVE_TOOL_INPUT', 'Tool call contains credential-shaped content');
+            }
+            // A token can span arbitrary model deltas. Publish only after the
+            // complete response has been scrubbed; a prior raw delta cannot be retracted.
+            if (command === null && text) {
+                const safeText = redactAgentText(text);
+                for (let offset = 0; offset < safeText.length; offset += 4096)
+                    emit(ledger, c.runId, { textDelta: safeText.slice(offset, offset + 4096) });
+            }
             let completed = false;
             ledger.commit(c, () => {
                 if (response?.assistant) modelResponses.complete(input.conversationId, c.runId, step.id, response);
@@ -395,14 +411,15 @@ async function maybeAutoTitle(input: {
         const fresh = input.log.getConversation(input.conversationId);
         if (!fresh || fresh.title !== null)
             return;
-        input.log.renameConversation(input.conversationId, generated);
+        const safeTitle = redactAgentText(generated);
+        input.log.renameConversation(input.conversationId, safeTitle);
         input.eventBus.emitEvent({
             type: "copilot_run_updated",
             userId: input.userId,
             runId: input.runId,
             conversationId: input.conversationId,
             status: "completed",
-            titleUpdated: generated,
+            titleUpdated: safeTitle,
             occurredAt: new Date()
         });
     }

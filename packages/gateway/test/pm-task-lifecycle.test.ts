@@ -143,6 +143,29 @@ describe('PM task lifecycle reliability',()=>{
   assert.equal(progress.attempt?.consumedNotificationId,undefined);
   await assert.rejects(f.actions.executeOwner('pm.task.execute',input,'interrupt-replay'),/TASK_ALREADY_DISPATCHED/);
   assert.equal(f.state.enters,1);
+  f.eventBus.emitEvent({type:'claude_notification',userId:f.user.id,sessionId:result.session.id,
+   projectId:f.project.id,hookEventName:'Stop',notificationType:'task_completed',message:'Finished later'});
+  assert.equal(f.pm.getWorkItem(f.project.id,item.id)?.status,'ready_for_review');
+  const resolved=getTaskProgress({db:f.db,userId:f.user.id},f.project.id,item.id);
+  assert.equal(resolved.found&&resolved.notifications.length,2);
+  assert.equal(resolved.found&&resolved.evidenceStatus,'available');
+ });
+
+ it('reconciles terminal evidence after more than twenty interruption notices',async()=>{
+  const f=fixture();const item=f.pm.createWorkItem(f.project.id,{title:'Many interruptions'});
+  const input={projectId:f.project.id,workItemId:item.id};
+  const result=await f.actions.executeOwner('pm.task.execute',input,'many-interruptions') as {session:{id:string}};
+  f.supervisor.stop();
+  for(let index=0;index<25;index++) f.eventBus.emitEvent({type:'claude_notification',userId:f.user.id,
+   sessionId:result.session.id,projectId:f.project.id,hookEventName:'Interrupt',
+   notificationType:'task_interrupted',message:`Interrupted ${index}`});
+  f.eventBus.emitEvent({type:'claude_notification',userId:f.user.id,sessionId:result.session.id,
+   projectId:f.project.id,hookEventName:'Stop',notificationType:'task_completed',message:'Finished after interruptions'});
+  const before=getTaskProgress({db:f.db,userId:f.user.id},f.project.id,item.id);
+  assert.equal(before.found&&before.notifications.some(entry=>entry.notificationType==='task_completed'),true);
+  const restored=attachDispatchSupervisor({db:f.db,eventBus:f.eventBus});restored.stop();
+  assert.equal(f.pm.getWorkItem(f.project.id,item.id)?.status,'ready_for_review');
+  assert.equal(f.state.enters,1);
  });
 
  it('fences unknown staging across new intents and never presses Enter on unverifiable staging',async()=>{

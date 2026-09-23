@@ -130,6 +130,24 @@ describe("notification event persistence", () => {
     db.close();
   });
 
+  it("redacts credential-shaped text from notification message and payload fields", () => {
+    const db = createTestDb();
+    try {
+      const user = new UserRepository(db).create("sensitive-hook-notify@example.com", "hash");
+      const eventBus = new ForgeBadgerEventBus();
+      attachNotificationPersistence({ db, eventBus });
+      const marker = "sk-FAKENOTIFICATION123456";
+      eventBus.emitEvent({ type: "claude_notification", userId: user.id,
+        sessionId: "session-1", hookEventName: "Interrupt", notificationType: "task_interrupted",
+        message: `CLI interruption ${marker}`, title: `title ${marker}`,
+        toolName: `Bash-${marker}` });
+      const notification = new NotificationRepository(db, user.id).list()[0];
+      assert.ok(notification);
+      assert.equal(JSON.stringify(notification).includes(marker), false);
+      assert.match(notification.message, /\[REDACTED\]/);
+    } finally { db.close(); }
+  });
+
   it("persists newly allowlisted CLI notifications with mapped title keys", () => {
     const db = createTestDb();
     const user = new UserRepository(db).create("extended-notify@example.com", "hash");

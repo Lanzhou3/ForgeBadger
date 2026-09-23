@@ -14,6 +14,7 @@
  */
 import { eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { redactSensitiveContent } from "../lib/redaction.js";
 
 import { projects, sessions } from "../db/schema.js";
 import type { Database } from "../db/types.js";
@@ -77,19 +78,21 @@ export function ingestTerminalNotification(
     return { handled: false, reason: "deduped" };
   }
 
-  const projectName = row?.projectName;
+  const projectName = row?.projectName ? redactSensitiveContent(row.projectName) : undefined;
+  const message = redactSensitiveContent(mapped.message);
+  const title = mapped.title ? redactSensitiveContent(mapped.title) : undefined;
   eventBus.emitEvent({
     type: "claude_notification",
     userId: session.userId,
     sessionId: session.id,
     projectId: session.projectId,
     ...(projectName ? { projectName } : {}),
-    sessionName: session.name,
+    sessionName: redactSensitiveContent(session.name),
     hookEventName: "Notification",
     notificationType: mapped.type,
-    message: mapped.message,
+    message,
     adapter: session.aiTool,
-    ...(mapped.title ? { title: mapped.title } : {})
+    ...(title ? { title } : {})
   });
   recordActivity({
     db,
@@ -99,7 +102,7 @@ export function ingestTerminalNotification(
     projectId: session.projectId,
     type: mapped.type,
     status: activityStatus(mapped.type),
-    message: mapped.message,
+    message,
     metadata: {
       hookEventName: "Notification",
       notificationType: mapped.type,

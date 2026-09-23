@@ -32,6 +32,7 @@ import { gatewayLoopbackUrl } from "../services/claude-route/gateway-url.js";
 import { cliConfigTargetPath, hashTargetLocator } from "../services/cli-config-target.js";
 import { acquireModelBindingTargetLock, ModelBindingTargetLockError } from "../services/model-binding-target-lock.js";
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
+import { redactSensitiveContent } from "../lib/redaction.js";
 
 const providerBodySchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
@@ -490,7 +491,8 @@ function emitApplyProviderNotification(
   input: ApplyProviderNotificationInput
 ): void {
   if (!eventBus) return;
-  const target = input.providerName ? `${input.providerName} -> ${input.adapter}` : input.adapter;
+  const providerName = input.providerName ? redactSensitiveContent(input.providerName) : undefined;
+  const target = providerName ? `${providerName} -> ${input.adapter}` : input.adapter;
   eventBus.emitEvent({
     type: "app_action_notification",
     userId: input.userId,
@@ -499,10 +501,10 @@ function emitApplyProviderNotification(
     titleKey: input.status === "success"
       ? "notifications.applyProviderSucceeded"
       : "notifications.applyProviderFailed",
-    message: `${input.detail} (${target})`,
+    message: redactSensitiveContent(`${input.detail} (${target})`),
     adapter: input.adapter,
     providerId: input.providerProfileId,
-    ...(input.providerName ? { providerName: input.providerName } : {})
+    ...(providerName ? { providerName } : {})
   });
 }
 

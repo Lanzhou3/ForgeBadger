@@ -205,3 +205,44 @@ FORGEBADGER_REAL_COPILOT_TEST=1 FORGEBADGER_TEST_MODEL_PROFILE=<configured-profi
 
 Only synthetic read-tool requests are sent. `FORGEBADGER_TEST_MODEL_USER` selects the
 owner when multiple accounts have default models. Credentials remain in memory.
+
+
+## Independent agent-design audit follow-up — 2026-09-23
+
+A separately invoked gpt-6-luna code-reviewer inspected the current Copilot
+orchestrator, tool/approval paths, provider replay, task tracking and notification
+boundaries. Three concrete gaps were reproduced with new failing tests:
+
+- Model-produced tool arguments could contain credential-shaped values. Those
+  arguments were written in plaintext into tool steps and transcript rows. The
+  orchestrator now rejects credential-shaped call IDs, names and arguments before
+  it creates any durable tool plan or external action intent, and marks the model
+  step failed. This is intentional fail-closed behavior; it does not silently
+  alter executable arguments or approval digests. Model text is buffered until
+  the complete response can be redacted, because a token can span stream chunks;
+  the cleaned response is then emitted in bounded chunks. Model-generated titles
+  are redacted before conversation storage and event broadcast as well. Review
+  also found that JSON-quoted `api_key` fields bypassed value-only matching;
+  recursive field checks and nested JSON-string coverage close that path.
+- CLI hook message/body/reason/error could reach emitted events, activities and
+  notification payloads without redaction. Hook and terminal-native ingestion now
+  redact before emission; apply-provider and model-sync notifications do the same.
+  Notification persistence independently sanitizes displayed and stored free-text
+  fields. Debug trace hook names are redacted on rejection as well. Task reports
+  use the same redacted content for conversation persistence and run events.
+- The live Kimi work item had a persisted `task_interrupted` notice while its
+  progress response returned no notice and `in_progress`. Attributed interruption
+  is now visible through `pm_get_task_progress` as `evidenceStatus: interrupted`
+  with an explicit inspection step. It remains `in_progress`; no automatic
+  dispatch, false completion or forced blocked transition occurs. A later
+  verified completion/failure notice remains eligible for normal reconciliation,
+  even after more than 20 prior interruptions.
+
+The independent review found no concrete automatic replay of uncertain external
+writes. The three repairs add no new approval prompts for ordinary operations.
+Targeted Gateway verification covered tool safety, encrypted response replay,
+run-ledger checkpoints, provider apply, PM lifecycle, hook normalization, task
+reports and terminal-native notifications. Relevant tests and Gateway typecheck
+and build passed. These are source and isolated-test results, not a live Gateway
+deployment or external CLI lifecycle retest. Known credential-shape redaction
+is not a general detector for arbitrary secret formats.

@@ -6,6 +6,7 @@ import type {
   ForgeBadgerEvent,
   ForgeBadgerEventBus
 } from "./event-bus.js";
+import { redactSensitiveContent } from "../lib/redaction.js";
 
 type PersistableNotificationEvent = ClaudeNotificationEvent | AppActionNotificationEvent;
 
@@ -54,7 +55,8 @@ export function notificationInputFromEvent(event: ForgeBadgerEvent): CreateNotif
       }
       const adapter = event.adapter ?? "claude";
       const titleKey = notificationTitleKey(event.notificationType, adapter);
-      const message = event.toolName ? `${event.toolName}: ${event.message}` : event.message;
+      const safe = redactSensitiveContent;
+      const message = safe(event.toolName ? `${event.toolName}: ${event.message}` : event.message);
       return {
         type: event.type,
         titleKey,
@@ -64,14 +66,14 @@ export function notificationInputFromEvent(event: ForgeBadgerEvent): CreateNotif
         payload: {
           session_id: event.sessionId,
           ...(event.projectId ? { project_id: event.projectId } : {}),
-          ...(event.projectName ? { project_name: event.projectName } : {}),
-          ...(event.sessionName ? { session_name: event.sessionName } : {}),
-          hook_event_name: event.hookEventName,
-          notification_type: event.notificationType,
-          message: event.message,
+          ...(event.projectName ? { project_name: safe(event.projectName) } : {}),
+          ...(event.sessionName ? { session_name: safe(event.sessionName) } : {}),
+          hook_event_name: safe(event.hookEventName),
+          notification_type: safe(event.notificationType),
+          message: safe(event.message),
           adapter,
-          ...(event.title ? { title: event.title } : {}),
-          ...(event.toolName ? { tool_name: event.toolName } : {})
+          ...(event.title ? { title: safe(event.title) } : {}),
+          ...(event.toolName ? { tool_name: safe(event.toolName) } : {})
         }
       };
     }
@@ -80,15 +82,15 @@ export function notificationInputFromEvent(event: ForgeBadgerEvent): CreateNotif
         type: event.type,
         category: "app_action",
         titleKey: event.titleKey,
-        message: event.message,
+        message: redactSensitiveContent(event.message),
         href: "/models",
         payload: {
           action: event.action,
           status: event.status,
-          message: event.message,
+          message: redactSensitiveContent(event.message),
           ...(event.adapter ? { adapter: event.adapter } : {}),
           ...(event.providerId ? { provider_id: event.providerId } : {}),
-          ...(event.providerName ? { provider_name: event.providerName } : {})
+          ...(event.providerName ? { provider_name: redactSensitiveContent(event.providerName) } : {})
         }
       };
     case "session_created":

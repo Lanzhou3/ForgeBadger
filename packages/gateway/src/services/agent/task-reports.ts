@@ -6,6 +6,7 @@ import { readTaskDispatchAttempt } from '../project-manager/task-execution.js';
 import { CopilotRunLedger, type TurnInput } from './run-ledger.js';
 import type { AgentStackDeps } from './agent-stack.js';
 import type { Database } from '../../db/types.js';
+import { redactAgentText } from './redaction.js';
 
 const scanCursors = new WeakMap<Database, Map<string, TaskReportCursor>>();
 
@@ -40,14 +41,14 @@ export function publishTaskReports(deps: AgentStackDeps, userId: string): void {
         const evidence = verified?.notifications[0];
         if (!evidence) return;
         const completed = evidence.notificationType === 'task_completed';
-        const content = [
+        const content = redactAgentText([
           `任务进度：${item.title}`,
           completed ? 'CLI 已报告本轮执行完成；验收结论仍需独立证据。' : `CLI 需要跟进：${evidence.notificationType}。`,
           `会话：/sessions/${attempt.sessionId}`,
           `派发回执：${attempt.originIntentId}；通知证据：${evidence.id}。`,
           '此报告确认派发与 CLI 生命周期结果，不代表测试通过、代码合入或部署完成。',
           ...(attempt.report ? [attempt.report] : []),
-        ].join('\n');
+        ].join('\n'));
         ledger.log.appendMessage(candidate.conversationId, {
           role: 'assistant', kind: 'text', content, toolName: 'pm_task_report', toolCallId: attempt.id,
         });

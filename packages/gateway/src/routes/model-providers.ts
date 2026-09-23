@@ -4,7 +4,7 @@ import { z } from "zod";
 import { authenticate, type AuthenticatedRequest, userIsInstanceAdmin } from "../auth/middleware.js";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import { isForeignKeyError } from "../lib/db-errors.js";
-import { redactSensitiveErrorMessage } from "../lib/redaction.js";
+import { redactSensitiveContent, redactSensitiveErrorMessage } from "../lib/redaction.js";
 import {
   ModelProviderRepository,
   type ModelProfile,
@@ -686,8 +686,8 @@ function emitModelSyncNotification(
     titleKey: input.status === "success"
       ? "notifications.modelSyncSucceeded"
       : "notifications.modelSyncFailed",
-    message: `${input.detail} (${input.provider.name})`,
+    message: redactSensitiveContent(`${input.detail} (${input.provider.name})`),
     providerId: input.provider.id,
-    providerName: input.provider.name
+    providerName: redactSensitiveContent(input.provider.name)
   });
 }
