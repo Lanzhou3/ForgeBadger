@@ -32,6 +32,10 @@ export interface ModelForm {
   /** Free-form supplement for capabilities outside the common set. */
   customCapabilities: string;
   contextWindow: string;
+  /** Checked thinking effort levels (Kimi Code support_efforts). */
+  supportEfforts: string[];
+  /** Default thinking effort (Kimi Code default_effort); "" = unset. */
+  defaultEffort: string;
 }
 
 export type DeleteTarget =
@@ -110,6 +114,8 @@ export const emptyModel: ModelForm = {
   capabilities: ["chat", "code"],
   customCapabilities: "",
   contextWindow: "",
+  supportEfforts: [],
+  defaultEffort: "",
 };
 
 export function adapterLabel(adapter: ProviderSupportedAdapter): string {
@@ -207,7 +213,15 @@ export function authTypeHint(authType: ProviderAuthType, t: Translate): string {
 }
 
 /** Common capability tags offered as one-tap checkboxes in the model form. */
-export const COMMON_MODEL_CAPABILITIES = ["chat", "code", "vision", "tools", "reasoning", "embedding"] as const;
+export const COMMON_MODEL_CAPABILITIES = ["chat", "code", "vision", "video", "tools", "reasoning", "embedding"] as const;
+
+/**
+ * Thinking effort levels understood by Kimi Code model entries
+ * (config.toml support_efforts / default_effort). Mirrors the Gateway enum;
+ * Codex's minimal|low|medium|high request-parameter ladder is a separate
+ * mechanism and is not part of this list.
+ */
+export const THINKING_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export function parseCapabilities(input: string): string[] {
   const seen = new Set<string>();

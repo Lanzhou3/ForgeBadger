@@ -5,7 +5,13 @@
  */
 export type CliAccountAdapter = "claude" | "codex" | "kimi";
 
-export type CliLoginState = "ready" | "not_authenticated" | "cli_missing" | "unknown";
+/**
+ * `custom_endpoint` (claude): the effective global config points
+ * ANTHROPIC_BASE_URL at a non-Anthropic endpoint (Gateway loopback route or
+ * third-party compatible relay), so a "native login" claim would be
+ * misleading even when `claude auth status` reports loggedIn.
+ */
+export type CliLoginState = "ready" | "custom_endpoint" | "not_authenticated" | "cli_missing" | "unknown";
 
 export interface CliLoginStatus {
   adapter: CliAccountAdapter;

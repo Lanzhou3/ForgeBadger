@@ -5,10 +5,12 @@ import {
   appliedStatusForAdapter,
   authTypeLabel,
   balanceEntryUsedPercent,
+  COMMON_MODEL_CAPABILITIES,
   isProviderActiveOnAdapter,
   mergeCapabilities,
   parseCapabilities,
   splitCapabilities,
+  THINKING_EFFORT_LEVELS,
   type Translate,
 } from "./shared";
 import type { AdapterAppliedStatus } from "@/lib/api";
@@ -75,6 +77,16 @@ describe("capability helpers", () => {
       checked: ["chat", "vision"],
       custom: "long-context",
     });
+  });
+});
+
+describe("model form constants", () => {
+  it("exposes the Kimi Code thinking effort levels in order", () => {
+    expect([...THINKING_EFFORT_LEVELS]).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+
+  it("keeps video among the common capability tags", () => {
+    expect(COMMON_MODEL_CAPABILITIES).toContain("video");
   });
 });
 

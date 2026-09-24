@@ -33,7 +33,7 @@ function fixture(t: TestContext, check = passingCheck) {
   const project = new ProjectRepository(db, user.id).create({ name: 'process-fixture', path: projectRoot, aiTool: 'codex' });
   const plan = { projectId: project.id, goal: 'Fix approved sum', sourceFiles: ['sum.cjs', 'sum.test.cjs'], changes: [{ path: 'sum.cjs', beforeSha256: hashText(originalSource), content: 'module.exports=(a,b)=>a+b;' }], checks: [{ path: 'sum.test.cjs', sha256: hashText(check) }] };
   const config = path.join(dir, 'fixture.json');
-  fs.writeFileSync(config, JSON.stringify({ database, userId: user.id, plan }));
+  fs.writeFileSync(config, JSON.stringify({ database, userId: user.id, projectRoot, plan }));
   db.close();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return { dir, database, config, projectRoot, userId: user.id, projectId: project.id };

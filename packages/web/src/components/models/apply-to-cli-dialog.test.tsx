@@ -25,7 +25,7 @@ function makeModel(overrides: Partial<ModelProfile> = {}): ModelProfile {
   return {
     id: "model-1", providerProfileId: "provider-1", providerKey: "custom", providerName: "Custom",
     baseUrl: "https://example.com/v1", name: "First Model", modelId: "m-1",
-    capabilities: [], contextWindow: null, status: "active", isDefault: true, ...overrides
+    capabilities: [], contextWindow: null, supportEfforts: [], defaultEffort: null, status: "active", isDefault: true, ...overrides
   };
 }
 

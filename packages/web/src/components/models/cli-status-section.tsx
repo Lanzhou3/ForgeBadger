@@ -123,12 +123,12 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
                   activeHere ? "border-emerald-500/40 bg-emerald-500/5" : "border-border/70 bg-muted/20"
                 }`}
               >
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="inline-flex min-w-0 items-center gap-1.5 text-sm font-medium">
                     <CliBrandIcon aiTool={adapter} className="size-4 shrink-0" />
                     <span className="truncate">{brand.label}</span>
                   </span>
-                  <span className="flex shrink-0 items-center gap-1">
+                  <span className="flex flex-wrap items-center gap-1">
                     {routedHere && (
                       <Badge variant="secondary" className="text-[10px]">
                         {t("models.claudeRouteBadge")}
@@ -235,11 +235,23 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
 
 /**
  * Native login badge for the claude/codex/kimi cards. cli_missing renders
- * nothing (the install badge already says so); unknown degrades to a muted
- * badge instead of an error state.
+ * nothing (the install badge already says so); custom_endpoint (routed
+ * Claude) renders a neutral badge because a first-party login claim would be
+ * misleading; unknown degrades to a muted badge instead of an error state.
  */
 function CliLoginBadge({ login, t }: { login: CliLoginStatus; t: Translate }) {
   if (login.state === "cli_missing") return null;
+  if (login.state === "custom_endpoint") {
+    return (
+      <Badge
+        variant="outline"
+        className="text-[10px] text-muted-foreground"
+        title={t("models.cliAccountCustomEndpointHint")}
+      >
+        {t("models.cliAccountCustomEndpoint")}
+      </Badge>
+    );
+  }
   if (login.state === "ready") {
     const method = loginMethodLabel(login.method, t);
     return (

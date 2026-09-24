@@ -154,6 +154,8 @@ export default function ModelsPage() {
         capabilities: checked,
         customCapabilities: custom,
         contextWindow: selectedModel.contextWindow ? String(selectedModel.contextWindow) : "",
+        supportEfforts: selectedModel.supportEfforts,
+        defaultEffort: selectedModel.defaultEffort ?? "",
       });
     } else {
       setModelForm(emptyModel);
@@ -314,6 +316,7 @@ export default function ModelsPage() {
     name: modelForm.name.trim(),
     modelId: modelForm.modelId.trim(),
     capabilities: mergeCapabilities(modelForm.capabilities, modelForm.customCapabilities),
+    supportEfforts: modelForm.supportEfforts,
   });
 
   const modelMutation = useMutation({
@@ -323,6 +326,7 @@ export default function ModelsPage() {
         ...(modelForm.contextWindow.trim()
           ? { contextWindow: Number(modelForm.contextWindow.trim()) }
           : {}),
+        ...(modelForm.defaultEffort ? { defaultEffort: modelForm.defaultEffort } : {}),
       }),
     onSuccess: async (result) => {
       setModelForm(emptyModel);
@@ -342,6 +346,7 @@ export default function ModelsPage() {
         contextWindow: modelForm.contextWindow.trim()
           ? Number(modelForm.contextWindow.trim())
           : null,
+        defaultEffort: modelForm.defaultEffort || null,
       });
     },
     onSuccess: async (result) => {

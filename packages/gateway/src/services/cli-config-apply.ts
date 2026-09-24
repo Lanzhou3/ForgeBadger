@@ -26,6 +26,7 @@ import {
 } from "./cli-config-fs.js";
 import { cliConfigTargetPath, globalConfigRoot } from "./cli-config-target.js";
 import { gatewayLoopbackUrl } from "./claude-route/gateway-url.js";
+import { projectedKimiCapabilities } from "./model-capability-projection.js";
 import {
   assertResolvedPublicHttpsEndpoint,
   type OutboundHostResolver
@@ -753,18 +754,45 @@ function buildApplyDocument(
   };
   if (context.baseUrl) definition.base_url = context.baseUrl;
   providers[context.providerKey] = definition;
-  // Additive semantics (matching the opencode branch): upsert
-  // every active model of the provider as an alias so the /model picker in
-  // Kimi Code can switch between them; default_model pins the selected one.
+  // Merge-style upsert (matching the opencode/PI branches): every active
+  // model of the provider becomes an alias the Kimi Code /model picker can
+  // switch to. Managed keys are provider/model/display_name/max_context_size,
+  // the capability projection, and the per-model thinking effort fields; any
+  // other hand-written key on the alias entry survives the ...current spread.
   const models = record(doc.models);
   for (const activeModel of context.activeModels) {
-    models[`${context.providerKey}/${activeModel.modelId}`] = {
+    const alias = `${context.providerKey}/${activeModel.modelId}`;
+    const current = record(models[alias]);
+    const next: Record<string, unknown> = {
+      ...current,
       provider: context.providerKey,
       model: activeModel.modelId,
-      max_context_size: activeModel.contextWindow && activeModel.contextWindow > 0
-        ? activeModel.contextWindow
-        : kimiDefaultMaxContextSize
+      display_name: activeModel.name
     };
+    // Profile value wins; then the entry's own positive value (Kimi
+    // hard-errors on a custom model without one); then the 256k floor.
+    next.max_context_size = activeModel.contextWindow && activeModel.contextWindow > 0
+      ? activeModel.contextWindow
+      : typeof current.max_context_size === "number" && current.max_context_size > 0
+        ? current.max_context_size
+        : kimiDefaultMaxContextSize;
+    // capabilities = existing ∪ projection: hand-written tags are never
+    // removed, and an empty projection leaves the entry untouched.
+    const projected = projectedKimiCapabilities(activeModel.capabilities);
+    if (projected.length > 0) {
+      const base = Array.isArray(current.capabilities)
+        ? current.capabilities.filter((value): value is string => typeof value === "string")
+        : [];
+      next.capabilities = [...base, ...projected.filter((value) => !base.includes(value))];
+    }
+    // support_efforts / default_effort are managed keys: written when the
+    // profile declares them, removed otherwise so a re-apply never pins a
+    // stale effort.
+    if (activeModel.supportEfforts.length > 0) next.support_efforts = activeModel.supportEfforts;
+    else delete next.support_efforts;
+    if (activeModel.defaultEffort) next.default_effort = activeModel.defaultEffort;
+    else delete next.default_effort;
+    models[alias] = next;
   }
   doc.providers = providers;
   doc.models = models;

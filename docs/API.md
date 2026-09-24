@@ -99,7 +99,7 @@ local users with role/status metadata. `PATCH` accepts:
 `role` is `admin` or `user`; `status` is `active` or `disabled`. Admins cannot
 demote or disable their own account. PRD-mentioned `editor` and `readonly`
 roles are intentionally out of scope for the local-first MVP; see the role
-model decision in `docs/TECH-ARCHITECTURE.md`（二、数据模型设计,`users` 表结构与注释）。
+model decision in `docs/TECH-ARCHITECTURE.md`ï¼äºãæ°æ®æ¨¡åè®¾è®¡,`users` è¡¨ç»æä¸æ³¨éï¼ã
 
 ### Dashboard
 
@@ -186,15 +186,15 @@ Authenticated REST endpoints are mounted under the project-scoped prefix
 Development stages and work-item dependencies are durable state introduced by
 `packages/gateway/src/db/migrations/0045_dev_task_stages.sql`:
 
-- `project_manager_stages` — ordered SDLC lanes (`position`, status
+- `project_manager_stages` â ordered SDLC lanes (`position`, status
   `active` / `completed` / `archived`). `POST /stages/seed-template` creates
-  the standard 需求分析 → 架构设计 → 编码实现 → 测试验证 → 发布交付 flow once
+  the standard éæ±åæ â æ¶æè®¾è®¡ â ç¼ç å®ç° â æµè¯éªè¯ â åå¸äº¤ä» flow once
   per project; `POST /stages/reorder` requires the exact stage id set and
   rewrites sequential positions; deleting a stage moves its work items back
   to the backlog (`stage_id = NULL`).
-- `project_manager_work_items.stage_id` — optional stage assignment settable
+- `project_manager_work_items.stage_id` â optional stage assignment settable
   through work-item create/patch (`stageId`, `null` clears).
-- `project_manager_work_item_links` — blocked-by edges
+- `project_manager_work_item_links` â blocked-by edges
   (`blocker_work_item_id` blocks `blocked_work_item_id`) with a unique pair
   index. Self links, duplicates, and direct or transitive cycles are rejected
   (`400`); deleting a work item removes its links. Stage and dependency
@@ -491,15 +491,15 @@ unsupported grant capabilities are rejected.
 | Method/path | Input and returned `data` |
 |---|---|
 | `GET /copilot/grants` | `{grants,capabilities}`; capabilities contain `id`, `capability`, `effect`. |
-| `POST /copilot/grants` | `{name,projectIds,allOperations?,capabilities?,allowedRoots?,expiresAt,maxActions,maxConcurrency?}` → `{grant}`. Expiry is Unix milliseconds; concurrency defaults to 1. |
+| `POST /copilot/grants` | `{name,projectIds,allOperations?,capabilities?,allowedRoots?,expiresAt,maxActions,maxConcurrency?}` â `{grant}`. Expiry is Unix milliseconds; concurrency defaults to 1. |
 | `POST /copilot/grants/:id/revoke` | `{grant}`; advances the revision and cancels active bound runs. |
 | `DELETE /copilot/grants/:id` | `{deleted:true}`; only revoked grants can be removed from lists. Repeated deletion is idempotent; active grants return 409. Historical bindings and audit references remain. |
-| `POST /platform-actions/preview` | `{commandId,input,idempotencyKey,grantId?}` → `{intent}`. No effect is executed. |
+| `POST /platform-actions/preview` | `{commandId,input,idempotencyKey,grantId?}` â `{intent}`. No effect is executed. |
 | `GET /platform-actions/:id` | `{intent,receipt}`; receipt is null before an outcome exists. |
-| `POST /platform-actions/:id/decide` | `{digest,approved}` → `{intent}`. Digest must match the immutable preview. |
+| `POST /platform-actions/:id/decide` | `{digest,approved}` â `{intent}`. Digest must match the immutable preview. |
 | `POST /platform-actions/:id/execute` | `{receipt}`; requires a currently valid approved intent. Duplicate confirmed execution returns the stored receipt. |
 | `GET /project-manager/overview?grantId=...` | `{projects,observedAt}`; an unavailable, revoked or expired requested grant returns 403. Omitted grant lists the owner's projects. |
-| `PATCH /projects/:id/project-manager/management` | `{expectedRevision,mode?,ownerLabel?,nextAction?,freshnessHours?}` → `{management}`. Mode is `manual` or `cli`; stale revisions conflict. |
+| `PATCH /projects/:id/project-manager/management` | `{expectedRevision,mode?,ownerLabel?,nextAction?,freshnessHours?}` â `{management}`. Mode is `manual` or `cli`; stale revisions conflict. |
 | `GET /sessions/:id/writer` | `{sessionId,mode,autonomy}`; mode is `manual` or `automated`; autonomy is `manual_only` unless the session adapter is listed in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` (then `supervised`). |
 | `POST /sessions/:id/takeover` | `{sessionId,takenOver}`; invalidates the old automatic writer before manual input resumes. |
 
@@ -534,7 +534,7 @@ Task preparation creates/links an idle session and never launches or submits a
 prompt. `pm.task.execute` composes prepare + session start + programmatic
 prompt delivery and marks the work item in progress; `session.dispatch`
 delivers a message into a live session. Both require the target adapter to be
-listed in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` (default empty) — otherwise they
+listed in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` (default empty) â otherwise they
 reject with `ADAPTER_AUTONOMY_UNVERIFIED` before any effect. Delivery uses
 bracketed-paste staging plus a single Enter with consumption confirmation;
 indeterminate delivery surfaces as `COPILOT_DELIVERY_UNCONFIRMED` and is never
@@ -642,8 +642,8 @@ Import behavior:
 Template extraction:
 
 - `POST /api/v1/projects/:id/templates` reads the project's AI CLI config
-  files — according to the stored `aiTool` hint, or an explicit `adapter` in
-  the body (`claude` | `opencode` | `codex` | `kimi`) — and creates a new
+  files â according to the stored `aiTool` hint, or an explicit `adapter` in
+  the body (`claude` | `opencode` | `codex` | `kimi`) â and creates a new
   tenant-owned custom template from them. CLI-agnostic projects must pass an
   explicit `adapter`; the request fails with `400` otherwise. Body:
   `{ name, description?, adapter?, bind? }`. On success (201) the response
@@ -689,7 +689,7 @@ Project template binding:
 - `PATCH /api/v1/projects/:id` updates the project's template tracking
   relationship. The body accepts an optional `templateId` field with three
   states: omitted (leave the binding unchanged), explicit `null` (untrack the
-  project — the record keeps its files untouched and becomes "independent
+  project â the record keeps its files untouched and becomes "independent
   config"), or a non-empty template id (switch/bind to that template; the
   template must exist and belong to the same user, otherwise `404`).
 - Untracking is a platform-level relationship change only: it never deletes,
@@ -870,13 +870,13 @@ Delete semantics: a delete requires a confirmed stop receipt from the Session
 Server daemon; while the stop is unconfirmed (the CLI exited but a descendant
 still holds the process group, or the runtime is briefly unreachable) the
 request fails with `409 SESSION_RUNTIME_STOP_UNCONFIRMED` and the row plus its
-durable stop proof are kept — retry once the leftover processes exit. A
+durable stop proof are kept â retry once the leftover processes exit. A
 pending stop proof also blocks project deletion; force-delete the session
 first in that case.
 
 `?force=true` is the operator escape hatch: it is rejected with
 `409 SESSION_FORCE_DELETE_NOT_ALLOWED` while the daemon reports the runtime
-leader still `running` (or the runtime state cannot be verified — the gate
+leader still `running` (or the runtime state cannot be verified â the gate
 fails closed). Once the leader has exited (`exited`/`error`, or the runtime is
 absent from the daemon), force delete revokes the pending stop confirmation,
 makes a best-effort kill, records a `session_force_deleted` activity, and
@@ -899,7 +899,7 @@ environment.
 session so read-only surfaces (session lists, board) can label it. Body:
 
 ```json
-{ "prompt": "修一下登录页" }
+{ "prompt": "ä¿®ä¸ä¸ç»å½é¡µ" }
 ```
 
 The prompt is trimmed and must be non-empty (`400` otherwise); values longer
@@ -930,14 +930,14 @@ overrides are honored):
 - `GET /api/v1/cli-config/adapters`
 - `GET /api/v1/cli-config/:adapter`
 - `GET /api/v1/cli-config/:adapter/file?path=<name>`
-- `PUT /api/v1/cli-config/:adapter/file` — raw file write (whitelisted file names, 128 KB cap, atomic write, mode `0600`)
-- `GET /api/v1/cli-config/:adapter/fields` — static curated field schema
-- `GET /api/v1/cli-config/:adapter/field-values` — current values with secrets redacted
-- `PATCH /api/v1/cli-config/:adapter/fields` — body `{ "updates": { "<fieldKey>": value | null } }`; `null` deletes the key, unknown keys / enum / type mismatches are rejected before any write, and an empty `updates` object is a no-op that does not rewrite (and reformat) the file
+- `PUT /api/v1/cli-config/:adapter/file` â raw file write (whitelisted file names, 128 KB cap, atomic write, mode `0600`)
+- `GET /api/v1/cli-config/:adapter/fields` â static curated field schema
+- `GET /api/v1/cli-config/:adapter/field-values` â current values with secrets redacted
+- `PATCH /api/v1/cli-config/:adapter/fields` â body `{ "updates": { "<fieldKey>": value | null } }`; `null` deletes the key, unknown keys / enum / type mismatches are rejected before any write, and an empty `updates` object is a no-op that does not rewrite (and reformat) the file
 - `PUT /api/v1/cli-config/:adapter/providers/:providerId`
 - `DELETE /api/v1/cli-config/:adapter/providers/:providerId`
-- `PUT /api/v1/cli-config/:adapter/models` — body carries `alias` (Kimi only; aliases may contain `/`)
-- `DELETE /api/v1/cli-config/:adapter/models` — body carries `alias`
+- `PUT /api/v1/cli-config/:adapter/models` â body carries `alias` (Kimi only; aliases may contain `/`)
+- `DELETE /api/v1/cli-config/:adapter/models` â body carries `alias`
 - `PUT /api/v1/cli-config/:adapter/default-model`
 - `POST /api/v1/cli-config/:adapter/apply-provider/preview`
 - `POST /api/v1/cli-config/:adapter/apply-provider`
@@ -981,22 +981,24 @@ Model selection is adapter-specific:
 - **Codex**: `modelProfileId` selects `model`; `reasoningEffort`
   (`minimal|low|medium|high`) is written as `model_reasoning_effort` and
   removed when omitted. `modelMapping` is rejected.
-- **OpenCode**: apply is additive — the provider entry is upserted with all
+- **OpenCode**: apply is additive â the provider entry is upserted with all
   active models of the provider, and the user-owned top-level `model` key is
   never touched. `modelProfileId` is ignored.
-- **Kimi**: `modelProfileId` selects `default_model`.
+- **Kimi**: `modelProfileId` selects `default_model`; the profile's
+  capability tags and thinking-effort fields are projected into the Kimi
+  Code `config.toml` alias entries (see Model Providers below).
 
 `modelProfileId` defaults to the provider's default model and `credentialId`
 to its first active credential. Preview returns `{ preview }` with per-file
 `targetPath`, redacted `current`/`proposed` content, `changedFields`, and
 `warnings`, without touching disk; per-file `operation` is one of
 `create | update | delete | none` (`delete` applies to a Codex `auth.json`
-whose last managed field was removed — Codex errors on an empty `auth.json`
+whose last managed field was removed â Codex errors on an empty `auth.json`
 but shows the login screen when the file is missing). Apply validates the
 provider base URL
 through the SSRF guard, takes an exclusive cross-process target lock, writes
 an AES-256-GCM-encrypted backup under the state directory, then atomically
-writes each target file with mode `0600` — including the plaintext credential,
+writes each target file with mode `0600` â including the plaintext credential,
 matching each CLI's native config format. Unsafe targets (for example
 symlinks) are rejected
 before any write, and a multi-file failure rolls back the files already
@@ -1012,7 +1014,7 @@ hooks into `.claude/settings.local.json` before Session Server launch.
 OpenAI is a normal verified provider. Applying a provider to Codex writes
 `model`, `model_provider`, and a `model_providers.<id>` entry with `base_url`,
 `wire_api = "responses"`, and `experimental_bearer_token` (the API key) into
-`~/.codex/config.toml` — the Codex 0.149+ provider-table layout, where third-party
+`~/.codex/config.toml` â the Codex 0.149+ provider-table layout, where third-party
 credentials live in the provider table. The legacy `OPENAI_API_KEY` slot is
 removed from `~/.codex/auth.json` (other existing `auth.json` fields such as
 ChatGPT login tokens are preserved); an `auth.json` left empty by that removal
@@ -1037,13 +1039,13 @@ the full provider/profile/model/credential inventory.
 - `GET /api/v1/model-providers`
 - `POST /api/v1/model-providers`
 - `PATCH /api/v1/model-providers/:id`
-- `DELETE /api/v1/model-providers/:id` — typed `409
+- `DELETE /api/v1/model-providers/:id` â typed `409
   PROVIDER_IN_USE_BY_SESSION` takes precedence over
   `PROVIDER_IN_USE_BY_BINDING`; active and revoked references remain intact.
 - `GET /api/v1/model-providers/:id/models`
 - `POST /api/v1/model-providers/:id/models`
 - `PATCH /api/v1/model-providers/:id/models/:modelId`
-- `DELETE /api/v1/model-providers/:id/models/:modelId` — typed `409
+- `DELETE /api/v1/model-providers/:id/models/:modelId` â typed `409
   MODEL_IN_USE_BY_SESSION` takes precedence over `MODEL_IN_USE_BY_BINDING`.
 - `POST /api/v1/model-providers/:id/models/sync`
 - `GET /api/v1/model-providers/applied`
@@ -1062,8 +1064,30 @@ bounded at 20 pages) so full model inventories are collected. Sync only adds
 missing models; existing model profiles are left untouched. When the
 provider's model list reports a context size (`context_length`,
 `context_window`, `max_context_length`, or `max_input_tokens`), sync fills it
-into the created model profile's `contextWindow` — Claude applies then inject
+into the created model profile's `contextWindow` â Claude applies then inject
 it as `CLAUDE_CODE_MAX_CONTEXT_TOKENS`/`CLAUDE_CODE_AUTO_COMPACT_WINDOW`.
+
+Model profiles also carry `supportEfforts` â an array drawn from
+`low | medium | high | xhigh | max` (Kimi Code's effort ladder; Codex uses
+its own `minimal|low|medium|high` and is not part of this enum) â and
+`defaultEffort`, one of the selected levels or `null`. Create and patch
+reject a `defaultEffort` that is not among the profile's
+`supportEfforts`. On PATCH, omitting either field keeps the stored value;
+an explicit `[]` or `null` clears it. When a provider is applied to Kimi
+Code, both fields are projected into the `~/.kimi-code/config.toml` alias
+entries under `[models]`, keyed by the `<providerKey>/<modelId>` alias:
+`supportEfforts` becomes `support_efforts` and `defaultEffort` becomes
+`default_effort` (each removed on re-apply when unset, so a stale effort
+is never pinned). The profile's capability tags are projected the same
+way: `vision` â `image_in`, `video` â `video_in`, `audio` â `audio_in`,
+`reasoning` â `thinking`, `tools` â `tool_use` (`chat`, `code`,
+`embedding`, and `always_thinking` have no Kimi Code counterpart and are
+not written). Alias entries are upserted by merge: every other
+hand-written key survives, projected capabilities are unioned with any
+hand-written ones (de-duplicated, first-seen order), and
+`max_context_size` is the profile's `contextWindow` when positive,
+otherwise the entry's existing positive value, otherwise the 262144
+default.
 
 `POST /api/v1/model-providers/:id/balance` checks the remaining balance or
 subscription quota for providers with a known endpoint, detected from the
@@ -1117,7 +1141,7 @@ by pre-decoupling records; those references remain intact.
 The web console ships a static, client-side list of provider presets
 (endpoints, auth type, API format) that prefill the add-provider form.
 Presets never carry model lists, there is no server-side
-preset catalog API, and no models are seeded at creation — the model list is
+preset catalog API, and no models are seeded at creation â the model list is
 always synced live from the configured provider endpoint.
 
 Creating a Provider Profile:
@@ -1322,7 +1346,7 @@ console rescan action.
 GitHub-backed install fetches single-file `SKILL.md` content through the
 GitHub REST API (no git client) and pins every install to a resolved commit
 SHA. All requests are HTTPS-only, validated against the outbound host
-blocklist (including every redirect hop), bounded by a ≤30s timeout, and
+blocklist (including every redirect hop), bounded by a â¤30s timeout, and
 limited to `api.github.com` / `raw.githubusercontent.com`. Repositories whose
 git tree exceeds 1000 entries (or is truncated) are rejected. `GITHUB_TOKEN`
 may be configured to raise the anonymous 60 req/h API limit; ForgeBadger sends
@@ -1579,7 +1603,7 @@ in the path or `X-ForgeBadger-Session-Id`. The payload may carry an optional
 - `DELETE /api/v1/mcp/tokens/:id`
 
 The Gateway can expose a Model Context Protocol server for external AI agents
-(Claude Code, Kimi Code, Cursor, …). It is mounted only when
+(Claude Code, Kimi Code, Cursor, â¦). It is mounted only when
 `FORGEBADGER_MCP_ENABLED=true`; otherwise `/mcp` and the token routes return
 `404`. The transport is Streamable HTTP in stateless mode: every `POST` is
 independent, no SSE streams or session state are kept, and `GET`/`DELETE`
@@ -1588,11 +1612,11 @@ response envelope.
 
 Authentication uses long-lived access tokens managed through the REST routes
 above (standard JWT/session auth + envelope). `POST /api/v1/mcp/tokens` accepts
-`{ name, scopes? }` (`scopes ⊆ ["read","operate"]`, default `["read"]`) and
-returns the plaintext token (`fbmcp_…`) exactly once; only its SHA-256 hash is
+`{ name, scopes? }` (`scopes â ["read","operate"]`, default `["read"]`) and
+returns the plaintext token (`fbmcp_â¦`) exactly once; only its SHA-256 hash is
 stored. `GET` lists the caller's tokens without any secret material; `DELETE`
 revokes immediately. MCP requests present the token as
-`Authorization: Bearer fbmcp_…`; the owning user's status is re-read on every
+`Authorization: Bearer fbmcp_â¦`; the owning user's status is re-read on every
 request and revocation takes effect at once.
 
 The tool surface reuses the native Copilot platform tools
@@ -1617,14 +1641,14 @@ home directory) are refused rather than auto-approved, and `write_memory` with
 `scope: "session"` is rejected because session memory is bound to a Copilot
 conversation. Error responses on this endpoint use JSON-RPC error envelopes
 (`-32700` parse error, `-32603` internal error), never the project REST
-envelope. Tenant isolation is unchanged — all tools
+envelope. Tenant isolation is unchanged â all tools
 execute with the token owner's `userId`.
 
 Client configuration example (Claude Code):
 
 ```bash
 claude mcp add --transport http forgebadger http://127.0.0.1:48731/mcp \
-  --header "Authorization: Bearer fbmcp_…"
+  --header "Authorization: Bearer fbmcp_â¦"
 ```
 
 ## 4. WebSocket Contract
@@ -1740,15 +1764,15 @@ endpoints do not themselves expose a public inbound relay.
 
 | Method | Path | Body / result |
 |---|---|---|
-| POST | `/pairings` | `{ channel: "feishu", accountId }` → `{ pairing, token }`; 201, token returned once, expires in 10 minutes |
+| POST | `/pairings` | `{ channel: "feishu", accountId }` â `{ pairing, token }`; 201, token returned once, expires in 10 minutes |
 | GET | `/pairings` | `{ pairings }`; latest 100, excludes token and hash |
-| POST | `/pairings/:id/confirm` | `{ revision, externalUserId, chatId }` matching the claimed record → `{ identity }` |
-| POST | `/pairings/:id/cancel` | `{}` → `{ cancelled: true }` |
+| POST | `/pairings/:id/confirm` | `{ revision, externalUserId, chatId }` matching the claimed record â `{ identity }` |
+| POST | `/pairings/:id/cancel` | `{}` â `{ cancelled: true }` |
 | GET | `/identities` | `{ identities }`; latest 100 |
-| POST | `/identities/:id/revoke` | `{}` → `{ revoked: true }`; also revokes identity routes and outstanding account pairings |
-| POST | `/routes` | `{ identityId, grantId }` → `{ route }`; 201, creates a fresh native grant-bound conversation atomically |
+| POST | `/identities/:id/revoke` | `{}` â `{ revoked: true }`; also revokes identity routes and outstanding account pairings |
+| POST | `/routes` | `{ identityId, grantId }` â `{ route }`; 201, creates a fresh native grant-bound conversation atomically |
 | GET | `/routes` | `{ routes }`; latest 100 |
-| POST | `/routes/:id/revoke` | `{}` → `{ revoked: true }` |
+| POST | `/routes/:id/revoke` | `{}` â `{ revoked: true }` |
 
 A trusted SDK transport must first claim a pairing using the private sender/chat
 and current account revision; there is deliberately no public claim/admission
@@ -1925,7 +1949,7 @@ history and is not a physical purge of historical records.
 
 Channel connection alone does not authorize remote operations. The channel page
 shows whether a current, valid identity/grant route exists and provides an explicit
-“启用飞书远程操作” action after selection. Creating a project grant alone does not
+âå¯ç¨é£ä¹¦è¿ç¨æä½â action after selection. Creating a project grant alone does not
 bind it to Feishu. Previously rejected messages are not replayed on activation;
 send a new message after binding.
 
@@ -2075,7 +2099,7 @@ An owner does not inherit another executor's terminal, attach token or session I
 Adding a member uses an existing active account's email; it sends no invitation.
 
 All path IDs, `verificationId` and `idempotencyKey` are UUIDs. `expectedCommit` is a
-40–64 character lowercase hexadecimal commit ID. Bodies are strict objects: unknown
+40â64 character lowercase hexadecimal commit ID. Bodies are strict objects: unknown
 fields are rejected, and archive/close require `{}`. Task updates require
 `expectedRevision >= 1`. Refresh after
 revision conflicts instead of silently overwriting newer data.
@@ -2089,26 +2113,26 @@ start the AI CLI or submit a prompt.
 
 | Method | Path | Request body / query | Response `data` |
 | --- | --- | --- | --- |
-| GET | `/projects` | — | `{ projects: ProjectSummary[] }` |
-| GET | `/projects/:projectId` | — | `{ project: ProjectDetail, members: Member[], tasks: Task[], events: Event[] }` |
+| GET | `/projects` | â | `{ projects: ProjectSummary[] }` |
+| GET | `/projects/:projectId` | â | `{ project: ProjectDetail, members: Member[], tasks: Task[], events: Event[] }` |
 | POST | `/projects/:projectId/archive` | `{}` | `{ archived: true }` |
 | PUT | `/projects/:projectId/members` | `{ email, role: "developer" or "reviewer" or "viewer" }` | `{ members: Member[] }` |
-| DELETE | `/projects/:projectId/members/:userId` | — | `{ revoked: true, pendingStops: number }` |
+| DELETE | `/projects/:projectId/members/:userId` | â | `{ revoked: true, pendingStops: number }` |
 | POST | `/projects/:projectId/tasks` | `TaskCreate` | **201** `{ task: Task }` |
 | PATCH | `/projects/:projectId/tasks/:taskId` | `{ expectedRevision, ...partial TaskCreate }` | `{ task: Task }` |
-| GET | `/projects/:projectId/tasks/:taskId` | — | `{ task: Task, comments: Comment[], runs: Run[] }` |
+| GET | `/projects/:projectId/tasks/:taskId` | â | `{ task: Task, comments: Comment[], runs: Run[] }` |
 | POST | `/projects/:projectId/tasks/:taskId/comments` | `{ text }` | **201** `{ comment: Comment }` |
 | POST | `/projects/:projectId/tasks/:taskId/runs` | `{ aiTool, idempotencyKey }` | **201** `{ run: Run }` |
-| GET | `/projects/:projectId/runs/:runId` | — | `{ run: Run, git: GitState, verifications: Receipt[], reviews: Review[] }` |
+| GET | `/projects/:projectId/runs/:runId` | â | `{ run: Run, git: GitState, verifications: Receipt[], reviews: Review[] }` |
 | GET | `/projects/:projectId/runs/:runId/diff` | `?path=<relative file path>` | `{ diff: string }` |
 | PATCH | `/projects/:projectId/runs/:runId/links` | `{ previewUrl: string or null, prUrl: string or null }` | `{ run: Run }` |
 | POST | `/projects/:projectId/runs/:runId/review` | `{ expectedCommit, verificationId, decision: "accepted" or "changes_requested", note }` | `{ review: Review }` |
 | POST | `/projects/:projectId/runs/:runId/integrate` | `{ expectedCommit }` | `{ run: Run }` |
 | POST | `/projects/:projectId/runs/:runId/recover` | `{ idempotencyKey }` | `{ run: Run }` for the **new** execution |
 | POST | `/projects/:projectId/runs/:runId/close` | `{}` | `{ run: Run }` |
-| GET | `/projects/:projectId/runs/:runId/handoff` | — | `{ markdown: string }` |
+| GET | `/projects/:projectId/runs/:runId/handoff` | â | `{ markdown: string }` |
 
-`TaskCreate` requires trimmed `title` (1–200 characters) and `acceptanceCriteria`
+`TaskCreate` requires trimmed `title` (1â200 characters) and `acceptanceCriteria`
 (up to 50 trimmed nonempty entries, each up to 1,000 characters). Optional
 `description` is at most 10,000 characters; optional `assigneeId`/`reviewerId` may be
 UUIDs or null.
@@ -2126,7 +2150,7 @@ cannot configure programs or enable execution. Links must be
 HTTP(S), at most 2,048 characters, with no embedded credentials; both link fields
 are required on update, and null clears one. Links are user-supplied metadata;
 ForgeBadger does not fetch, publish, validate remote contents or mutate PRs.
-Diff paths are 1–512 characters, confined to the worktree, and only committed
+Diff paths are 1â512 characters, confined to the worktree, and only committed
 changes from the run's recorded base are shared.
 
 ### Response DTOs
@@ -2261,7 +2285,7 @@ envelope; project/task lookup requires the current tenant and explicit `projectI
 
 | Method | Path below `/api/v1/copilot` | Data |
 | --- | --- | --- |
-| GET | `/development/capability` | `{ available, reason }`; actual local sandbox probe |
+| GET | `/development/capability` | `{ available, reason }`; actual local sandbox probe. Task execution requires macOS (Seatbelt `sandbox-exec`) plus Node >=22.8; other platforms fail closed with reason codes such as `DEVELOPMENT_SANDBOX_REQUIRES_MACOS` |
 | GET | `/development/tasks?projectId=...` | `{ tasks }`, latest 50 for the project |
 | GET | `/development/tasks/:id?projectId=...` | `{ task, evidence }`, finite diff/check receipts |
 
@@ -2277,9 +2301,11 @@ excluded. Limits: 200 source files, 64 changes, 10 checks, 64 KiB per file and
 `cancel_development_task` / `development.task.cancel` require `{ projectId,
 taskId }`. `accept_development_task` / `development.task.accept` also require the
 exact `artifactDigest`. All three are nondelegatable owner actions through the
-existing Platform Actions preview → decide(digest) → execute → receipt API.
+existing Platform Actions preview â decide(digest) â execute â receipt API.
 Submission returns `{ taskId, recipeDigest, status: "queued" }`; duplicate approved
-execution returns its existing receipt. Acceptance records an owner's decision
+execution returns its existing receipt. On hosts where the capability probe is
+unavailable, submission is rejected at preview (and rechecked at execution) with the
+host capability reason, so no task row is created there. Acceptance records an owner's decision
 against unchanged source/workspace/evidence; it never merges or writes the source.
 
 Task states: `queued`, `running`, `checks_passed`, `checks_failed`, `failed`,
@@ -2338,14 +2364,14 @@ member currently has a project grant; a personal project retains personal review
 
 | Method and path under `/api/v1/teams` | Input | `data` |
 | --- | --- | --- |
-| GET `/` | — | `{teams:Team[]}` |
+| GET `/` | â | `{teams:Team[]}` |
 | POST `/` | `{name}` | `{team}` (201) |
-| GET `/:teamId` | — | `{team,members,projects}` |
+| GET `/:teamId` | â | `{team,members,projects}` |
 | PATCH `/:teamId` | `{name,expectedRevision}` | `{team}` |
 | POST `/:teamId/transfer-owner` | `{newOwnerId,expectedRevision}` | `{team}` |
 | POST `/:teamId/close` | `{expectedRevision}` | `{team}` |
 | PATCH `/:teamId/members/:userId` | `{role:'admin'|'member',expectedRevision}` | `{member,team}` |
-| GET `/:teamId/enrollment-candidates` | — | `{projects:[{id,name,revision}]}` |
+| GET `/:teamId/enrollment-candidates` | â | `{projects:[{id,name,revision}]}` |
 | POST `/:teamId/projects` | `{projectId,expectedProjectRevision,expectedTeamRevision}` | `{project}` (201) |
 | POST `/:teamId/projects/:projectId/transfer-owner` | `{newOwnerId,expectedRevision}` | `{project}` |
 
@@ -2379,8 +2405,8 @@ email is sent; the operator explicitly copies a link with the token in its fragm
 | Method and path | Input | `data` |
 | --- | --- | --- |
 | POST `/api/v1/teams/:teamId/invitations` | `{email,role,expiresInHours?:1..168}` (default 24) | `{invitation,token}` (201) |
-| GET `/api/v1/teams/:teamId/invitations` | — | `{invitations}` |
-| DELETE `/api/v1/teams/:teamId/invitations/:inviteId` | — | `{revoked:true}` |
+| GET `/api/v1/teams/:teamId/invitations` | â | `{invitations}` |
+| DELETE `/api/v1/teams/:teamId/invitations/:inviteId` | â | `{revoked:true}` |
 | POST `/api/v1/auth/team-invitations/inspect` | `{token}` | `{invitation:{teamName,emailHint,role,expiresAt,registrationAllowed}}` |
 | POST `/api/v1/teams/invitations/accept` | `{token}`; authenticated matching account | `{team,membership}` |
 | POST `/api/v1/auth/team-invitations/register` | `{token,email,password}` | `{token,user,team,membership}` plus opaque session cookie (201) |
@@ -2406,10 +2432,10 @@ clears the departing member's assignment. Historical actor attribution is preser
 
 | Method and path under `/api/v1/teams/:teamId` | Input | `data` |
 | --- | --- | --- |
-| GET `/members/:userId/offboarding` | — | `{impact}` |
+| GET `/members/:userId/offboarding` | â | `{impact}` |
 | POST `/offboarding-plans` | `{memberId,expectedMemberRevision,expectedImpactDigest,handoffs}` | `{plan,confirmationToken}` (201) |
-| GET `/offboarding-plans` | — | `{plans}` (unfinished plans) |
-| GET `/offboarding-plans/:planId` | — | `{plan,impact?}` |
+| GET `/offboarding-plans` | â | `{plans}` (unfinished plans) |
+| GET `/offboarding-plans/:planId` | â | `{plan,impact?}` |
 | POST `/offboarding-plans/:planId/commit` | `{confirmationToken}` | `{plan,impact?}` |
 | PATCH `/offboarding-plans/:planId` | `{expectedPlanRevision,expectedImpactDigest,handoffs}` | `{plan}` |
 | POST `/offboarding-plans/:planId/resume` | `{}` | `{plan,impact?}` |
@@ -2531,7 +2557,7 @@ and current project authorization:
 | Method | Path | Contract |
 | --- | --- | --- |
 | GET | `/projects/:projectId/tasks/:taskId/copilot-artifacts` | `{artifacts,candidates}`; read permission. Candidates are completed, digest-valid artifacts owned by the actor in this project, and require develop capability. |
-| POST | `/projects/:projectId/tasks/:taskId/copilot-artifacts` | `{developmentTaskId,artifactDigest,expectedTaskRevision,shareSummary:true}` → `{artifact}`; requires develop plus original artifact ownership. |
+| POST | `/projects/:projectId/tasks/:taskId/copilot-artifacts` | `{developmentTaskId,artifactDigest,expectedTaskRevision,shareSummary:true}` â `{artifact}`; requires develop plus original artifact ownership. |
 
 Summary fields are `developmentTaskId,artifactDigest,status,filesCount,checksCount,
 passedChecks`. Linked records additionally expose `id,linkedAt,current,canOpen`.

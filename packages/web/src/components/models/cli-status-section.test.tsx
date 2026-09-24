@@ -122,6 +122,15 @@ describe("cli-status-section login badges", () => {
     setup([{ login: { adapter: "codex", state: "unknown" } }]);
     await waitFor(() => expect(cardText("codex")).toContain("models.cliAccountDetectFailed"));
   });
+
+  it("shows a neutral custom-endpoint badge for a routed claude config instead of a login state", async () => {
+    setup([{ login: { adapter: "claude", state: "custom_endpoint" } }]);
+    await waitFor(() => expect(cardText("claude")).toContain("models.cliAccountCustomEndpoint"));
+    const claudeText = cardText("claude");
+    expect(claudeText).not.toContain("models.cliAccountLoggedIn");
+    expect(claudeText).not.toContain("models.cliAccountNotLoggedIn");
+    expect(claudeText).not.toContain("models.cliAccountLoginHintClaude");
+  });
 });
 
 describe("cli-status-section quota summary", () => {

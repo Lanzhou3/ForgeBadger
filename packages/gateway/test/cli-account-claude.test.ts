@@ -12,6 +12,10 @@ import {
 } from "../src/services/cli-account/claude-account.js";
 
 const secretToken = "claude-oauth-token-material";
+// Isolated config root for login-probe tests: the check for a routed
+// endpoint reads <root>/settings.json, so the real user's ~/.claude (which on
+// a dev machine may itself be routed) must not leak into the assertions.
+const ISOLATED_HOME = "/nonexistent-claude-probe-home";
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -31,6 +35,8 @@ async function makeHomeWithCredentials(credentials: unknown): Promise<string> {
 describe("claude cli-account login probe", () => {
   it("maps exit code 0 to ready with authMethod/email from the JSON payload", async () => {
     const status = await observeClaudeLogin({
+      env: {},
+      homeDir: ISOLATED_HOME,
       run: async () => ({
         exitCode: 0,
         stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai", email: "user@example.com", subscriptionType: "max" }),
@@ -47,6 +53,8 @@ describe("claude cli-account login probe", () => {
 
   it("defaults the method and tolerates unknown JSON fields", async () => {
     const status = await observeClaudeLogin({
+      env: {},
+      homeDir: ISOLATED_HOME,
       run: async () => ({
         exitCode: 0,
         stdout: JSON.stringify({ loggedIn: true, futureField: { nested: true } }),
@@ -58,6 +66,8 @@ describe("claude cli-account login probe", () => {
 
   it("keeps ready on exit 0 with loggedIn:false and passes the raw value through (issue #84394)", async () => {
     const status = await observeClaudeLogin({
+      env: {},
+      homeDir: ISOLATED_HOME,
       run: async () => ({
         exitCode: 0,
         stdout: JSON.stringify({ loggedIn: false, authMethod: "claude.ai" }),
@@ -74,6 +84,8 @@ describe("claude cli-account login probe", () => {
 
   it("maps exit code 1 to not_authenticated per the CLI contract", async () => {
     const status = await observeClaudeLogin({
+      env: {},
+      homeDir: ISOLATED_HOME,
       run: async () => ({ exitCode: 1, stdout: "", stderr: "Not logged in" })
     });
     assert.deepEqual(status, { adapter: "claude", state: "not_authenticated", method: "unknown" });
@@ -81,10 +93,14 @@ describe("claude cli-account login probe", () => {
 
   it("maps other non-zero exits, missing binary and failures to unknown/cli_missing", async () => {
     const unknown = await observeClaudeLogin({
+      env: {},
+      homeDir: ISOLATED_HOME,
       run: async () => ({ exitCode: 2, stdout: "", stderr: "boom" })
     });
     assert.deepEqual(unknown, { adapter: "claude", state: "unknown", method: "unknown" });
     const missing = await observeClaudeLogin({
+      env: {},
+      homeDir: ISOLATED_HOME,
       run: async () => {
         const error = new Error("spawn claude ENOENT") as NodeJS.ErrnoException;
         error.code = "ENOENT";
@@ -92,6 +108,81 @@ describe("claude cli-account login probe", () => {
       }
     });
     assert.deepEqual(missing, { adapter: "claude", state: "cli_missing", method: "unknown" });
+  });
+
+  it("reports custom_endpoint and skips the probe when the global config routes to a non-Anthropic base URL", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-account-"));
+    const root = path.join(home, ".claude");
+    await mkdir(root, { recursive: true });
+    await writeFile(
+      path.join(root, "settings.json"),
+      JSON.stringify({
+        env: {
+          ANTHROPIC_BASE_URL: "http://127.0.0.1:15721",
+          ANTHROPIC_AUTH_TOKEN: "route-token-material"
+        }
+      })
+    );
+    try {
+      let probed = false;
+      const status = await observeClaudeLogin({
+        env: {},
+        homeDir: home,
+        run: async () => {
+          probed = true;
+          return { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, authMethod: "oauth_token" }), stderr: "" };
+        }
+      });
+      assert.deepEqual(status, { adapter: "claude", state: "custom_endpoint" });
+      assert.equal(probed, false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("still probes native login when the base URL stays on api.anthropic.com", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-account-"));
+    const root = path.join(home, ".claude");
+    await mkdir(root, { recursive: true });
+    await writeFile(
+      path.join(root, "settings.json"),
+      JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://api.anthropic.com" } })
+    );
+    try {
+      const status = await observeClaudeLogin({
+        env: {},
+        homeDir: home,
+        run: async () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }),
+          stderr: ""
+        })
+      });
+      assert.deepEqual(status, { adapter: "claude", state: "ready", method: "claude.ai" });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores a malformed settings.json and falls back to the probe", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-account-"));
+    const root = path.join(home, ".claude");
+    await mkdir(root, { recursive: true });
+    await writeFile(path.join(root, "settings.json"), "{not json");
+    try {
+      const status = await observeClaudeLogin({
+        env: {},
+        homeDir: home,
+        run: async () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }),
+          stderr: ""
+        })
+      });
+      assert.deepEqual(status, { adapter: "claude", state: "ready", method: "claude.ai" });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
   });
 
   it("singleflights and briefly caches login probes per user", async () => {
@@ -103,13 +194,13 @@ describe("claude cli-account login probe", () => {
       return { exitCode: 0, stdout: JSON.stringify({ loggedIn: true }), stderr: "" };
     };
     const [first, second] = await Promise.all([
-      buildClaudeAccountOverview("user-claude", { run, homeDir: "/nonexistent-home" }),
-      buildClaudeAccountOverview("user-claude", { run, homeDir: "/nonexistent-home" })
+      buildClaudeAccountOverview("user-claude", { run, env: {}, homeDir: "/nonexistent-home" }),
+      buildClaudeAccountOverview("user-claude", { run, env: {}, homeDir: "/nonexistent-home" })
     ]);
     assert.equal(first.login.state, "ready");
     assert.deepEqual(first.login, second.login);
     assert.equal(calls, 1);
-    await buildClaudeAccountOverview("user-claude", { run, homeDir: "/nonexistent-home" });
+    await buildClaudeAccountOverview("user-claude", { run, env: {}, homeDir: "/nonexistent-home" });
     assert.equal(calls, 1);
   });
 
@@ -125,6 +216,8 @@ describe("claude cli-account login probe", () => {
     try {
       let observedEnv: NodeJS.ProcessEnv | undefined;
       const status = await observeClaudeLogin({
+        env: {},
+        homeDir: ISOLATED_HOME,
         run: async (command, args, _signal, options) => {
           assert.equal(command, "claude");
           assert.deepEqual(args, ["auth", "status"]);

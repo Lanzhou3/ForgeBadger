@@ -139,4 +139,46 @@ describe("model provider repository", () => {
     assert.equal(repo.updateProviderProfile(publicProvider.id, { allowPrivateNetworks: false })?.allowPrivateNetworks, false);
   });
 
+  it("round-trips per-model thinking effort fields with nullable clearing", () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("effort-fields@example.com", "hash");
+    const repo = new ModelProviderRepository(db, user.id, masterKey);
+    const provider = repo.createProviderProfile({
+      name: "DeepSeek Gateway",
+      providerKey: "deepseek-efforts",
+      baseUrl: "https://api.deepseek.com",
+      authType: "api_key",
+      apiFormat: "openai-compatible",
+      supportedAdapters: ["opencode"]
+    });
+    const model = repo.createModelProfile({
+      providerProfileId: provider.id,
+      name: "Reasoner",
+      modelId: "deepseek-reasoner",
+      supportEfforts: ["low", "high"],
+      defaultEffort: "high"
+    });
+    assert.deepEqual(repo.getModelProfile(model.id)?.supportEfforts, ["low", "high"]);
+    assert.equal(repo.getModelProfile(model.id)?.defaultEffort, "high");
+
+    // Omitted fields default to an empty list and a null default.
+    const plain = repo.createModelProfile({
+      providerProfileId: provider.id,
+      name: "Plain",
+      modelId: "plain-model"
+    });
+    assert.deepEqual(plain.supportEfforts, []);
+    assert.equal(plain.defaultEffort, null);
+
+    // Explicit null clears a stored default; omitted fields keep their values.
+    assert.equal(repo.updateModelProfile(model.id, { defaultEffort: null })?.defaultEffort, null);
+    assert.deepEqual(repo.updateModelProfile(model.id, { name: "Renamed" })?.supportEfforts, ["low", "high"]);
+    const updatedPlain = repo.updateModelProfile(plain.id, {
+      supportEfforts: ["medium", "max"],
+      defaultEffort: "max"
+    });
+    assert.deepEqual(updatedPlain?.supportEfforts, ["medium", "max"]);
+    assert.equal(updatedPlain?.defaultEffort, "max");
+  });
+
 });

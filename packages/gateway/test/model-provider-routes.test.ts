@@ -528,6 +528,65 @@ describe("model provider routes", () => {
     assert.equal(listed.body.data.models.find((model: { id: string }) => model.id === modelB.body.data.model.id)?.isDefault, true);
   });
 
+  it("manages per-model thinking efforts with enum and cross-field validation", async () => {
+    const deepseek = await makeRequest(app, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
+    const providerId = deepseek.body.data.provider.id;
+
+    const created = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "Reasoner",
+      modelId: "deepseek-reasoner",
+      supportEfforts: ["low", "high", "xhigh"],
+      defaultEffort: "high"
+    }, authHeaders());
+    assert.equal(created.status, 201);
+    assert.deepEqual(created.body.data.model.supportEfforts, ["low", "high", "xhigh"]);
+    assert.equal(created.body.data.model.defaultEffort, "high");
+
+    // Levels outside the Kimi Code ladder are rejected by the schema.
+    const badLevel = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "Bad Level",
+      modelId: "bad-level",
+      supportEfforts: ["minimal"]
+    }, authHeaders());
+    assert.equal(badLevel.status, 400);
+    assert.match(badLevel.body.message, /payload/i);
+
+    const badDefault = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "Bad Default",
+      modelId: "bad-default",
+      supportEfforts: ["low"],
+      defaultEffort: "off"
+    }, authHeaders());
+    assert.equal(badDefault.status, 400);
+
+    // The default must be one of the selected efforts.
+    const inconsistent = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/models`, {
+      name: "Inconsistent",
+      modelId: "inconsistent",
+      supportEfforts: ["low"],
+      defaultEffort: "high"
+    }, authHeaders());
+    assert.equal(inconsistent.status, 400);
+    assert.match(inconsistent.body.message, /defaultEffort/i);
+
+    // Update validation merges the payload with the stored values.
+    const storedId = created.body.data.model.id;
+    const merged = await makeRequest(app, "PATCH", `/api/v1/model-providers/${providerId}/models/${storedId}`, {
+      defaultEffort: "max"
+    }, authHeaders());
+    assert.equal(merged.status, 400);
+    assert.match(merged.body.message, /defaultEffort/i);
+
+    // Explicit empty / null clears both managed fields.
+    const cleared = await makeRequest(app, "PATCH", `/api/v1/model-providers/${providerId}/models/${storedId}`, {
+      supportEfforts: [],
+      defaultEffort: null
+    }, authHeaders());
+    assert.equal(cleared.status, 200);
+    assert.deepEqual(cleared.body.data.model.supportEfforts, []);
+    assert.equal(cleared.body.data.model.defaultEffort, null);
+  });
+
   it("deletes and rotates credentials only within the selected provider", async () => {
     const deepseek = await makeRequest(app, "POST", "/api/v1/model-providers", deepseekProviderInput, authHeaders());
     const openai = await makeRequest(app, "POST", "/api/v1/model-providers", openaiProviderInput, authHeaders());

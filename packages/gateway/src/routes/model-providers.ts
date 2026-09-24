@@ -30,6 +30,7 @@ import { getProviderCapabilities } from "../services/provider-capabilities.js";
 import { buildAppliedProvidersOverview } from "../services/model-provider-applied.js";
 import type { AdapterId } from "../services/adapter-discovery.js";
 import type { CliConfigSnapshot } from "../services/cli-config.js";
+import { THINKING_EFFORT_LEVELS } from "../services/model-capability-projection.js";
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 
 const adapterSchema = z.enum(["claude", "opencode", "codex", "kimi", "pi"]);
@@ -55,6 +56,8 @@ const createModelProfileSchema = z.object({
   modelId: z.string().min(1),
   capabilities: z.array(z.string().min(1)).optional(),
   contextWindow: z.number().int().positive().nullable().optional(),
+  supportEfforts: z.array(z.enum(THINKING_EFFORT_LEVELS)).optional(),
+  defaultEffort: z.enum(THINKING_EFFORT_LEVELS).nullable().optional(),
   isDefault: z.boolean().optional()
 });
 const updateModelProfileSchema = createModelProfileSchema.partial();
@@ -74,6 +77,19 @@ const balanceSchema = z.object({
   credentialId: z.string().min(1).optional(),
   timeoutMs: z.number().int().min(100).max(15000).optional()
 });
+
+/**
+ * Cross-field rule: a default effort must be one of the model's supported
+ * efforts. An empty/absent support list imposes no constraint (the CLI will
+ * simply not expose the effort selector for that model).
+ */
+function invalidEffortSelection(supportEfforts: readonly string[], defaultEffort: string | null): string | null {
+  if (!defaultEffort || supportEfforts.length === 0) return null;
+  if (!supportEfforts.includes(defaultEffort)) {
+    return "defaultEffort must be one of the selected supportEfforts";
+  }
+  return null;
+}
 
 export interface ModelProviderRouteOptions {
   fetchProviderModels?: (input: FetchProviderModelsInput) => Promise<FetchedProviderModel[]>;
@@ -291,6 +307,14 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       res.status(400).json({ code: 1, message: "Invalid model profile payload" });
       return;
     }
+    const effortError = invalidEffortSelection(
+      parseResult.data.supportEfforts ?? [],
+      parseResult.data.defaultEffort ?? null
+    );
+    if (effortError) {
+      res.status(400).json({ code: 1, message: effortError });
+      return;
+    }
     const repo = repoFor(db, masterKey, req);
     const modelInput: CreateModelProfileInput = {
       providerProfileId: req.params.id,
@@ -298,6 +322,8 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       modelId: parseResult.data.modelId,
       ...(parseResult.data.capabilities !== undefined ? { capabilities: parseResult.data.capabilities } : {}),
       ...(parseResult.data.contextWindow !== undefined ? { contextWindow: parseResult.data.contextWindow } : {}),
+      ...(parseResult.data.supportEfforts !== undefined ? { supportEfforts: parseResult.data.supportEfforts } : {}),
+      ...(parseResult.data.defaultEffort !== undefined ? { defaultEffort: parseResult.data.defaultEffort } : {}),
       ...(parseResult.data.isDefault !== undefined ? { isDefault: parseResult.data.isDefault } : {})
     };
     const model = repo.createModelProfile(modelInput);
@@ -444,12 +470,22 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       res.status(400).json({ code: 1, message: "Model does not belong to the selected provider" });
       return;
     }
+    const effortError = invalidEffortSelection(
+      parseResult.data.supportEfforts ?? model.supportEfforts,
+      parseResult.data.defaultEffort !== undefined ? parseResult.data.defaultEffort : model.defaultEffort
+    );
+    if (effortError) {
+      res.status(400).json({ code: 1, message: effortError });
+      return;
+    }
     const updateInput: UpdateModelProfileInput = {};
     if (parseResult.data.name !== undefined) updateInput.name = parseResult.data.name;
     if (parseResult.data.modelId !== undefined) updateInput.modelId = parseResult.data.modelId;
     if (parseResult.data.capabilities !== undefined) updateInput.capabilities = parseResult.data.capabilities;
     if (parseResult.data.contextWindow !== undefined) updateInput.contextWindow = parseResult.data.contextWindow;
     if (parseResult.data.isDefault !== undefined) updateInput.isDefault = parseResult.data.isDefault;
+    if (parseResult.data.supportEfforts !== undefined) updateInput.supportEfforts = parseResult.data.supportEfforts;
+    if (parseResult.data.defaultEffort !== undefined) updateInput.defaultEffort = parseResult.data.defaultEffort;
     const updated = repo.updateModelProfile(model.id, updateInput);
     res.json({ code: 0, data: { model: updated }, message: "" });
   });

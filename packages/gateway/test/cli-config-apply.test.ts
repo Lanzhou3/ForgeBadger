@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { parse as parseToml } from "smol-toml";
 
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
@@ -416,6 +417,128 @@ describe("cli-config apply service", () => {
       assert.match(configToml, /\[providers\.relay\]/u);
       assert.match(configToml, /type = "openai"/u);
       assert.match(configToml, /base_url = "https:\/\/relay\.example\.com\/v1"/u);
+    });
+
+    it("writes the capability projection, display_name, and thinking efforts for Kimi models", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-kimi-capabilities@example.com", "hash");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-apply-kimi-cap-");
+      const fixture = createFixture(db, user.id, "kimi");
+      fixture.repo.updateModelProfile(fixture.modelId, {
+        name: "Qwen 3.8",
+        capabilities: ["chat", "code", "vision", "video", "reasoning", "tools"],
+        supportEfforts: ["low", "high", "xhigh"],
+        defaultEffort: "high"
+      });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "kimi",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+
+      const doc = parseToml(await readFile(path.join(root, "config.toml"), "utf8")) as {
+        models: Record<string, Record<string, unknown>>;
+      };
+      const entry = doc.models["kimi-provider/kimi-model-1"];
+      assert.ok(entry);
+      // chat/code have no Kimi Code counterpart and are not projected.
+      assert.deepEqual(entry.capabilities, ["image_in", "video_in", "thinking", "tool_use"]);
+      assert.equal(entry.display_name, "Qwen 3.8");
+      assert.deepEqual(entry.support_efforts, ["low", "high", "xhigh"]);
+      assert.equal(entry.default_effort, "high");
+    });
+
+    it("merges hand-written Kimi model entries instead of wiping them", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-kimi-merge@example.com", "hash");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-apply-kimi-merge-");
+      const fixture = createFixture(db, user.id, "kimi");
+      // A hand-written entry from before the merge-style writer: extra
+      // capabilities, a custom context size, a custom tool, and effort keys.
+      await writeFile(path.join(root, "config.toml"), [
+        '[providers.kimi-provider]',
+        'type = "anthropic"',
+        'api_key = "sk-stale"',
+        'base_url = "https://api.deepseek.com/anthropic"',
+        "",
+        '[models."kimi-provider/kimi-model-1"]',
+        'provider = "kimi-provider"',
+        'model = "kimi-model-1"',
+        'capabilities = ["audio_in"]',
+        'max_context_size = 196608',
+        'display_name = "Hand renamed"',
+        'dynamically_loaded_tools = "some-tool"',
+        'support_efforts = ["low"]',
+        'default_effort = "low"'
+      ].join("\n"), "utf8");
+      fixture.repo.updateModelProfile(fixture.modelId, { capabilities: ["vision"] });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "kimi",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+
+      const doc = parseToml(await readFile(path.join(root, "config.toml"), "utf8")) as {
+        models: Record<string, Record<string, unknown>>;
+      };
+      const entry = doc.models["kimi-provider/kimi-model-1"];
+      assert.ok(entry);
+      // capabilities is a union: the hand-written tag survives, the projected
+      // one is appended.
+      assert.deepEqual(entry.capabilities, ["audio_in", "image_in"]);
+      // No contextWindow on the profile: the entry's own positive value wins.
+      assert.equal(entry.max_context_size, 196608);
+      // Unmanaged keys survive the re-apply.
+      assert.equal(entry.dynamically_loaded_tools, "some-tool");
+      // Managed keys track the profile: display_name is overridden, and the
+      // effort keys are removed because the profile declares none.
+      assert.equal(entry.display_name, "Default Model");
+      assert.equal(entry.support_efforts, undefined);
+      assert.equal(entry.default_effort, undefined);
+      // The stale provider secret is replaced by the vault credential.
+      const providers = (parseToml(await readFile(path.join(root, "config.toml"), "utf8")) as {
+        providers: Record<string, Record<string, string>>;
+      }).providers;
+      assert.equal(providers["kimi-provider"]?.api_key, "sk-kimi-secret");
+    });
+
+    it("writes and clears Kimi thinking efforts as managed keys", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-kimi-efforts@example.com", "hash");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-apply-kimi-efforts-");
+      const fixture = createFixture(db, user.id, "kimi");
+      fixture.repo.updateModelProfile(fixture.modelId, {
+        supportEfforts: ["low", "medium", "high"],
+        defaultEffort: "medium"
+      });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "kimi",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+      let doc = parseToml(await readFile(path.join(root, "config.toml"), "utf8")) as {
+        models: Record<string, Record<string, unknown>>;
+      };
+      let entry = doc.models["kimi-provider/kimi-model-1"];
+      assert.ok(entry);
+      assert.deepEqual(entry.support_efforts, ["low", "medium", "high"]);
+      assert.equal(entry.default_effort, "medium");
+
+      // Clearing the profile's effort declaration removes the keys on the
+      // next apply instead of pinning stale values.
+      fixture.repo.updateModelProfile(fixture.modelId, { supportEfforts: [], defaultEffort: null });
+      await settle(15);
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "kimi",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+      doc = parseToml(await readFile(path.join(root, "config.toml"), "utf8")) as {
+        models: Record<string, Record<string, unknown>>;
+      };
+      entry = doc.models["kimi-provider/kimi-model-1"];
+      assert.ok(entry);
+      assert.equal(entry.support_efforts, undefined);
+      assert.equal(entry.default_effort, undefined);
     });
 
     it("removes a stale ANTHROPIC_API_KEY when applying a token-based provider", async () => {

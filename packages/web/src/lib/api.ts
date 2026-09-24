@@ -32,6 +32,7 @@ export interface Project {
   templateId?: string | null;
   description?: string;
   status?: string;
+  copilotAutonomy?: boolean;
 }
 
 export interface ProjectManagerEvidenceRef {
@@ -667,6 +668,8 @@ export interface ModelProfile {
   modelId: string;
   capabilities: string[];
   contextWindow: number | null;
+  supportEfforts: string[];
+  defaultEffort: string | null;
   status: string;
   isDefault: boolean;
 }
@@ -701,7 +704,7 @@ export interface ProviderBalanceResult {
  */
 export type CliAccountAdapter = "claude" | "codex" | "kimi";
 
-export type CliLoginState = "ready" | "not_authenticated" | "cli_missing" | "unknown";
+export type CliLoginState = "ready" | "custom_endpoint" | "not_authenticated" | "cli_missing" | "unknown";
 
 export interface CliLoginStatus {
   adapter: CliAccountAdapter;
@@ -3211,7 +3214,7 @@ export async function deleteProviderCredential(providerId: string, credentialId:
 
 export async function createProviderModel(
   providerId: string,
-  data: { name: string; modelId: string; capabilities?: string[]; contextWindow?: number | null; isDefault?: boolean }
+  data: { name: string; modelId: string; capabilities?: string[]; contextWindow?: number | null; isDefault?: boolean; supportEfforts?: string[]; defaultEffort?: string | null }
 ): Promise<{ model: ModelProfile }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/models`, {
     method: "POST",
@@ -3222,7 +3225,7 @@ export async function createProviderModel(
 export async function updateProviderModel(
   providerId: string,
   modelId: string,
-  data: { name?: string; modelId?: string; capabilities?: string[]; contextWindow?: number | null; isDefault?: boolean }
+  data: { name?: string; modelId?: string; capabilities?: string[]; contextWindow?: number | null; isDefault?: boolean; supportEfforts?: string[]; defaultEffort?: string | null }
 ): Promise<{ model: ModelProfile }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/models/${modelId}`, {
     method: "PATCH",

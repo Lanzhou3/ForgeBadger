@@ -410,6 +410,9 @@ function modelProfile() {
     name: "Provider 01 Model",
     modelId: "provider-01-model",
     capabilities: ["chat", "code"],
+    contextWindow: 262144,
+    supportEfforts: ["low", "high"],
+    defaultEffort: null,
     status: "active",
     isDefault: true,
   };

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { readFile, stat } from "node:fs/promises";
 
 import type { CliAccountOverview, CliLoginStatus, CliQuotaEntry, CliQuotaResult } from "./types.js";
 import { globalConfigRoot } from "../cli-config-target.js";
@@ -48,6 +49,13 @@ export async function buildClaudeAccountOverview(
 
 export async function observeClaudeLogin(options: CliAccountProbeOptions = {}): Promise<CliLoginStatus> {
   const base = { adapter: "claude" as const };
+  // A routed endpoint (Gateway loopback or third-party compatible relay)
+  // makes the native-login question moot: `claude auth status` reports the
+  // route's ANTHROPIC_AUTH_TOKEN as an oauth login (exit 0, loggedIn:true),
+  // which the badge must not surface as a first-party login.
+  if (await isRoutedToCustomEndpoint(options)) {
+    return { ...base, state: "custom_endpoint" };
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 2_000);
   timeout.unref?.();
@@ -108,6 +116,43 @@ export async function observeClaudeQuota(options: CliAccountProbeOptions = {}): 
   const entries = parseUsageBody(outcome.body);
   const planLabel = stringField(asRecord(outcome.body)?.planType) ?? stringField(asRecord(outcome.body)?.plan_type);
   return { supported: true, entries, fetchedAt, ...(planLabel ? { planLabel } : {}) };
+}
+
+/** Claude global settings can carry plugins/marketplace metadata; cap the read. */
+const maxClaudeSettingsBytes = 256 * 1024;
+
+/** True when the effective global config points Claude at a non-Anthropic endpoint. */
+async function isRoutedToCustomEndpoint(options: CliAccountProbeOptions): Promise<boolean> {
+  const root = globalConfigRoot("claude", probeConfigRootOptions(options));
+  const doc = await readConfigDocBounded(path.join(root, "settings.json"));
+  const baseUrl = stringField(asRecord(doc?.env)?.ANTHROPIC_BASE_URL);
+  if (!baseUrl) return false;
+  return !isAnthropicFirstPartyBaseUrl(baseUrl);
+}
+
+/**
+ * In-memory-only, size-capped JSON config reader. The env block may hold
+ * credentials — the value is never logged, persisted, or returned by an API.
+ */
+async function readConfigDocBounded(filePath: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const info = await stat(filePath);
+    if (!info.isFile() || info.size > maxClaudeSettingsBytes) return undefined;
+    const parsed: unknown = JSON.parse(await readFile(filePath, "utf8"));
+    return asRecord(parsed);
+  } catch {
+    return undefined;
+  }
+}
+
+function isAnthropicFirstPartyBaseUrl(baseUrl: string): boolean {
+  let host: string;
+  try {
+    host = new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return host === "api.anthropic.com" || host.endsWith(".anthropic.com");
 }
 
 function parseAuthStatusJson(stdout: string): Record<string, unknown> | undefined {
