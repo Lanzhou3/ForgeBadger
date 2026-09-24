@@ -91,8 +91,9 @@ describe("provider-quota-panel dual display (applied provider + native login)", 
     expect((await screen.findByRole("progressbar", { name: /5h window/ })).getAttribute("aria-valuenow")).toBe(
       "30"
     );
-    expect(panelText()).toContain("OpenAI");
-    expect(panelText()).toContain("sessions.providerQuotaNative · claude.ai");
+    // Each source label appears twice: once in the header badge, once as its block label.
+    expect(panelText().split("OpenAI").length - 1).toBe(2);
+    expect(panelText().split("sessions.providerQuotaNative · claude.ai").length - 1).toBe(2);
     expect(getCliAccount).toHaveBeenCalled();
 
     // One refresh button per source, with per-source labels.
