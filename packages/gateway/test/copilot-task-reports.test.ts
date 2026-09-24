@@ -10,8 +10,6 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { ProjectManagerRepository } from '../src/db/repositories/project-manager-repository.js';
-import { PlatformActions } from '../src/services/platform-commands/actions.js';
-import { createPlatformCommands } from '../src/services/platform-commands/catalog.js';
 import { InMemorySessionManager } from '../src/services/session-manager.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { configureCliAutonomyAdapters } from '../src/services/adapter-autonomy.js';
@@ -27,12 +25,14 @@ import { readTaskDispatchAttempt } from '../src/services/project-manager/task-ex
 const cleanups: Array<() => void> = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); configureCliAutonomyAdapters([]); });
 
-function fixture(options: { grant?: boolean; cancelAfterDispatch?: boolean; maxSteps?: number } = {}) {
+function fixture(options: { autonomy?: boolean; cancelAfterDispatch?: boolean; maxSteps?: number } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'fb-task-report-'));
   const db = new Database(':memory:');
   migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
   const user = new UserRepository(db).create('report@test.dev', 'hash');
-  const project = new ProjectRepository(db, user.id).create({ name: 'report fixture', path: root, aiTool: 'codex' });
+  const projects = new ProjectRepository(db, user.id);
+  const project = projects.create({ name: 'report fixture', path: root, aiTool: 'codex' });
+  if (options.autonomy ?? true) projects.setCopilotAutonomy(project.id, true);
   const pm = new ProjectManagerRepository(db, user.id);
   const eventBus = new ForgeBadgerEventBus();
   attachNotificationPersistence({ db, eventBus });
@@ -47,8 +47,6 @@ function fixture(options: { grant?: boolean; cancelAfterDispatch?: boolean; maxS
   }, undefined, undefined, { sleep: async () => {} });
   configureCliAutonomyAdapters(['codex']);
   const deps = { db, masterKey: 'test', eventBus, sessionManager: manager, adapterCommandRunner: async (command: string) => ({ exitCode: 0, stdout: `${command} 1.0.0`, stderr: '' }) };
-  const actions = new PlatformActions({ ...deps, userId: user.id }, createPlatformCommands());
-  const grant = options.grant ? actions.createGrant({ name: 'task delivery', projectIds: [project.id], capabilities: ['pm.work_item.create', 'pm.task.execute'], expiresAt: Date.now() + 100_000, maxActions: 10 }) : undefined;
   const ledger = new CopilotRunLedger(db, user.id);
   const conversation = ledger.log.createConversation();
   let calls = 0;
@@ -56,8 +54,8 @@ function fixture(options: { grant?: boolean; cancelAfterDispatch?: boolean; maxS
     async stream({ onEvent }) {
       if (calls++ === 0) onEvent({ type: 'tool_call', toolCall: { id: 'create', name: 'pm_create_work_item', arguments: JSON.stringify({ projectId: project.id, title: 'Report origin task', acceptanceCriteria: ['Tests must be independently reviewed.'] }) } });
       else if (calls === 2) {
-        const item = pm.listWorkItems(project.id)[0]!;
-        onEvent({ type: 'tool_call', toolCall: { id: 'dispatch', name: 'pm_execute_task_packet', arguments: JSON.stringify({ projectId: project.id, workItemId: item.id }) } });
+        const item = pm.listWorkItems(project.id)[0];
+        if (item) onEvent({ type: 'tool_call', toolCall: { id: 'dispatch', name: 'pm_execute_task_packet', arguments: JSON.stringify({ projectId: project.id, workItemId: item.id }) } });
       } else if (options.cancelAfterDispatch) {
         const active = db.prepare("SELECT id FROM copilot_runs WHERE conversation_id = ? AND status = 'running'").get(conversation.id) as { id: string };
         assert.ok(active); assert.equal(ledger.cancel(active.id), true);
@@ -66,7 +64,19 @@ function fixture(options: { grant?: boolean; cancelAfterDispatch?: boolean; maxS
     },
     async summarize() { return ''; }, async generateTitle() { return ''; }
   } });
-  const run = () => orchestrator.runTurn({ userId: user.id, conversationId: conversation.id, projectId: project.id, userText: 'Create and dispatch this task, then report completion here.', ...(grant ? { grantId: grant.id } : {}) });
+  const approveAll = async (runId: string) => {
+    for (let guard = 0; guard < 10; guard++) {
+      if (ledger.get(runId)?.status !== 'awaiting_approval') return;
+      const pending = ledger.log.listPendingActions(runId).find(action => action.status === 'pending' && action.stepId);
+      if (!pending) return;
+      await orchestrator.resumeAfterApproval({ userId: user.id, runId, actionId: pending.id, approved: true });
+    }
+  };
+  const run = async () => {
+    const runId = await orchestrator.runTurn({ userId: user.id, conversationId: conversation.id, projectId: project.id, userText: 'Create and dispatch this task, then report completion here.' });
+    await approveAll(runId);
+    return runId;
+  };
   const notify = () => {
     const item = pm.listWorkItems(project.id)[0]!;
     const attempt = readTaskDispatchAttempt(item)!;
@@ -76,7 +86,7 @@ function fixture(options: { grant?: boolean; cancelAfterDispatch?: boolean; maxS
   };
   const reports = () => db.prepare("SELECT * FROM copilot_messages WHERE user_id = ? AND tool_name = 'pm_task_report'").all(user.id) as Array<{ conversation_id: string; tool_call_id: string; content: string }>;
   cleanups.push(() => { supervisor.stop(); db.close(); rmSync(root, { recursive: true, force: true }); });
-  return { db, user, project, pm, deps, actions, grant, ledger, conversation, eventBus, supervisor, run, notify, reports, enterCount: () => enters };
+  return { db, user, project, pm, deps, ledger, conversation, eventBus, supervisor, run, notify, reports, enterCount: () => enters };
 }
 
 describe('Copilot durable task reports', () => {
@@ -84,7 +94,7 @@ describe('Copilot durable task reports', () => {
     const f = fixture();
     const runId = await f.run();
     assert.equal(f.ledger.get(runId)?.status, 'completed');
-    assert.equal(f.ledger.log.listPendingActions(runId).length, 0);
+    assert.equal(f.ledger.log.listPendingActions(runId).filter(action => action.status === 'pending').length, 0);
     assert.equal(f.enterCount(), 1);
     const otherConversation = f.ledger.log.createConversation();
     f.supervisor.stop();
@@ -132,12 +142,14 @@ describe('Copilot durable task reports', () => {
     assert.equal(f.enterCount(), 1);
   });
 
-  it('rechecks the original grant and refuses to publish after revocation', async () => {
-    const f = fixture({ grant: true });
+  it('refuses to publish when the project autonomy switch never authorized the copilot dispatch', async () => {
+    const f = fixture({ autonomy: false });
     const runId = await f.run();
     assert.equal(f.ledger.get(runId)?.status, 'completed');
-    f.notify();
-    f.actions.grants.revoke(f.grant!.id);
+    const toolSteps = f.ledger.steps(runId).filter(step => step.kind === 'tool');
+    assert.ok(toolSteps.length > 0);
+    for (const step of toolSteps) assert.match(step.result_json ?? '', /COPILOT_PROJECT_AUTONOMY_OFF/);
+    assert.equal(f.pm.listWorkItems(f.project.id).length, 0);
     publishTaskReports(f.deps, f.user.id);
     assert.equal(f.reports().length, 0);
   });
@@ -168,6 +180,7 @@ describe('Copilot durable task reports', () => {
     publishTaskReports(f.deps, f.user.id);
     assert.equal(f.reports().length, 0);
   });
+
   it('advances a stable cursor across pumps so invalid older candidates cannot starve later valid reports', async () => {
     const f = fixture();
     await f.run();
@@ -213,6 +226,4 @@ describe('Copilot durable task reports', () => {
       assert.equal(f.reports().length, 0);
     });
   }
-
-
 });

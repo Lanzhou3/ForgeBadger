@@ -3,14 +3,13 @@
 import { useState, useEffect } from "react";
 import { AlertTriangle, Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, Loader2, Pencil, Wrench } from "lucide-react";
 
-import { PlatformActionPreview } from "@/components/copilot/PlatformActionPreview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { CopilotMarkdown, closeOpenMarkdown } from "@/components/copilot/copilot-markdown";
 import { useLanguage } from "@/hooks/use-language";
 import { parseThinkingContent } from "@/lib/parse-thinking";
-import type { CopilotMessage, CopilotPendingAction } from "@/lib/copilot-api";
+import type { CopilotMessage } from "@/lib/copilot-api";
 
 /**
  * Shared Copilot message-stream primitives, used by both the full-page console
@@ -213,64 +212,6 @@ export function ThinkingSection({ text, live = false }: { text: string; live?: b
           {text}
         </pre>
       )}
-    </div>
-  );
-}
-
-export function PendingActionRow({
-  action,
-  onDecide,
-}: {
-  action: CopilotPendingAction;
-  onDecide: (approved: boolean) => void | Promise<void>;
-}) {
-  const { t } = useLanguage();
-  const [previewUnavailable, setPreviewUnavailable] = useState(Boolean(action.platformIntent));
-  const [now, setNow] = useState(Date.now());
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  const expired = action.platformIntent
-    ? action.platformIntent.expires_at <= now
-    : action.status !== "pending";
-  async function decide(approved: boolean) {
-    setBusy(true);
-    setError("");
-    try {
-      await onDecide(approved);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "确认失败，请同步状态后重试");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
-      <div className="flex items-center gap-2">
-        <Badge variant="outline" className="border-amber-500/50 text-amber-500">
-          {t("copilot.approvalRequired")}
-        </Badge>
-        <span className="text-sm font-medium">{action.tool}</span>
-      </div>
-      {action.platformIntent && (
-        <PlatformActionPreview intent={action.platformIntent} onUnavailable={setPreviewUnavailable} />
-      )}
-      {expired && <p role="status">确认已失效，请重新生成操作预览。</p>}
-      {error && <p role="alert" className="text-destructive">{error}</p>}
-      {action.inputJson && (
-        <pre className="max-h-40 overflow-auto rounded bg-background p-2 text-xs">{action.inputJson}</pre>
-      )}
-      <div className="flex gap-2">
-        <Button size="sm" disabled={busy || expired || previewUnavailable} onClick={() => void decide(true)}>
-          {t("copilot.approve")}
-        </Button>
-        <Button size="sm" variant="outline" disabled={busy || expired || previewUnavailable} onClick={() => void decide(false)}>
-          {t("copilot.reject")}
-        </Button>
-      </div>
     </div>
   );
 }

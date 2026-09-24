@@ -40,8 +40,6 @@ export interface CompressedContextOptions {
   prefixMessages?: AgentLlmMessage[];
   memory?: AgentMemoryRepository;
   memoryProjectId?: string;
-  memoryProjectIds?: string[];
-  excludeGlobalMemory?: boolean;
   memoryConversationId?: string;
   canCommit?: () => boolean;
   signal?: AbortSignal;
@@ -128,12 +126,11 @@ function buildRecallBlock(rows: AgentMessage[], options: CompressedContextOption
 
   const limit = options.memoryRecallLimit ?? DEFAULT_RECALL_LIMIT;
   const budget = options.memoryRecallBudget ?? DEFAULT_RECALL_BUDGET_CHARS;
-  const scopes = options.memoryProjectId
+  const scopes: import("./memory.js").AgentMemoryScope[] = options.memoryProjectId
     ? [{ scope: "global" as const }, { scope: "project" as const, projectId: options.memoryProjectId }]
     : [{ scope: "global" as const }];
-  const recallScopes: import("./memory.js").AgentMemoryScope[] = options.excludeGlobalMemory ? (options.memoryProjectIds ?? []).map(projectId => ({scope: "project" as const, projectId})) : scopes;
-  if (options.memoryConversationId) recallScopes.push({ scope: "session", conversationId: options.memoryConversationId });
-  const entries = memory.searchMulti(recallScopes, query, limit);
+  if (options.memoryConversationId) scopes.push({ scope: "session", conversationId: options.memoryConversationId });
+  const entries = memory.searchMulti(scopes, query, limit);
   if (entries.length === 0) return undefined;
 
   const lines = entries.map((entry) => `- (${entry.scope}/${entry.kind}) ${entry.text}`);

@@ -9,20 +9,19 @@ import { getPlatformAction, type PlatformIntent } from "@/lib/platform-actions-a
 import * as api from "@/lib/development-api";
 vi.mock("@/lib/api", () => ({ listProjects: vi.fn() }));
 vi.mock("@/lib/platform-actions-api", () => ({ getPlatformAction: vi.fn() }));
-vi.mock("@/lib/development-api", async importOriginal => ({ ...await importOriginal<typeof api>(), getDevelopmentCapability: vi.fn(), listDevelopmentTasks: vi.fn(), getDevelopmentTask: vi.fn(), previewDevelopmentAction: vi.fn(), approveDevelopmentAction: vi.fn(), executeDevelopmentAction: vi.fn() }));
+vi.mock("@/lib/development-api", async importOriginal => ({ ...await importOriginal<typeof api>(), getDevelopmentCapability: vi.fn(), listDevelopmentTasks: vi.fn(), getDevelopmentTask: vi.fn(), previewDevelopmentAction: vi.fn(), executeDevelopmentAction: vi.fn() }));
 const task: api.DevelopmentTask = { id: "t1", projectId: "p1", goal: "修复排版问题", status: "checks_passed", revision: 1, sourceDigest: "source", outputDigest: "output", recipeDigest: "recipe", artifactDigest: "artifact", error: null, createdAt: 1, updatedAt: 1 };
 const evidence: api.DevelopmentEvidence = { sourceDigest: "source", outputDigest: "output", recipeDigest: "recipe", files: [{ path: "a.ts", beforeSha256: "before", afterSha256: "after" }], diff: "-old\n+new<script>bad</script>", checks: [{ path: "test.ts", exitCode: 0, stdout: "passed", stderr: "", durationMs: 12, timedOut: false, cancelled: false }], startedAt: 1, finishedAt: 2 };
 let intent: PlatformIntent;
 let client: QueryClient;
 beforeEach(() => {
   localStorage.clear();
-  intent = { id: "i1", command_id: "development.task.accept", input_json: '{"projectId":"p1","taskId":"t1","artifactDigest":"artifact"}', resources_json: '{"revision":1}', digest: "d".repeat(64), authority: "owner_action", grant_id: null, expires_at: Date.now() + 60000, status: "pending" };
+  intent = { id: "i1", command_id: "development.task.accept", input_json: '{"projectId":"p1","taskId":"t1","artifactDigest":"artifact"}', resources_json: '{"revision":1}', digest: "d".repeat(64), authority: "owner_action", expires_at: Date.now() + 60000, status: "approved" };
   vi.mocked(listProjects).mockResolvedValue({ projects: [{ id: "p1", name: "项目一" }, { id: "p2", name: "项目二" }] as Project[] });
   vi.mocked(api.getDevelopmentCapability).mockResolvedValue({ available: true, reason: null });
   vi.mocked(api.listDevelopmentTasks).mockResolvedValue({ tasks: [task] });
   vi.mocked(api.getDevelopmentTask).mockResolvedValue({ task, evidence });
   vi.mocked(api.previewDevelopmentAction).mockImplementation(async () => ({ intent }));
-  vi.mocked(api.approveDevelopmentAction).mockImplementation(async () => ({ intent: { ...intent, status: "approved" } }));
   vi.mocked(api.executeDevelopmentAction).mockResolvedValue({ receipt: { intentId: "i1", outcome: "confirmed", result: {}, createdAt: 1 } });
   vi.mocked(getPlatformAction).mockImplementation(async () => ({ intent, receipt: null }));
 });
@@ -51,12 +50,9 @@ it("requires separate exact preview and explicit owner confirmation", async () =
   fireEvent.click(screen.getByRole("button", { name: "预览验收操作" }));
   await screen.findByText(intent.digest);
   expect(screen.getByText(/artifactDigest/)).toBeTruthy();
-  expect(api.approveDevelopmentAction).not.toHaveBeenCalled();
   expect(api.executeDevelopmentAction).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "所有者确认并执行" }));
   await screen.findByText("操作回执已确认。");
-  expect(api.approveDevelopmentAction).toHaveBeenCalledTimes(1);
-  expect(api.approveDevelopmentAction).toHaveBeenCalledWith(intent);
   expect(api.executeDevelopmentAction).toHaveBeenCalledTimes(1);
   expect(api.executeDevelopmentAction).toHaveBeenCalledWith("i1");
 });
@@ -90,13 +86,12 @@ it("blocks expired previews and discards previews when project changes", async (
   await waitFor(() => expect(screen.queryByText(intent.digest)).toBeNull());
   expect(api.executeDevelopmentAction).not.toHaveBeenCalled();
 });
-it("rejects stale authority or changed digest before approval", async () => {
+it("rejects stale authority or changed digest before execution", async () => {
   vi.mocked(getPlatformAction).mockResolvedValue({ intent: { ...intent, digest: "changed" }, receipt: null });
   mount(); await selectTask();
   fireEvent.click(screen.getByRole("button", { name: "预览验收操作" }));
   fireEvent.click(await screen.findByRole("button", { name: "所有者确认并执行" }));
   await screen.findByText(/预览已失效/);
-  expect(api.approveDevelopmentAction).not.toHaveBeenCalled();
   expect(api.executeDevelopmentAction).not.toHaveBeenCalled();
 });
 it("shows empty and unavailable states while retaining read-only history", async () => {
@@ -106,6 +101,21 @@ it("shows empty and unavailable states while retaining read-only history", async
   await screen.findByText(/Runner unavailable/);
   fireEvent.change(await screen.findByRole("combobox"), { target: { value: "p1" } });
   await screen.findByText(/暂无任务。在 Copilot/);
+});
+it("explains the macOS sandbox requirement instead of showing only the raw code", async () => {
+  vi.mocked(api.getDevelopmentCapability).mockResolvedValue({ available: false, reason: "DEVELOPMENT_SANDBOX_REQUIRES_MACOS" });
+  mount();
+  expect(await screen.findByText(/Seatbelt/)).toBeTruthy();
+});
+it("shows a localized explanation and the raw code for sandbox task failures", async () => {
+  const failed = { ...task, status: "failed" as const, error: "DEVELOPMENT_SANDBOX_REQUIRES_MACOS", artifactDigest: null };
+  vi.mocked(api.listDevelopmentTasks).mockResolvedValue({ tasks: [failed] });
+  vi.mocked(api.getDevelopmentTask).mockResolvedValue({ task: failed, evidence: null });
+  mount();
+  fireEvent.change(await screen.findByRole("combobox", { name: "项目" }), { target: { value: "p1" } });
+  fireEvent.click(await screen.findByRole("button", { name: /修复排版问题/ }));
+  expect(await screen.findByText(/Seatbelt/)).toBeTruthy();
+  expect(screen.getByText("DEVELOPMENT_SANDBOX_REQUIRES_MACOS")).toBeTruthy();
 });
 it("renders query errors and allows read-only retry", async () => {
   vi.mocked(api.listDevelopmentTasks).mockRejectedValueOnce(new Error("List unavailable"));

@@ -8,12 +8,11 @@ import type { CopilotPendingAction } from "@/lib/copilot-api";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { sendMessageMock, editMessageMock, getRunMock, listRunsMock, decidePendingActionMock } = vi.hoisted(() => ({
+const { sendMessageMock, editMessageMock, getRunMock, listRunsMock } = vi.hoisted(() => ({
   sendMessageMock: vi.fn(),
   editMessageMock: vi.fn(),
   getRunMock: vi.fn(),
   listRunsMock: vi.fn(),
-  decidePendingActionMock: vi.fn(),
 }));
 
 vi.mock("@/lib/copilot-api", async (importOriginal) => {
@@ -24,7 +23,6 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     editMessage: editMessageMock,
     getRun: getRunMock,
     listConversationRuns: listRunsMock,
-    decidePendingAction: decidePendingActionMock,
   };
 });
 
@@ -76,7 +74,6 @@ describe("useCopilotRun streaming reliability", () => {
     sendMessageMock.mockResolvedValue({ runId: "run-1" });
     editMessageMock.mockResolvedValue({ runId: "run-1" });
     getRunMock.mockResolvedValue({ run: runningRun, pendingActions: [] });
-    decidePendingActionMock.mockResolvedValue({ resumed: true, runId: "run-1" });
   });
 
   afterEach(() => {
@@ -278,14 +275,13 @@ describe("durable conversation restoration", () => {
     vi.clearAllMocks();
     listRunsMock.mockResolvedValue({ runs: [runningRun], activeRun: runningRun });
     getRunMock.mockResolvedValue({ run: { ...runningRun, status: "awaiting_approval", revision: 3 }, pendingActions: [pendingAction] });
-    decidePendingActionMock.mockResolvedValue({ resumed: true, runId: "run-1" });
   });
-  it("restores full approval on mount and continues the same run after decision", async () => {
+  it("restores a persisted pending action on mount", async () => {
     const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1" }));
     await act(async () => {});
     expect(result.current.active?.pendingAction?.inputDigest).toBe("digest");
     getRunMock.mockResolvedValue({ run: { ...runningRun, status: "pending", revision: 4 }, pendingActions: [] });
-    await act(async () => { await result.current.approveAction("run-1", "act-1", true); });
+    await act(async () => { await result.current.reconcile(); });
     expect(result.current.active?.status).toBe("pending");
     expect(result.current.active?.pendingAction).toBeNull();
   });

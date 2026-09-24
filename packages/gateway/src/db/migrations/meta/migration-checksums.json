@@ -100,5 +100,8 @@
   "0099_runtime_settings.sql": "22419e14d9419068c859fdb88e75afe5d7b5478f663e69f341b82002d4482da2",
   "0100_runtime_confirmation_revocation.sql": "5d07144a876953ae56dda22dc0d3c1cd494e89e87ebab8d8a1ca147dff1b6ac4",
   "0101_provider_private_networks.sql": "b7c921430cf0f863f90fc3d96f5cdae0e3e90ed6e3053694fb71c1cab9007359",
-  "0102_copilot_preferences.sql": "e13567345bc8ff0d32b3bac1bdfec1d5cae5d9532583a072b89b59bcd05ca3cd"
+  "0102_copilot_preferences.sql": "e13567345bc8ff0d32b3bac1bdfec1d5cae5d9532583a072b89b59bcd05ca3cd",
+  "0103_model_thinking_efforts.sql": "e91787913d53b4aba31bbcda796033eb57c76cda8d0e4c1312f862f8d8c7a624",
+  "0104_copilot_project_autonomy.sql": "b123326b25c7b04991acbbec377d1fb0af36bcf8b78b1e9abfab6f3b1caad9cf",
+  "0105_remove_copilot_grants.sql": "d56e00d8383c2f49541238974f3d420cadb02f6e59ff67010f7095cc7ce43a76"
 }

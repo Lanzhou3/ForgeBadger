@@ -8,7 +8,7 @@ import { packageMainFile, parseCopilotSkillPackage, validateSkillFilePath } from
 
 export const MAX_IMPORTED_COPILOT_SKILLS = 32;
 
-export interface CopilotSkillQueryOptions { availableToolNames?: readonly string[]; grantBound?: boolean; }
+export interface CopilotSkillQueryOptions { availableToolNames?: readonly string[]; }
 export interface CopilotSkillRow {
   id: string; name: string; description: string; kind: 'builtin-playbook' | 'imported';
   version: string; currentVersion: string; revisionId: string; source: CopilotSkillSource;
@@ -193,17 +193,16 @@ function describeSkill(row: Skill, snapshot: CopilotSkillSnapshot, head: SkillHe
   const missing = snapshot.requiredTools.filter(name => !options.availableToolNames?.includes(name));
   const compatible = snapshot.incompatibilityReasons.length === 0;
   const unavailableReason = !row.isEnabled ? 'disabled_by_owner' : reviewRequired ? 'playbook_review_required'
-    : !compatible ? 'incompatible_skill_package' : options.grantBound && !trusted ? 'untrusted_for_grant'
-    : options.grantBound && !options.availableToolNames ? 'tool_availability_unknown'
+    : !compatible ? 'incompatible_skill_package'
     : missing.length ? `required_tools_unavailable:${missing.join(',')}` : null;
-  return { id: row.id, name: trusted && options.grantBound ? bundled!.name : snapshot.name,
-    description: trusted && options.grantBound ? bundled!.description : snapshot.description,
+  return { id: row.id, name: trusted ? bundled!.name : snapshot.name,
+    description: trusted ? bundled!.description : snapshot.description,
     kind: bundled ? 'builtin-playbook' : 'imported', version: snapshot.version, currentVersion: bundled?.version ?? snapshot.version,
     revisionId: head?.current_revision_id ?? `legacy:${row.id}`, source: snapshot.source, isEnabled: row.isEnabled,
     available: unavailableReason === null, unavailableReason, compatible, incompatibilityReasons: snapshot.incompatibilityReasons,
     requiredTools: snapshot.requiredTools, reviewRequired, editable: row.userId === userId,
     updatedAt: new Date(record?.created_at ?? row.updatedAt?.getTime() ?? 0).toISOString(),
-    content: trusted && options.grantBound ? bundled!.body : snapshot.content, files: snapshot.files };
+    content: trusted ? bundled!.body : snapshot.content, files: snapshot.files };
 }
 
 /** Lightweight current catalog for the model context; callers supply its effective tools. */

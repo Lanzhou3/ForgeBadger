@@ -17,7 +17,6 @@ const {
   renameConversationMock,
   sendMessageMock,
   cancelRunMock,
-  decidePendingActionMock,
   getRunMock,
   listRunsMock,
 } = vi.hoisted(() => ({
@@ -26,7 +25,6 @@ const {
   renameConversationMock: vi.fn(),
   sendMessageMock: vi.fn(),
   cancelRunMock: vi.fn(),
-  decidePendingActionMock: vi.fn(),
   getRunMock: vi.fn(),
   listRunsMock: vi.fn(),
 }));
@@ -40,7 +38,6 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     renameConversation: renameConversationMock,
     sendMessage: sendMessageMock,
     cancelRun: cancelRunMock,
-    decidePendingAction: decidePendingActionMock,
     getRun: getRunMock,
     listConversationRuns: listRunsMock,
   };
@@ -129,7 +126,6 @@ describe("RobotChatPanel", () => {
     renameConversationMock.mockResolvedValue({ conversation: newConversation });
     sendMessageMock.mockResolvedValue({ runId: "run-1" });
     cancelRunMock.mockResolvedValue({ cancelled: true, runId: "run-1" });
-    decidePendingActionMock.mockResolvedValue({ resumed: true, runId: "run-1" });
     getRunMock.mockResolvedValue({
       run: {
         id: "run-1",
@@ -265,32 +261,6 @@ describe("RobotChatPanel", () => {
     getRunMock.mockResolvedValue({ run: { id: "run-1", conversationId: "conv-new", status: "completed", revision: 3 }, pendingActions: [] });
     dispatchRunUpdated({ run_id: "run-1", status: "completed" });
     await waitFor(() => expect(screen.queryByText("正在生成回复")).toBeNull());
-  });
-
-  it("approves a pending action from the approval card", async () => {
-    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
-    listMessagesMock.mockResolvedValue({ messages: [storedMessage] });
-    renderPanel();
-
-    await waitFor(() => expect(screen.getByText("上次的问题")).toBeTruthy());
-
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "跑一下构建" } });
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
-    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-stored", "跑一下构建", undefined));
-
-    getRunMock.mockResolvedValue({ run: { id: "run-1", conversationId: "conv-stored", status: "awaiting_approval", revision: 2 }, pendingActions: [{ id: "act-1", runId: "run-1", tool: "run_terminal", status: "pending", inputJson: "{}", inputDigest: "digest" }] });
-    dispatchRunUpdated({
-      run_id: "run-1",
-      status: "awaiting_approval",
-      pending_action_id: "act-1",
-      tool_name: "run_terminal",
-    });
-
-    await waitFor(() => expect(screen.getByText("需要批准")).toBeTruthy());
-    expect(screen.getByText("run_terminal")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "批准" }));
-
-    await waitFor(() => expect(decidePendingActionMock).toHaveBeenCalledWith("run-1", "act-1", true));
   });
 
   it("resets to a fresh draft on new chat without creating a server conversation", async () => {

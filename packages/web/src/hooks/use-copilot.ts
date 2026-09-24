@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FORGEBADGER_GATEWAY_EVENT, FORGEBADGER_GATEWAY_CONNECTED } from "@/lib/gateway-events";
-import { decidePendingAction, editMessage, getRun, listConversationRuns, sendMessage,
+import { editMessage, getRun, listConversationRuns, sendMessage,
   type CopilotPendingAction, type CopilotRunStatus } from "@/lib/copilot-api";
 
 export interface ActiveCopilotRun {
@@ -179,9 +179,5 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
     submit(id, () => options ? sendMessage(id, text, modelId, options) : sendMessage(id, text, modelId)), [submit]);
   const startEditedRun = useCallback((id: string, messageId: string, text: string) =>
     submit(id, () => editMessage(id, messageId, text)), [submit]);
-  const approveAction = useCallback(async (runId: string, actionId: string, approved: boolean) => {
-    await decidePendingAction(runId, actionId, approved);
-    await reconcile();
-  }, [reconcile]);
-  return { active, syncError, startRun, startEditedRun, approveAction, clearActive, markPending, reconcile };
+  return { active, syncError, startRun, startEditedRun, clearActive, markPending, reconcile };
 }

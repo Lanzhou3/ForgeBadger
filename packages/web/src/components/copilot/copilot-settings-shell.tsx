@@ -8,7 +8,6 @@ import {
   CalendarClock,
   Puzzle,
   Radio,
-  ShieldCheck,
   SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
@@ -16,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useSettingsCopy } from "./settings-copy";
 
-export type CopilotSettingsSection = "general" | "access" | "extensions" | "channels" | "automations";
+export type CopilotSettingsSection = "general" | "extensions" | "channels" | "automations";
 
 interface NavItem {
   key: CopilotSettingsSection;
@@ -29,7 +28,6 @@ function useNavItems(): NavItem[] {
   const copy = useSettingsCopy();
   return [
     { key: "general", href: "/copilot/settings", icon: SlidersHorizontal, label: copy.navGeneral },
-    { key: "access", href: "/copilot/settings/access", icon: ShieldCheck, label: copy.navAccess },
     { key: "extensions", href: "/copilot/extensions", icon: Puzzle, label: copy.navExtensions },
     { key: "channels", href: "/copilot/channels", icon: Radio, label: copy.navChannels },
     { key: "automations", href: "/copilot/automations", icon: CalendarClock, label: copy.navAutomations },
@@ -39,7 +37,7 @@ function useNavItems(): NavItem[] {
 /**
  * Shared shell for every Copilot settings surface: a back-to-chat header plus
  * a persistent section nav (sidebar on desktop, scrollable chips on mobile),
- * so 常规 / 授权 / 扩展 / 渠道 / 自动化 read as one coherent settings center.
+ * so 常规 / 扩展 / 渠道 / 自动化 read as one coherent settings center.
  */
 export function CopilotSettingsShell({
   active,

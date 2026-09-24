@@ -10,8 +10,8 @@ const resourceInput = z.object({
 }).strict();
 function options(context: AgentToolContext): PlaybookQueryOptions {
   const names = context.availableToolNames;
-  return { grantBound: typeof context.grantId === 'string',
-    ...(Array.isArray(names) && names.every(name => typeof name === 'string') ? { availableToolNames: names as string[] } : {}) };
+  return Array.isArray(names) && names.every(name => typeof name === 'string')
+    ? { availableToolNames: names as string[] } : {};
 }
 export function createSkillTools(): AgentTool[] {
   return [

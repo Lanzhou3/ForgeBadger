@@ -91,7 +91,7 @@ it('keeps default full mode and includes discovery mode in idempotency without b
   const f = fixture(t);
   const input = { userId: f.userId, conversationId: f.conversationId, userText: 'inspect', clientRequestId: 'stable-key' };
   const runId = f.ledger.admit(input, 16);
-  const oldDigest = createHash('sha256').update(JSON.stringify({ content: 'inspect', modelId: null, projectId: null, grantId: null, source: 'user', skipUserMessage: false })).digest('hex');
+  const oldDigest = createHash('sha256').update(JSON.stringify({ content: 'inspect', modelId: null, projectId: null, source: 'user', skipUserMessage: false })).digest('hex');
   f.db.prepare('UPDATE copilot_runs SET request_digest=? WHERE id=?').run(oldDigest, runId);
   assert.equal(f.ledger.admit({ ...input, toolDiscovery: false }, 16), runId);
   assert.throws(() => f.ledger.admit({ ...input, toolDiscovery: true }, 16), { code: 'COPILOT_REQUEST_CONFLICT' });
@@ -110,9 +110,9 @@ it('intersects discovered selections with current owner switches and source perm
   }).runTurn({ userId: f.userId, conversationId: f.conversationId, userText: 'inspect', toolDiscovery: true });
   assert.equal(turns, 3);
   const registry = createAgentToolRegistry([...createPlatformTools(), { name: 'mcp_external', description: 'external', risk: 'operate', requiresApproval: true, inputSchema: z.object({}), async execute() { return {}; } }]);
-  const visible = visibleToolSchemas(registry, { hasSessionManager: false, grantBound: true, scheduled: true });
+  const visible = visibleToolSchemas(registry, { hasSessionManager: false, scheduled: true });
   assert.equal(discoverToolSchemas(visible, 'mcp', 12).length, 0);
-  assert.equal(discoverToolSchemas(visible, 'get_usage_summary', 12).length, 0);
+  assert.equal(discoverToolSchemas(visible, 'create_project', 12).length, 0);
   assert.equal(discoverToolSchemas(visible, 'start_session', 12).length, 0);
 });
 

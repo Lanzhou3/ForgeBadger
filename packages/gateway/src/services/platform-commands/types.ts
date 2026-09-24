@@ -23,7 +23,6 @@ export interface PlatformCommand {
     id: string;
     capability: string;
     effect: 'database' | 'external';
-    delegatable: boolean;
     inputSchema: z.ZodType<unknown>;
     prepare?(context: CommandContext, input: unknown): Promise<void>;
     resolve(context: CommandContext, input: unknown): CommandResources;

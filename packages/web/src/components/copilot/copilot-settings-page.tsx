@@ -8,7 +8,6 @@ import {
   Cpu,
   Puzzle,
   Radio,
-  ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -28,7 +27,6 @@ import {
   listCopilotConnections,
   listCopilotSkills,
 } from "@/lib/copilot-extensions-api";
-import { listGrants } from "@/lib/platform-actions-api";
 
 /** Copilot settings hub: runtime status, entries into each settings section, and memory. */
 export function CopilotSettingsPage() {
@@ -40,7 +38,6 @@ export function CopilotSettingsPage() {
     queryFn: listModelProviders,
     retry: false,
   });
-  const grants = useQuery({ queryKey: ["copilot-grants"], queryFn: listGrants, retry: false });
   const skills = useQuery({ queryKey: copilotSkillsKey, queryFn: listCopilotSkills, retry: false });
   const connections = useQuery({
     queryKey: copilotConnectionsKey,
@@ -56,7 +53,6 @@ export function CopilotSettingsPage() {
       : selected
         ? `${selected.providerName} / ${selected.name}`
         : t("copilot.followSystemDefault");
-  const activeGrants = grants.data?.grants.filter((grant) => grant.status === "active").length;
   const skillCount = skills.data?.skills.length;
   const connectionCount = connections.data?.connections.filter((item) => item.kind === "mcp").length;
 
@@ -68,14 +64,6 @@ export function CopilotSettingsPage() {
     summary?: string;
     delay: number;
   }[] = [
-    {
-      href: "/copilot/settings/access",
-      icon: ShieldCheck,
-      title: copy.accessCardTitle,
-      description: copy.accessCardDescription,
-      summary: activeGrants !== undefined ? `${activeGrants} · ${copy.statusActive}` : undefined,
-      delay: 180,
-    },
     {
       href: "/copilot/extensions",
       icon: Puzzle,

@@ -1,5 +1,5 @@
 import { zodToJsonSchema } from "./tool-schema.js";
-import { checkAgentScope, scopedListResult } from "../platform-commands/agent-scope.js";
+import { checkAgentScope } from "../platform-commands/agent-scope.js";
 import { executeAgentAction, TOOL_COMMANDS } from "../platform-commands/agent-actions.js";
 /**
  * Tool registry for the Copilot harness.
@@ -86,10 +86,9 @@ export async function executeAgentTool(
   }
   try {
     checkAgentScope(context, tool.name, parsed.data);
-    const scoped = scopedListResult(context, tool.name, parsed.data);
     const output = tool.risk === "operate" && TOOL_COMMANDS[tool.name]
       ? await executeAgentAction(tool.name, parsed.data, context)
-      : scoped !== undefined ? scoped : await tool.execute(parsed.data, context);
+: await tool.execute(parsed.data, context);
     return { ok: true, output: capOutput(output) };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Tool execution failed" };

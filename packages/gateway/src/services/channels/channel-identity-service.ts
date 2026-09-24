@@ -2,7 +2,6 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import type { Database } from '../../db/types.js';
 import { ChannelIdentityRepository, type ChannelIdentity } from '../../db/repositories/channel-identity-repository.js';
-import { CopilotGrantRepository } from '../../db/repositories/copilot-grant-repository.js';
 import { FeishuIntegrationRepository } from '../../db/repositories/feishu-integration-repository.js';
 import { TelegramIntegrationRepository } from '../../db/repositories/telegram-integration-repository.js';
 import { ProjectRepository } from '../../db/repositories/project-repository.js';
@@ -14,7 +13,7 @@ export const channelPlatforms = ['feishu', 'telegram'] as const;
 export type ChannelPlatform = typeof channelPlatforms[number];
 export const channelPairingInput = z.object({ channel: z.enum(channelPlatforms), accountId: id }).strict();
 export const channelConfirmationInput = z.object({ revision: z.number().int().positive(), externalUserId: id, chatId: id }).strict();
-export const channelRouteInput = z.object({ identityId: id, grantId: id }).strict();
+export const channelRouteInput = z.object({ identityId: id, projectId: id }).strict();
 const peerBase = { channel: z.enum(channelPlatforms), accountId: id, accountRevision: z.number().int().positive(), externalUserId: id, chatId: id };
 const peerSchema = z.discriminatedUnion('chatType', [
   z.object({ ...peerBase, chatType: z.literal('p2p') }).strict(),
@@ -35,11 +34,9 @@ interface ChannelIntegrationGate {
 
 export class ChannelIdentityService {
   readonly records: ChannelIdentityRepository;
-  private readonly grants: CopilotGrantRepository;
   private readonly conversations: CopilotConversationLog;
   constructor(private readonly db: Database, private readonly userId: string, _masterKey?: string) {
     this.records = new ChannelIdentityRepository(db, userId);
-    this.grants = new CopilotGrantRepository(db, userId);
     this.conversations = new CopilotConversationLog(db, userId);
   }
 
@@ -107,10 +104,10 @@ export class ChannelIdentityService {
     const value = channelRouteInput.parse(raw);
     return this.records.transaction(() => {
       this.currentIdentity(value.identityId);
-      const grant = this.currentGrant(value.grantId);
+      const project = new ProjectRepository(this.db, this.userId).getById(value.projectId);
+      requireAuthority(project !== undefined);
       const conversation = this.conversations.createConversation('Channel Copilot');
-      this.grants.bind(conversation.id, grant.id);
-      const route = this.records.createRoute({ ...value, grantRevision: grant.revision, conversationId: conversation.id });
+      const route = this.records.createRoute({ identityId: value.identityId, projectId: value.projectId, conversationId: conversation.id });
       this.audit('channel.route.create', route.id);
       return route;
     });
@@ -130,12 +127,12 @@ export class ChannelIdentityService {
     return this.records.transaction(() => {
       const route = this.records.route(routeId); requireAuthority(route?.status === 'active');
       const identity = this.currentIdentity(route!.identityId);
-      const grant = this.currentGrant(route!.grantId);
-      requireAuthority(grant.revision === route!.grantRevision && this.conversations.getConversation(route!.conversationId)?.status === 'active'
-        && this.grants.binding(route!.conversationId) === grant.id);
+      const project = new ProjectRepository(this.db, this.userId).getById(route!.projectId);
+      requireAuthority(this.conversations.getConversation(route!.conversationId)?.status === 'active'
+        && project !== undefined && project.copilotAutonomy === true);
       return { userId: this.userId, actorUserId: this.userId, routeId: route!.id, routeRevision: route!.revision,
-        identityId: identity.id, identityRevision: identity.revision, grantId: grant.id, grantRevision: grant.revision,
-        conversationId: route!.conversationId, projectIds: grant.scope.projectIds };
+        identityId: identity.id, identityRevision: identity.revision,
+        conversationId: route!.conversationId, projectIds: [route!.projectId] };
     });
   }
 
@@ -151,13 +148,13 @@ export class ChannelIdentityService {
       requireAuthority(identity.channel === peer.channel && identity.accountId === peer.accountId
         && identity.accountRevision === peer.accountRevision && identity.externalUserId === peer.externalUserId
         && (peer.chatType === 'group' || identity.chatId === peer.chatId));
-      const grant = this.currentGrant(route!.grantId);
-      requireAuthority(grant.revision === route!.grantRevision && this.conversations.getConversation(route!.conversationId)?.status === 'active'
-        && this.grants.binding(route!.conversationId) === grant.id);
-      if (scope) requireAuthority(grant.scope.capabilities.includes(scope.capability) && scope.projectIds.every(projectId => grant.scope.projectIds.includes(projectId)));
+      const project = new ProjectRepository(this.db, this.userId).getById(route!.projectId);
+      requireAuthority(this.conversations.getConversation(route!.conversationId)?.status === 'active'
+        && project !== undefined && project.copilotAutonomy === true);
+      if (scope) requireAuthority(scope.projectIds.includes(route!.projectId));
       return { userId: this.userId, actorUserId: this.userId, routeId: route!.id, routeRevision: route!.revision,
-        identityId: identity.id, identityRevision: identity.revision, grantId: grant.id, grantRevision: grant.revision,
-        conversationId: route!.conversationId, projectIds: grant.scope.projectIds };
+        identityId: identity.id, identityRevision: identity.revision,
+        conversationId: route!.conversationId, projectIds: [route!.projectId] };
     });
   }
 
@@ -189,13 +186,6 @@ export class ChannelIdentityService {
   /** Account fence for a stored identity: enabled/config/emergency plus revision. The chat allowlist is enforced on the presenting peer, never on the identity's own private chat. */
   private checkIdentityAccount(identity: ChannelIdentity): void {
     requireAuthority(this.account(identity.channel as ChannelPlatform, identity.accountId).configRevision === identity.accountRevision);
-  }
-  private currentGrant(grantId: string) {
-    this.actor(); const grant = this.grants.get(grantId);
-    requireAuthority(grant?.status === 'active' && grant.actorUserId === this.userId && (grant.expiresAt === null || grant.expiresAt > Date.now()));
-    const projects = new ProjectRepository(this.db, this.userId);
-    requireAuthority(grant!.scope.projectIds.every(projectId => projects.getById(projectId)));
-    return grant!;
   }
   private audit(action: string, resourceId: string): void {
     new AuditLogRepository(this.db, this.userId).create({ action, resourceType: 'channel_authority', resourceId, details: {} });

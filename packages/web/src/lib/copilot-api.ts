@@ -95,7 +95,7 @@ export interface CopilotToolInfo {
   available: boolean;
   unavailableReason: string | null;
   effectiveEnabled?: boolean;
-  authorization?: "read" | "approval_or_grant" | "unavailable";
+  authorization?: "read" | "owner_action" | "unavailable";
 }
 
 export interface CopilotPlaybook {
@@ -135,10 +135,10 @@ export function listConversations() {
   return fetchJson<{ conversations: CopilotConversation[] }>("/api/v1/copilot/conversations");
 }
 
-export function createConversation(title?: string, grantId?: string) {
+export function createConversation(title?: string) {
   return fetchJson<{ conversation: CopilotConversation }>("/api/v1/copilot/conversations", {
     method: "POST",
-    body: JSON.stringify({ ...(title ? { title } : {}), ...(grantId ? { grantId } : {}) }),
+    body: JSON.stringify(title ? { title } : {}),
   });
 }
 
@@ -194,13 +194,6 @@ export function cancelRun(runId: string) {
   return fetchJson<{ cancelled: boolean; runId: string }>(
     `/api/v1/copilot/runs/${encodeURIComponent(runId)}/cancel`,
     { method: "POST" }
-  );
-}
-
-export function decidePendingAction(runId: string, actionId: string, approved: boolean) {
-  return fetchJson<{ resumed: boolean; runId: string }>(
-    `/api/v1/copilot/runs/${encodeURIComponent(runId)}/pending-actions/${encodeURIComponent(actionId)}/decide`,
-    { method: "POST", body: JSON.stringify({ approved }) }
   );
 }
 

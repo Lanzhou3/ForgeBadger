@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   MessageRow,
-  PendingActionRow,
   StreamingMessage,
   ThinkingSection,
   indexToolResults,
@@ -60,7 +59,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
   const conversationIdRef = useRef<string | null>(null);
   conversationIdRef.current = conversationId;
 
-  const { active, startRun, approveAction, clearActive, markPending, reconcile, syncError } = useCopilotRun({
+  const { active, startRun, clearActive, markPending, reconcile, syncError } = useCopilotRun({
     conversationId,
     onSettled: async (id) => {
       const { messages: next } = await listMessages(id);
@@ -160,15 +159,6 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
     } catch { setLoadError("取消未确认，请同步状态后重试。"); }
     if (active.conversationId) await reloadMessages(active.conversationId);
   }, [active, reconcile, reloadMessages]);
-
-  const onDecide = useCallback(
-    async (approved: boolean) => {
-      if (!active?.pendingAction) return;
-      await approveAction(active.runId, active.pendingAction.id, approved);
-      await reloadMessages(active.conversationId);
-    },
-    [active, approveAction, reloadMessages]
-  );
 
   const onScroll = useCallback(() => {
     const node = scrollRef.current;
@@ -285,9 +275,6 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
               {t("copilot.running")}
             </p>
           ) : null}
-          {active?.pendingAction && (
-            <PendingActionRow action={active.pendingAction} onDecide={onDecide} />
-          )}
           {sendError && (
             <div className="flex items-center gap-2">
               <p className="text-sm text-destructive">{t("copilot.sendError")}</p>

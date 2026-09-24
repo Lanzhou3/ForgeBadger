@@ -11,7 +11,7 @@ import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { signJwt } from '../src/auth/jwt.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 
-it('reports dispatch as a normal approval-or-grant tool and refuses enabling retired tools', async () => {
+it('reports dispatch as a normal owner-action tool and refuses enabling retired tools', async () => {
   const db = new Database(':memory:');
   migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations/',import.meta.url))});
   const user = new UserRepository(db).create('capability@test.dev','hash');
@@ -31,7 +31,8 @@ it('reports dispatch as a normal approval-or-grant tool and refuses enabling ret
     // A session runtime is needed independently of per-adapter autonomy.
     assert.equal(dispatch.available,false);
     assert.equal(dispatch.unavailableReason,'SESSION_RUNTIME_UNAVAILABLE');
-    assert.equal(dispatch.authorization,'approval_or_grant');
+    // Authorization is the project-autonomy gate for copilot-origin actions; owner-initiated tool calls are plain owner actions.
+    assert.equal(dispatch.authorization,'owner_action');
     assert.ok(body.data.tools.some(tool=>tool.name==='pm_prepare_task_packet'));
     assert.ok(body.data.tools.some(tool=>tool.name==='pm_execute_task_packet'));
     const output = body.data.tools.find(tool=>tool.name==='get_session_output')!;

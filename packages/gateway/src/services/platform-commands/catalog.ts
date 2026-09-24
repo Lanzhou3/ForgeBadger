@@ -73,7 +73,7 @@ import { assertNewProjectResource } from '../../db/repositories/managed-project-
 
 export function createPlatformCommands(): Map<string, PlatformCommand> {
     const commands: PlatformCommand[] = [
-        command({ id: 'project.create', effect: 'external', delegatable: true, inputSchema: projectCreateInput,
+        command({ id: 'project.create', effect: 'external', inputSchema: projectCreateInput,
             resolve(_ctx, input) {
                 const v = projectCreateInput.parse(input);
                 return { projectIds: [], rootPaths: [canonicalRoot(v.path)], revision: canonicalRoot(v.path) };
@@ -92,35 +92,35 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                     throw new Error('Project root must be a directory');
                 return new ProjectRepository(ctx.db, ctx.userId).create({ ...v, path: canonicalRoot(root), aiTool: '' });
             } }),
-        command({ id: 'project.metadata.update', effect: 'database', delegatable: true, inputSchema: projectInput.extend({ name: z.string().min(1).max(200).optional(), description: z.string().max(2000).optional() }), resolve: projectResources,
+        command({ id: 'project.metadata.update', effect: 'database', inputSchema: projectInput.extend({ name: z.string().min(1).max(200).optional(), description: z.string().max(2000).optional() }), resolve: projectResources,
             execute(ctx, input) {
                 const v = z.object({ projectId: id, name: z.string().optional(), description: z.string().optional() }).parse(input);
                 return new ProjectRepository(ctx.db, ctx.userId).updateMetadata(v.projectId, v);
             } }),
-        command({ id: 'pm.work_item.create', effect: 'database', delegatable: true, inputSchema: workItemCreateInput, resolve: projectResources,
+        command({ id: 'pm.work_item.create', effect: 'database', inputSchema: workItemCreateInput, resolve: projectResources,
             execute(ctx, input) {
                 const v = workItemCreateInput.parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
                 return new ProjectManagerRepository(ctx.db, ctx.userId).createWorkItem(v.projectId, v);
             } }),
-        command({ id: 'pm.work_item.create_with_evidence', effect: 'database', delegatable: false, inputSchema: workItemWithEvidence, resolve: projectResources, execute(ctx, input) {
+        command({ id: 'pm.work_item.create_with_evidence', effect: 'database', inputSchema: workItemWithEvidence, resolve: projectResources, execute(ctx, input) {
                 const v = workItemWithEvidence.parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
                 return mutateAssignedTask(ctx.db,ctx.userId,v.projectId,undefined,v);
             } }),
-        command({ id: 'pm.work_item.update', effect: 'database', delegatable: false, inputSchema: workItemUpdateInput, resolve: itemResources,
+        command({ id: 'pm.work_item.update', effect: 'database', inputSchema: workItemUpdateInput, resolve: itemResources,
             execute(ctx, input) {
                 const v = workItemUpdateInput.parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
                 return mutateAssignedTask(ctx.db,ctx.userId,v.projectId,v.workItemId,v);
             } }),
-        command({ id: 'pm.work_item.metadata', effect: 'database', delegatable: true, inputSchema: workItemUpdateInput.omit({ acceptanceCriteria: true, stageId: true,assigneeId:true,reviewerId:true }), resolve: itemResources,
+        command({ id: 'pm.work_item.metadata', effect: 'database', inputSchema: workItemUpdateInput.omit({ acceptanceCriteria: true, stageId: true,assigneeId:true,reviewerId:true }), resolve: itemResources,
             execute(ctx, input) {
                 const v = workItemUpdateInput.omit({ acceptanceCriteria: true, stageId: true,assigneeId:true,reviewerId:true }).parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
                 return mutateAssignedTask(ctx.db,ctx.userId,v.projectId,v.workItemId,v);
             } }),
-        command({ id: 'pm.task.prepare', effect: 'database', delegatable: true, inputSchema: taskPrepareInput, resolve: itemResources,
+        command({ id: 'pm.task.prepare', effect: 'database', inputSchema: taskPrepareInput, resolve: itemResources,
             async prepare(ctx, input) {
                 const v = taskPrepareInput.parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
@@ -146,7 +146,7 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 }).immediate();
                 return { taskPacket: buildTaskPacket({ project: p, workItem: item, session }), session: toTaskPacketSessionDto(session!), existed };
             } }),
-        command({ id: 'pm.task.execute', effect: 'external', delegatable: true, inputSchema: taskPrepareInput,
+        command({ id: 'pm.task.execute', effect: 'external', inputSchema: taskPrepareInput,
             resolve(ctx, input) {
                 const resources = itemResources(ctx, input);
                 const v = taskPrepareInput.parse(input);
@@ -167,9 +167,9 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
             async execute(ctx, input) {
                 return executeTaskPacket(ctx, taskPrepareInput.parse(input));
             } }),
-        command({ id: 'pm.task.close', effect: 'database', delegatable: true, inputSchema: taskCloseInput, resolve: itemResources,
+        command({ id: 'pm.task.close', effect: 'database', inputSchema: taskCloseInput, resolve: itemResources,
             execute(ctx, input) { return closeTask(ctx, taskCloseInput.parse(input)); } }),
-        command({ id: 'session.dispatch', effect: 'external', delegatable: true, inputSchema: sessionDispatchInput,
+        command({ id: 'session.dispatch', effect: 'external', inputSchema: sessionDispatchInput,
             resolve(ctx, input) {
                 const resources = sessionResources(ctx, input);
                 const { sessionId } = sessionDispatchInput.parse(input);
@@ -195,7 +195,7 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 ctx.authorize?.();
                 return dispatchSessionInput(manager, sessionId, adapter, message, { authorize: ctx.authorize });
             } }),
-        command({ id: 'memory.write', effect: 'database', delegatable: true, inputSchema: memoryWriteInput,
+        command({ id: 'memory.write', effect: 'database', inputSchema: memoryWriteInput,
             resolve(ctx, input) {
                 const v = memoryWriteInput.parse(input);
                 if (v.scope === 'project') {

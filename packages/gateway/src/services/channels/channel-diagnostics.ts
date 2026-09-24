@@ -1,7 +1,8 @@
 import type { Database } from '../../db/types.js';
 import { ChannelIdentityRepository } from '../../db/repositories/channel-identity-repository.js';
-import { CopilotGrantRepository } from '../../db/repositories/copilot-grant-repository.js';
+import { ProjectRepository } from '../../db/repositories/project-repository.js';
 import { ModelProviderRepository } from '../../db/repositories/model-provider-repository.js';
+import { CopilotConversationLog } from '../agent/conversation-log.js';
 import type { ChannelPlatform } from './channel-identity-service.js';
 
 export type ChannelDiagnosticKey = 'credentials' | 'connection' | 'identity' | 'route' | 'model' | 'delivery';
@@ -107,27 +108,31 @@ function identityCheck(identities: ReturnType<ChannelIdentityRepository['listIde
 }
 
 function routeCheck(db: Database, userId: string, records: ChannelIdentityRepository, identities: ReturnType<ChannelIdentityRepository['listIdentities']>, account: ChannelAccountRow, label: string): ChannelDiagnosticCheck {
-  const grants = new CopilotGrantRepository(db, userId);
-  const now = Date.now();
+  const projects = new ProjectRepository(db, userId);
+  const conversations = new CopilotConversationLog(db, userId);
   let problem: string | undefined;
+  let problemRouteId: string | undefined;
   for (const route of records.listRoutes()) {
     if (route.status !== 'active') continue;
     const owner = identities.find(identity => identity.id === route.identityId);
     if (!owner || owner.status !== 'active') { problem = problem ?? 'identity'; continue; }
     if (owner.accountId !== account.id || owner.accountRevision !== account.config_revision) { problem = problem ?? 'revision'; continue; }
     if (account.enabled !== 1) { problem = problem ?? 'disabled'; continue; }
-    const grant = grants.get(route.grantId);
-    if (!grant || grant.status !== 'active' || grant.revision !== route.grantRevision
-      || (grant.expiresAt !== null && grant.expiresAt <= now)
-      || (grant.maxActions !== null && grant.usedActions >= grant.maxActions)) { problem = problem ?? 'grant'; continue; }
+    const project = projects.getById(route.projectId);
+    const conversation = conversations.getConversation(route.conversationId);
+    if (!project) { problem = problem ?? 'project'; problemRouteId = problemRouteId ?? route.id; continue; }
+    if (project.copilotAutonomy !== true) { problem = problem ?? 'autonomy_off'; problemRouteId = problemRouteId ?? route.id; continue; }
+    if (conversation?.status !== 'active') { problem = problem ?? 'conversation'; problemRouteId = problemRouteId ?? route.id; continue; }
     return { key: 'route', ok: true, detail: '存在有效的渠道授权路由。', fixHint: '' };
   }
   return {
     key: 'route', ok: false,
-    detail: problem === 'grant' ? '渠道授权已失效（授权被撤销、已过期或次数已用尽）。'
+    detail: problem === 'project' ? `路由 ${problemRouteId} 指向的项目不存在。`
+      : problem === 'autonomy_off' ? `路由 ${problemRouteId} 所在项目未开启 Copilot 自治。`
       : problem === 'revision' ? '渠道授权与当前配置版本不匹配（需重新绑定）。'
       : problem === 'disabled' ? '渠道已停用，授权路由不可用。'
       : problem === 'identity' ? '渠道授权绑定的身份已失效。'
+      : problem === 'conversation' ? '路由绑定的会话已失效。'
       : '尚无渠道授权路由。',
     fixHint: routeHint(problem ?? 'missing')
   };
@@ -179,10 +184,12 @@ function pairingHint(label: string): string {
 }
 
 function routeHint(problem: string): string {
-  if (problem === 'grant') return '请先在 Copilot 授权管理中创建有效的项目授权，再回「远程渠道」第 3 步重新绑定渠道授权。';
+  if (problem === 'project') return '删除失效路由，选择有效项目后重新绑定。';
+  if (problem === 'autonomy_off') return '在 Web 控制台项目设置中开启该项目的 Copilot 自治后，渠道授权即可生效。';
+  if (problem === 'conversation') return '路由绑定的会话已失效：请回「远程渠道」第 3 步重新绑定渠道授权。';
   if (problem === 'revision' || problem === 'identity') return '配置或身份已变化：请先重新完成身份配对，再回「远程渠道」第 3 步重新绑定渠道授权。';
   if (problem === 'disabled') return '请先在「远程渠道」设置页启用渠道，再重新绑定渠道授权。';
-  return '请在 Web 控制台「远程渠道」设置页第 3 步选择已确认身份与有效项目授权，点击「启用远程操作」创建渠道授权。';
+  return '选择已确认身份与目标项目，点击「启用远程操作」创建渠道授权。';
 }
 
 function modelHint(problem: string): string {

@@ -10,7 +10,7 @@ export function assertDevelopmentAuthority(db:Database,row:DevelopmentTaskRow,ch
  const active=db.prepare('SELECT status FROM users WHERE id=?').get(row.user_id) as {status:string}|undefined;
  if(active?.status!=='active')throw new Error('DEVELOPMENT_ACTOR_REVOKED');
  const actions=new PlatformActionRepository(db,row.user_id),intent=actions.get(row.intent_id),receipt=actions.receipt(row.intent_id);
- if(!intent||intent.authority!=='owner_action'||intent.grant_id||intent.status!=='completed'||intent.command_id!=='development.task.submit'||intent.expires_at<=Date.now()||intent.policy_version!==1)throw new Error('DEVELOPMENT_AUTHORITY_EXPIRED');
+ if(!intent||intent.authority!=='owner_action'||intent.status!=='completed'||intent.command_id!=='development.task.submit'||intent.expires_at<=Date.now()||intent.policy_version!==1)throw new Error('DEVELOPMENT_AUTHORITY_EXPIRED');
  const result=receipt?.result as {taskId?:string;recipeDigest?:string}|undefined;
  if(receipt?.outcome!=='confirmed'||result?.taskId!==row.id||result.recipeDigest!==row.recipe_digest)throw new Error('DEVELOPMENT_RECEIPT_MISMATCH');
  if(!new CopilotToolPreferenceRepository(db,row.user_id).isEnabled('submit_development_task'))throw new Error('DEVELOPMENT_TOOL_DISABLED');

@@ -184,6 +184,40 @@ describe("programmatic terminal submit classifiers", () => {
     assert.equal(isProgrammaticTaskConsumed("codex", STAGED_PANES.codex, busyPane, needle), true);
   });
 
+  it("recognizes PI's folded multi-line paste marker as staged input", () => {
+    // pi 0.87.1 folds a multi-line bracketed paste into `[paste #N +M lines]`
+    // inside the editor box (live capture 2026-09-23: a Copilot task packet
+    // staged as `[paste #1 +20 lines]`); the raw task text never renders, so
+    // the needle alone cannot prove staging.
+    const message = [
+      "Task: 修复登录流程",
+      "Project: ForgeBadger",
+      "Runtime CLI: pi",
+      "",
+      ...Array.from({ length: 16 }, (_, index) => `context line ${index}`)
+    ].join("\n");
+    const needle = programmaticDeliveryNeedle(message);
+    const border = "  " + "─".repeat(90);
+    const pane = [
+      " pi v0.87.1",
+      border,
+      "  [paste #1 +20 lines]",
+      border,
+      "  D:\\Project\\opensource\\ForgeBadger (dev)",
+      "  0.0%/131k (auto)                    GLM-5.2 • medium"
+    ].join("\n");
+    assert.equal(composerContainsNeedle("pi", pane, needle), false, "folded paste hides the raw text");
+    assert.equal(composerContainsStagedTask("pi", pane, message, needle), true);
+
+    // Layout A (pi ≤ 0.86.0): the marker renders below the status line.
+    const layoutA = "  /app/workspace/project\n  0.0%/262k (auto)\n  [paste #2 +20 lines]";
+    assert.equal(composerContainsStagedTask("pi", layoutA, message, needle), true);
+
+    // The marker only counts inside the current composer, not in scrollback.
+    const scrollback = `[paste #1 +20 lines]\n${READY_PANES.pi}`;
+    assert.equal(composerContainsStagedTask("pi", scrollback, message, needle), false);
+  });
+
   it("recognizes Codex's current-composer placeholder for a large Unicode paste", () => {
     const message = "🙂".repeat(1001);
     const pane = "› [Pasted Content 1001 chars]\n\nmodel · cwd";

@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { ModelProviderRepository } from '../src/db/repositories/model-provider-repository.js';
-import { PlatformActions } from '../src/services/platform-commands/actions.js';
-import { createPlatformCommands } from '../src/services/platform-commands/catalog.js';
 import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
 import { createCopilotOrchestrator } from '../src/services/agent/orchestrator.js';
 import { createAgentLlmClient } from '../src/services/agent/llm-client.js';
@@ -16,10 +15,10 @@ import { createPlatformTools } from '../src/services/agent/tools/index.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { MAX_CONTEXT_CHARS } from '../src/services/agent/context.js';
 for(const apiFormat of ['openai','anthropic'] as const)it(`selected project without memory and huge tool turn fit complete ${apiFormat} wire body`,async()=>{
-  const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+  const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations',import.meta.url))});
   try{
     const user=new UserRepository(db).create('context-wire@test.dev','hash');
-    const project=new ProjectRepository(db,user.id).create({name:'明确选择的项目',path:'/tmp/copilot-project-wire',description:'Context does not grant authority.',aiTool:''});
+    const project=new ProjectRepository(db,user.id).create({name:'明确选择的项目',path:'/tmp/copilot-project-wire',description:'Descriptive context, not additional authority.',aiTool:''});
     const ledger=new CopilotRunLedger(db,user.id);const c=ledger.log.createConversation('fixed title');
     ledger.log.appendMessage(c.id,{role:'user',kind:'text',content:'Keep this exact current goal.'});
     for(const id of ['a','b','c'])ledger.log.appendMessage(c.id,{role:'assistant',kind:'tool_call',content:'',toolName:'get_project',toolCallId:id,toolInputJson:JSON.stringify({projectId:project.id})});
@@ -43,9 +42,6 @@ for(const apiFormat of ['openai','anthropic'] as const)it(`selected project with
     const foreign=new ProjectRepository(db,outsider.id).create({name:'foreign',path:'/tmp/foreign-project-context',aiTool:''});
     const rejected=ledger.log.createConversation('rejected');
     await assert.rejects(orchestrator.runTurn({userId:user.id,conversationId:rejected.id,userText:'inspect',projectId:foreign.id}),/Project not found/);
-    const grant=new PlatformActions({db,userId:user.id},createPlatformCommands()).createGrant({name:'scope',projectIds:[project.id],capabilities:['memory.write'],expiresAt:Date.now()+10000,maxActions:5});
-    const outside=new ProjectRepository(db,user.id).create({name:'outside',path:'/tmp/outside-project-context',aiTool:''});
-    await assert.rejects(orchestrator.runTurn({userId:user.id,conversationId:rejected.id,userText:'inspect',projectId:outside.id,grantId:grant.id}),/outside grant/);
     assert.equal(bodies.length,1);assert.equal(ledger.log.listRuns(rejected.id).length,0);
   }finally{db.close();}
 });

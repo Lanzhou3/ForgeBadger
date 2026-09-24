@@ -4,35 +4,101 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   getProjectOverview,
+  setCopilotAutonomy,
   updateProjectManagement,
   type ManagedProject,
 } from "@/lib/platform-actions-api";
-import {
-  CopilotGrantsPanel,
-  type CopilotGrantsPanelProps,
-} from "./CopilotGrantsPanel";
 
 /**
- * Chat-sheet management surface: project grants (shared CopilotGrantsPanel)
+ * Chat-sheet management surface: per-project Copilot autonomy switches
  * plus the per-project management progress view.
  */
-export function CopilotManagementPanel(props: CopilotGrantsPanelProps) {
-  return (
-    <div className="space-y-6 p-4 text-sm">
-      <CopilotGrantsPanel {...props} />
-      <ManagementSection />
-    </div>
-  );
-}
-
-function ManagementSection() {
+export function CopilotManagementPanel() {
   const overview = useQuery({
     queryKey: ["project-management-overview"],
     queryFn: () => getProjectOverview(),
     refetchInterval: 30000,
   });
+  return (
+    <div className="space-y-6 p-4 text-sm">
+      <section className="space-y-3">
+        <h2 className="font-semibold">Copilot 项目自治</h2>
+        <p className="text-xs text-muted-foreground">
+          打开开关即授权 Copilot 在该项目内直接执行平台动作（创建任务、创建会话、下发指令），
+          无需逐条审批；关闭后立即停止授权，新动作会被拒绝。
+        </p>
+        {overview.isPending && <p role="status">正在加载项目…</p>}
+        {overview.isError && (
+          <p role="alert">
+            项目加载失败{" "}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void overview.refetch()}
+            >
+              重试
+            </Button>
+          </p>
+        )}
+        {overview.data?.projects.length === 0 && (
+          <p className="text-muted-foreground">
+            暂无项目，请先在项目页创建或导入。
+          </p>
+        )}
+        {overview.data?.projects.map((project) => (
+          <AutonomyRow key={`autonomy-${project.id}`} project={project} />
+        ))}
+      </section>
+      <ManagementSection overview={overview} />
+    </div>
+  );
+}
+
+function AutonomyRow({ project }: { project: ManagedProject }) {
+  const client = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: (enabled: boolean) => setCopilotAutonomy(project.id, enabled),
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: ["project-management-overview"] }),
+  });
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 p-3">
+      <div className="min-w-0">
+        <a
+          className="font-medium hover:underline"
+          href={`/projects/${project.id}`}
+        >
+          {project.name}
+        </a>
+        <p className="text-xs text-muted-foreground">
+          {project.copilotAutonomy ? "已授权 Copilot 自治执行" : "未授权"}
+          {mutation.isError ? ` · 保存失败：${mutation.error.message}` : ""}
+        </p>
+      </div>
+      <Switch
+        checked={project.copilotAutonomy}
+        onCheckedChange={(value) => mutation.mutate(value)}
+        disabled={mutation.isPending}
+        aria-label={`${project.name} Copilot 自治开关`}
+      />
+    </div>
+  );
+}
+
+type OverviewQuery = ReturnType<typeof useProjectOverview>;
+
+function useProjectOverview() {
+  return useQuery({
+    queryKey: ["project-management-overview"],
+    queryFn: () => getProjectOverview(),
+    refetchInterval: 30000,
+  });
+}
+
+function ManagementSection({ overview }: { overview: OverviewQuery }) {
   return (
     <section className="space-y-3">
       <h2 className="font-semibold">多项目进度</h2>
@@ -42,24 +108,6 @@ function ManagementSection() {
         环境变量 FORGEBADGER_CLI_AUTONOMY_ADAPTERS）中为对应适配器开启；
         未开启的适配器仍需人工在终端操作。
       </p>
-      {overview.isPending && <p role="status">正在加载项目…</p>}
-      {overview.isError && (
-        <p role="alert">
-          项目加载失败{" "}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void overview.refetch()}
-          >
-            重试
-          </Button>
-        </p>
-      )}
-      {overview.data?.projects.length === 0 && (
-        <p className="text-muted-foreground">
-          暂无项目，请先在项目页创建或导入。
-        </p>
-      )}
       {overview.data?.projects.map((project) => (
         <ManagementRow
           key={`${project.id}-${project.management.revision}`}

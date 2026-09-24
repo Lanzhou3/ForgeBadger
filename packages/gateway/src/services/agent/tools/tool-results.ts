@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { CopilotToolResultRepository, type ToolResultSource } from '../../../db/repositories/copilot-tool-result-repository.js';
-import { CopilotGrantRepository } from '../../../db/repositories/copilot-grant-repository.js';
 import { ProjectRepository } from '../../../db/repositories/project-repository.js';
 import { SessionRepository } from '../../../db/repositories/session-repository.js';
 import { CopilotRunLedger, type TurnInput } from '../run-ledger.js';
@@ -34,9 +33,6 @@ function authorizeSource(context: AgentToolContext,messageId:string): ToolResult
   if (!current || current.conversation_id!==conversationId) throw denied();
   const originalInput=parseRun(source.runInputJson,context);
   const currentInput=parseRun(current.input_json,context);
-  const binding=new CopilotGrantRepository(context.db,context.userId).binding(conversationId);
-  if ((originalInput.grantId??null)!==(binding??null) || (currentInput.grantId??null)!==(binding??null)
-    || (context.grantId??null)!==(binding??null)) throw denied();
   ledger.validateScope(originalInput);
   ledger.validateScope(currentInput);
   const raw:unknown=JSON.parse(source.inputJson);

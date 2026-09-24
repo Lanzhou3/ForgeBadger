@@ -13,7 +13,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { CopilotStatusBar } from "@/components/copilot/copilot-runtime-panel";
 import {
   MessageRow,
-  PendingActionRow,
   StreamingMessage,
   ThinkingSection,
   indexToolResults,
@@ -22,7 +21,6 @@ import { CopilotSettings } from "@/components/copilot/copilot-settings";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
 import { listProjects, type Project } from "@/lib/api";
 import { writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
-import { listGrants, type CopilotGrant } from "@/lib/platform-actions-api";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
 import {
@@ -61,7 +59,6 @@ export function CopilotChat() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [projectError, setProjectError] = useState(false);
-  const [grants, setGrants] = useState<CopilotGrant[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -140,21 +137,16 @@ export function CopilotChat() {
     void refreshConversations();
   }, [refreshConversations]);
 
-  const activeGrantId = conversations.find(item => item.id === conversationId)?.grantId;
   useEffect(() => {
     let cancelled = false;
     setProjectError(false);
-    void Promise.all([listProjects(), activeGrantId ? listGrants() : Promise.resolve({ grants: [] })])
-      .then(([result, authority]) => {
+    void listProjects()
+      .then((result) => {
         if (cancelled) return;
         setProjects(result.projects);
-        setGrants(authority.grants);
-      }).catch(() => { if (!cancelled) { setProjects([]); setGrants([]); setProjectError(true); } });
+      }).catch(() => { if (!cancelled) { setProjects([]); setProjectError(true); } });
     return () => { cancelled = true; };
-  }, [activeGrantId]);
-  const selectableProjects = activeGrantId
-    ? projects.filter(project => grants.find(grant => grant.id === activeGrantId && grant.status === "active")?.scope.projectIds.includes(project.id))
-    : projects;
+  }, []);
 
   // Deep-link follow-up: same-page client navigation (robot panel "expand"
   // while already on /copilot) does not remount this component, so react to
@@ -183,7 +175,7 @@ export function CopilotChat() {
 
   // Refresh the conversation list when the reactive loop opens a fresh
   // proactive conversation, so its report becomes visible.
-  const { active, startRun, startEditedRun, approveAction, clearActive, markPending, reconcile, syncError } = useCopilotRun({
+  const { active, startRun, startEditedRun, clearActive, markPending, reconcile, syncError } = useCopilotRun({
     conversationId,
     onSettled: async (id) => {
       const { messages: next } = await listMessages(id);
@@ -285,15 +277,6 @@ export function CopilotChat() {
     const id = active.conversationId;
     if (id) await reloadActiveConversation(id);
   }, [active, reconcile, reloadActiveConversation]);
-
-  const onDecide = useCallback(
-    async (approved: boolean) => {
-      if (!active?.pendingAction) return;
-      await approveAction(active.runId, active.pendingAction.id, approved);
-      await reloadActiveConversation(active.conversationId);
-    },
-    [active, approveAction, reloadActiveConversation]
-  );
 
   const beginEditMessage = useCallback((message: CopilotMessage) => {
     setEditingMessageId(message.id);
@@ -465,9 +448,6 @@ export function CopilotChat() {
                   {t("copilot.running")}
                 </p>
               ) : null}
-              {active?.pendingAction && (
-                <PendingActionRow action={active.pendingAction} onDecide={onDecide} />
-              )}
               {sendError && (
                 <div className="flex items-center gap-2">
                   <p className="text-sm text-destructive">{t("copilot.sendError")}</p>
@@ -502,7 +482,7 @@ export function CopilotChat() {
               onChange={event => setProjectId(event.target.value)}
               className="max-w-60 rounded-md border border-border bg-background px-2 py-1 text-foreground">
               <option value="">{t("copilot.noProject")}</option>
-              {selectableProjects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+              {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
             </select>
             {projectError ? <span role="status">{t("copilot.projectLoadError")}</span> : null}
           </div>

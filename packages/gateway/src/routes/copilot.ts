@@ -5,7 +5,6 @@ import { createCopilotConnectionRoutes } from "./copilot-connections.js";
 import { createCopilotPlaybookRoutes } from "./copilot-playbooks.js";
 import { visibleToolSchemas, toolUnavailableReason } from "../services/agent/tool-availability.js";
 import { randomUUID } from "node:crypto";
-import { CopilotGrantRepository } from "../db/repositories/copilot-grant-repository.js";
 import { PlatformActions } from "../services/platform-commands/actions.js";
 import { createPlatformCommands } from "../services/platform-commands/catalog.js";
 import { PlatformActionRepository } from "../db/repositories/platform-action-repository.js";
@@ -36,12 +35,11 @@ const titleSchema = z.string().trim().min(1).max(200).optional();
 const renameConversationSchema = z.object({ title: z.string().trim().min(1).max(200) }).strict();
 const modelIdSchema = z.string().trim().min(1).max(128).optional();
 const preferencesSchema = z.object({ modelId: z.string().trim().min(1).max(128).nullish(), thinkingEffort: z.enum(["off", "low", "medium", "high"]).optional() }).strict();
-const createConversationSchema = z.object({ title: titleSchema, grantId: idSchema.optional() }).strict();
+const createConversationSchema = z.object({ title: titleSchema }).strict();
 const sendMessageSchema = z.object({
   content: z.string().trim().min(1).max(32 * 1024),
   modelId: modelIdSchema,
   projectId: idSchema.optional(),
-  grantId: idSchema.optional(),
   clientRequestId: idSchema.optional(),
   toolDiscovery: z.boolean().optional()
 }).strict();
@@ -91,7 +89,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
         requiresApproval: tool.requiresApproval, enabled,
         available: unavailableReason === null, unavailableReason,
         effectiveEnabled: enabled && unavailableReason === null,
-        authorization: tool.risk === "read" ? "read" : "approval_or_grant"
+        authorization: tool.risk === "read" ? "read" : "owner_action"
       };
     });
     res.json(ok({ tools }));
@@ -124,19 +122,14 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   router.post("/conversations", (req, res) => withBody(req.body, createConversationSchema, res, (value) => {
     const { log } = buildAgentStack(deps, userId(req));
     try {
-      const conversation = deps.db.transaction(() => {
-        if(value.grantId) new PlatformActions({db:deps.db,userId:userId(req)},createPlatformCommands()).assertGrant(value.grantId);
-        const created = log.createConversation(value.title);
-        if(value.grantId) new CopilotGrantRepository(deps.db,userId(req)).bind(created.id,value.grantId);
-        return {...created,grantId:value.grantId??null};
-      }).immediate();
+      const conversation = log.createConversation(value.title);
       res.status(201).json(ok({ conversation }));
     } catch(error) { domainError(res,error); }
   }));
 
   router.get("/conversations", (_req, res) => {
     const { log } = buildAgentStack(deps, userId(_req));
-    res.json(ok({ conversations: log.listConversations().map(c=>({...c,grantId:new CopilotGrantRepository(deps.db,userId(_req)).binding(c.id)??null})) }));
+    res.json(ok({ conversations: log.listConversations() }));
   });
 
   router.get("/conversations/:id/messages", (req, res) => {
@@ -209,7 +202,6 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
           userText: value.content,
           ...(value.modelId !== undefined ? { modelId: value.modelId } : {}),
           ...(value.projectId ? {projectId:value.projectId}: {}),
-          ...(value.grantId ? { grantId: value.grantId } : {}),
           ...(value.clientRequestId ? { clientRequestId: value.clientRequestId } : {}),
           ...(value.toolDiscovery !== undefined ? { toolDiscovery: value.toolDiscovery } : {})
         });

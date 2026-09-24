@@ -4,10 +4,16 @@ import { PlatformActionRepository } from '../../db/repositories/platform-action-
 import { DevelopmentTaskRepository } from '../../db/repositories/development-task-repository.js';
 import { developmentPlanSchema,developmentId,sha256Schema,taskSummary,type DevelopmentEvidence } from './contracts.js';
 import { prepareSource,assertWorkspace,hashText } from './workspace.js';
+import { sandboxCapability } from './sandbox.js';
 import type { CommandContext,PlatformCommand } from '../platform-commands/types.js';
 
 export const developmentTaskInput=z.object({projectId:developmentId,taskId:developmentId}).strict();
 export const developmentAcceptInput=developmentTaskInput.extend({artifactDigest:sha256Schema});
+/** Fail fast on hosts that cannot run sandboxed checks; the worker keeps its own backstop. */
+export function assertDevelopmentSandboxAvailable(){
+ const c=sandboxCapability();
+ if(!c.available)throw new Error(c.reason??'DEVELOPMENT_SANDBOX_UNAVAILABLE');
+}
 export function ownedProject(ctx:Pick<CommandContext,'db'|'userId'>,projectId:string) {
  const project=new ProjectRepository(ctx.db,ctx.userId).getById(projectId);if(!project)throw new Error('DEVELOPMENT_PROJECT_NOT_FOUND');return project;
 }
@@ -28,16 +34,17 @@ function verifyEvidence(ctx:CommandContext,raw:unknown) {
  assertWorkspace(row.workspace_path,prepared);return row;
 }
 export function createDevelopmentCommands():PlatformCommand[] {
- return [{id:'development.task.submit',capability:'development.task.submit',effect:'database',delegatable:false,inputSchema:developmentPlanSchema,
-  resolve(ctx,raw){const plan=developmentPlanSchema.parse(raw),p=prepareSource(ownedProject(ctx,plan.projectId).path,plan);return {projectIds:[plan.projectId],rootPaths:[p.root],revision:hashText(JSON.stringify([p.root,p.sourceDigest,p.outputDigest,p.recipeDigest]))};},
+ return [{id:'development.task.submit',capability:'development.task.submit',effect:'database',inputSchema:developmentPlanSchema,
+  resolve(ctx,raw){const plan=developmentPlanSchema.parse(raw),p=prepareSource(ownedProject(ctx,plan.projectId).path,plan);assertDevelopmentSandboxAvailable();return {projectIds:[plan.projectId],rootPaths:[p.root],revision:hashText(JSON.stringify([p.root,p.sourceDigest,p.outputDigest,p.recipeDigest]))};},
   execute(ctx,raw){
+   assertDevelopmentSandboxAvailable();
    const plan=developmentPlanSchema.parse(raw),p=prepareSource(ownedProject(ctx,plan.projectId).path,plan);
    const intent=ctx.actionIntentId?new PlatformActionRepository(ctx.db,ctx.userId).get(ctx.actionIntentId):undefined;
-   if(!intent||intent.status!=='executing'||intent.authority!=='owner_action'||intent.grant_id||!['copilot','owner_api'].includes(intent.origin_kind))throw new Error('DEVELOPMENT_APPROVAL_REQUIRED');
+   if(!intent||intent.status!=='executing'||!['copilot','owner_api'].includes(intent.origin_kind))throw new Error('DEVELOPMENT_APPROVAL_REQUIRED');
    const task=new DevelopmentTaskRepository(ctx.db,ctx.userId).create({project_id:plan.projectId,goal:plan.goal,plan_json:JSON.stringify(plan),recipe_digest:p.recipeDigest,source_digest:p.sourceDigest,output_digest:p.outputDigest,intent_id:intent.id,origin_run_id:intent.origin_run_id,origin_step_id:intent.origin_step_id,project_root:p.root});
    return {taskId:task.id,recipeDigest:task.recipe_digest,status:task.status};
   }},
-  {id:'development.task.cancel',capability:'development.task.cancel',effect:'database',delegatable:false,inputSchema:developmentTaskInput,resolve:taskResources,execute(ctx,raw){const v=developmentTaskInput.parse(raw);return taskSummary(new DevelopmentTaskRepository(ctx.db,ctx.userId).cancel(v.taskId,v.projectId));}},
-  {id:'development.task.accept',capability:'development.task.accept',effect:'database',delegatable:false,inputSchema:developmentAcceptInput,resolve(ctx,raw){verifyEvidence(ctx,raw);return taskResources(ctx,raw);},execute(ctx,raw){const row=verifyEvidence(ctx,raw);return taskSummary(new DevelopmentTaskRepository(ctx.db,ctx.userId).accept(row.id,row.project_id,row.artifact_digest!));}}
+  {id:'development.task.cancel',capability:'development.task.cancel',effect:'database',inputSchema:developmentTaskInput,resolve:taskResources,execute(ctx,raw){const v=developmentTaskInput.parse(raw);return taskSummary(new DevelopmentTaskRepository(ctx.db,ctx.userId).cancel(v.taskId,v.projectId));}},
+  {id:'development.task.accept',capability:'development.task.accept',effect:'database',inputSchema:developmentAcceptInput,resolve(ctx,raw){verifyEvidence(ctx,raw);return taskResources(ctx,raw);},execute(ctx,raw){const row=verifyEvidence(ctx,raw);return taskSummary(new DevelopmentTaskRepository(ctx.db,ctx.userId).accept(row.id,row.project_id,row.artifact_digest!));}}
  ];
 }

@@ -5,9 +5,7 @@ export interface ActionIntent {
     id: string;
     user_id: string;
     actor_user_id: string;
-    grant_id: string | null;
-    grant_revision: number | null;
-    authority: 'owner_action' | 'delegated_grant';
+    authority: 'owner_action' ;
     command_id: string;
     input_json: string;
     digest: string;
@@ -49,8 +47,8 @@ export class PlatformActionRepository {
         return this.db.transaction(() => {
         const id = randomUUID();
         this.db.prepare(`INSERT INTO platform_action_intents
- (id,user_id,actor_user_id,grant_id,grant_revision,authority,command_id,input_json,digest,resources_json,policy_version,expires_at,idempotency_key,status,created_at)
- VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, this.userId, input.actor_user_id, input.grant_id, input.grant_revision, input.authority, input.command_id, input.input_json, input.digest, input.resources_json, input.policy_version, input.expires_at, input.idempotency_key, input.status, Date.now());
+ (id,user_id,actor_user_id,authority,command_id,input_json,digest,resources_json,policy_version,expires_at,idempotency_key,status,created_at)
+ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, this.userId, input.actor_user_id, input.authority, input.command_id, input.input_json, input.digest, input.resources_json, input.policy_version, input.expires_at, input.idempotency_key, input.status, Date.now());
         let step:{id:string;run_id:string}|undefined;
         if(originSource?.kind==='copilot') {
             if(originSource.stepId!==input.idempotency_key)throw new Error('Copilot action origin key mismatch');
@@ -124,10 +122,5 @@ export class PlatformActionRepository {
     assertOriginActive(key: string) {
         const row=this.db.prepare("SELECT r.status FROM copilot_run_steps s JOIN copilot_runs r ON r.user_id=s.user_id AND r.id=s.run_id WHERE s.user_id=? AND s.id=?").get(this.userId,key) as {status:string}|undefined;
         if(row&&!['pending','running','awaiting_approval'].includes(row.status))throw new Error('Originating Copilot run is no longer active');
-    }
-    activeForGrant(id: string) {
-        return (this.db.prepare("SELECT COUNT(*) n FROM platform_action_intents WHERE user_id=? AND grant_id=? AND status IN ('executing','indeterminate')").get(this.userId, id) as {
-            n: number;
-        }).n;
     }
 }

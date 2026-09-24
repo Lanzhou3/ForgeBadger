@@ -49,7 +49,7 @@ export class NativeChannelInbox {
         admission=this.authority.admit(item.route_id,input.peer);
       } catch { this.messages.reject(item.id); return {status:'rejected'} as const; }
       if(this.messages.busy(admission.conversationId))continue;
-      const runId=new CopilotRunLedger(this.db,this.userId).admit({userId:this.userId,conversationId:admission.conversationId,grantId:admission.grantId,userText:input.text},16);
+      const runId=new CopilotRunLedger(this.db,this.userId).admit({userId:this.userId,conversationId:admission.conversationId,userText:input.text},16);
       this.messages.adopt(item.id,runId);
       return {status:'adopted',runId,messageId:item.id} as const;
       }

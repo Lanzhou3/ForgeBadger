@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cancelRun,
   createConversation,
-  decidePendingAction,
   deleteMemoryEntry,
   getCopilotCapabilities,
   getRun,
@@ -50,11 +49,11 @@ describe("copilot api client", () => {
     );
   });
 
-  it("binds authority only when creating a new conversation", async () => {
-    await createConversation(undefined, "grant-1");
+  it("creates a conversation without authority binding", async () => {
+    await createConversation();
     expect(fetch).toHaveBeenCalledWith(
       `${BASE}/api/v1/copilot/conversations`,
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ grantId: "grant-1" }) })
+      expect.objectContaining({ method: "POST", body: JSON.stringify({}) })
     );
     await sendMessage("conv-1", "continue");
     expect(fetch).toHaveBeenLastCalledWith(
@@ -102,14 +101,6 @@ describe("copilot api client", () => {
     expect(fetch).toHaveBeenCalledWith(
       `${BASE}/api/v1/copilot/runs/run-1/cancel`,
       expect.objectContaining({ method: "POST" })
-    );
-  });
-
-  it("decides a pending action with an approve flag", async () => {
-    await decidePendingAction("run-1", "action-1", true);
-    expect(fetch).toHaveBeenCalledWith(
-      `${BASE}/api/v1/copilot/runs/run-1/pending-actions/action-1/decide`,
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ approved: true }) })
     );
   });
 

@@ -13,7 +13,6 @@ import { FeishuChannelRepository } from '../src/db/repositories/feishu-channel-r
 import { FeishuIntegrationRepository } from '../src/db/repositories/feishu-integration-repository.js';
 import { TelegramChannelRepository } from '../src/db/repositories/telegram-channel-repository.js';
 import { TelegramIntegrationRepository } from '../src/db/repositories/telegram-integration-repository.js';
-import { CopilotGrantRepository } from '../src/db/repositories/copilot-grant-repository.js';
 import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { ModelProviderRepository } from '../src/db/repositories/model-provider-repository.js';
 import { ChannelIdentityService, type TrustedChannelPeer } from '../src/services/channels/channel-identity-service.js';
@@ -38,12 +37,11 @@ function fixture() {
   const config = new FeishuIntegrationRepository(db, user.id);
   const telegramAccounts = new TelegramChannelRepository(db, user.id, key);
   const telegramConfig = new TelegramIntegrationRepository(db, user.id);
-  const project = new ProjectRepository(db, user.id).create({ name: 'p', path: '/private/tmp/diagnostics-project', aiTool: 'claude' });
-  const grants = new CopilotGrantRepository(db, user.id);
-  const grant = grants.create({ name: 'limited', scope: { projectIds: [project.id], capabilities: ['project.update'], allowedRoots: [] }, expiresAt: Date.now() + 600_000, maxActions: 5, maxConcurrency: 1 });
+  const projects = new ProjectRepository(db, user.id);
+  const project = projects.create({ name: 'p', path: '/private/tmp/diagnostics-project', aiTool: 'claude' });
   const service = new ChannelIdentityService(db, user.id, key);
   const models = new ModelProviderRepository(db, user.id, key);
-  return { db, user, key, accounts, config, telegramAccounts, telegramConfig, project, grants, grant, service, models };
+  return { db, user, key, accounts, config, telegramAccounts, telegramConfig, projects, project, service, models };
 }
 
 type Check = { key: string; ok: boolean; detail: string; fixHint: string };
@@ -76,7 +74,8 @@ function pairFeishu(f: ReturnType<typeof fixture>) {
   const issued = f.service.createPairing({ channel: 'feishu', accountId: account.id });
   const claimed = f.service.claimPairing(issued.token, peer);
   const identity = f.service.confirmPairing(claimed.id, { revision: claimed.revision, externalUserId: peer.externalUserId, chatId: peer.chatId });
-  const route = f.service.createRoute({ identityId: identity.id, grantId: f.grant.id });
+  const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
+  f.projects.setCopilotAutonomy(f.project.id, true);
   return { account, peer, identity, route };
 }
 
@@ -160,7 +159,7 @@ it('returns all-green diagnostics for a fully wired channel', async () => {
   }
 });
 
-it('surfaces stale identity, invalid grant and failed delivery with targeted fix hints', async () => {
+it('surfaces stale identity and an autonomy-off route with targeted fix hints', async () => {
   const f = fixture();
   const { account, route } = pairFeishu(f);
   f.accounts.updateAccountHealth(account.id, { state: 'connected', lastConnectedAt: new Date() });
@@ -193,16 +192,17 @@ it('surfaces stale identity, invalid grant and failed delivery with targeted fix
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 
-  // A revoked grant invalidates the route even when identity and revision match.
+  // Turning off the project's Copilot autonomy invalidates the route even when identity and revision match.
   f.service.revokeRoute(route.id);
   const fresh = pairFeishu(f);
-  f.grants.revoke(f.grant.id);
+  f.projects.setCopilotAutonomy(f.project.id, false);
+  assert.throws(() => f.service.admit(fresh.route.id, fresh.peer));
   ({ server, checks } = await serve(f));
   try {
     all = await checks('/feishu/diagnostics');
     assert.equal(all.route!.ok, false);
-    assert.match(all.route!.detail, /授权已失效/);
-    assert.match(all.route!.fixHint, /创建有效的项目授权/);
+    assert.match(all.route!.detail, /未开启 Copilot 自治/);
+    assert.match(all.route!.fixHint, /开启该项目的 Copilot 自治/);
     assert.equal(fresh.route.status, 'active');
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
@@ -277,7 +277,8 @@ it('surfaces AGENT_NO_MODEL and generic failure categories in channel replies', 
   const issued = f.service.createPairing({ channel: 'feishu', accountId: account.id });
   const claimed = f.service.claimPairing(issued.token, peer);
   const identity = f.service.confirmPairing(claimed.id, { revision: claimed.revision, externalUserId: peer.externalUserId, chatId: peer.chatId });
-  f.service.createRoute({ identityId: identity.id, grantId: f.grant.id });
+  f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
+  f.projects.setCopilotAutonomy(f.project.id, true);
 
   const failWith = async (reason: string): Promise<string> => {
     const inbox = new NativeChannelInbox(f.db, f.user.id, f.key);

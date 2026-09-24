@@ -8,11 +8,33 @@ import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/hooks/use-language";
 import { listProjects } from "@/lib/api";
 import { getPlatformAction, type PlatformIntent, type PlatformReceipt } from "@/lib/platform-actions-api";
-import { approveDevelopmentAction, executeDevelopmentAction, getDevelopmentCapability, getDevelopmentTask, isDevelopmentActive, listDevelopmentTasks, previewDevelopmentAction, type DevelopmentEvidence, type DevelopmentStatus, type DevelopmentTask } from "@/lib/development-api";
+import { executeDevelopmentAction, getDevelopmentCapability, getDevelopmentTask, isDevelopmentActive, listDevelopmentTasks, previewDevelopmentAction, type DevelopmentEvidence, type DevelopmentStatus, type DevelopmentTask } from "@/lib/development-api";
 
 function useCopy() {
   const { language } = useLanguage();
   return (zh: string, en: string) => language === "zh-CN" ? zh : en;
+}
+/** Map raw sandbox capability reasons to actionable host explanations; unknown codes fall back to the raw value. */
+function sandboxReasonText(reason: string, copy: (zh: string, en: string) => string): string {
+  switch (reason) {
+    case "DEVELOPMENT_SANDBOX_REQUIRES_MACOS":
+      return copy(
+        "开发任务的检查需在 macOS Seatbelt 沙箱（/usr/bin/sandbox-exec）内隔离执行，当前主机不是 macOS，因此无法执行新开发任务。历史任务的差异与检查回执仍可查看，排队中的任务仍可取消。",
+        "Development task checks must run isolated inside the macOS Seatbelt sandbox (/usr/bin/sandbox-exec). This host is not macOS, so new development tasks cannot run. Existing task diffs and check receipts remain viewable, and queued tasks can still be cancelled.",
+      );
+    case "DEVELOPMENT_SANDBOX_REQUIRES_NODE_22_8":
+      return copy(
+        "执行开发任务检查需要 Node 22.8 或更高版本，当前 Gateway 的 Node 版本不满足，因此无法执行新开发任务。",
+        "Running development task checks requires Node 22.8 or newer. The Gateway is running an older Node version, so new development tasks cannot run.",
+      );
+    case "DEVELOPMENT_SANDBOX_UNAVAILABLE":
+      return copy(
+        "本机沙箱探测失败（/usr/bin/sandbox-exec 缺失或运行失败），因此无法执行新开发任务。",
+        "The local sandbox probe failed (/usr/bin/sandbox-exec is missing or failed), so new development tasks cannot run.",
+      );
+    default:
+      return "";
+  }
 }
 function TaskStatus({ status }: { status: DevelopmentStatus }) {
   const copy = useCopy();
@@ -43,7 +65,7 @@ export function DevelopmentTasks({initialProjectId = "", initialTaskId = ""}: {i
     <p className="text-sm text-muted-foreground">{copy("查看隔离任务的差异和检查回执。检查通过后仍需所有者判断目标是否完成；验收不会合并或写回源项目。", "Review isolated task diffs and check receipts. Passing checks still requires the owner's judgment of the goal. Acceptance does not merge or write back to the source project.")}</p>
     {capability.isPending && <p role="status">{copy("正在检查运行能力…", "Checking runtime capability…")}</p>}
     {capability.isError && <QueryError error={capability.error} retry={() => void capability.refetch()} />}
-    {capability.data && !capability.data.available && <p role="status" className="rounded-lg border border-border p-3 text-sm">{copy("当前无法执行新开发任务：", "New development tasks are unavailable: ")}{capability.data.reason ?? copy("运行环境不可用", "Runtime unavailable")}</p>}
+    {capability.data && !capability.data.available && <p role="status" className="rounded-lg border border-border p-3 text-sm">{sandboxReasonText(capability.data.reason ?? "", copy) || `${copy("当前无法执行新开发任务：", "New development tasks are unavailable: ")}${capability.data.reason ?? copy("运行环境不可用", "Runtime unavailable")}`}</p>}
     {projects.isPending ? <p role="status">{copy("正在加载项目…", "Loading projects…")}</p> : projects.isError ? <QueryError error={projects.error} retry={() => void projects.refetch()} /> : !projects.data.projects.length ? <p>{copy("暂无项目。请先导入项目。", "No projects. Import a project first.")}</p> : <label className="flex flex-wrap items-center gap-3 text-sm">{copy("项目", "Project")}<select aria-label={copy("项目", "Project")} className="max-w-full rounded-md border border-border bg-background px-3 py-2" value={projectId} onChange={event => { setProjectId(event.target.value); setTaskId(""); }}><option value="">{copy("选择项目", "Select a project")}</option>{projects.data.projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
     {projectId && <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(220px,1fr)_minmax(0,3fr)]">
       <section className="min-w-0 space-y-3 rounded-lg border border-border p-3" aria-label={copy("任务列表", "Task list")}>
@@ -67,7 +89,7 @@ function TaskDetails({ projectId, taskId }: { projectId: string; taskId: string 
   return <section className="min-w-0 space-y-4 rounded-lg border border-border p-4">
     <div className="flex flex-wrap items-start justify-between gap-3"><h2 className="break-words text-sm font-semibold">{task.goal}</h2><div className="flex items-center gap-2"><TaskStatus status={task.status} /><Button variant="ghost" size="sm" disabled={detail.isFetching} onClick={() => void detail.refetch()}>{copy("刷新回执", "Refresh evidence")}</Button></div></div>
     <p className="break-all text-xs text-muted-foreground">{task.id} · {copy("版本", "Revision")} {task.revision} · {new Date(task.updatedAt).toLocaleString()}</p>
-    {task.error && <p role="alert" className="break-words text-sm text-destructive">{task.error}</p>}
+    {task.error && <p role="alert" className="break-words text-sm text-destructive">{sandboxReasonText(task.error, copy) ? <>{sandboxReasonText(task.error, copy)}<span className="mt-1 block font-mono text-xs opacity-70">{task.error}</span></> : task.error}</p>}
     {task.status === "indeterminate" && <p role="status">{copy("执行结果未知，请人工核实已有回执；不要重复执行。", "Execution outcome is unknown. Verify existing receipts manually; do not replay.")}</p>}
     {evidence ? <EvidencePanel evidence={evidence} /> : <p className="text-sm text-muted-foreground">{copy("尚无可用差异或检查回执。", "No diff or check evidence is available yet.")}</p>}
     <TaskAction key={task.id} task={task} />
@@ -114,8 +136,7 @@ function TaskAction({ task }: { task: DevelopmentTask }) {
     try {
       const current = await getPlatformAction(intent.id);
       if (current.receipt) { setReceipt(current.receipt); return; }
-      if (current.intent.digest !== intent.digest || current.intent.status !== "pending" || current.intent.authority !== "owner_action" || current.intent.expires_at <= Date.now()) throw new Error(copy("预览已失效，请刷新任务并重新核实。", "Preview is no longer valid. Refresh the task and review again."));
-      await approveDevelopmentAction(intent);
+      if (current.intent.digest !== intent.digest || current.intent.status !== "approved" || current.intent.authority !== "owner_action" || current.intent.expires_at <= Date.now()) throw new Error(copy("预览已失效，请刷新任务并重新核实。", "Preview is no longer valid. Refresh the task and review again."));
       setReceipt((await executeDevelopmentAction(intent.id)).receipt);
     } catch (err) {
       setError(`${err instanceof Error ? err.message : copy("操作失败", "Action failed")} ${copy("请核实操作回执；不会自动重试执行。", "Verify the action receipt; execution will not be retried automatically.")}`);
@@ -138,7 +159,7 @@ function TaskAction({ task }: { task: DevelopmentTask }) {
     {intent && <div className="space-y-3 rounded-md border border-border/70 p-3"><h3 className="text-sm font-semibold">{copy("确认精确操作", "Confirm exact action")}</h3><p className="text-xs text-muted-foreground">{copy("本次人工确认。验收记录所有者判断，不会合并或写回源项目。", "One-time owner confirmation. Acceptance records the owner's judgment and does not merge or write back to the source project.")}</p><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">{intent.command_id}{"\n"}{intent.input_json}{"\n"}{intent.resources_json}</pre><p className="break-all text-xs">{intent.digest}</p><p className="text-xs">{copy("有效期", "Expires")} {new Date(intent.expires_at).toLocaleString()}</p>
       {intent.expires_at <= now && <p role="alert">{copy("预览已过期，请重新预览。", "Preview expired. Prepare a new preview.")}</p>}
       {!attempted && !busy && intent.expires_at <= now && <Button variant="outline" size="sm" onClick={() => { requestKey.current = null; setIntent(null); }}>{copy("重新预览", "New preview")}</Button>}
-      {!attempted && <Button disabled={busy || intent.expires_at <= now || intent.authority !== "owner_action" || intent.status !== "pending"} onClick={() => void confirm()}>{busy ? copy("正在确认…", "Confirming…") : copy("所有者确认并执行", "Owner confirms and executes")}</Button>}
+      {!attempted && <Button disabled={busy || intent.expires_at <= now || intent.authority !== "owner_action" || intent.status !== "approved"} onClick={() => void confirm()}>{busy ? copy("正在确认…", "Confirming…") : copy("所有者确认并执行", "Owner confirms and executes")}</Button>}
       {attempted && <Button size="sm" variant="outline" disabled={busy} onClick={() => void readReceipt()}>{copy("读取操作回执", "Read action receipt")}</Button>}
     </div>}
     {receipt && <p role="status">{receipt.outcome === "confirmed" ? copy("操作回执已确认。", "Action receipt confirmed.") : receipt.outcome === "unknown" ? copy("操作结果未知，请人工核实；不会自动重放。", "Action outcome unknown. Verify manually; no automatic replay.") : copy("确认未产生变更。", "Confirmed no effect.")}</p>}

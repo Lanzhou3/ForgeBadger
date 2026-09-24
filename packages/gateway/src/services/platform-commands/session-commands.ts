@@ -22,7 +22,7 @@ function resolve(ctx: CommandContext, input: unknown) {
 }
 export function createSessionCommands(): PlatformCommand[] {
     return ["start", "stop", "takeover"].map(action => ({
-        id: `session.${action}`, capability: `session.${action}`, effect: "external", delegatable: action !== "takeover", inputSchema, resolve,
+        id: `session.${action}`, capability: `session.${action}`, effect: "external", inputSchema, resolve,
         prepare(ctx, input) {
             return preflight(ctx, inputSchema.parse(input).sessionId, action);
         },

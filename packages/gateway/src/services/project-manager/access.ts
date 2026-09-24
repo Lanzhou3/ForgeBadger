@@ -13,7 +13,7 @@ export function projectManagerAccess(db:Database,actorId:string,projectId:string
  if(personal&&!governed) access={userId:actorId,actorId,projectId,role:'owner',capabilities:['read','comment','develop','review','manage'] as Capability[],teamId:null,logicalOwnerId:actorId,authorityEpoch:'',membershipRevision:0,path:personal.path,name:personal.name};
  else access=new CollaborationRepository(db,actorId).access(projectId);
  const safe=db.prepare('SELECT description,status FROM projects WHERE user_id=? AND id=?').get(access.userId,projectId) as {description:string|null;status:string};
- const project:Project=personal??{id:projectId,userId:access.userId,name:access.name,path:'',description:safe.description,status:safe.status,aiTool:'',techStack:null,isImported:false,templateId:null,createdAt:new Date(0),updatedAt:new Date(0)};
+ const project:Project=personal??{id:projectId,userId:access.userId,name:access.name,path:'',description:safe.description,status:safe.status,aiTool:'',techStack:null,isImported:false,copilotAutonomy:false,templateId:null,createdAt:new Date(0),updatedAt:new Date(0)};
  return {access,project,privateDetailAllowed:!!personal,shared:!personal,revisionRequired:governed};
 }
 export function assertProjectManagerWrite(db:Database,actorId:string,projectId:string,manage=false) {

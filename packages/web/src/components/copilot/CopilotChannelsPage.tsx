@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { ChannelPlatform } from '@/lib/api';
 import { getFeishuChannelAccount, getFeishuConnectionHealth, saveFeishuChannelAccount, emergencyStopFeishu, getTelegramChannelAccount, getTelegramConnectionHealth, saveTelegramChannelAccount, getTelegramIntegrationConfig, updateTelegramIntegrationConfig, emergencyStopTelegram, getChannelDiagnostics } from '@/lib/api';
-import { listGrants, getProjectOverview } from '@/lib/platform-actions-api';
+import { getProjectOverview } from '@/lib/platform-actions-api';
 import * as channels from '@/lib/copilot-channels-api';
 import { CopilotManagementPanel } from './CopilotManagementPanel';
 import { CopilotSettingsShell } from './copilot-settings-shell';
@@ -28,13 +28,12 @@ export function CopilotChannelsPage() {
   },refetchInterval:3000});
   const diagnostics=useQuery({queryKey:['channel-diagnostics',channel],queryFn:()=>getChannelDiagnostics(channel),refetchInterval:5000});
   const telegramConfig=useQuery({queryKey:['telegram-channel-config'],queryFn:getTelegramIntegrationConfig,enabled:channel==='telegram',refetchInterval:5000});
-  const grants=useQuery({queryKey:['copilot-grants'],queryFn:listGrants,refetchInterval:15000});
-  const projects=useQuery({queryKey:['project-management-overview'],queryFn:()=>getProjectOverview()});
+  const projects=useQuery({queryKey:['project-management-overview'],queryFn:()=>getProjectOverview(),refetchInterval:15000});
   const [appId,setAppId]=useState('');const [appSecret,setAppSecret]=useState('');const [botToken,setBotToken]=useState('');
   const [whitelistDraft,setWhitelistDraft]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [success,setSuccess]=useState('');
   const [token,setToken]=useState<{id:string;value:string;expiresAt:number}|null>(null);
-  const [ack,setAck]=useState('');const [identityId,setIdentityId]=useState('');const [grantId,setGrantId]=useState('');
+  const [ack,setAck]=useState('');const [identityId,setIdentityId]=useState('');const [projectId,setProjectId]=useState('');
   const [now,setNow]=useState(Date.now());
   useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[]);
   const data=query.data;
@@ -48,8 +47,8 @@ export function CopilotChannelsPage() {
   useEffect(()=>setAck(''),[candidate]);
   useEffect(()=>{if(token && (token.expiresAt<=now || (data && !data.pairings.some(p=>p.id===token.id && p.status==='pending' && p.accountRevision===accountRevision))))setToken(null);},[data,now,token,accountRevision]);
   const identities=data?.identities.filter(i=>i.status==='active' && i.accountId===accountId && i.accountRevision===accountRevision)??[];
-  const validGrants=grants.data?.grants.filter(g=>g.status==='active' && (g.expiresAt===null || g.expiresAt>now) && (g.maxActions===null || g.usedActions<g.maxActions))??[];
-  const grant=validGrants.find(g=>g.id===grantId);
+  const autonomyProjects=projects.data?.projects.filter(p=>p.copilotAutonomy)??[];
+  const project=autonomyProjects.find(p=>p.id===projectId);
   const identity=identities.find(i=>i.id===identityId)??(identities.length===1?identities[0]:undefined);
   const idsText=telegramConfig.data?.allowedChatIds.join(', ')??'';
   const whitelistValue=whitelistDraft??idsText;
@@ -61,12 +60,13 @@ export function CopilotChannelsPage() {
     if(!owner || owner.status!=='active')return '身份已失效';
     if(owner.accountId!==accountId || owner.accountRevision!==accountRevision)return '配置已更新，需要重新绑定';
     if(!account?.enabled)return '渠道已停用';
-    if(grants.isPending || grants.isError)return '授权状态待核查';
-    const bound=grants.data?.grants.find(g=>g.id===route.grantId);
-    if(!bound || bound.status!=='active' || bound.revision!==route.grantRevision || (bound.expiresAt!==null && bound.expiresAt<=now) || (bound.maxActions!==null && bound.usedActions>=bound.maxActions))return '授权已失效';
+    if(projects.isPending || projects.isError)return '授权状态待核查';
+    const bound=projects.data?.projects.find(p=>p.id===route.projectId);
+    if(!bound)return '项目不存在';
+    if(!bound.copilotAutonomy)return '项目 Copilot 自治未开启';
     return '权限有效';
   }
-  async function refresh(){await Promise.all([client.invalidateQueries({queryKey:channelKey}),client.invalidateQueries({queryKey:['copilot-grants']}),client.invalidateQueries({queryKey:['channel-diagnostics']}),client.invalidateQueries({queryKey:['telegram-channel-config']})]);}
+  async function refresh(){await Promise.all([client.invalidateQueries({queryKey:channelKey}),client.invalidateQueries({queryKey:['project-management-overview']}),client.invalidateQueries({queryKey:['channel-diagnostics']}),client.invalidateQueries({queryKey:['telegram-channel-config']})]);}
   // Do not use mutation cache: these calls can carry write-only secrets or one-time tokens.
   async function perform(action:()=>Promise<unknown>){
     setBusy(true);setError('');setSuccess('');
@@ -78,16 +78,16 @@ export function CopilotChannelsPage() {
     <CopilotSettingsShell active="channels" title={copy.channelsCardTitle} description={copy.channelsCardDescription}>
       <div className="flex flex-col gap-4">
         {query.isPending && <p role="status">正在加载渠道…</p>}
-        {(query.isError || grants.isError) && <div role="alert">加载失败。<Button variant="outline" onClick={()=>{void query.refetch();void grants.refetch();}}>重新加载</Button></div>}
+        {(query.isError || projects.isError) && <div role="alert">加载失败。<Button variant="outline" onClick={()=>{void query.refetch();void projects.refetch();}}>重新加载</Button></div>}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         {success && <p role="status" className="text-sm">{success}</p>}
         {data && <>
           <div role="status" className="rounded-md border border-border p-3 text-sm">
-            {grants.isPending || grants.isError
+            {projects.isPending || projects.isError
               ? '远程操作状态待核查。'
               : data.routes.some(r => routeState(r) === '权限有效')
                 ? channel==='feishu' ? '飞书远程操作已授权；实际收发还需连接正常。' : 'Telegram 远程操作已授权；实际收发还需连接正常。'
-                : channel==='feishu' ? '飞书远程操作尚未启用：请在第 3 步选择有效项目授权，并点击“启用飞书远程操作”。仅创建项目授权不会启用飞书。' : 'Telegram 远程操作尚未启用：请在第 3 步选择有效项目授权，并点击“启用 Telegram 远程操作”。仅创建项目授权不会启用 Telegram。'}
+                : channel==='feishu' ? '飞书远程操作尚未启用：请在第 3 步选择已开启 Copilot 自治的项目，并点击“启用飞书远程操作”。' : 'Telegram 远程操作尚未启用：请在第 3 步选择已开启 Copilot 自治的项目，并点击“启用 Telegram 远程操作”。'}
           </div>
           <Card><CardHeader><CardTitle>渠道诊断 · {channelName}</CardTitle></CardHeader><CardContent className="space-y-2">
             {diagnostics.isPending && <p role="status">正在检查渠道状态…</p>}
@@ -149,22 +149,21 @@ export function CopilotChannelsPage() {
             </div>}
           </CardContent></Card>
           <Card><CardHeader><CardTitle>3. 绑定项目与操作授权</CardTitle></CardHeader><CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">绑定会创建独立会话。权限范围不可在该会话中切换；更换授权需要撤销旧绑定。</p>
-            <details open className="rounded-md border border-border p-3"><summary className="cursor-pointer text-sm">创建或管理项目授权</summary><CopilotManagementPanel onGrantCreated={setGrantId} startConversationLabel="选择此授权" onStartConversation={async id=>setGrantId(id)} /></details>
-            {grants.isPending && <p role="status">正在加载授权…</p>}
-            {!grants.isPending && !validGrants.length && <p className="text-sm">尚无可用授权，请先创建。</p>}
+            <p className="text-sm text-muted-foreground">绑定会创建独立会话。授权范围就是所选项目：项目的 Copilot 自治开关开启时渠道消息可直接执行，关闭后立即停止受理。</p>
+            <details className="rounded-md border border-border p-3"><summary className="cursor-pointer text-sm">管理项目 Copilot 自治开关</summary><CopilotManagementPanel /></details>
+            {projects.isPending && <p role="status">正在加载项目…</p>}
+            {!projects.isPending && !autonomyProjects.length && <p className="text-sm">尚无已开启 Copilot 自治的项目，请先在上方打开项目开关。</p>}
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1 text-sm">私聊身份<select aria-label="私聊身份" className="w-full rounded-md border border-border bg-background p-2" value={identity?.id??''} onChange={e=>setIdentityId(e.target.value)}><option value="">选择已确认身份</option>{identities.map(i=><option key={i.id} value={i.id}>{i.externalUserId}</option>)}</select></label>
-              <label className="space-y-1 text-sm">授权<select aria-label="授权" className="w-full rounded-md border border-border bg-background p-2" value={grant?.id??''} onChange={e=>setGrantId(e.target.value)}><option value="">选择有效授权</option>{validGrants.map(g=><option key={g.id} value={g.id}>{g.name}</option>)}</select></label>
+              <label className="space-y-1 text-sm">项目<select aria-label="项目" className="w-full rounded-md border border-border bg-background p-2" value={project?.id??''} onChange={e=>setProjectId(e.target.value)}><option value="">选择已开启自治的项目</option>{autonomyProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
             </div>
-            {grant && <div className="space-y-1 rounded-md border border-border/70 p-3 text-sm"><p>项目：{grant.scope.projectIds.map(id=>projects.data?.projects.find(p=>p.id===id)?.name??id).join('、')||'无现有项目'}</p><p className="break-all">允许操作：{grant.scope.capabilities.join('、')||'无写操作'}</p><p className="break-all">允许目录：{grant.scope.allowedRoots.join('、')||'无额外目录'}</p><p>已用次数：{grant.usedActions}/{grant.maxActions??"不限"} · 最大并发：{grant.maxConcurrency}</p><p>到期：{grant.expiresAt===null?"长期有效，直至撤销":new Date(grant.expiresAt).toLocaleString()}</p></div>}
-            <Button disabled={busy||!grant||!identity||data.routes.some(r=>r.identityId===identity.id&&r.status==='active')} onClick={()=>void perform(async()=>{await channels.createChannelRoute(identity!.id,grant!.id);setSuccess("渠道绑定已创建；请以上方实时状态为准，状态正常后发送一条新消息。");})}>启用{channelName}远程操作</Button>
-            {data.routes.map(r=><div key={r.id} className="space-y-2 rounded-md border border-border/70 p-3 text-sm"><p>{grants.data?.grants.find(g=>g.id===r.grantId)?.name??r.grantId} · {routeState(r)}</p><p className="break-all text-xs text-muted-foreground">独立会话：{r.conversationId}</p><Link className="inline-block underline underline-offset-4" href={`/copilot?c=${encodeURIComponent(r.conversationId)}`}>打开会话与审批</Link><Button variant="outline" size="sm" disabled={busy||r.status!=='active'} onClick={()=>void perform(()=>channels.revokeChannelRoute(r.id))}>撤销渠道授权</Button></div>)}
+            <Button disabled={busy||!project||!identity||data.routes.some(r=>r.identityId===identity.id&&r.status==='active')} onClick={()=>void perform(async()=>{await channels.createChannelRoute(identity!.id,project!.id);setSuccess("渠道绑定已创建；请以上方实时状态为准，状态正常后发送一条新消息。");})}>启用{channelName}远程操作</Button>
+            {data.routes.map(r=><div key={r.id} className="space-y-2 rounded-md border border-border/70 p-3 text-sm"><p>{projects.data?.projects.find(p=>p.id===r.projectId)?.name??r.projectId} · {routeState(r)}</p><p className="break-all text-xs text-muted-foreground">独立会话：{r.conversationId}</p><Link className="inline-block underline underline-offset-4" href={`/copilot?c=${encodeURIComponent(r.conversationId)}`}>打开会话</Link><Button variant="outline" size="sm" disabled={busy||r.status!=='active'} onClick={()=>void perform(()=>channels.revokeChannelRoute(r.id))}>撤销渠道绑定</Button></div>)}
           </CardContent></Card>
           <Card><CardHeader><CardTitle>最近结果回传</CardTitle></CardHeader><CardContent className="space-y-3 text-sm">
             <p className="text-muted-foreground">“渠道已接收”不代表已读。“结果不确定”可能已经送达，请先核对飞书或 Telegram；系统不会自动重发。</p>
             {!data.deliveries.length && <p>暂无回传记录。</p>}
-            {data.deliveries.map(d=><div key={d.id} className="flex flex-wrap justify-between gap-2 rounded-md border border-border/70 p-3"><span>{d.phase==='terminal'?'任务结果':'审批提示'} · {label(d.status)}</span><time>{new Date(d.createdAt).toLocaleString()}</time></div>)}
+            {data.deliveries.map(d=><div key={d.id} className="flex flex-wrap justify-between gap-2 rounded-md border border-border/70 p-3"><span>{d.phase==='terminal'?'任务结果':'状态提示'} · {label(d.status)}</span><time>{new Date(d.createdAt).toLocaleString()}</time></div>)}
           </CardContent></Card>
         </>}
       </div>

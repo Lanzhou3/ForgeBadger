@@ -1,7 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { fetchJson } from "./api";
-import { approveDevelopmentAction, executeDevelopmentAction, getDevelopmentTask, listDevelopmentTasks, previewDevelopmentAction, type DevelopmentTask } from "./development-api";
-import type { PlatformIntent } from "./platform-actions-api";
+import { executeDevelopmentAction, getDevelopmentTask, listDevelopmentTasks, previewDevelopmentAction, type DevelopmentTask } from "./development-api";
 vi.mock("./api", () => ({ fetchJson: vi.fn() }));
 beforeEach(() => vi.clearAllMocks());
 it("encodes both project scope and task identifier", () => {
@@ -18,10 +17,7 @@ it("cancels without including unrelated artifact fields", () => {
   previewDevelopmentAction({ id: "t", projectId: "p", artifactDigest: "artifact" } as DevelopmentTask, "cancel", "same-key");
   expect(JSON.parse(vi.mocked(fetchJson).mock.calls[0]![1]!.body as string)).toEqual({ commandId: "development.task.cancel", input: { projectId: "p", taskId: "t" }, idempotencyKey: "same-key" });
 });
-it("uses the exact intent digest for approval and a separate execute request", () => {
-  approveDevelopmentAction({ id: "i/1", digest: "digest" } as PlatformIntent);
-  expect(fetchJson).toHaveBeenCalledTimes(1);
-  expect(fetchJson).toHaveBeenLastCalledWith("/api/v1/platform-actions/i%2F1/decide", { method: "POST", body: JSON.stringify({ digest: "digest", approved: true }) });
+it("executes an approved intent through a separate execute request", () => {
   executeDevelopmentAction("i/1");
   expect(fetchJson).toHaveBeenLastCalledWith("/api/v1/platform-actions/i%2F1/execute", { method: "POST", body: "{}" });
 });

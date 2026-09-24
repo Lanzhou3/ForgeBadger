@@ -10,9 +10,11 @@ import {migrate} from 'drizzle-orm/better-sqlite3/migrator';
 import {UserRepository} from '../src/db/repositories/user-repository.js';
 import {ProjectRepository} from '../src/db/repositories/project-repository.js';
 import {DevelopmentTaskRepository} from '../src/db/repositories/development-task-repository.js';
-import {PlatformActions} from '../src/services/platform-commands/actions.js';
+import {PlatformActionRepository} from '../src/db/repositories/platform-action-repository.js';
+import {PlatformActions,canonical} from '../src/services/platform-commands/actions.js';
 import {createPlatformCommands} from '../src/services/platform-commands/catalog.js';
 import {startDevelopmentRuntime} from '../src/services/development/runtime.js';
+import {sandboxCapability} from '../src/services/development/sandbox.js';
 import {prepareSource,readSource,sourcePath,hashText,writeWorkspace,assertWorkspace} from '../src/services/development/workspace.js';
 import {assertDevelopmentAuthority} from '../src/services/development/authority.js';
 import {ForgeBadgerEventBus} from '../src/services/event-bus.js';
@@ -33,7 +35,15 @@ function fixture(testContent="const {test}=require('node:test');const a=require(
  fs.writeFileSync(path.join(root,'sum.cjs'),'module.exports=(a,b)=>a-b;');fs.writeFileSync(path.join(root,'sum.test.cjs'),testContent);
  const plan={projectId:project.id,goal:'Fix sum using the approved check',sourceFiles:['sum.cjs','sum.test.cjs'],changes:[{path:'sum.cjs',beforeSha256:hashText('module.exports=(a,b)=>a-b;'),content:'module.exports=(a,b)=>a+b;'}],checks:[{path:'sum.test.cjs',sha256:hashText(testContent)}]};
  const actions=new PlatformActions({db,userId:user.id,actionOrigin:{kind:'owner_api'}},createPlatformCommands()),repo=new DevelopmentTaskRepository(db,user.id),eventBus=new ForgeBadgerEventBus();
- const submit=async()=>await actions.executeOwner('development.task.submit',plan,crypto.randomUUID()) as {taskId:string;recipeDigest:string};
+ // On hosts without a sandbox the submit API now fails fast; seed the exact post-submit
+ // state so platform-independent lifecycle logic stays covered on every platform.
+ const seedSubmit=()=>{const p=prepareSource(root,plan),key=crypto.randomUUID();
+  const intent=actions.intents.create({actor_user_id:user.id,grant_id:null,grant_revision:null,authority:'owner_action',command_id:'development.task.submit',input_json:canonical(plan),digest:'a'.repeat(64),resources_json:canonical({projectIds:[plan.projectId],rootPaths:[p.root],revision:hashText(JSON.stringify([p.root,p.sourceDigest,p.outputDigest,p.recipeDigest]))}),policy_version:1,expires_at:Date.now()+15*60000,idempotency_key:key,status:'approved'},{kind:'owner_api'});
+  actions.intents.start(intent.id,crypto.randomUUID(),Date.now()+30000);
+  const task=repo.create({project_id:plan.projectId,goal:plan.goal,plan_json:JSON.stringify(plan),recipe_digest:p.recipeDigest,source_digest:p.sourceDigest,output_digest:p.outputDigest,intent_id:intent.id,origin_run_id:null,origin_step_id:null,project_root:p.root});
+  actions.intents.finish(intent.id,'confirmed',{taskId:task.id,recipeDigest:task.recipe_digest});
+  return {taskId:task.id,recipeDigest:task.recipe_digest};};
+ const submit=async()=>sandboxCapability().available?await actions.executeOwner('development.task.submit',plan,crypto.randomUUID()) as {taskId:string;recipeDigest:string}:seedSubmit();
  return {dir,root,db,user,other,project,plan,actions,repo,eventBus,submit,close(){db.close();fs.rmSync(dir,{recursive:true,force:true});}};
 }
 async function until(predicate:()=>boolean,timeout=10000){const start=Date.now();while(!predicate()){if(Date.now()-start>timeout)throw new Error('Fixture deadline exceeded');await new Promise(r=>setTimeout(r,20));}}
@@ -50,8 +60,16 @@ it('rejects symlink, hidden, secret, binary and oversized reads without changing
  fs.writeFileSync(path.join(f.root,'binary.js'),Buffer.from([0,1]));assert.throws(()=>readSource(f.root,'binary.js'),/NOT_TEXT/);
  fs.writeFileSync(path.join(f.root,'large.js'),'x'.repeat(65537));assert.throws(()=>readSource(f.root,'large.js'),/TOO_LARGE/);
 }finally{f.close();}});
+it('submit preview fails fast with the host capability reason and creates no task or intent',()=>{const f=fixture();try{
+ const capability=sandboxCapability();
+ if(capability.available){assert.ok(f.actions.preview({commandId:'development.task.submit',input:f.plan,authority:'owner_action',idempotencyKey:'cap-pass'}).id);return;}
+ assert.throws(()=>f.actions.preview({commandId:'development.task.submit',input:f.plan,authority:'owner_action',idempotencyKey:'cap-block'}),new RegExp(capability.reason!));
+ assert.equal(f.db.prepare('SELECT COUNT(*) n FROM copilot_development_tasks').get().n,0);
+ assert.equal(f.db.prepare('SELECT COUNT(*) n FROM platform_action_intents').get().n,0);
+}finally{f.close();}});
 it('binds source revision and immutable checks to exact owner approval; rejects grants and tenant escape',async()=>{const f=fixture();try{
- const intent=f.actions.preview({commandId:'development.task.submit',input:f.plan,authority:'owner_action',idempotencyKey:'preview'});
+ const p=prepareSource(f.root,f.plan);
+ const intent=f.actions.intents.create({actor_user_id:f.user.id,grant_id:null,grant_revision:null,authority:'owner_action',command_id:'development.task.submit',input_json:canonical(f.plan),digest:'b'.repeat(64),resources_json:canonical({projectIds:[f.plan.projectId],rootPaths:[p.root],revision:hashText(JSON.stringify([p.root,p.sourceDigest,p.outputDigest,p.recipeDigest]))}),policy_version:1,expires_at:Date.now()+15*60000,idempotency_key:'preview',status:'pending'},{kind:'owner_api'});
  await assert.rejects(f.actions.execute(intent.id),/approved/);
  fs.writeFileSync(path.join(f.root,'sum.cjs'),'changed');assert.throws(()=>f.actions.decide(intent.id,intent.digest,true),/DRIFT/);
  assert.throws(()=>new PlatformActions({db:f.db,userId:f.other.id,actionOrigin:{kind:'owner_api'}},createPlatformCommands()).preview({commandId:'development.task.submit',input:f.plan,authority:'owner_action',idempotencyKey:'escape'}),/PROJECT_NOT_FOUND/);
@@ -122,7 +140,9 @@ it('confirmed task provenance fails closed when its Copilot origin disappears',a
  assert.throws(()=>assertDevelopmentAuthority(f.db,f.repo.get(taskId)!),/ORIGIN_REVOKED/);
 }finally{f.close();}});
 it('global host slot serializes two tenants without exposing or replaying another tenant task',async()=>{const f=fixture();try{
- const first=await f.submit();const project=new ProjectRepository(f.db,f.other.id).create({name:'other',path:f.root,aiTool:'codex'});const actions=new PlatformActions({db:f.db,userId:f.other.id,actionOrigin:{kind:'owner_api'}},createPlatformCommands());await actions.executeOwner('development.task.submit',{...f.plan,projectId:project.id},'other');
+ const first=await f.submit();const project=new ProjectRepository(f.db,f.other.id).create({name:'other',path:f.root,aiTool:'codex'});const otherPlan={...f.plan,projectId:project.id},p2=prepareSource(f.root,otherPlan);
+ const otherIntent=new PlatformActionRepository(f.db,f.other.id).create({actor_user_id:f.other.id,grant_id:null,grant_revision:null,authority:'owner_action',command_id:'development.task.submit',input_json:canonical(otherPlan),digest:'d'.repeat(64),resources_json:canonical({projectIds:[project.id],rootPaths:[p2.root],revision:hashText(JSON.stringify([p2.root,p2.sourceDigest,p2.outputDigest,p2.recipeDigest]))}),policy_version:1,expires_at:Date.now()+15*60000,idempotency_key:'other-seed',status:'pending'},{kind:'owner_api'});
+ new DevelopmentTaskRepository(f.db,f.other.id).create({project_id:project.id,goal:otherPlan.goal,plan_json:JSON.stringify(otherPlan),recipe_digest:p2.recipeDigest,source_digest:p2.sourceDigest,output_digest:p2.outputDigest,intent_id:otherIntent.id,origin_run_id:null,origin_step_id:null,project_root:p2.root});
  assert.equal(f.repo.claim('first')?.id,first.taskId);assert.equal(new DevelopmentTaskRepository(f.db,f.other.id).claim('second'),undefined);
  assert.equal(new DevelopmentTaskRepository(f.db,f.other.id).get(first.taskId),undefined);
 }finally{f.close();}});
@@ -133,7 +153,9 @@ it('source pagination uses fully redacted text before every arbitrary offset',as
 }finally{f.close();}});
 it('explicit Copilot origin with missing step cannot become owner API authority',()=>{const f=fixture();try{
  const actions=new PlatformActions({db:f.db,userId:f.user.id,actionOrigin:{kind:'copilot',runId:'missing',stepId:'missing'}},createPlatformCommands());
- assert.throws(()=>actions.preview({commandId:'development.task.submit',input:f.plan,authority:'owner_action',idempotencyKey:'missing'}),/origin missing/);
+ const capability=sandboxCapability();
+ if(capability.available)assert.throws(()=>actions.preview({commandId:'development.task.submit',input:f.plan,authority:'owner_action',idempotencyKey:'missing'}),/origin missing/);
+ else assert.throws(()=>actions.preview({commandId:'development.task.submit',input:f.plan,authority:'owner_action',idempotencyKey:'missing'}),new RegExp(capability.reason!));
  assert.equal(f.db.prepare('SELECT count(*) n FROM platform_action_intents').get().n,0);
 }finally{f.close();}});
 it('nonregular FIFO input is rejected without blocking a subprocess',async()=>{const {execFileSync,spawnSync}=await import('node:child_process');const f=fixture();try{
@@ -150,8 +172,12 @@ it('running persistence failure aborts the real worker without publishing succes
  f.db.pragma('query_only=OFF');f.repo.recover(Date.now()+30000);assert.equal(f.repo.get(taskId)?.status,'indeterminate');assert.equal(f.repo.claim('retry'),undefined);
 }finally{await runtime?.stop();console.error=original;f.db.pragma('query_only=OFF');f.close();}});
 
-it('source hashes and snapshots preserve original UTF-8 BOM bytes and reject BOM-only drift',async()=>{const f=fixture();try{
+it('source hashes and snapshots preserve original UTF-8 BOM bytes',()=>{const f=fixture();try{
  const bytes=Buffer.from('\ufeffmodule.exports=(a,b)=>a-b;');fs.writeFileSync(path.join(f.root,'sum.cjs'),bytes);const source=readSource(f.root,'sum.cjs');assert.equal(source.content.charCodeAt(0),0xfeff);assert.equal(source.sha256,hashText(bytes.toString('utf8')));assert.deepEqual(Buffer.from(source.content),bytes);
  f.plan.changes[0]!.beforeSha256=source.sha256;f.plan.changes[0]!.content='\ufeffmodule.exports=(a,b)=>a+b;';const prepared=prepareSource(f.root,f.plan),workspace=path.join(f.dir,'bom-output');writeWorkspace(workspace,prepared);assert.deepEqual(fs.readFileSync(path.join(workspace,'sum.cjs')),Buffer.from(f.plan.changes[0]!.content));
+}finally{f.close();}});
+it('rejects BOM-only drift after approval on a capable host',{skip:!mac},async()=>{const f=fixture();try{
+ const bytes=Buffer.from('\ufeffmodule.exports=(a,b)=>a-b;');fs.writeFileSync(path.join(f.root,'sum.cjs'),bytes);const source=readSource(f.root,'sum.cjs');
+ f.plan.changes[0]!.beforeSha256=source.sha256;f.plan.changes[0]!.content='\ufeffmodule.exports=(a,b)=>a+b;';
  const intent=f.actions.preview({commandId:'development.task.submit',input:f.plan,authority:'owner_action',idempotencyKey:'bom'});f.actions.decide(intent.id,intent.digest,true);fs.writeFileSync(path.join(f.root,'sum.cjs'),'module.exports=(a,b)=>a-b;');await assert.rejects(f.actions.execute(intent.id),/DRIFT/);
 }finally{f.close();}});

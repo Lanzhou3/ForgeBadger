@@ -1,7 +1,6 @@
 import { assertChannelConversationAuthority } from "../channels/channel-run-authority.js";
 import { projectActionReceipt } from "../platform-commands/receipt-projection.js";
 import { PlatformActionRepository } from "../../db/repositories/platform-action-repository.js";
-import { CopilotGrantRepository } from "../../db/repositories/copilot-grant-repository.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "../../db/types.js";
 import { CopilotConversationLog } from "./conversation-log.js";
@@ -13,7 +12,6 @@ export interface TurnInput {
     userText: string;
     modelId?: string;
     projectId?: string;
-    grantId?: string;
     source?: "user" | "reactive" | "scheduled";
     skipUserMessage?: boolean;
     clientRequestId?: string;
@@ -61,7 +59,7 @@ export const ACTIVE_RUN_STATES = ["pending", "running", "awaiting_approval"];
 export const inputDigest = (value: string) => createHash("sha256").update(value).digest("hex");
 function requestDigest(input: TurnInput): string {
     return inputDigest(JSON.stringify({ content: input.userText, modelId: input.modelId ?? null,
-        projectId: input.projectId ?? null, grantId: input.grantId ?? null,
+        projectId: input.projectId ?? null,
         source: input.source ?? 'user', skipUserMessage: input.skipUserMessage ?? false,
         ...(input.toolDiscovery === true ? { toolDiscovery: true } : {}) }));
 }
@@ -86,23 +84,11 @@ export class CopilotRunLedger {
         if (user?.status !== "active")
             throw new AgentError("COPILOT_USER_INACTIVE", "User is not active");
         assertChannelConversationAuthority(this.db,this.userId,input.conversationId);
-        if (input.grantId) {
-            const g = new CopilotGrantRepository(this.db, this.userId).get(input.grantId);
-            if (!g || g.status !== "active" || (g.expiresAt !== null && g.expiresAt <= Date.now())) throw new Error("Grant unavailable, expired or revoked");
-            if (input.projectId && !g.scope.projectIds.includes(input.projectId)) throw new Error("Project outside grant scope");
-        }
         if (input.projectId && !this.db.prepare("SELECT id FROM projects WHERE user_id=? AND id=?").get(this.userId, input.projectId))
             throw new AgentError("COPILOT_PROJECT_NOT_FOUND", "Project not found");
     }
     admit(input: TurnInput, maxSteps: number): string {
         return this.db.transaction(() => {
-            const grants = new CopilotGrantRepository(this.db, this.userId);
-            const binding = grants.binding(input.conversationId);
-            if (binding && input.grantId && binding !== input.grantId) throw new Error("Conversation grant cannot change");
-            if (binding) input = { ...input, grantId: binding };
-            if (!binding && input.grantId) {
-                if (this.log.listMessages(input.conversationId).length || this.log.listRuns(input.conversationId).length) throw new Error("Grant requires a fresh empty conversation");
-            }
             this.validateScope(input);
             const digest = requestDigest(input);
             if (input.clientRequestId !== undefined) {
@@ -116,7 +102,6 @@ export class CopilotRunLedger {
                     return existing.id;
                 }
             }
-            if (!binding && input.grantId) grants.bind(input.conversationId, input.grantId);
             if (this.log.listRuns(input.conversationId).some(r => ACTIVE_RUN_STATES.includes(r.status)))
                 throw new AgentError("COPILOT_CONVERSATION_BUSY", "Conversation already has an active run");
             const run = this.log.createRun(input.conversationId, input.modelId ? { model: input.modelId } : {});

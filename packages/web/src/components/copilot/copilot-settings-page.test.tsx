@@ -7,9 +7,6 @@ import { LanguageProvider } from "@/hooks/use-language";
 const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("@/lib/api", () => ({ listModelProviders: vi.fn().mockResolvedValue({ models: [] }) }));
-vi.mock("@/lib/platform-actions-api", () => ({
-  listGrants: vi.fn().mockResolvedValue({ grants: [], capabilities: [] }),
-}));
 vi.mock("@/lib/copilot-extensions-api", () => ({
   copilotSkillsKey: ["copilot", "skills"],
   copilotConnectionsKey: ["copilot", "connections"],
@@ -32,14 +29,12 @@ it("renders the settings nav with entries into every Copilot settings section", 
   mount();
   expect(screen.getByRole("heading", { name: "Copilot 设置" })).toBeTruthy();
   const nav = screen.getByRole("navigation", { name: "Copilot 设置导航" });
-  expect(nav.querySelector('a[href="/copilot/settings/access"]')).toBeTruthy();
   expect(nav.querySelector('a[href="/copilot/extensions"]')).toBeTruthy();
   expect(nav.querySelector('a[href="/copilot/channels"]')).toBeTruthy();
   expect(nav.querySelector('a[href="/copilot/automations"]')).toBeTruthy();
 });
-it("links summary cards to access, extensions, channels and automations", () => {
+it("links summary cards to extensions, channels and automations", () => {
   mount();
-  expect(screen.getAllByRole("link", { name: /授权/ }).some((link) => link.getAttribute("href") === "/copilot/settings/access")).toBe(true);
   expect(screen.getAllByRole("link", { name: /Copilot 扩展/ }).some((link) => link.getAttribute("href") === "/copilot/extensions")).toBe(true);
   expect(screen.getAllByRole("link", { name: /远程渠道/ }).some((link) => link.getAttribute("href") === "/copilot/channels")).toBe(true);
   expect(screen.getAllByRole("link", { name: /定时自动化/ }).some((link) => link.getAttribute("href") === "/copilot/automations")).toBe(true);

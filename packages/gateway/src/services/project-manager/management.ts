@@ -18,7 +18,7 @@ const commandSchema = managementPatchSchema.extend({ projectId: z.string().min(1
 
 export function createManagementCommands(): PlatformCommand[] {
   return [{
-    id: "pm.management.update", capability: "pm.management.update", effect: "database", delegatable: true,
+    id: "pm.management.update", capability: "pm.management.update", effect: "database",
     inputSchema: commandSchema,
     resolve(context, raw) {
       const { projectId, expectedRevision } = commandSchema.parse(raw);
@@ -70,7 +70,7 @@ export function projectManagementOverview(context: CommandContext, allowedProjec
       Record<typeof PROJECT_MANAGER_WORK_ITEM_STATUSES[number] | "total", number>;
     for (const row of rows) counts[row.status]++;
     const goal = pm.getGoal(project.id);
-    return { id: project.id, name: project.name, management, counts,
+    return { id: project.id, name: project.name, copilotAutonomy: project.copilotAutonomy, management, counts,
       goal: goal ? { summary: goal.summary, status: goal.status } : null,
       evidenceFreshness: evidenceFreshness(rows, management.freshnessHours, now),
       autonomy: getAdapterAutonomy(project.aiTool as AdapterId).mode };

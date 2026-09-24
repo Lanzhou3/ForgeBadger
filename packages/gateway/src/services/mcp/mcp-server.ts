@@ -157,15 +157,11 @@ async function executeMcpTool(tool: AgentTool, rawInput: unknown, deps: McpBridg
       throw new Error("Tool requires interactive approval and is unavailable over MCP");
     }
     const actions = agentActions(context);
-    let intent = actions.preview({
+    const intent = actions.preview({
       commandId,
       input: agentActionInput(tool.name, parsed.data, context),
-      idempotencyKey: randomUUID(),
-      authority: "owner_action"
+      idempotencyKey: randomUUID()
     });
-    if (intent.status === "pending") {
-      intent = actions.decide(intent.id, intent.digest, true);
-    }
     context.platformIntentId = intent.id;
   }
 

@@ -8,16 +8,20 @@ import { ProjectRepository } from "../src/db/repositories/project-repository.js"
 import { ProjectManagerRepository } from "../src/db/repositories/project-manager-repository.js";
 import { ProjectManagementRepository } from "../src/db/repositories/project-management-repository.js";
 import { createManagementCommands, projectManagementOverview } from "../src/services/project-manager/management.js";
+import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
+import { CopilotRunLedger } from "../src/services/agent/run-ledger.js";
 import express from "express";
 import { randomUUID } from "node:crypto";
 import { signJwt } from "../src/auth/jwt.js";
 import { PlatformActions } from "../src/services/platform-commands/actions.js";
+import { PlatformNoEffectError } from "../src/services/platform-commands/errors.js";
 import { createProjectManagementRoutes } from "../src/routes/project-management.js";
 import { errorHandler } from "../src/middleware/error-handler.js";
+import { fileURLToPath } from "node:url";
 
 function fixture() {
   const db = new Database(":memory:");
-  migrate(drizzle(db), { migrationsFolder: new URL("../src/db/migrations", import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL("../src/db/migrations", import.meta.url)) });
   const user = new UserRepository(db).create("management@test.dev", "hash");
   const other = new UserRepository(db).create("other-management@test.dev", "hash");
   const projects = new ProjectRepository(db, user.id);
@@ -27,7 +31,7 @@ function fixture() {
   return { db, user, project, second, foreign, context: { db, userId: user.id } };
 }
 
-it("defaults existing projects to manual, excludes foreign/ungranted projects and reports unknown evidence", () => {
+it("defaults existing projects to manual, excludes foreign projects and reports unknown evidence", () => {
   const f = fixture();
   try {
     const all = projectManagementOverview(f.context);
@@ -78,7 +82,7 @@ it("management command validates schema and resource ownership, uses CAS revisio
   } finally { f.db.close(); }
 });
 
-it("HTTP management uses command receipts, rejects stale revisions, and never falls back after grant revocation", async () => {
+it("HTTP management uses command receipts, rejects stale revisions, and scopes the overview to the owner's projects", async () => {
   const f = fixture();
   const app = express();
   const jwtSecret = randomUUID();
@@ -93,24 +97,76 @@ it("HTTP management uses command receipts, rejects stale revisions, and never fa
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const base = `http://127.0.0.1:${address.port}/api/v1`;
   const headers = { Authorization: `Bearer ${signJwt({ userId: f.user.id, email: f.user.email }, jwtSecret)}`, "Content-Type": "application/json" };
-  const actions = new PlatformActions(f.context, commands);
   try {
     assert.equal((await fetch(base + "/project-manager/overview")).status, 401);
-    const grant = actions.createGrant({ name: "One project", projectIds: [f.project.id], capabilities: ["pm.management.update"], expiresAt: Date.now() + 60000, maxActions: 2 });
-    const url = base + `/project-manager/overview?grantId=${grant.id}`;
-    const scoped = await fetch(url, { headers });
-    const data = await scoped.json() as { data: { projects: { id: string }[] } };
-    assert.deepEqual(data.data.projects.map(project => project.id), [f.project.id]);
+    // Grant scoping is gone: the overview is always the owner's own projects,
+    // and a legacy grantId query param is ignored.
+    const overview = await fetch(base + "/project-manager/overview?grantId=stale-param", { headers });
+    assert.equal(overview.status, 200);
+    const data = await overview.json() as { data: { projects: { id: string }[] } };
+    assert.deepEqual(data.data.projects.map(project => project.id).sort(), [f.project.id, f.second.id].sort());
     const patch = (id: string, body: unknown) => fetch(base + `/projects/${id}/project-manager/management`, { method: "PATCH", headers, body: JSON.stringify(body) });
     assert.equal((await patch(f.project.id, { expectedRevision: 0, nextAction: "Review" })).status, 200);
     assert.equal((f.db.prepare("SELECT count(*) AS n FROM platform_action_receipts WHERE user_id=?").get(f.user.id) as { n: number }).n, 1);
     assert.equal((await patch(f.project.id, { expectedRevision: 0, nextAction: "Stale" })).status, 409);
     assert.equal((await patch(f.foreign.id, { expectedRevision: 0, nextAction: "Forbidden" })).status, 404);
-    assert.equal((await patch(f.project.id, { expectedRevision: 1, grantId: grant.id, mode: "cli" })).status, 400);
-    actions.grants.revoke(grant.id);
-    assert.equal((await fetch(url, { headers })).status, 403);
+    // grantId is no longer a request field: the strict schema rejects it.
+    assert.equal((await patch(f.project.id, { expectedRevision: 1, grantId: "legacy-field", mode: "cli" })).status, 400);
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     f.db.close();
   }
+});
+
+it("gates copilot-origin management actions on the per-project autonomy switch while the owner path is unaffected", async () => {
+  const f = fixture();
+  try {
+    const commands = new Map(createManagementCommands().map(command => [command.id, command]));
+    const log = new CopilotConversationLog(f.db, f.user.id);
+    const conversation = log.createConversation();
+    const ledger = new CopilotRunLedger(f.db, f.user.id);
+    const runId = ledger.admit({ userId: f.user.id, conversationId: conversation.id, userText: "Update the plan" }, 10);
+    const step = ledger.addStep(runId, { kind: "tool", toolName: "pm_update_management", effect: "write" });
+    const copilot = new PlatformActions({ db: f.db, userId: f.user.id, actionOrigin: { kind: "copilot", runId, stepId: step.id } }, commands);
+    const projects = new ProjectRepository(f.db, f.user.id);
+    const copilotIntentCount = () => (f.db.prepare("SELECT count(*) AS n FROM platform_action_intents WHERE user_id=? AND origin_kind='copilot'").get(f.user.id) as { n: number }).n;
+
+    // The switch defaults to OFF: the copilot preview is rejected with the switch code,
+    // the project name and Web guidance, and nothing is persisted.
+    assert.equal(projects.getCopilotAutonomy(f.project.id), false);
+    assert.throws(
+      () => copilot.preview({ commandId: "pm.management.update", input: { projectId: f.project.id, expectedRevision: 0, nextAction: "From Copilot" }, idempotencyKey: step.id }),
+      (error: unknown) => error instanceof PlatformNoEffectError
+        && error.message.startsWith("COPILOT_PROJECT_AUTONOMY_OFF:")
+        && error.message.includes(f.project.name)
+        && error.message.includes("未开启 Copilot 自治")
+        && error.message.includes("Web 控制台项目设置中开启后重试"),
+    );
+    assert.equal(copilotIntentCount(), 0);
+
+    // The owner path is never gated by the switch.
+    const owner = await new PlatformActions(f.context, commands).executeOwner("pm.management.update", { projectId: f.project.id, expectedRevision: 0, nextAction: "Owner first" }, "owner-1") as { nextAction: string };
+    assert.equal(owner.nextAction, "Owner first");
+
+    // Switch ON: the preview is approved, bound to the run step, and execution confirms a receipt.
+    projects.setCopilotAutonomy(f.project.id, true);
+    const intent = copilot.preview({ commandId: "pm.management.update", input: { projectId: f.project.id, expectedRevision: 1, nextAction: "From Copilot" }, idempotencyKey: step.id });
+    assert.equal(intent.status, "approved");
+    assert.equal(intent.origin_kind, "copilot");
+    assert.equal(intent.origin_run_id, runId);
+    assert.equal(intent.origin_step_id, step.id);
+    const receipt = await copilot.execute(intent.id);
+    assert.equal(receipt.outcome, "confirmed");
+
+    // The switch is hot: flipping it back OFF rejects a new copilot intent
+    // immediately, while the confirmed receipt survives.
+    projects.setCopilotAutonomy(f.project.id, false);
+    const nextStep = ledger.addStep(runId, { kind: "tool", toolName: "pm_update_management", effect: "write" });
+    assert.throws(
+      () => copilot.preview({ commandId: "pm.management.update", input: { projectId: f.project.id, expectedRevision: 2, nextAction: "Again" }, idempotencyKey: nextStep.id }),
+      (error: unknown) => error instanceof PlatformNoEffectError && error.message.startsWith("COPILOT_PROJECT_AUTONOMY_OFF:"),
+    );
+    assert.equal(copilotIntentCount(), 1);
+    assert.equal(copilot.intents.receipt(intent.id)?.outcome, "confirmed");
+  } finally { f.db.close(); }
 });

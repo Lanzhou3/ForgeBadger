@@ -5,7 +5,6 @@ import { visibleToolSchemas, toolUnavailableReason } from "./tool-availability.j
 import { projectActionReceipt } from "../platform-commands/receipt-projection.js";
 import { agentActions, agentActionInput, TOOL_COMMANDS } from "../platform-commands/agent-actions.js";
 import { checkAgentScope } from "../platform-commands/agent-scope.js";
-import { CopilotGrantRepository } from "../../db/repositories/copilot-grant-repository.js";
 import { ProjectRepository } from "../../db/repositories/project-repository.js";
 import { randomUUID } from "node:crypto";
 import { ForgeBadgerEventBus } from "../event-bus.js";
@@ -59,7 +58,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     }
     const allVisibleTools = (input: TurnInput) => visibleToolSchemas(deps.toolRegistry, {
         hasSessionManager: !!deps.sessionManager, isToolDisabled: deps.isToolDisabled,
-        grantBound: !!input.grantId, scheduled: input.source === "scheduled", reactive: input.source === "reactive"
+        scheduled: input.source === "scheduled", reactive: input.source === "reactive"
     });
     const effect = (name: string) => deps.toolRegistry.tools.get(name)?.risk === "operate" || name === "write_memory" ? "write" as const : "read" as const;
     function enqueue(input: TurnInput): string {
@@ -147,7 +146,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 const availableToolNames = allVisibleTools(input).map(tool => tool.name);
                 if (!availableToolNames.includes("list_playbooks")) return [];
                 return listEnabledCopilotPlaybookSummaries(deps.db, input.userId, {
-                    availableToolNames, grantBound: !!input.grantId
+                    availableToolNames
                 });
             }) : null;
             const calls: AgentToolCall[] = [];
@@ -162,7 +161,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     runId: c.runId, masterKey: deps.masterKey, enabled: input.toolDiscovery === true });
                 const availableToolNames = allVisible.map(tool => tool.name);
                 const skillCatalog = availableToolNames.includes("load_playbook")
-                    ? listAvailableCopilotSkillSummaries(deps.db, input.userId, { availableToolNames, grantBound: !!input.grantId }) : [];
+                    ? listAvailableCopilotSkillSummaries(deps.db, input.userId, { availableToolNames }) : [];
                 const prefixMessages: import("./orchestrator-types.js").AgentLlmMessage[] = [];
                 if (input.toolDiscovery) prefixMessages.push({ role: 'user', content:
                     'Tool discovery mode is enabled. Use discover_tools to find additional current platform capabilities. Successful selections become available on the next model round; discovery does not change permissions or approvals.' });
@@ -179,7 +178,6 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 const { messages } = await buildCompressedContext(ledger.log, input.conversationId, deps.llm, input.modelId, {
                     assistantMessages: modelResponses.list(input.conversationId),
                     memory: new AgentMemoryRepository(deps.db, input.userId), memoryConversationId: input.conversationId, signal,
-                    ...(input.grantId ? { excludeGlobalMemory: true, memoryProjectIds: new CopilotGrantRepository(deps.db, input.userId).get(input.grantId)?.scope.projectIds ?? [] } : {}),
                     ...(input.projectId ? { memoryProjectId: input.projectId } : {}), canCommit: live,
                     tools, prefixMessages, reservedChars: 8192
                 });
@@ -243,7 +241,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                         ledger.validateScope(input);
                         await maybeAutoTitle({ log: ledger.log, userId: input.userId, conversationId: input.conversationId, userText: input.userText, assistantText: text, source: input.source ?? "user", signal, canCommit: () => { if(control.stopped || !deps.db.open)return false; ledger.validateScope(input); return !!ledger.log.getConversation(input.conversationId) && ledger.log.listRuns(input.conversationId)[0]?.id === c.runId; }, runId: c.runId, eventBus: deps.eventBus, llm: deps.llm, ...(input.modelId ? { modelId: input.modelId } : {}) }).catch(() => undefined);
                         // Durable memory writes are platform commands; background curation
-                        // cannot bypass the selected grant or exact one-shot approval.
+                        // cannot bypass the project autonomy switch or exact one-shot approval.
                     }
                 }
                 return;
@@ -264,7 +262,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             rejection = `Tool unavailable: ${toolUnavailableReason(tool.name, !!deps.sessionManager)}`;
         else if (deps.isToolDisabled?.(tool.name))
             rejection = `Tool disabled by owner: ${tool.name}`;
-        else if (tool.name.startsWith("mcp_") && (input.grantId || (input.source && input.source !== "user")))
+        else if (tool.name.startsWith("mcp_") && (input.source && input.source !== "user"))
             rejection = "External tools require direct owner authority";
         else if (input.source === "scheduled" && effect(tool.name) === "write")
             rejection = "Scheduled runs are read only";
@@ -277,10 +275,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         const availableToolSchemas = allVisibleTools(input);
         const context: AgentToolContext = { source: input.source ?? "user", runId: c.runId, stepId: step.id, externalActionId: action?.id, checkExecutionAuthority: live, userId: input.userId, db: deps.db, masterKey: deps.masterKey, conversationId: input.conversationId,
             availableToolNames: availableToolSchemas.map(tool => tool.name), availableToolSchemas,
-            ...(input.grantId ? { grantId: input.grantId } : {}),
             ...(input.projectId ? { projectId: input.projectId } : {}), ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}), ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}) };
         if (!rejection && tool) {
-            try { checkAgentScope(context, tool.name, raw); } catch (error) { rejection = error instanceof Error ? error.message : "Grant scope rejected"; }
+            try { checkAgentScope(context, tool.name, raw); } catch (error) { rejection = error instanceof Error ? error.message : "Tool scope rejected"; }
             const decision = policy.evaluate({ userId: input.userId, toolName: tool.name, toolRisk: tool.risk, requiresApproval: tool.requiresApproval, input: raw });
             logSecurityDecision({ db: deps.db, userId: input.userId, operation: tool.name, input: raw, action: decision.action, reason: decision.reason });
             if (decision.action === "deny") rejection = `Denied by security policy: ${decision.reason}`;
@@ -288,17 +285,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 try {
                     const actions = agentActions(context);
                     let intent = actions.intents.byKey(step.id);
-                    if (!intent) intent = actions.preview({ commandId: TOOL_COMMANDS[tool.name], input: agentActionInput(tool.name, raw, context), idempotencyKey: step.id,
-                        authority: input.grantId ? "delegated_grant" : "owner_action", ...(input.grantId ? { grantId: input.grantId } : {}) });
-                    const automaticOwnerAction = decision.action === "auto_approve"
-                        && !input.grantId && (input.source ?? "user") === "user";
-                    if (intent.status === "pending" && action?.status === "approved") {
-                        intent = actions.decide(intent.id, intent.digest, true);
-                    } else if (intent.status === "pending" && automaticOwnerAction) {
-                        intent = actions.approveRoutine(intent.id);
-                    }
+                    if (!intent) intent = actions.preview({ commandId: TOOL_COMMANDS[tool.name], input: agentActionInput(tool.name, raw, context), idempotencyKey: step.id });
                     context.platformIntentId = intent.id;
-                    if (intent.status === "pending") {
+                    if (intent.status === "pending" || action?.status !== "approved") {
                         ledger.waitApproval(c, step);
                         const pending = ledger.log.listPendingActions(c.runId).find(a => a.stepId === step.id);
                         emit(ledger, c.runId, { toolName: tool.name, ...(pending ? { pendingActionId: pending.id } : {}) });
@@ -306,9 +295,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     }
                     if (intent.status === "rejected") rejection = "Action rejected";
                 } catch (error) { rejection = error instanceof Error ? error.message : "Platform action rejected"; }
-            } else if (!rejection && tool.risk === "operate" && (input.grantId || action?.status !== "approved")) {
-                if (input.grantId) rejection = "Unregistered command is unavailable under grant authority";
-                else { ledger.waitApproval(c, step); return; }
+            } else if (!rejection && tool.risk === "operate" && action?.status !== "approved") {
+                ledger.waitApproval(c, step);
+                return;
             }
         }
         if (!ledger.startStep(c, step)) return;
@@ -341,10 +330,6 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             }
             const changed = ledger.decide(input.runId,input.actionId,input.approved);
             if(!changed)return false;
-            const action=ledger.log.getPendingAction(input.actionId);
-            const actions=agentActions({db:deps.db,userId:input.userId,masterKey:deps.masterKey});
-            const intent=action?.stepId?actions.intents.byKey(action.stepId):undefined;
-            if(intent?.authority==="owner_action"&&intent.status==="pending")actions.decide(intent.id,intent.digest,input.approved);
             return true;
         }).immediate();
         if (resumed) {

@@ -130,6 +130,11 @@ const PI_BUSY_BAR = /Working\s*─+/u;
 const PI_FOLD_MARKER = /↑\s*\d+\s*more/u;
 // A full-width horizontal rule (the editor box border lines).
 const PI_BOX_BORDER = /^\s*─{20,}\s*$/u;
+// pi folds a multi-line bracketed paste into a `[paste #N +M lines]` marker
+// inside the editor box (observed on pi 0.87.1); the payload is retained
+// internally and expanded on submit, so the staged text itself never renders.
+// Matched against the whitespace-stripped composer.
+const PI_PASTE_MARKER = /\[paste#\d+(?:\+\d+lines?)?\]/u;
 // Box-bar/spacer slots above the status line that the busy spinner occupies.
 const PI_FOOTER_WINDOW = 4;
 // Max interior height when searching upward for the box's top border.
@@ -227,6 +232,12 @@ export function composerContainsStagedTask(
   needle: string
 ): boolean {
   if (composerContainsNeedle(adapter, pane, needle)) return true;
+  const composer = normalizeComparable(currentProgrammaticComposer(adapter, pane));
+  if (adapter === "pi") {
+    // The ready gate requires an empty composer, so a paste marker found here
+    // can only come from the write that was just staged.
+    return PI_PASTE_MARKER.test(composer);
+  }
   if (adapter !== "codex") return false;
 
   // Codex collapses pastes over its large-paste threshold into a current-
@@ -236,8 +247,7 @@ export function composerContainsStagedTask(
   // UTF-16 string length for astral characters.
   const charCount = Array.from(message).length;
   const expectedPlaceholder = `[PastedContent${charCount}chars]`;
-  return normalizeComparable(currentProgrammaticComposer(adapter, pane))
-    .includes(expectedPlaceholder);
+  return composer.includes(expectedPlaceholder);
 }
 
 export function isProgrammaticTaskConsumed(

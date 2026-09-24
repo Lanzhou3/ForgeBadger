@@ -43,11 +43,6 @@ export function previewDevelopmentAction(task: DevelopmentTask, action: "cancel"
     body: JSON.stringify({ commandId: `development.task.${action}`, input: { projectId: task.projectId, taskId: task.id, ...(action === "accept" ? { artifactDigest: task.artifactDigest } : {}) }, idempotencyKey }),
   });
 }
-export function approveDevelopmentAction(intent: PlatformIntent) {
-  return fetchJson<{ intent: PlatformIntent }>(`/api/v1/platform-actions/${encodeURIComponent(intent.id)}/decide`, {
-    method: "POST", body: JSON.stringify({ digest: intent.digest, approved: true }),
-  });
-}
 export function executeDevelopmentAction(intentId: string) {
   return fetchJson<{ receipt: PlatformReceipt }>(`/api/v1/platform-actions/${encodeURIComponent(intentId)}/execute`, { method: "POST", body: "{}" });
 }

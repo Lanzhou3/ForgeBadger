@@ -44,6 +44,8 @@ export interface ModelProfile {
   modelId: string;
   capabilities: string[];
   contextWindow: number | null;
+  supportEfforts: string[];
+  defaultEffort: string | null;
   status: string;
   isDefault: boolean;
   sortOrder: number;
@@ -87,6 +89,8 @@ export interface CreateModelProfileInput {
   modelId: string;
   capabilities?: string[];
   contextWindow?: number | null;
+  supportEfforts?: string[];
+  defaultEffort?: string | null;
   isDefault?: boolean;
 }
 
@@ -95,6 +99,8 @@ export interface UpdateModelProfileInput {
   modelId?: string;
   capabilities?: string[];
   contextWindow?: number | null;
+  supportEfforts?: string[];
+  defaultEffort?: string | null;
   isDefault?: boolean;
 }
 
@@ -139,6 +145,8 @@ interface ModelProfileRow {
   model_id: string;
   capabilities: string;
   context_window: number | null;
+  support_efforts: string;
+  default_effort: string | null;
   status: string;
   is_default: number;
   sort_order: number;
@@ -296,8 +304,9 @@ export class ModelProviderRepository {
     this.db.prepare(`
       INSERT INTO model_profiles (
         id, user_id, provider_profile_id, name, model_id, capabilities,
-        context_window, status, is_default, sort_order, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 0, ?, ?)
+        context_window, support_efforts, default_effort,
+        status, is_default, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 0, ?, ?)
     `).run(
       id,
       this.userId,
@@ -306,6 +315,8 @@ export class ModelProviderRepository {
       input.modelId,
       JSON.stringify(input.capabilities ?? []),
       input.contextWindow ?? null,
+      JSON.stringify(input.supportEfforts ?? []),
+      input.defaultEffort ?? null,
       input.isDefault ? 1 : 0,
       now,
       now
@@ -348,11 +359,14 @@ export class ModelProviderRepository {
       modelId: input.modelId ?? existing.modelId,
       capabilities: input.capabilities ?? existing.capabilities,
       contextWindow: input.contextWindow === undefined ? existing.contextWindow : input.contextWindow,
+      supportEfforts: input.supportEfforts ?? existing.supportEfforts,
+      defaultEffort: input.defaultEffort === undefined ? existing.defaultEffort : input.defaultEffort,
       isDefault: input.isDefault ?? existing.isDefault
     };
     this.db.prepare(`
       UPDATE model_profiles
       SET name = ?, model_id = ?, capabilities = ?, context_window = ?,
+        support_efforts = ?, default_effort = ?,
         is_default = ?, updated_at = ?
       WHERE id = ? AND user_id = ?
     `).run(
@@ -360,6 +374,8 @@ export class ModelProviderRepository {
       next.modelId,
       JSON.stringify(next.capabilities),
       next.contextWindow ?? null,
+      JSON.stringify(next.supportEfforts),
+      next.defaultEffort ?? null,
       next.isDefault ? 1 : 0,
       now,
       id,
@@ -519,6 +535,8 @@ function toModelProfile(row: ModelProfileRow): ModelProfile {
     modelId: row.model_id,
     capabilities: parseJsonArray(row.capabilities),
     contextWindow: row.context_window,
+    supportEfforts: parseJsonArray(row.support_efforts),
+    defaultEffort: row.default_effort,
     status: row.status,
     isDefault: Boolean(row.is_default),
     sortOrder: row.sort_order,
