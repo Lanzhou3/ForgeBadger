@@ -52,6 +52,10 @@ function readyWithQuota(): CliAccountOverview {
   };
 }
 
+function notAuthenticated(): CliAccountOverview {
+  return { login: { adapter: "claude", state: "not_authenticated" } };
+}
+
 function renderPanel(aiTool: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
@@ -72,16 +76,48 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("provider-quota-panel applied provider", () => {
-  it("shows the applied provider balance and skips the native account query", async () => {
+describe("provider-quota-panel dual display (applied provider + native login)", () => {
+  it("shows both the provider balance and the labeled native quota with independent refresh buttons", async () => {
     vi.mocked(getAppliedProviderForAdapter).mockResolvedValue({ appliedProvider: applied });
     vi.mocked(checkProviderBalance).mockResolvedValue(balance);
+    vi.mocked(getCliAccount).mockResolvedValue({ overview: readyWithQuota() });
     renderPanel("claude");
+
+    // Provider block: balance rows under the provider name label.
     expect((await screen.findByRole("progressbar", { name: /Credits/ })).getAttribute("aria-valuenow")).toBe(
       "20"
     );
+    // Native block: CLI quota rows under the native login label.
+    expect((await screen.findByRole("progressbar", { name: /5h window/ })).getAttribute("aria-valuenow")).toBe(
+      "30"
+    );
     expect(panelText()).toContain("OpenAI");
-    expect(getCliAccount).not.toHaveBeenCalled();
+    expect(panelText()).toContain("sessions.providerQuotaNative · claude.ai");
+    expect(getCliAccount).toHaveBeenCalled();
+
+    // One refresh button per source, with per-source labels.
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "sessions.providerQuotaRefreshProvider" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "sessions.providerQuotaRefreshNative" })).toBeTruthy();
+  });
+
+  it("shows only the provider block when the native CLI is not logged in", async () => {
+    vi.mocked(getAppliedProviderForAdapter).mockResolvedValue({ appliedProvider: applied });
+    vi.mocked(checkProviderBalance).mockResolvedValue(balance);
+    vi.mocked(getCliAccount).mockResolvedValue({ overview: notAuthenticated() });
+    renderPanel("claude");
+
+    expect((await screen.findByRole("progressbar", { name: /Credits/ })).getAttribute("aria-valuenow")).toBe(
+      "20"
+    );
+    await waitFor(() => expect(getCliAccount).toHaveBeenCalled());
+    expect(screen.queryByRole("progressbar", { name: /5h window/ })).toBeNull();
+    expect(panelText()).not.toContain("sessions.providerQuotaNative");
+
+    // Single source: one neutral refresh button, no native one.
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "sessions.providerQuotaRefresh" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "sessions.providerQuotaRefreshNative" })).toBeNull();
   });
 });
 
