@@ -7,6 +7,11 @@ import type { CopilotMessage } from "@/lib/copilot-api";
 const call: CopilotMessage = { id: "call", conversationId: "c", userId: "u", role: "assistant", kind: "tool_call", content: "", sequence: 1, createdAt: "", toolName: "create_project", toolCallId: "tc" };
 afterEach(cleanup);
 describe("tool outcome badges", () => {
+  it("does not label historical calls without a result as still running", () => {
+    render(<LanguageProvider><MessageRow message={call} pairedResult={null} suppressRender={false} /></LanguageProvider>);
+    expect(screen.getByLabelText("unknown")).toBeTruthy();
+    expect(screen.queryByLabelText("running")).toBeNull();
+  });
   it.each([
     ["Action rejected by owner", "denied"],
     ["Tool disabled by owner: create_project", "denied"],

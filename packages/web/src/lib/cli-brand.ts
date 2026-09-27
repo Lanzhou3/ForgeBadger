@@ -16,8 +16,7 @@ export interface CliBrand {
 /**
  * Accent colors follow each CLI's own branding:
  * - Claude Code: Anthropic terracotta/coral (#D97757, taken from the official mark)
- * - Codex: OpenAI monochrome (near-white on dark surfaces; the Codex mark is
- *   intentionally monochrome)
+ * - Codex: violet accent (#AD9DF8, sampled from OpenAI's Codex app icon)
  * - Kimi Code: Kimi blue (#1783FF, taken from the official mark)
  * - OpenCode: OpenCode grayscale (#B7B1B1, from the official dark logo variant;
  *   the opencode.ai brand is deliberately monochrome)
@@ -25,7 +24,7 @@ export interface CliBrand {
  */
 const CLI_BRANDS: Record<CliBrandId, CliBrand> = {
   claude: { id: "claude", label: "Claude Code", shortLabel: "Claude", color: "#d97757" },
-  codex: { id: "codex", label: "Codex", shortLabel: "Codex", color: "#e4e4e7" },
+  codex: { id: "codex", label: "Codex", shortLabel: "Codex", color: "#ad9df8" },
   kimi: { id: "kimi", label: "Kimi Code", shortLabel: "Kimi", color: "#1783ff" },
   opencode: { id: "opencode", label: "OpenCode", shortLabel: "OpenCode", color: "#b7b1b1" },
   pi: { id: "pi", label: "PI", shortLabel: "PI", color: "#4d9abf" },

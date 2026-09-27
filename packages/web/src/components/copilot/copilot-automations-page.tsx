@@ -2,14 +2,34 @@
 
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { CalendarClock, Lightbulb, Play, Plus, Trash2 } from "lucide-react";
 
+import { SettingsCardHeader } from "@/components/settings/ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { CopilotSettingsShell } from "./copilot-settings-shell";
+import { CopilotEmptyState } from "./copilot-empty-state";
+import { useAutomationsCopy } from "./automations-copy";
 import { useLanguage } from "@/hooks/use-language";
 import {
   acceptAutomationSuggestion,
@@ -22,14 +42,22 @@ import {
   pauseAutomation,
   runAutomationNow,
   type CopilotAutomation,
+  type CopilotAutomationStatus,
   type CopilotAutomationSuggestion,
 } from "@/lib/copilot-api";
 
 const automationsQueryKey = ["copilot", "automations"] as const;
 const suggestionsQueryKey = ["copilot", "automation-suggestions"] as const;
 
+/** Basic five-field cron sanity check (minute hour day month weekday). */
+function isValidCron(expression: string): boolean {
+  const fields = expression.trim().split(/\s+/);
+  return fields.length === 5 && fields.every((field) => field.length > 0);
+}
+
 export function CopilotAutomationsPage() {
   const { t } = useLanguage();
+  const copy = useAutomationsCopy();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", prompt: "", scheduleKind: "cron" as "cron" | "interval" | "once", scheduleExpression: "0 9 * * *" });
@@ -42,6 +70,8 @@ export function CopilotAutomationsPage() {
     void queryClient.invalidateQueries({ queryKey: automationsQueryKey });
     void queryClient.invalidateQueries({ queryKey: suggestionsQueryKey });
   }, [queryClient]);
+
+  const cronInvalid = form.scheduleKind === "cron" && !isValidCron(form.scheduleExpression);
 
   const createMutation = useMutation({
     mutationFn: () => createAutomation({
@@ -57,144 +87,138 @@ export function CopilotAutomationsPage() {
       setError(null);
       invalidate();
     },
-    onError: (err) => setError(err instanceof Error ? err.message : t("copilot.automationsCreateFailed"))
+    onError: (err) => setError(err instanceof Error ? err.message : copy.createFailed)
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: deleteAutomation,
-    onSuccess: invalidate
-  });
-
-  const pauseMutation = useMutation({
-    mutationFn: pauseAutomation,
-    onSuccess: invalidate
-  });
-
-  const enableMutation = useMutation({
-    mutationFn: enableAutomation,
-    onSuccess: invalidate
-  });
-
-  const runMutation = useMutation({
-    mutationFn: runAutomationNow,
-    onSuccess: invalidate
-  });
-
-  const acceptMutation = useMutation({
-    mutationFn: acceptAutomationSuggestion,
-    onSuccess: invalidate
-  });
-
-  const dismissMutation = useMutation({
-    mutationFn: dismissAutomationSuggestion,
-    onSuccess: invalidate
-  });
+  const deleteMutation = useMutation({ mutationFn: deleteAutomation, onSuccess: invalidate });
+  const pauseMutation = useMutation({ mutationFn: pauseAutomation, onSuccess: invalidate });
+  const enableMutation = useMutation({ mutationFn: enableAutomation, onSuccess: invalidate });
+  const runMutation = useMutation({ mutationFn: runAutomationNow, onSuccess: invalidate });
+  const acceptMutation = useMutation({ mutationFn: acceptAutomationSuggestion, onSuccess: invalidate });
+  const dismissMutation = useMutation({ mutationFn: dismissAutomationSuggestion, onSuccess: invalidate });
 
   const items = automations.data?.automations ?? [];
   const suggestionsList = suggestions.data?.suggestions ?? [];
+  const actionError = [deleteMutation, pauseMutation, enableMutation, runMutation, acceptMutation, dismissMutation].find(mutation => mutation.isError)?.error;
 
   return (
-    <CopilotSettingsShell
-      active="automations"
-      title={t("copilot.automationsTitle")}
-      description={t("copilot.automationsDescription")}
-    >
+    <CopilotSettingsShell active="automations" title={copy.title} description={copy.description}>
       <div className="flex flex-col gap-4">
+        {actionError && <p role="alert" className="text-sm text-destructive">{t("copilot.actionFailed")}</p>}
+        {suggestions.isError && <p role="alert" className="text-sm text-destructive">{t("copilot.loadError")}</p>}
         {suggestionsList.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{t("copilot.automationsSuggestions")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {suggestionsList.map((suggestion) => (
-              <SuggestionRow
-                key={suggestion.id}
-                suggestion={suggestion}
-                pending={acceptMutation.isPending || dismissMutation.isPending}
-                onAccept={() => acceptMutation.mutate(suggestion.id)}
-                onDismiss={() => dismissMutation.mutate(suggestion.id)}
-              />
-            ))}
-          </CardContent>
-        </Card>
-      )}
+          <Card className="forgebadger-animate-in">
+            <SettingsCardHeader
+              icon={<Lightbulb className="size-4" />}
+              title={copy.suggestions}
+              description={copy.description}
+            />
+            <CardContent className="space-y-2">
+              {suggestionsList.map((suggestion) => (
+                <SuggestionRow
+                  key={suggestion.id}
+                  suggestion={suggestion}
+                  pending={acceptMutation.isPending || dismissMutation.isPending}
+                  onAccept={() => acceptMutation.mutate(suggestion.id)}
+                  onDismiss={() => dismissMutation.mutate(suggestion.id)}
+                />
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm">{t("copilot.automationsList")}</CardTitle>
-          <Button size="sm" variant="outline" onClick={() => setCreating((v) => !v)}>
-            {creating ? t("common.cancel") : <><Plus className="size-4" />{t("copilot.automationsCreate")}</>}
-          </Button>
-        </CardHeader>
-        {creating && (
-          <CardContent className="space-y-3 border-t border-border/70 pt-3">
-            <div className="space-y-2">
-              <Label htmlFor="automation-name">{t("common.name")}</Label>
-              <input
-                id="automation-name"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="automation-prompt">{t("copilot.automationsPrompt")}</Label>
-              <Textarea
-                id="automation-prompt"
-                value={form.prompt}
-                onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
-                rows={3}
-              />
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
+        <Card className="forgebadger-animate-in">
+          <SettingsCardHeader
+            icon={<CalendarClock className="size-4" />}
+            title={copy.list}
+            description={copy.description}
+            action={
+              <Button size="sm" variant="outline" onClick={() => setCreating((v) => !v)}>
+                {creating ? t("common.cancel") : <><Plus className="size-4" />{copy.create}</>}
+              </Button>
+            }
+          />
+          {creating && (
+            <CardContent className="space-y-3 border-t border-border/70 pt-3">
               <div className="space-y-2">
-                <Label htmlFor="automation-kind">{t("copilot.automationsSchedule")}</Label>
-                <select
-                  id="automation-kind"
-                  value={form.scheduleKind}
-                  onChange={(e) => setForm((f) => ({ ...f, scheduleKind: e.target.value as typeof form.scheduleKind }))}
-                  className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                >
-                  <option value="cron">cron</option>
-                  <option value="interval">interval</option>
-                  <option value="once">once</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="automation-expression">{t("copilot.automationsExpression")}</Label>
-                <input
-                  id="automation-expression"
-                  value={form.scheduleExpression}
-                  onChange={(e) => setForm((f) => ({ ...f, scheduleExpression: e.target.value }))}
-                  className="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                <Label htmlFor="automation-name">{t("common.name")}</Label>
+                <Input
+                  id="automation-name"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 />
               </div>
-            </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button size="sm" onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !form.name.trim() || !form.prompt.trim()}>
-              {createMutation.isPending ? t("common.loading") : t("copilot.automationsSave")}
-            </Button>
-          </CardContent>
-        )}
-        <CardContent className="space-y-2">
-          {items.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{t("copilot.automationsEmpty")}</p>
-          ) : (
-            items.map((automation) => (
-              <AutomationRow
-                key={automation.id}
-                automation={automation}
-                pending={pauseMutation.isPending || enableMutation.isPending || runMutation.isPending}
-                onToggle={() => automation.status === "enabled" ? pauseMutation.mutate(automation.id) : enableMutation.mutate(automation.id)}
-                onRun={() => runMutation.mutate(automation.id)}
-                onDelete={() => {
-                  if (window.confirm(t("copilot.automationsDeleteConfirm"))) deleteMutation.mutate(automation.id);
-                }}
-              />
-            ))
+              <div className="space-y-2">
+                <Label htmlFor="automation-prompt">{copy.prompt}</Label>
+                <Textarea
+                  id="automation-prompt"
+                  value={form.prompt}
+                  onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
+                  rows={3}
+                />
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>{copy.scheduleKind}</Label>
+                  <Select
+                    value={form.scheduleKind}
+                    onValueChange={(value) => setForm((f) => ({ ...f, scheduleKind: value as typeof form.scheduleKind }))}
+                  >
+                    <SelectTrigger aria-label={copy.scheduleKind} className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cron">cron</SelectItem>
+                      <SelectItem value="interval">interval</SelectItem>
+                      <SelectItem value="once">once</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="automation-expression">{copy.expression}</Label>
+                  <Input
+                    id="automation-expression"
+                    value={form.scheduleExpression}
+                    onChange={(e) => setForm((f) => ({ ...f, scheduleExpression: e.target.value }))}
+                    className="font-mono"
+                    aria-invalid={cronInvalid}
+                  />
+                  {cronInvalid && <p role="alert" className="text-xs text-destructive">{copy.invalidCron}</p>}
+                </div>
+              </div>
+              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  onClick={() => createMutation.mutate()}
+                  disabled={createMutation.isPending || !form.name.trim() || !form.prompt.trim() || cronInvalid}
+                >
+                  {createMutation.isPending ? t("common.loading") : copy.save}
+                </Button>
+              </div>
+            </CardContent>
           )}
-        </CardContent>
-      </Card>
+          <CardContent className="space-y-2">
+            {automations.isPending ? (
+              <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
+            ) : automations.isError ? (
+              <p role="alert" className="text-sm text-destructive">{t("copilot.loadError")}</p>
+            ) : items.length === 0 ? (
+              <CopilotEmptyState icon={CalendarClock} title={copy.empty} />
+            ) : (
+              items.map((automation) => (
+                <AutomationRow
+                  key={automation.id}
+                  automation={automation}
+                  pending={deleteMutation.isPending || pauseMutation.isPending || enableMutation.isPending || runMutation.isPending}
+                  onToggle={(enabled) => enabled ? enableMutation.mutate(automation.id) : pauseMutation.mutate(automation.id)}
+                  onRun={() => runMutation.mutate(automation.id)}
+                  onDelete={() => deleteMutation.mutate(automation.id)}
+                />
+              ))
+            )}
+          </CardContent>
+        </Card>
       </div>
     </CopilotSettingsShell>
   );
@@ -203,45 +227,73 @@ export function CopilotAutomationsPage() {
 function AutomationRow({ automation, pending, onToggle, onRun, onDelete }: {
   automation: CopilotAutomation;
   pending: boolean;
-  onToggle: () => void;
+  onToggle: (enabled: boolean) => void;
   onRun: () => void;
   onDelete: () => void;
 }) {
   const { t } = useLanguage();
+  const copy = useAutomationsCopy();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const enabled = automation.status === "enabled";
   return (
-    <div className="flex items-center gap-3 rounded-md border border-border/70 bg-card px-3 py-2">
-      <CalendarClock className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    <div className="flex flex-wrap items-center gap-3 rounded-md border border-border/70 bg-card px-3 py-2.5">
       <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-2 text-sm font-medium">
-          {automation.name}
+        <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+          <span className="line-clamp-2 min-w-0 break-all" title={automation.name}>{automation.name}</span>
           <StatusBadge status={automation.status} />
         </p>
-        <p className="truncate text-xs text-muted-foreground">
+        <p className="truncate font-mono text-xs text-muted-foreground">
           {automation.scheduleKind} {automation.scheduleExpression}
         </p>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
-        <Button variant="ghost" size="icon" aria-label={t("copilot.automationsRunNow")} title={t("copilot.automationsRunNow")} disabled={pending} onClick={onRun}>
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        <Button variant="ghost" size="icon" aria-label={copy.runNow} title={copy.runNow} disabled={pending} onClick={onRun}>
           <Play className="size-4" />
         </Button>
-        <Button variant="ghost" size="icon" aria-label={automation.status === "enabled" ? t("copilot.automationsPause") : t("copilot.automationsEnable")} disabled={pending} onClick={onToggle}>
-          <RefreshCw className="size-4" />
-        </Button>
-        <Button variant="ghost" size="icon" className="text-destructive" aria-label={t("common.delete")} disabled={pending} onClick={onDelete}>
+        <Switch
+          aria-label={enabled ? copy.pause : copy.enable}
+          checked={enabled}
+          disabled={pending}
+          onCheckedChange={onToggle}
+        />
+        <Button variant="ghost" size="icon" className="text-destructive" aria-label={t("common.delete")} disabled={pending} onClick={() => setDeleteOpen(true)}>
           <Trash2 className="size-4" />
         </Button>
       </div>
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{copy.deleteConfirm}</DialogTitle>
+            <DialogDescription>{automation.name}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>{t("common.cancel")}</Button>
+            <Button
+              variant="destructive"
+              disabled={pending}
+              onClick={() => {
+                setDeleteOpen(false);
+                onDelete();
+              }}
+            >
+              {t("common.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: CopilotAutomation["status"] }) {
-  return (
-    <Badge variant="outline" className="gap-1 text-[10px]">
-      <span className={`size-1.5 rounded-full ${status === "enabled" ? "bg-emerald-400" : status === "paused" ? "bg-amber-400" : "bg-muted-foreground/40"}`} />
-      {status}
-    </Badge>
-  );
+function StatusBadge({ status }: { status: CopilotAutomationStatus }) {
+  const copy = useAutomationsCopy();
+  const classes = status === "enabled"
+    ? "bg-emerald-500/15 text-emerald-400"
+    : status === "paused"
+      ? "bg-amber-500/15 text-amber-400"
+      : "text-muted-foreground";
+  const label = status === "enabled" ? copy.statusEnabled : status === "paused" ? copy.statusPaused : copy.statusDraft;
+  return <Badge variant="secondary" className={classes}>{label}</Badge>;
 }
 
 function SuggestionRow({ suggestion, pending, onAccept, onDismiss }: {
@@ -250,16 +302,16 @@ function SuggestionRow({ suggestion, pending, onAccept, onDismiss }: {
   onAccept: () => void;
   onDismiss: () => void;
 }) {
-  const { t } = useLanguage();
+  const copy = useAutomationsCopy();
   const spec = parseJobSpec(suggestion.jobSpec);
   return (
     <div className="flex items-center gap-3 rounded-md border border-border/70 bg-card px-3 py-2">
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{spec.name}</p>
+        <p className="break-all text-sm font-medium">{spec.name}</p>
         <p className="truncate text-xs text-muted-foreground">{spec.prompt}</p>
       </div>
-      <Button size="sm" variant="outline" disabled={pending} onClick={onAccept}>{t("copilot.automationsAccept")}</Button>
-      <Button size="sm" variant="ghost" disabled={pending} onClick={onDismiss}>{t("copilot.automationsDismiss")}</Button>
+      <Button size="sm" variant="outline" disabled={pending} onClick={onAccept}>{copy.accept}</Button>
+      <Button size="sm" variant="ghost" disabled={pending} onClick={onDismiss}>{copy.dismiss}</Button>
     </div>
   );
 }

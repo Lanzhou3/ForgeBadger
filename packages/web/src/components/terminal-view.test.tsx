@@ -7,7 +7,9 @@ import { TerminalView } from "./terminal-view";
 const terminal = vi.hoisted(() => ({
   cols: 80, rows: 24, write: vi.fn(), reset: vi.fn(), writeln: vi.fn(),
   attachCustomKeyEventHandler: vi.fn(), attachCustomWheelEventHandler: vi.fn(),
-  loadAddon: vi.fn(), open: vi.fn(), dispose: vi.fn(), onData: vi.fn(() => ({ dispose: vi.fn() })),
+  loadAddon: vi.fn(), open: vi.fn(), input: vi.fn(), element: null as HTMLElement | null,
+  modes: { mouseTrackingMode: "none" },
+  dispose: vi.fn(), onData: vi.fn(() => ({ dispose: vi.fn() })),
   onScroll: vi.fn(() => ({ dispose: vi.fn() })), scrollToBottom: vi.fn(),
   onBell: vi.fn(() => ({ dispose: vi.fn() })),
   parser: { registerOscHandler: vi.fn(() => ({ dispose: vi.fn() })) },
@@ -34,23 +36,59 @@ beforeEach(() => {
   terminal.buffer.active.type = "normal";
   terminal.buffer.active.viewportY = 0;
   terminal.buffer.active.baseY = 0;
+  terminal.modes.mouseTrackingMode = "none";
+  terminal.element = null;
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const queryClient = new QueryClient();
-function renderTerminalView(props: { sessionId: string; authToken: string; attachToken: string }) {
+function renderTerminalView(props: { sessionId: string; authToken: string; attachToken: string; aiTool?: string }) {
   return render(
     <QueryClientProvider client={queryClient}>
       <TerminalView {...props} />
     </QueryClientProvider>
   );
 }
-async function start() {
-  const view = renderTerminalView({ sessionId: "s", authToken: "a", attachToken: "t" });
+async function start(aiTool?: string) {
+  const view = renderTerminalView({ sessionId: "s", authToken: "a", attachToken: "t", aiTool });
   await waitFor(() => expect(Socket.instances).toHaveLength(1));
   const socket = Socket.instances[0]!;
   act(() => socket.dispatchEvent(new Event("open")));
   return { view, socket };
 }
+it("sends the full trackpad distance to Codex's alternate-screen transcript", async () => {
+  // Arrange
+  await start("codex");
+  const host = screen.getByTestId("terminal-host");
+  const xtermScreen = document.createElement("div");
+  xtermScreen.className = "xterm-screen";
+  xtermScreen.getBoundingClientRect = () => ({ left: 100, top: 200, width: 800, height: 600 } as DOMRect);
+  host.appendChild(xtermScreen);
+  terminal.element = host;
+  terminal.buffer.active.type = "alternate";
+  terminal.modes.mouseTrackingMode = "any";
+  const handleWheel = terminal.attachCustomWheelEventHandler.mock.calls[0]![0] as (event: WheelEvent) => boolean;
+  const event = new WheelEvent("wheel", { deltaY: -120, clientX: 500, clientY: 500, cancelable: true });
+
+  // Act
+  const allowed = handleWheel(event);
+
+  // Assert
+  expect(allowed).toBe(false);
+  expect(event.defaultPrevented).toBe(true);
+  expect(terminal.input).toHaveBeenCalledWith("\x1b[<64;41;13M".repeat(9), false);
+});
+
+it("keeps other mouse-reporting CLIs on xterm's existing wheel path", async () => {
+  // Arrange
+  await start("opencode");
+  terminal.buffer.active.type = "alternate";
+  terminal.modes.mouseTrackingMode = "any";
+  const handleWheel = terminal.attachCustomWheelEventHandler.mock.calls[0]![0] as (event: WheelEvent) => boolean;
+
+  // Act / Assert
+  expect(handleWheel(new WheelEvent("wheel", { deltaY: -120 }))).toBe(true);
+  expect(terminal.input).not.toHaveBeenCalled();
+});
 it("ACKs each frame only after xterm consumption and ignores callbacks after unmount", async () => {
   const { view, socket } = await start();
   act(() => { socket.message("terminal_history", { data: "history", sequence: 1 }); socket.message("terminal_output", { data: "live", sequence: 2 }); });

@@ -80,6 +80,7 @@ export function ConversationSidebar({
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder={t("copilot.search")}
+            aria-label={t("copilot.search")}
             className="h-8 pl-8 text-sm"
           />
         </div>
@@ -99,10 +100,15 @@ export function ConversationSidebar({
                   <Input
                     ref={renameInputRef}
                     value={renameDraft}
+                    aria-label={t("copilot.rename")}
+                    data-conversation-rename=""
                     onChange={(event) => setRenameDraft(event.target.value)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter") void submitRename();
-                      if (event.key === "Escape") setRenamingId(null);
+                      if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        void submitRename();
+                      }
+                      if (event.key === "Escape") { event.preventDefault(); setRenamingId(null); }
                     }}
                     maxLength={200}
                     className="h-7 text-sm"
@@ -129,6 +135,7 @@ export function ConversationSidebar({
               ) : (
                 <button
                   onClick={() => onSelect(conversation.id)}
+                  aria-current={isActive ? "page" : undefined}
                   className="block w-full px-3 py-2 pr-16 text-left"
                 >
                   <span className="flex items-center gap-1.5 text-sm">
@@ -143,7 +150,7 @@ export function ConversationSidebar({
                 </button>
               )}
               {renamingId !== conversation.id && deletingId !== conversation.id && (
-                <div className="absolute right-1.5 top-1.5 hidden gap-0.5 group-hover:flex">
+                <div className="absolute right-1.5 top-1.5 flex gap-0.5 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
                   <Button
                     variant="ghost"
                     size="icon"

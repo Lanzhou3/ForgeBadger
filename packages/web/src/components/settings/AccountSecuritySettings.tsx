@@ -8,14 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { useLanguage } from "@/hooks/use-language";
+import { SettingsCardHeader } from "@/components/settings/ui";
 import { logout } from "@/lib/auth";
 import {
   changePassword,
@@ -41,6 +36,7 @@ export function AccountSecuritySettings() {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [passwordForm, setPasswordForm] = useState<PasswordFormState>(EMPTY_PASSWORD_FORM);
+  const [passwordFormOpen, setPasswordFormOpen] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordNotice, setPasswordNotice] = useState<string | null>(null);
 
@@ -60,6 +56,7 @@ export function AccountSecuritySettings() {
       // Every session (including this one) is revoked server-side, so the
       // console must drop its local credentials and return to the login page.
       setPasswordForm(EMPTY_PASSWORD_FORM);
+      setPasswordFormOpen(false);
       setPasswordError(null);
       setPasswordNotice(t("settings.account.passwordChanged"));
       logout();
@@ -92,6 +89,13 @@ export function AccountSecuritySettings() {
     [sessions]
   );
 
+  function closePasswordForm() {
+    setPasswordForm(EMPTY_PASSWORD_FORM);
+    setPasswordError(null);
+    setPasswordNotice(null);
+    setPasswordFormOpen(false);
+  }
+
   function submitPasswordChange() {
     setPasswordError(null);
     setPasswordNotice(null);
@@ -108,106 +112,130 @@ export function AccountSecuritySettings() {
 
   return (
     <Card className="forgebadger-animate-in">
-      <CardHeader className="flex flex-row items-center gap-3 space-y-0">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
-          <KeyRound className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <CardTitle className="text-sm font-semibold">
-            {t("settings.account.title")}
-          </CardTitle>
-          <CardDescription className="mt-1 text-xs">
-            {t("settings.account.description")}
-          </CardDescription>
-        </div>
-      </CardHeader>
+      <SettingsCardHeader
+        icon={<KeyRound className="size-4" />}
+        title={t("settings.account.title")}
+        description={t("settings.account.description")}
+      />
       <CardContent className="space-y-6">
-        <div className="space-y-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="current-password" className="text-xs font-medium">
-              {t("settings.account.currentPassword")}
-            </Label>
-            <Input
-              id="current-password"
-              type="password"
-              autoComplete="current-password"
-              value={passwordForm.currentPassword}
-              onChange={(event) =>
-                setPasswordForm((prev) => ({
-                  ...prev,
-                  currentPassword: event.target.value,
-                }))
-              }
-            />
-          </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {passwordFormOpen ? (
+          <div className="space-y-3">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="new-password" className="text-xs font-medium">
-                {t("settings.account.newPassword")}
+              <Label htmlFor="current-password" className="text-xs font-medium">
+                {t("settings.account.currentPassword")}
               </Label>
               <Input
-                id="new-password"
+                id="current-password"
                 type="password"
-                autoComplete="new-password"
-                value={passwordForm.newPassword}
+                autoComplete="current-password"
+                value={passwordForm.currentPassword}
                 onChange={(event) =>
                   setPasswordForm((prev) => ({
                     ...prev,
-                    newPassword: event.target.value,
+                    currentPassword: event.target.value,
                   }))
                 }
               />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="confirm-password" className="text-xs font-medium">
-                {t("settings.account.confirmPassword")}
-              </Label>
-              <Input
-                id="confirm-password"
-                type="password"
-                autoComplete="new-password"
-                value={passwordForm.confirmPassword}
-                onChange={(event) =>
-                  setPasswordForm((prev) => ({
-                    ...prev,
-                    confirmPassword: event.target.value,
-                  }))
-                }
-              />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="new-password" className="text-xs font-medium">
+                  {t("settings.account.newPassword")}
+                </Label>
+                <Input
+                  id="new-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={passwordForm.newPassword}
+                  onChange={(event) =>
+                    setPasswordForm((prev) => ({
+                      ...prev,
+                      newPassword: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="confirm-password" className="text-xs font-medium">
+                  {t("settings.account.confirmPassword")}
+                </Label>
+                <Input
+                  id="confirm-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={passwordForm.confirmPassword}
+                  onChange={(event) =>
+                    setPasswordForm((prev) => ({
+                      ...prev,
+                      confirmPassword: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+            </div>
+            {passwordError && (
+              <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {passwordError}
+              </p>
+            )}
+            {passwordNotice && (
+              <p className="rounded-md border border-emerald-400/40 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-400">
+                {passwordNotice}
+              </p>
+            )}
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                {t("settings.account.passwordHint")}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={changePasswordMutation.isPending}
+                  onClick={closePasswordForm}
+                >
+                  {t("common.cancel")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="bg-brand text-brand-foreground hover:bg-brand/90"
+                  disabled={
+                    changePasswordMutation.isPending ||
+                    !passwordForm.currentPassword ||
+                    !passwordForm.newPassword ||
+                    !passwordForm.confirmPassword
+                  }
+                  onClick={submitPasswordChange}
+                >
+                  {changePasswordMutation.isPending
+                    ? t("settings.account.passwordChanging")
+                    : t("settings.account.passwordSubmit")}
+                </Button>
+              </div>
             </div>
           </div>
-          {passwordError && (
-            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {passwordError}
-            </p>
-          )}
-          {passwordNotice && (
-            <p className="rounded-md border border-emerald-400/40 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-400">
-              {passwordNotice}
-            </p>
-          )}
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-muted-foreground">
-              {t("settings.account.passwordHint")}
-            </p>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">
+                {t("settings.account.passwordSubmit")}
+              </div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                {t("settings.account.passwordHint")}
+              </div>
+            </div>
             <Button
               type="button"
+              variant="outline"
               size="sm"
-              className="bg-brand text-brand-foreground hover:bg-brand/90"
-              disabled={
-                changePasswordMutation.isPending ||
-                !passwordForm.currentPassword ||
-                !passwordForm.newPassword ||
-                !passwordForm.confirmPassword
-              }
-              onClick={submitPasswordChange}
+              onClick={() => setPasswordFormOpen(true)}
             >
-              {changePasswordMutation.isPending
-                ? t("settings.account.passwordChanging")
-                : t("settings.account.passwordSubmit")}
+              {t("settings.account.passwordSubmit")}
             </Button>
           </div>
-        </div>
+        )}
 
         <div className="space-y-3 border-t border-border/70 pt-4">
           <div className="flex flex-wrap items-center justify-between gap-3">

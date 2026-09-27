@@ -8,6 +8,7 @@ import { CopilotChat } from "@/components/copilot/copilot-chat";
 import { LAST_COPILOT_CONVERSATION_KEY } from "@/lib/copilot-conversation-storage";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
 import type { CopilotPreferences } from "@/lib/copilot-api";
+import { GatewayApiError } from "@/lib/api";
 
 const {
   pushMock,
@@ -54,6 +55,7 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/copilot-api")>();
   return {
     ...actual,
+    listFollowups: vi.fn().mockResolvedValue({ followups: [] }),
     listConversations: listConversationsMock,
     listMessages: listMessagesMock,
     createConversation: createConversationMock,
@@ -174,6 +176,50 @@ function deferred<T>() {
 }
 
 describe("CopilotChat console layout", () => {
+  it("restores the last selected conversation when returning from settings", async () => {
+    listConversationsMock.mockResolvedValue({ conversations: [baseConversation, { ...baseConversation, id: "conv-2", title: "上次阅读" }] });
+    window.localStorage.setItem(LAST_COPILOT_CONVERSATION_KEY, "conv-2");
+    renderChat();
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledWith("conv-2"));
+    expect(listMessagesMock).not.toHaveBeenCalledWith("conv-1");
+  });
+
+  it("shows loading instead of an empty conversation and can retry a failed history read", async () => {
+    const loading = deferred<{ messages: typeof baseUserMessage[] }>();
+    listMessagesMock.mockReturnValueOnce(loading.promise);
+    renderChat();
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalled());
+    expect(screen.queryByText("你好")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("加载");
+    await act(async () => loading.reject(new Error("offline")));
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitForConversationLoaded();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps optional controls out of history and preserves their consent when the panel closes", async () => {
+    renderChat();
+    await waitForConversationLoaded();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "执行选项" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /任务结束后自动只读复核/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /测试失败后尝试修复/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText("你好")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "执行选项" }));
+    expect((screen.getByRole("checkbox", { name: /任务结束后自动只读复核/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: /测试失败后尝试修复/ }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "inspect" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "inspect", undefined,
+      expect.objectContaining({ reviewTaskResults: true, repairFailedChecks: true })));
+    fireEvent.click(screen.getByRole("button", { name: "执行选项" }));
+    expect((screen.getByRole("checkbox", { name: /测试失败后尝试修复/ }) as HTMLInputElement).disabled).toBe(true);
+  });
+
   it("retains project and request identity when retrying an uncertain submission", async () => {
     sendMessageMock.mockRejectedValueOnce(new Error("network lost"));
     renderChat();
@@ -228,6 +274,44 @@ describe("CopilotChat console layout", () => {
       },
       pendingActions: [],
     });
+  });
+
+  it("keeps the selected conversation and reports a busy deletion", async () => {
+    deleteConversationMock.mockRejectedValueOnce(new GatewayApiError("Conversation busy", 409, { code: "COPILOT_CONVERSATION_BUSY" }));
+    renderChat();
+    await waitForConversationLoaded();
+    fireEvent.click(screen.getByRole("button", { name: "删除对话" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除对话" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("停止"));
+    expect(screen.getByText("你好")).toBeTruthy();
+    expect(window.localStorage.getItem(LAST_COPILOT_CONVERSATION_KEY)).toBe("conv-1");
+  });
+
+  it("selects the remaining conversation after deleting the current one", async () => {
+    const other = { ...baseConversation, id: "conv-2", title: "目标对话" };
+    listConversationsMock.mockResolvedValueOnce({ conversations: [baseConversation, other] }).mockResolvedValue({ conversations: [other] });
+    listMessagesMock.mockImplementation(async (id: string) => ({ messages: [{ ...baseUserMessage, conversationId: id, content: id === "conv-1" ? "你好" : "保留消息" }] }));
+    renderChat();
+    await waitForConversationLoaded();
+    fireEvent.click(screen.getAllByRole("button", { name: "删除对话" })[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: "删除对话" })[0]!);
+
+    await waitFor(() => expect(screen.getByText("保留消息")).toBeTruthy());
+    expect(window.localStorage.getItem(LAST_COPILOT_CONVERSATION_KEY)).toBe("conv-2");
+    expect(screen.queryByText("你好")).toBeNull();
+  });
+
+  it("reports rename failures instead of silently discarding the change", async () => {
+    renameConversationMock.mockRejectedValueOnce(new Error("offline"));
+    renderChat();
+    await waitForConversationLoaded();
+    fireEvent.click(screen.getByRole("button", { name: "重命名" }));
+    const editor = screen.getByDisplayValue("测试对话");
+    fireEvent.change(editor, { target: { value: "新标题" } });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("重命名失败"));
+    expect(screen.getByText("你好")).toBeTruthy();
   });
 
   it("shows the thinking pulse immediately on send, before the POST answers", async () => {
@@ -338,6 +422,7 @@ describe("CopilotChat console layout", () => {
     await waitForConversationLoaded();
     const picker = await screen.findByLabelText("当前模型");
     fireEvent.change(picker, { target: { value: "model-2" } });
+    await waitFor(() => expect((picker as HTMLSelectElement).value).toBe("model-2"));
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "换个模型" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
@@ -372,6 +457,21 @@ describe("CopilotChat console layout", () => {
     await waitFor(() => expect(updateCopilotPreferencesMock).toHaveBeenCalledWith({ thinkingEffort: "low" }, expect.anything()));
     // The invalidation refetch lands and the picker follows the server value.
     await waitFor(() => expect(effortPicker.value).toBe("low"));
+  });
+
+  it("keeps the displayed and submitted model aligned when saving a preference fails", async () => {
+    listModelProvidersMock.mockResolvedValue({ ...baseModels, models: [baseModels.models[0], { ...baseModels.models[0], id: "model-2", name: "Other model", isDefault: false }] });
+    updateCopilotPreferencesMock.mockRejectedValueOnce(new Error("offline"));
+    renderChat();
+    await waitForConversationLoaded();
+    const picker = screen.getByLabelText("当前模型") as HTMLSelectElement;
+    fireEvent.change(picker, { target: { value: "model-2" } });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("偏好保存失败"));
+    expect(picker.value).toBe("");
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "继续" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
+    expect(sendMessageMock.mock.calls[0]![2]).toBeUndefined();
   });
 
   it("clears a stale model preference that no longer exists in the model list", async () => {
@@ -481,6 +581,117 @@ describe("CopilotChat console layout", () => {
     expect(screen.getByText("最新内容")).toBeTruthy();
   });
 
+  it("resets an unfinished edit when switching conversations", async () => {
+    const other = { ...baseConversation, id: "conv-2", title: "目标对话" };
+    listConversationsMock.mockResolvedValue({ conversations: [baseConversation, other] });
+    listMessagesMock.mockImplementation(async (id: string) => ({ messages: [{ ...baseUserMessage, id: `message-${id}`, conversationId: id, content: id === "conv-1" ? "你好" : "第二条消息" }] }));
+    renderChat();
+    await waitForConversationLoaded();
+    fireEvent.click(screen.getByRole("button", { name: /编辑消息/ }));
+    fireEvent.click(screen.getByRole("button", { name: /目标对话/ }));
+    await screen.findByText("第二条消息");
+    expect(screen.getByRole("button", { name: /编辑消息/ })).toBeTruthy();
+  });
+
+  it("follows a changed deep link without remounting the chat", async () => {
+    const other = { ...baseConversation, id: "conv-2", title: "目标对话" };
+    listConversationsMock.mockResolvedValue({ conversations: [baseConversation, other] });
+    listMessagesMock.mockImplementation(async (id: string) => ({ messages: [{ ...baseUserMessage, conversationId: id, content: id === "conv-1" ? "你好" : "第二条消息" }] }));
+    const rendered = renderChat();
+    await waitForConversationLoaded();
+    window.history.replaceState({}, "", "/copilot?c=conv-2");
+    rendered.rerender(<LanguageProvider><QueryClientProvider client={createQueryClient()}><CopilotChat /></QueryClientProvider></LanguageProvider>);
+    await screen.findByText("第二条消息");
+    expect(window.localStorage.getItem(LAST_COPILOT_CONVERSATION_KEY)).toBe("conv-2");
+  });
+
+  it("keeps the new conversation's run when an old send fails late", async () => {
+    const oldSend = deferred<{ runId: string }>();
+    sendMessageMock.mockReturnValueOnce(oldSend.promise);
+    const other = { ...baseConversation, id: "conv-2", title: "目标对话" };
+    listConversationsMock.mockResolvedValue({ conversations: [baseConversation, other] });
+    listMessagesMock.mockImplementation(async (id: string) => ({ messages: [{ ...baseUserMessage, conversationId: id, content: id === "conv-1" ? "你好" : "第二条消息" }] }));
+    renderChat();
+    await waitForConversationLoaded();
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "继续" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    const run = { id: "run-2", conversationId: "conv-2", status: "running", revision: 2 };
+    listRunsMock.mockResolvedValue({ runs: [run], activeRun: run });
+    getRunMock.mockResolvedValue({ run, pendingActions: [] });
+    fireEvent.click(screen.getByRole("button", { name: /目标对话/ }));
+    await screen.findByText("第二条消息");
+    await act(async () => { oldSend.reject(new Error("late network failure")); });
+    expect(screen.queryByText("发送失败，请检查 Gateway 服务。")).toBeNull();
+    expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
+  });
+
+  it("reuses the edit request identity and project context after an uncertain result", async () => {
+    editMessageMock.mockRejectedValueOnce(new Error("response lost"));
+    renderChat();
+    await waitForConversationLoaded();
+    await screen.findByRole("option", { name: "Selected project" });
+    fireEvent.change(screen.getByLabelText("项目上下文"), { target: { value: "project-1" } });
+    fireEvent.click(screen.getByRole("button", { name: /编辑消息/ }));
+    fireEvent.click(screen.getByRole("button", { name: "保存并重新运行" }));
+    await screen.findByText("编辑失败，请重试。");
+    const first = editMessageMock.mock.calls[0]!;
+    expect(first[3]).toEqual({ projectId: "project-1", clientRequestId: expect.any(String) });
+    fireEvent.click(screen.getByRole("button", { name: "保存并重新运行" }));
+    await waitFor(() => expect(editMessageMock).toHaveBeenCalledTimes(2));
+    expect(editMessageMock.mock.calls[1]).toEqual(first);
+  });
+
+  it("keeps the new conversation load when an old send succeeds late", async () => {
+    const oldSend = deferred<{ runId: string }>();
+    const newMessages = deferred<{ messages: typeof baseUserMessage[] }>();
+    sendMessageMock.mockReturnValueOnce(oldSend.promise);
+    const other = { ...baseConversation, id: "conv-2", title: "目标对话" };
+    listConversationsMock.mockResolvedValue({ conversations: [baseConversation, other] });
+    listMessagesMock.mockImplementation((id: string) => id === "conv-2" ? newMessages.promise : Promise.resolve({ messages: [baseUserMessage] }));
+    renderChat();
+    await waitForConversationLoaded();
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "继续" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.click(screen.getByRole("button", { name: /目标对话/ }));
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledWith("conv-2"));
+    await act(async () => { oldSend.resolve({ runId: "old-run" }); });
+    await act(async () => { newMessages.resolve({ messages: [{ ...baseUserMessage, conversationId: "conv-2", content: "目标消息" }] }); });
+    expect(screen.getByText("目标消息")).toBeTruthy();
+    expect(listMessagesMock.mock.calls.filter(([id]) => id === "conv-1")).toHaveLength(1);
+  });
+
+  it("does not overwrite a newly sent message with an older refresh of the same conversation", async () => {
+    const oldMessages = deferred<{ messages: typeof baseUserMessage[] }>();
+    const pendingSend = deferred<{ runId: string }>();
+    listMessagesMock.mockReturnValueOnce(oldMessages.promise);
+    renderChat();
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledTimes(1));
+    // The first transcript load is still in flight when a new turn starts.
+    sendMessageMock.mockReturnValueOnce(pendingSend.promise);
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "新问题" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await act(async () => { oldMessages.resolve({ messages: [baseUserMessage] }); });
+    expect(screen.getByText("新问题")).toBeTruthy();
+    await act(async () => { pendingSend.reject(new Error("offline")); });
+  });
+
+  it("applies a pending deep link using the latest overlapping list refresh", async () => {
+    const other = { ...baseConversation, id: "conv-2", title: "目标对话" };
+    const blocked = deferred<{ conversations: typeof baseConversation[] }>();
+    listConversationsMock.mockResolvedValue({ conversations: [baseConversation, other] });
+    listMessagesMock.mockImplementation(async (id: string) => ({ messages: [{ ...baseUserMessage, conversationId: id, content: id === "conv-1" ? "你好" : "目标消息" }] }));
+    const rendered = renderChat();
+    await waitForConversationLoaded();
+    listConversationsMock.mockReturnValueOnce(blocked.promise);
+    window.history.replaceState({}, "", "/copilot?c=conv-2");
+    rendered.rerender(<LanguageProvider><QueryClientProvider client={createQueryClient()}><CopilotChat /></QueryClientProvider></LanguageProvider>);
+    await waitFor(() => expect(listConversationsMock).toHaveBeenCalledTimes(2));
+    act(() => { window.dispatchEvent(new CustomEvent(FORGEBADGER_GATEWAY_EVENT, { detail: { type: "copilot_run_updated", payload: { source: "reactive", run_id: "report-run", conversation_id: "other-conversation" } } })); });
+    await screen.findByText("目标消息");
+    await act(async () => { blocked.resolve({ conversations: [baseConversation, other] }); });
+    expect(screen.getByText("目标消息")).toBeTruthy();
+  });
+
   it("shares the active conversation with the floating robot panel's storage", async () => {
     const otherConversation = { ...baseConversation, id: "conv-2", title: "目标对话" };
     const freshMessage = { ...baseUserMessage, id: "msg-3", conversationId: "conv-2", content: "最新内容" };
@@ -514,17 +725,18 @@ describe("CopilotChat console layout", () => {
 
     await waitFor(() => expect(screen.getByText("编辑失败，请重试。")).toBeTruthy());
   });
-  it("does not submit Enter while a restored approval is pending", async () => {
+  it("does not submit Enter while a restored legacy approval state is pending", async () => {
     const run = { id: "run-1", conversationId: "conv-1", status: "awaiting_approval", revision: 3 };
     listRunsMock.mockResolvedValue({ runs: [run], activeRun: run });
     getRunMock.mockResolvedValue({ run, pendingActions: [{ id: "action", runId: "run-1", tool: "create_project", status: "pending", inputJson: "{}", inputDigest: "digest" }] });
     renderChat();
-    await waitFor(() => expect(screen.getByText("需要批准")).toBeTruthy());
+    await waitFor(() => expect((screen.getByLabelText("项目上下文") as HTMLSelectElement).disabled).toBe(true));
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "继续" } });
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
     await act(async () => {});
     expect(sendMessageMock).not.toHaveBeenCalled();
-    expect(screen.getByText("需要批准")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "停止" }));
+    await waitFor(() => expect(cancelRunMock).toHaveBeenCalledWith("run-1"));
   });
 
 });

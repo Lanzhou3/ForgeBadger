@@ -12,6 +12,9 @@ import { SessionOutputHistory } from "@/components/sessions/session-output-histo
 import { useLanguage } from "@/hooks/use-language";
 import { updateSessionLastPrompt } from "@/lib/api";
 import { resolveWheelAction } from "@/lib/terminal-scroll";
+import { CodexWheelInput } from "@/lib/codex-wheel-input";
+import { installSafariTerminalInputFix } from "@/lib/terminal-safari-input";
+import { terminalAltArrowInput } from "@/lib/terminal-alt-arrows";
 import { copySelectedTerminalText, shouldCopyTerminalSelection } from "@/lib/terminal-copy";
 import { createTerminalInputMessage, createTerminalResizeMessage } from "@/lib/terminal-messages";
 import { createTerminalPromptCapture } from "@/lib/terminal-prompt-capture";
@@ -94,12 +97,14 @@ export function TerminalView({
   sessionId,
   authToken,
   attachToken,
+  aiTool,
   historyOpen = false,
   onHistoryClose,
 }: {
   sessionId: string;
   authToken: string;
   attachToken: string;
+  aiTool?: string;
   /** Controlled read-only output-history overlay (trigger lives in the tab strip). */
   historyOpen?: boolean;
   onHistoryClose?: () => void;
@@ -109,6 +114,8 @@ export function TerminalView({
   const queryClient = useQueryClient();
   const writerRef = useRef(writer);
   writerRef.current = writer;
+  const aiToolRef = useRef(aiTool);
+  aiToolRef.current = aiTool;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<TerminalInstance | null>(null);
   const fitAddonRef = useRef<FitAddonInstance | null>(null);
@@ -371,11 +378,13 @@ export function TerminalView({
   // Initialize terminal instance once
   useEffect(() => {
     let cancelled = false;
+    let disposeSafariInputFix: (() => void) | undefined;
     let scrollDisposable: { dispose(): void } | null = null;
     let bellDisposable: { dispose(): void } | null = null;
     let osc9Disposable: { dispose(): void } | null = null;
     let osc99Disposable: { dispose(): void } | null = null;
     let osc777Disposable: { dispose(): void } | null = null;
+    const codexWheel = new CodexWheelInput();
     const onWheelCapture = (event: WheelEvent) => {
       if (event.deltaY < 0) lastWheelUpAtRef.current = Date.now();
     };
@@ -398,6 +407,12 @@ export function TerminalView({
           });
           terminal.attachCustomKeyEventHandler((event) => {
             if (event.type !== "keydown") return true;
+            const altArrowInput = terminalAltArrowInput(event, navigator.platform);
+            if (altArrowInput !== null) {
+              event.preventDefault();
+              terminal.input(altArrowInput, true);
+              return false;
+            }
             if (!shouldCopyTerminalSelection(event, terminal.hasSelection())) return true;
 
             event.preventDefault();
@@ -410,6 +425,29 @@ export function TerminalView({
           // history. Suppress only in that state; OpenCode (mouse on) keeps its
           // SGR wheel events and the normal buffer keeps its scrollback scroll.
           terminal.attachCustomWheelEventHandler((event) => {
+            if (
+              aiToolRef.current === "codex" &&
+              terminal.buffer.active.type === "alternate" &&
+              terminal.modes.mouseTrackingMode !== "none"
+            ) {
+              const screen = terminal.element?.querySelector(".xterm-screen");
+              const rect = screen?.getBoundingClientRect();
+              const data = rect
+                ? codexWheel.encode(event, {
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    cols: terminal.cols,
+                    rows: terminal.rows
+                  })
+                : null;
+              if (data !== null) {
+                event.preventDefault();
+                if (data) terminal.input(data, false);
+                return false;
+              }
+            }
             const suppress =
               resolveWheelAction(
                 terminal.buffer.active.type,
@@ -425,6 +463,7 @@ export function TerminalView({
           const fitAddon = new fit.FitAddon();
           terminal.loadAddon(fitAddon);
           terminal.open(host);
+          disposeSafariInputFix = installSafariTerminalInputFix(terminal);
           terminalRef.current = terminal;
           fitAddonRef.current = fitAddon;
           scrollDisposable = terminal.onScroll(syncAtBottom);
@@ -508,6 +547,7 @@ export function TerminalView({
 
     return () => {
       cancelled = true;
+      disposeSafariInputFix?.();
       window.clearTimeout(timer);
       setTerminalReady(false);
       scrollDisposable?.dispose();
@@ -660,6 +700,7 @@ export function TerminalView({
         <div
           ref={hostRef}
           data-testid="terminal-host"
+          title={t("terminal.selectionHint")}
           className="min-h-0 flex-1 [&_.xterm-screen]:!h-full [&_.xterm-viewport]:!h-full [&_.xterm]:h-full"
         />
         {terminalToast && ToastIcon && (

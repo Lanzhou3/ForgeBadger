@@ -21,6 +21,8 @@ import {
   type CopilotMessage,
 } from "@/lib/copilot-api";
 import { cn } from "@/lib/utils";
+import { GatewayApiError } from "@/lib/api";
+import { CopilotApproval } from "@/components/copilot/CopilotApproval";
 import { LAST_COPILOT_CONVERSATION_KEY, readLastCopilotConversation, writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
 
 const AUTO_TITLE_MAX_CHARS = 24;
@@ -44,6 +46,12 @@ interface RobotChatPanelProps {
  */
 export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
   const { t } = useLanguage();
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    inputRef.current?.focus();
+    return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
+  }, []);
 
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
@@ -55,22 +63,29 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const lastSentRef = useRef<string>("");
+  const lastSentRef = useRef<{ text: string; conversationId: string | null; clientRequestId: string } | null>(null);
+  const selectionEpochRef = useRef(0);
+  const messageSerialRef = useRef(0);
   const conversationIdRef = useRef<string | null>(null);
   conversationIdRef.current = conversationId;
 
+  const reloadMessages = useCallback(async (id: string) => {
+    if (conversationIdRef.current !== id) return;
+    const serial = ++messageSerialRef.current;
+    const epoch = selectionEpochRef.current;
+    const current = () => serial === messageSerialRef.current && epoch === selectionEpochRef.current && conversationIdRef.current === id;
+    try {
+      const { messages: next } = await listMessages(id);
+      if (current()) { setMessages(next); setLoadError(null); }
+    } catch (error) {
+      if (current()) throw error;
+    }
+  }, []);
+
   const { active, startRun, clearActive, markPending, reconcile, syncError } = useCopilotRun({
     conversationId,
-    onSettled: async (id) => {
-      const { messages: next } = await listMessages(id);
-      if (conversationIdRef.current === id) setMessages(next);
-    },
+    onSettled: reloadMessages,
   });
-
-  const reloadMessages = useCallback(async (id: string) => {
-    const { messages: next } = await listMessages(id);
-    if (conversationIdRef.current === id) setMessages(next);
-  }, []);
 
   // Restore the previous conversation on mount; a stale id (deleted on the
   // server) is dropped so the panel falls back to a fresh draft. Runs that
@@ -80,28 +95,41 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
   useEffect(() => {
     const stored = readLastCopilotConversation();
     if (!stored) return;
+    let disposed = false;
+    const epoch = selectionEpochRef.current;
+    const serial = ++messageSerialRef.current;
     setRestoring(true);
+    conversationIdRef.current = stored;
     setConversationId(stored);
     listMessages(stored)
       .then(({ messages: next }) => {
-        if (conversationIdRef.current === stored) setMessages(next);
+        if (!disposed && serial === messageSerialRef.current && epoch === selectionEpochRef.current && conversationIdRef.current === stored) setMessages(next);
       })
-      .catch(() => {
-        writeLastCopilotConversation(null);
-        if (conversationIdRef.current === stored) {
+      .catch((error: unknown) => {
+        if (disposed || epoch !== selectionEpochRef.current || conversationIdRef.current !== stored) return;
+        if (error instanceof GatewayApiError && error.status === 404) {
+          conversationIdRef.current = null;
+          writeLastCopilotConversation(null);
           setConversationId(null);
           setMessages([]);
-        }
+          clearActive();
+        } else setLoadError(t("copilot.loadError"));
       })
-      .finally(() => setRestoring(false));
-  }, []);
+      .finally(() => { if (!disposed && epoch === selectionEpochRef.current) setRestoring(false); });
+    return () => { disposed = true; };
+  }, [clearActive, t]);
 
-  const send = useCallback(async (textOverride?: string) => {
-    const text = (textOverride ?? input).trim();
-    if (!text || sending || (active && ["pending", "running", "awaiting_approval"].includes(active.status))) return;
-    lastSentRef.current = text;
+  const send = useCallback(async (textOverride?: string, retry = false) => {
+    const prior = retry ? lastSentRef.current : null;
+    const text = (prior?.text ?? textOverride ?? input).trim();
+    if (!text || sending || restoring || (active && ["pending", "running", "awaiting_approval"].includes(active.status))) return;
+    if (retry && (!prior || prior.conversationId !== conversationId)) return;
+    const request = prior ?? { text, conversationId, clientRequestId: crypto.randomUUID() };
+    lastSentRef.current = request;
+    const epoch = selectionEpochRef.current;
+    messageSerialRef.current++;
     setPinnedToBottom(true);
-    setMessages((current) => [
+    if (!retry) setMessages((current) => [
       ...current,
       {
         id: `local-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -117,6 +145,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
     if (!textOverride) setInput("");
     setSending(true);
     setSendError(false);
+    setLoadError(null);
     clearActive();
     // Show the "thinking" pulse immediately, covering the lazy conversation
     // creation and the sendMessage round-trip before any run event arrives.
@@ -127,38 +156,52 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
         // Lazy creation: the conversation only exists on the server once the
         // user actually sends something.
         const { conversation } = await createConversation();
+        if (epoch !== selectionEpochRef.current) return;
         id = conversation.id;
+        request.conversationId = id;
+        conversationIdRef.current = id;
         setConversationId(id);
         writeLastCopilotConversation(id);
         await renameConversation(id, text.slice(0, AUTO_TITLE_MAX_CHARS)).catch(() => undefined);
       }
-      await startRun(id, text);
-      await reloadMessages(id);
+      if (epoch !== selectionEpochRef.current) return;
+      await startRun(id, text, undefined, { clientRequestId: request.clientRequestId });
+      if (epoch !== selectionEpochRef.current) return;
+      await reloadMessages(id).catch(() => {
+        if (epoch === selectionEpochRef.current) setLoadError(t("copilot.loadError"));
+      });
     } catch {
-      clearActive();
-      setSendError(true);
+      if (epoch === selectionEpochRef.current) { clearActive(); setSendError(true); }
     } finally {
-      setSending(false);
+      if (epoch === selectionEpochRef.current) setSending(false);
     }
-  }, [input, sending, active, conversationId, clearActive, markPending, startRun, reloadMessages]);
+  }, [input, sending, restoring, active, conversationId, clearActive, markPending, startRun, reloadMessages, t]);
 
   const newChat = useCallback(() => {
+    selectionEpochRef.current++;
+    messageSerialRef.current++;
+    conversationIdRef.current = null;
+    lastSentRef.current = null;
     clearActive();
     setConversationId(null);
     setMessages([]);
     setLoadError(null);
     setSendError(false);
+    setSending(false);
+    setRestoring(false);
+    setInput("");
     writeLastCopilotConversation(null);
   }, [clearActive]);
 
   const stopRun = useCallback(async () => {
     if (!active?.runId) return;
+    const epoch = selectionEpochRef.current;
     try {
       await cancelRun(active.runId);
       await reconcile();
-    } catch { setLoadError("取消未确认，请同步状态后重试。"); }
-    if (active.conversationId) await reloadMessages(active.conversationId);
-  }, [active, reconcile, reloadMessages]);
+      if (active.conversationId) await reloadMessages(active.conversationId);
+    } catch { if (epoch === selectionEpochRef.current) setLoadError(t("copilot.cancelFailed")); }
+  }, [active, reconcile, reloadMessages, t]);
 
   const onScroll = useCallback(() => {
     const node = scrollRef.current;
@@ -190,7 +233,10 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
       role="dialog"
       aria-label={t("nav.copilot")}
       data-testid="robot-chat-panel"
-      className="fixed inset-x-2 bottom-2 top-14 z-40 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl shadow-black/40 md:inset-x-auto md:bottom-32 md:right-4 md:top-auto md:h-[520px] md:w-[380px]"
+      onKeyDown={event => {
+        if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); onClose(); }
+      }}
+      className="fixed inset-x-2 bottom-2 top-14 z-40 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl shadow-black/40 md:inset-x-auto md:bottom-32 md:right-4 md:top-auto md:h-[520px] md:max-h-[calc(100dvh-9rem)] md:w-[380px]"
     >
       <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3">
         <div className="flex min-w-0 items-center gap-2">
@@ -266,6 +312,9 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
             );
           })}
           {(syncError || active?.error) && <p role="status" className="text-sm text-muted-foreground">{syncError || active?.error}</p>}
+          {active?.status === "awaiting_approval" && (active.pendingAction
+            ? <CopilotApproval key={active.pendingAction.id} action={active.pendingAction} onDecided={reconcile} />
+            : <p role="status" className="text-sm text-muted-foreground">{t("copilot.awaitingApproval")}</p>)}
           {active?.thinking ? <ThinkingSection text={active.thinking} live={isRunning === true} /> : null}
           {active?.text ? (
             <StreamingMessage text={active.text} />
@@ -278,7 +327,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
           {sendError && (
             <div className="flex items-center gap-2">
               <p className="text-sm text-destructive">{t("copilot.sendError")}</p>
-              <Button variant="outline" size="sm" onClick={() => void send(lastSentRef.current)}>
+              <Button variant="outline" size="sm" onClick={() => void send(undefined, true)}>
                 {t("copilot.retry")}
               </Button>
             </div>
@@ -310,6 +359,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
           className="flex items-end gap-1.5 rounded-xl border border-border/70 bg-card/90 px-2 py-1.5 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
         >
           <Textarea
+            ref={inputRef}
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
@@ -323,12 +373,13 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
             className="min-h-[32px] max-h-32 flex-1 resize-none rounded-none border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0"
             rows={1}
           />
-          {isRunning ? (
+          {isBusy ? (
             <Button
               variant="outline"
               size="icon"
               className="size-7 shrink-0 rounded-full"
               onClick={() => void stopRun()}
+              disabled={!active?.runId}
               aria-label={t("copilot.stop")}
               title={t("copilot.stop")}
             >
@@ -339,7 +390,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
               size="icon"
               className="size-7 shrink-0 rounded-full"
               onClick={() => void send()}
-              disabled={sending || isBusy || !input.trim()}
+              disabled={sending || restoring || isBusy || !input.trim()}
               aria-label={t("copilot.send")}
               title={t("copilot.send")}
             >

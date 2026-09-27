@@ -43,6 +43,7 @@ export function shouldTriggerBrowserNotification(
       "task_interrupted",
       "task_failed",
       "session_ended",
+      "attention",
     ].includes(String(event.payload?.notification_type ?? ""))
   ) {
     return true;

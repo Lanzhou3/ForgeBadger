@@ -13,7 +13,7 @@ const connection: api.CopilotConnection = { id: "c1", name: "Docs server", kind:
 ] };
 let client: QueryClient;
 function mount() { render(<LanguageProvider><QueryClientProvider client={client}><CopilotConnectionsPanel /></QueryClientProvider></LanguageProvider>); }
-beforeEach(() => { cleanup(); vi.resetAllMocks(); client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); vi.mocked(api.listCopilotConnections).mockResolvedValue({ connections: [connection] }); });
+beforeEach(() => { cleanup(); vi.resetAllMocks(); client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); vi.mocked(api.listCopilotConnections).mockResolvedValue({ connections: [connection] }); });
 it("opens platform controls only inside the built-in Connection", () => {
   mount(); expect(screen.queryByText("Platform tool switches")).toBeNull(); fireEvent.click(screen.getByRole("button", { name: "管理工具" })); expect(screen.getByText("Platform tool switches")).toBeTruthy();
 });

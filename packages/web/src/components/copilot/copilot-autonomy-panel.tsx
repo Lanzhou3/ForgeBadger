@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Lock } from "lucide-react";
+import { AlertTriangle, Bot, Lock } from "lucide-react";
 
+import { SettingsCardHeader, SettingRow } from "@/components/settings/ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Switch } from "@/components/ui/switch";
+import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
 import {
@@ -87,96 +87,85 @@ export function CopilotAutonomyPanel() {
   }
 
   return (
-    <section
-      className="forgebadger-animate-in space-y-3 rounded-lg border border-border bg-card p-4"
-      style={{ animationDelay: "150ms" }}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <Bot className="size-4 text-brand" />
-        <h2 className="text-sm font-semibold">{copy.autonomyTitle}</h2>
-        {readonly && (
-          <Badge variant="outline" className="gap-1">
-            <Lock className="size-3" />
-            {copy.autonomySourceEnv}
-          </Badge>
-        )}
-        <SourceBadge source={adaptersSource} labelEnv={copy.autonomySourceEnv} labelSettings={copy.autonomySourceSettings} />
-      </div>
-      <p className="text-xs text-muted-foreground">{copy.autonomyDescription}</p>
-
-      {settings.isError ? (
-        <div className="flex items-center gap-3 text-xs text-destructive">
-          {copy.autonomyLoadError}
-          <Button type="button" variant="ghost" size="sm" className="h-6" onClick={() => void settings.refetch()}>
-            {copy.autonomyRetry}
-          </Button>
-        </div>
-      ) : settings.isLoading ? (
-        <p className="text-xs text-muted-foreground">…</p>
-      ) : (
-        <div className="space-y-3">
-          {readonly && (
-            <p className="rounded-md border border-border/70 bg-muted/20 p-2 text-xs text-muted-foreground">
-              {copy.autonomyReadonly}
-            </p>
-          )}
-          <div className="grid gap-2 sm:grid-cols-2">
-            {AUTONOMY_ADAPTER_IDS.map((id) => {
-              const adapter = availability.get(id);
-              const checked = enabledAdapters.includes(id);
-              return (
-                <label
-                  key={id}
-                  className={`flex items-center gap-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs ${
-                    readonly ? "cursor-not-allowed opacity-60" : "cursor-pointer"
-                  }`}
-                >
-                  <Checkbox
-                    checked={checked}
-                    onCheckedChange={() => toggleAdapter(id)}
-                    disabled={readonly}
-                    aria-label={id}
-                  />
-                  <span className="font-mono font-medium">{id}</span>
-                  <span className="ml-auto text-muted-foreground">
-                    {adapter ? (adapter.available ? copy.autonomyInstalled : copy.autonomyMissing) : ""}
-                  </span>
-                </label>
-              );
-            })}
+    <Card className="forgebadger-animate-in" style={{ animationDelay: "150ms" }}>
+      <SettingsCardHeader
+        icon={<Bot className="size-4" />}
+        title={copy.autonomyTitle}
+        description={copy.autonomyDescription}
+        action={
+          <>
+            {readonly && (
+              <Badge variant="outline" className="gap-1">
+                <Lock className="size-3" />
+                {copy.autonomySourceEnv}
+              </Badge>
+            )}
+            <SourceBadge source={adaptersSource} labelEnv={copy.autonomySourceEnv} labelSettings={copy.autonomySourceSettings} />
+          </>
+        }
+      />
+      <CardContent className="space-y-3">
+        {settings.isError ? (
+          <div className="flex items-center gap-3 text-xs text-destructive">
+            {copy.autonomyLoadError}
+            <Button type="button" variant="ghost" size="sm" className="h-6" onClick={() => void settings.refetch()}>
+              {copy.autonomyRetry}
+            </Button>
           </div>
-          {enabledAdapters.length === 0 && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">{copy.autonomyEmptyNote}</p>
-          )}
-          <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
-            <div className="min-w-0 space-y-0.5">
-              <p className="text-xs font-medium">{copy.autonomyAutoDispatch}</p>
-              <p className="text-xs text-muted-foreground">
-                {enabledAdapters.length === 0 ? copy.autonomyAutoDispatchBlocked : copy.autonomyAutoDispatchDescription}
+        ) : settings.isLoading ? (
+          <p className="text-xs text-muted-foreground">…</p>
+        ) : (
+          <>
+            {readonly && (
+              <p className="rounded-md border border-border/70 bg-muted/20 p-2 text-xs text-muted-foreground">
+                {copy.autonomyReadonly}
               </p>
+            )}
+            <div className="space-y-2">
+              {AUTONOMY_ADAPTER_IDS.map((id) => {
+                const adapter = availability.get(id);
+                return (
+                  <SettingRow
+                    key={id}
+                    title={id}
+                    description={adapter ? (adapter.available ? copy.autonomyInstalled : copy.autonomyMissing) : ""}
+                    checked={enabledAdapters.includes(id)}
+                    disabled={readonly}
+                    onCheckedChange={() => toggleAdapter(id)}
+                  />
+                );
+              })}
             </div>
-            <Switch
+            {enabledAdapters.length === 0 && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                <span>{copy.autonomyEmptyNote}</span>
+              </div>
+            )}
+            <SettingRow
+              title={copy.autonomyAutoDispatch}
+              description={enabledAdapters.length === 0 ? copy.autonomyAutoDispatchBlocked : copy.autonomyAutoDispatchDescription}
               checked={autoDispatch}
+              disabled={readonly || enabledAdapters.length === 0}
               onCheckedChange={(value) => {
                 setAutoDispatch(value);
                 setDirty(true);
               }}
-              disabled={readonly || enabledAdapters.length === 0}
             />
-          </div>
-          <div>
-            <Button
-              size="sm"
-              className="h-8"
-              disabled={readonly || !dirty || save.isPending}
-              onClick={() => save.mutate()}
-            >
-              {save.isPending ? copy.autonomySaving : t("common.save")}
-            </Button>
-          </div>
-        </div>
-      )}
-    </section>
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                className="h-8"
+                disabled={readonly || !dirty || save.isPending}
+                onClick={() => save.mutate()}
+              >
+                {save.isPending ? copy.autonomySaving : t("common.save")}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

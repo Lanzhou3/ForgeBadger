@@ -4,7 +4,8 @@ import { useId, useState } from "react";
 import { Bot, Check } from "lucide-react";
 
 import { RobotSprite } from "@/components/copilot/RobotSprite";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SettingsCardHeader } from "@/components/settings/ui";
+import { Card, CardContent } from "@/components/ui/card";
 import { useLanguage } from "@/hooks/use-language";
 import { usePetPreference } from "@/hooks/use-pet-preference";
 import { PET_OPTIONS, writePetPreference, type PetId } from "@/lib/pet-preference";
@@ -22,15 +23,12 @@ export function PetSettings() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center gap-3 space-y-0">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
-          <Bot className="size-4" aria-hidden="true" />
-        </div>
-        <div className="min-w-0">
-          <CardTitle id={titleId} className="text-sm font-semibold">{t("settings.pet")}</CardTitle>
-          <CardDescription className="mt-1 text-xs">{t("settings.petDescription")}</CardDescription>
-        </div>
-      </CardHeader>
+      <SettingsCardHeader
+        icon={<Bot className="size-4" aria-hidden="true" />}
+        title={t("settings.pet")}
+        description={t("settings.petDescription")}
+        titleId={titleId}
+      />
       <CardContent className="space-y-3">
         <div role="radiogroup" aria-labelledby={titleId} className="grid gap-3 sm:grid-cols-2">
           {PET_OPTIONS.map((pet) => {

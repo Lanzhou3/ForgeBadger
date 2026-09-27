@@ -5,9 +5,9 @@ import { render } from "@testing-library/react";
 import { CliBrandIcon } from "./cli-brand-icon";
 
 describe("CliBrandIcon", () => {
-  it("renders an inline svg for each known CLI brand", () => {
+  it("renders inline svg marks for the other known CLI brands", () => {
     // Arrange & Act
-    const rendered = ["claude", "codex", "kimi", "opencode", "pi"].map((aiTool) =>
+    const rendered = ["claude", "kimi", "opencode", "pi"].map((aiTool) =>
       render(<CliBrandIcon aiTool={aiTool} />)
     );
 
@@ -15,6 +15,18 @@ describe("CliBrandIcon", () => {
     for (const view of rendered) {
       expect(view.container.querySelector("svg")).not.toBeNull();
     }
+  });
+
+  it("renders the official Codex icon with a larger centered crop", () => {
+    const { container } = render(<CliBrandIcon aiTool="codex" className="size-5" />);
+    const icon = container.querySelector("img");
+    const crop = icon?.parentElement;
+
+    expect(icon?.getAttribute("src")).toBe("/brand/cli/codex.png");
+    expect(icon?.getAttribute("class")).toContain("size-[150%]");
+    expect(crop?.getAttribute("class")).toContain("size-5");
+    expect(crop?.getAttribute("class")).toContain("overflow-hidden");
+    expect(container.querySelector("svg")).toBeNull();
   });
 
   it("renders nothing for unknown or missing aiTool values", () => {

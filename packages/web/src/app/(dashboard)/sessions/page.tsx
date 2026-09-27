@@ -82,7 +82,10 @@ export default function SessionsPage() {
   });
   const stopMutation = useMutation({
     mutationFn: (id: string) => stopSession(id),
-    onSuccess: refreshSessions,
+    onSuccess: (result) => {
+      if (result?.session?.warning) toast.warning(t("copilot.stopExternalWarning"));
+      refreshSessions();
+    },
     onError: (error) => {
       toast.error(
         error instanceof Error && error.message

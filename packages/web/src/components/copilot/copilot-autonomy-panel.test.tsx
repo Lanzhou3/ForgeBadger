@@ -126,7 +126,7 @@ describe("CopilotAutonomyPanel", () => {
     );
     renderPanel();
     expect(await screen.findByText(/未启用任何适配器/)).toBeTruthy();
-    const switchEl = screen.getByRole("switch");
+    const switchEl = screen.getByRole("switch", { name: "项目任务自动推进" });
     expect((switchEl as HTMLButtonElement).disabled).toBe(true);
   });
 

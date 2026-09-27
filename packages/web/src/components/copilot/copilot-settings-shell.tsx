@@ -70,10 +70,10 @@ export function CopilotSettingsShell({
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         </div>
       </header>
-      <div className="flex min-h-0 flex-col gap-5 md:flex-row md:gap-8">
+      <div className="flex min-h-0 flex-col gap-5 lg:flex-row lg:gap-8">
         <nav
           aria-label={copy.navAriaLabel}
-          className="forgebadger-animate-in flex shrink-0 gap-1 overflow-x-auto pb-1 md:w-44 md:flex-col md:overflow-visible md:pb-0"
+          className="forgebadger-animate-in flex shrink-0 gap-1 overflow-x-auto pb-1 lg:w-[200px] lg:flex-col lg:overflow-visible lg:pb-0"
           style={{ animationDelay: "60ms" }}
         >
           {items.map((item) => {
@@ -96,7 +96,7 @@ export function CopilotSettingsShell({
             );
           })}
         </nav>
-        <div className="min-w-0 flex-1">{children}</div>
+        <div className="min-w-0 max-w-3xl flex-1">{children}</div>
       </div>
     </div>
   );

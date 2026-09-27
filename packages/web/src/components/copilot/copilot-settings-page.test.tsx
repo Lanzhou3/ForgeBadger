@@ -4,9 +4,12 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { CopilotSettingsPage } from "./copilot-settings-page";
 import { LanguageProvider } from "@/hooks/use-language";
+import { listModelProviders } from "@/lib/api";
+import { getCopilotPreferences } from "@/lib/copilot-api";
 const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("@/lib/api", () => ({ listModelProviders: vi.fn().mockResolvedValue({ models: [] }) }));
+vi.mock("@/lib/copilot-api", () => ({ getCopilotPreferences: vi.fn().mockResolvedValue({ modelId: null, thinkingEffort: "medium" }) }));
 vi.mock("@/lib/copilot-extensions-api", () => ({
   copilotSkillsKey: ["copilot", "skills"],
   copilotConnectionsKey: ["copilot", "connections"],
@@ -24,7 +27,21 @@ function mount() {
     </LanguageProvider>,
   );
 }
-beforeEach(() => { cleanup(); vi.clearAllMocks(); });
+beforeEach(() => {
+  cleanup(); vi.clearAllMocks();
+  vi.mocked(getCopilotPreferences).mockResolvedValue({ modelId: null, thinkingEffort: "medium" });
+});
+it("displays the effective chat model instead of always showing the platform default", async () => {
+  vi.mocked(listModelProviders).mockResolvedValueOnce({ providers: [], credentials: [], models: [
+    { id: "default", name: "Default", providerName: "Provider", isDefault: true, status: "active" },
+    { id: "chosen", name: "Chosen", providerName: "Provider", isDefault: false, status: "active" },
+  ].map(model => ({ ...model, providerProfileId: "provider", providerKey: "openai", baseUrl: null,
+    modelId: model.id, capabilities: [], contextWindow: null, supportEfforts: [], defaultEffort: null })) });
+  vi.mocked(getCopilotPreferences).mockResolvedValue({ modelId: "chosen", thinkingEffort: "medium" });
+  mount();
+  expect(await screen.findByText("Provider / Chosen", { exact: false })).toBeTruthy();
+  expect(screen.queryByText("Provider / Default", { exact: false })).toBeNull();
+});
 it("renders the settings nav with entries into every Copilot settings section", () => {
   mount();
   expect(screen.getByRole("heading", { name: "Copilot 设置" })).toBeTruthy();

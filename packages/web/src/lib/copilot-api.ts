@@ -20,7 +20,6 @@ export type CopilotRunStatus =
 export interface CopilotConversation {
   id: string;
   title: string | null;
-  grantId?: string | null;
   status: string;
   created_at: number;
   updated_at: number;
@@ -42,6 +41,9 @@ export interface CopilotMessage {
 }
 
 export interface CopilotRun {
+  phase?: string;
+  phaseStartedAt?: string;
+  usage?: { chargedTokens: number; reportedTokens: number; estimatedCalls: number; calls: number };
   revision?: number;
   stopReason?: string;
   id: string;
@@ -164,6 +166,9 @@ export function listMessages(conversationId: string) {
 
 /** Run a turn; returns the run id. Streaming deltas arrive via /ws/events. */
 export interface CopilotMessageOptions {
+  reviewTaskResults?: boolean;
+  repairFailedChecks?: boolean;
+  toolDiscovery?: boolean;
   projectId?: string;
   clientRequestId?: string;
 }
@@ -194,6 +199,13 @@ export function cancelRun(runId: string) {
   return fetchJson<{ cancelled: boolean; runId: string }>(
     `/api/v1/copilot/runs/${encodeURIComponent(runId)}/cancel`,
     { method: "POST" }
+  );
+}
+
+export function decidePendingAction(runId: string, actionId: string, approved: boolean) {
+  return fetchJson<{ resumed: boolean; runId: string }>(
+    `/api/v1/copilot/runs/${encodeURIComponent(runId)}/pending-actions/${encodeURIComponent(actionId)}/decide`,
+    { method: "POST", body: JSON.stringify({ approved }) }
   );
 }
 
@@ -242,10 +254,10 @@ export function deleteMemoryEntry(id: string) {
   );
 }
 
-export function editMessage(conversationId: string, messageId: string, content: string) {
+export function editMessage(conversationId: string, messageId: string, content: string, options?: CopilotMessageOptions & { modelId?: string; toolDiscovery?: boolean }) {
   return fetchJson<{ runId: string }>(
     `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/edit-message`,
-    { method: "POST", body: JSON.stringify({ messageId, content }) }
+    { method: "POST", body: JSON.stringify({ messageId, content, ...options }) }
   );
 }
 
@@ -404,3 +416,16 @@ export function dismissAutomationSuggestion(suggestionId: string) {
 
 // Re-export the envelope helper for tests that assert on the HTTP envelope.
 export { fetchEnvelope };
+
+export interface CopilotFollowup { id: string; status: string; runId: string | null; content: string; error: string | null; createdAt: number; }
+export function listFollowups(conversationId: string) {
+  return fetchJson<{ followups: CopilotFollowup[] }>(`/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/followups`);
+}
+export function queueFollowup(conversationId: string, content: string, options: CopilotMessageOptions & { clientRequestId: string; modelId?: string }) {
+  return fetchJson<{ followup: { id: string; status: string; runId: string | null } }>(`/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/followups`, {
+    method: 'POST', body: JSON.stringify({ content, ...options }),
+  });
+}
+export function cancelFollowup(id: string) {
+  return fetchJson<{ cancelled: boolean }>(`/api/v1/copilot/followups/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}

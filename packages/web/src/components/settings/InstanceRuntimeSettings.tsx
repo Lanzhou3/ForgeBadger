@@ -6,13 +6,7 @@ import { Lock, Server } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -24,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
+import { SettingsCardHeader } from "@/components/settings/ui";
 import type { TranslationKey } from "@/lib/i18n";
 import {
   getRuntimeSettings,
@@ -84,21 +79,19 @@ export function InstanceRuntimeSettings() {
 
   return (
     <Card className="forgebadger-animate-in">
-      <CardHeader className="flex flex-row items-center gap-3 space-y-0">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
-          <Server className="size-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <CardTitle className="text-sm font-semibold">{t("settings.instance")}</CardTitle>
-          <CardDescription className="mt-1 text-xs">{t("settings.instanceDescription")}</CardDescription>
-        </div>
-        {readonly && (
-          <Badge variant="outline" className="gap-1">
-            <Lock className="size-3" />
-            {t("settings.sourceEnv")}
-          </Badge>
-        )}
-      </CardHeader>
+      <SettingsCardHeader
+        icon={<Server className="size-4" />}
+        title={t("settings.instance")}
+        description={t("settings.instanceDescription")}
+        action={
+          readonly && (
+            <Badge variant="outline" className="gap-1">
+              <Lock className="size-3" />
+              {t("settings.sourceEnv")}
+            </Badge>
+          )
+        }
+      />
       <CardContent className="space-y-3">
         {settings.isError ? (
           <p className="text-xs text-destructive">{t("settings.instanceLoadError")}</p>

@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CopilotTextStream } from '@/lib/copilot-text-stream';
 import { FORGEBADGER_GATEWAY_EVENT, FORGEBADGER_GATEWAY_CONNECTED } from "@/lib/gateway-events";
 import { editMessage, getRun, listConversationRuns, sendMessage,
   type CopilotPendingAction, type CopilotRunStatus } from "@/lib/copilot-api";
 
 export interface ActiveCopilotRun {
+  phase?: string;
+  phaseStartedAt?: string;
   runId: string;
   conversationId: string;
   status: CopilotRunStatus;
@@ -29,6 +32,8 @@ const emptyRun = (conversationId: string, runId = ""): ActiveCopilotRun => ({
 });
 function terminalReason(status: CopilotRunStatus, reason?: string) {
   if (status === "indeterminate") return "操作结果尚未确认，请核实实际结果后再继续，避免重复操作。";
+  if (status === "stopped" && reason === "COPILOT_TOKEN_BUDGET") return "本次执行已达到模型用量预算；执行记录已保留。";
+  if (status === "stopped" && reason === "COPILOT_TIME_BUDGET") return "本次执行已达到时间预算；执行记录已保留。";
   if (status === "stopped") return reason === "step_budget_exhausted" ? "已达到本次执行步数上限。" : "执行已停止。";
   if (status === "cancelled") return "执行已取消；已发生的操作不会自动撤销。";
   if (status === "failed") return reason || "执行失败，请查看会话记录。";
@@ -47,12 +52,16 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
   const settled = useRef(new Set<string>());
   const requestSerial = useRef(0);
   const appliedSerial = useRef(0);
+  const submitting = useRef(false);
+  const publicStream = useRef(new CopilotTextStream());
   const update = useCallback((next: ActiveCopilotRun | null) => {
     activeRef.current = next;
     setActive(next);
   }, []);
   const clearActive = useCallback(() => {
     generation.current++;
+    submitting.current = false;
+    publicStream.current.clear();
     update(null);
     setSyncError(null);
   }, [update]);
@@ -64,6 +73,9 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
     const valid = () => epoch === generation.current && serial >= appliedSerial.current;
     try {
       let runId = activeRef.current?.runId;
+      // Until the POST (or a run event) identifies the new turn, the latest
+      // persisted run can still be the previous one.
+      if (!runId && submitting.current) return;
       if (conversationId && (!runId || TERMINAL.has(activeRef.current?.status ?? ""))) {
         const { runs, activeRun } = await listConversationRuns(conversationId);
         if (!valid()) return;
@@ -81,17 +93,18 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       const next: ActiveCopilotRun = {
         ...(sameRun && previous ? previous : emptyRun(run.conversationId, run.id)),
         runId: run.id, conversationId: run.conversationId, status: run.status,
-        revision: run.revision, syncError: undefined,
+        revision: run.revision, syncError: undefined, phase: run.phase, phaseStartedAt: run.phaseStartedAt,
         pendingAction: pendingActions.find((action) => action.status === "pending") ?? null,
         error: terminalReason(run.status, run.error ?? run.stopReason),
       };
       if (TERMINAL.has(run.status)) {
         // Keep the streaming bubble until durable messages have replaced it.
-        if (!settled.current.has(run.id)) {
-          await optionsRef.current?.onSettled?.(run.conversationId);
-          if (!valid()) return;
-          settled.current.add(run.id);
-        }
+        // A completed run can receive durable task reports later. The settled
+        // set only fences provisional deltas, never transcript refreshes.
+        await optionsRef.current?.onSettled?.(run.conversationId);
+        if (!valid()) return;
+        settled.current.add(run.id);
+        publicStream.current.clear();
         update(run.status === "completed" ? null : { ...next, text: "", thinking: "", pendingAction: null });
       } else update(next);
     } catch {
@@ -125,6 +138,13 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       const conversationId = selectedRef.current ?? current?.conversationId;
       if (!conversationId || (p.conversation_id && p.conversation_id !== conversationId)) return;
       if (typeof p.run_id !== "string") return;
+      if (typeof p.message === "string" && TERMINAL.has(String(p.status))
+        && (settled.current.has(p.run_id) || (current?.runId && current.runId !== p.run_id))) {
+        const epoch = generation.current;
+        void Promise.resolve(optionsRef.current?.onSettled?.(conversationId)).catch(() => {
+          if (epoch === generation.current) setSyncError("消息同步失败，请稍后重试。");
+        });
+      }
       if (current?.runId && current.runId !== p.run_id) {
         if (TERMINAL.has(current.status)) refresh();
         return;
@@ -133,9 +153,10 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       if (typeof p.revision === "number" && p.revision < (current?.revision ?? 0)) return;
       if (!current && p.conversation_id !== conversationId) return;
       const next = current ?? emptyRun(conversationId, p.run_id);
+      const streamed = publicStream.current.accept(p.run_id,p);
       update({ ...next, runId: p.run_id,
         revision: typeof p.revision === "number" ? p.revision : next.revision,
-        text: next.text + (typeof p.text_delta === "string" ? p.text_delta : ""),
+        text: streamed ?? (typeof p.text_step_id === 'string' ? next.text : next.text + (typeof p.text_delta === "string" ? p.text_delta : "")),
         thinking: next.thinking + (typeof p.thinking_delta === "string" ? p.thinking_delta : ""),
       });
       // Never manufacture an empty approval card or infer a terminal outcome.
@@ -158,6 +179,7 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
   }, [reconcile, update]);
 
   const markPending = useCallback((conversationId: string) => {
+    submitting.current = true;
     selectedRef.current = conversationId;
     update(emptyRun(conversationId));
   }, [update]);
@@ -167,6 +189,7 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
     try {
       const { runId } = await request();
       if (epoch !== generation.current) return runId;
+      submitting.current = false;
       if (!settled.current.has(runId)) update({ ...(activeRef.current ?? emptyRun(conversationId)), runId });
       await reconcile();
       return runId;
@@ -177,7 +200,7 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
   }, [markPending, update, reconcile, clearActive]);
   const startRun = useCallback((id: string, text: string, modelId?: string, options?: import("@/lib/copilot-api").CopilotMessageOptions) =>
     submit(id, () => options ? sendMessage(id, text, modelId, options) : sendMessage(id, text, modelId)), [submit]);
-  const startEditedRun = useCallback((id: string, messageId: string, text: string) =>
-    submit(id, () => editMessage(id, messageId, text)), [submit]);
+  const startEditedRun = useCallback((id: string, messageId: string, text: string, options?: Parameters<typeof editMessage>[3]) =>
+    submit(id, () => options ? editMessage(id, messageId, text, options) : editMessage(id, messageId, text)), [submit]);
   return { active, syncError, startRun, startEditedRun, clearActive, markPending, reconcile };
 }

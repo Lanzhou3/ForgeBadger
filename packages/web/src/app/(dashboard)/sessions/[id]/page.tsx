@@ -134,7 +134,8 @@ export default function TerminalPage() {
 
   const stopMutation = useMutation({
     mutationFn: () => stopSession(id),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      if (result?.session?.warning) toast.warning(t("copilot.stopExternalWarning"));
       queryClient.invalidateQueries({ queryKey: ["session", id] });
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
@@ -361,6 +362,7 @@ export default function TerminalPage() {
             sessionId={id}
             authToken={authToken}
             attachToken={attachToken}
+            aiTool={session?.aiTool}
             historyOpen={outputHistoryOpen}
             onHistoryClose={() => setOutputHistoryOpen(false)}
           />

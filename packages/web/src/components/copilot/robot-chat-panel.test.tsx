@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 
 import { LanguageProvider } from "@/hooks/use-language";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
+import { GatewayApiError } from "@/lib/api";
 import {
   ROBOT_CONVERSATION_STORAGE_KEY,
   RobotChatPanel,
@@ -116,6 +117,13 @@ function deferred<T>() {
 }
 
 describe("RobotChatPanel", () => {
+  it("focuses the quick-chat input and lets keyboard users close with Escape", () => {
+    const { onClose } = renderPanel();
+    const input = screen.getByRole("textbox");
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -138,6 +146,52 @@ describe("RobotChatPanel", () => {
       },
       pendingActions: [],
     });
+  });
+
+  it("retries an uncertain send using the same request identity without duplicating the local message", async () => {
+    sendMessageMock.mockRejectedValueOnce(new Error("response lost"));
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "派发任务" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "重试" })).toBeTruthy());
+    const options = sendMessageMock.mock.calls[0]![3];
+    expect(options).toEqual({ clientRequestId: expect.any(String) });
+    sendMessageMock.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(2));
+    expect(sendMessageMock.mock.calls[1]).toEqual(["conv-new", "派发任务", undefined, options]);
+    expect(screen.getAllByText("派发任务")).toHaveLength(1);
+  });
+
+  it("preserves the restored conversation when loading fails temporarily", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    listMessagesMock.mockRejectedValueOnce(new Error("offline"));
+    const { onExpandFull } = renderPanel();
+    await waitFor(() => expect(screen.getByText("加载失败，请检查 Gateway 服务。")).toBeTruthy());
+    expect(window.localStorage.getItem(ROBOT_CONVERSATION_STORAGE_KEY)).toBe("conv-stored");
+    fireEvent.click(screen.getByRole("button", { name: "展开全屏" }));
+    expect(onExpandFull).toHaveBeenCalledWith("conv-stored");
+  });
+
+  it("keeps an accepted run when the subsequent message refresh fails", async () => {
+    listMessagesMock.mockRejectedValue(new Error("offline"));
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "派发任务" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(screen.getByText("加载失败，请检查 Gateway 服务。")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+    expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers cancellation for a restored awaiting approval run", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    const run = { id: "run-legacy", conversationId: "conv-stored", status: "awaiting_approval", revision: 2 };
+    listRunsMock.mockResolvedValue({ runs: [run], activeRun: run });
+    getRunMock.mockResolvedValue({ run, pendingActions: [] });
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "停止" }));
+    await waitFor(() => expect(cancelRunMock).toHaveBeenCalledWith("run-legacy"));
   });
 
   it("renders the header actions, the empty state, and the floating panel shape", () => {
@@ -188,7 +242,7 @@ describe("RobotChatPanel", () => {
     // Optimistic user bubble appears immediately.
     expect(screen.getByText("帮我看看进度")).toBeTruthy();
     await waitFor(() => expect(createConversationMock).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "帮我看看进度", undefined));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "帮我看看进度", undefined, { clientRequestId: expect.any(String) }));
     expect(window.localStorage.getItem(ROBOT_CONVERSATION_STORAGE_KEY)).toBe("conv-new");
     // The new conversation gets an auto title from the first message.
     await waitFor(() => expect(renameConversationMock).toHaveBeenCalledWith("conv-new", "帮我看看进度"));
@@ -292,7 +346,7 @@ describe("RobotChatPanel", () => {
 
   it("drops a stale persisted conversation id when the server no longer has it", async () => {
     window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-gone");
-    listMessagesMock.mockRejectedValue(new Error("not found"));
+    listMessagesMock.mockRejectedValue(new GatewayApiError("not found", 404));
 
     renderPanel();
 
@@ -366,7 +420,7 @@ describe("RobotChatPanel", () => {
 
     await waitFor(() => expect(createConversationMock).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "我的项目状态如何？", undefined)
+      expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "我的项目状态如何？", undefined, { clientRequestId: expect.any(String) })
     );
     // The empty state is replaced by the conversation.
     expect(screen.queryByRole("button", { name: "列出进行中的会话" })).toBeNull();

@@ -5,12 +5,12 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { LanguageProvider } from "@/hooks/use-language";
 import * as api from "@/lib/copilot-extensions-api";
 import { CopilotSkillsPanel } from "./CopilotSkillsPanel";
-vi.mock("@/lib/copilot-extensions-api", async original => ({ ...await original<typeof import("@/lib/copilot-extensions-api")>(), listCopilotSkills: vi.fn(), getCopilotSkill: vi.fn(), importCopilotSkill: vi.fn(), updateCopilotSkill: vi.fn(), setCopilotSkillEnabled: vi.fn(), listSkillRevisions: vi.fn(), getSkillRevision: vi.fn(), rollbackCopilotSkill: vi.fn() }));
+vi.mock("@/lib/copilot-extensions-api", async original => ({ ...await original<typeof import("@/lib/copilot-extensions-api")>(), listCopilotSkills: vi.fn(), getCopilotSkill: vi.fn(), importCopilotSkill: vi.fn(), updateCopilotSkill: vi.fn(), setCopilotSkillEnabled: vi.fn(), listSkillRevisions: vi.fn(), getSkillRevision: vi.fn(), rollbackCopilotSkill: vi.fn(), adoptBuiltinSkill: vi.fn() }));
 const files = [{ path: "SKILL.md", content: "---\nname: review\n---\nReview" }, { path: "references/check.md", content: "Reference" }];
 const skill: api.CopilotSkillDetail = { id: "s1", name: "Review", description: "Project review", kind: "imported", version: "1.0.0", currentVersion: "1.0.0", revisionId: "r1", source: { kind: "upload", label: "review" }, isEnabled: false, available: false, unavailableReason: "disabled", compatible: true, incompatibilityReasons: [], requiredTools: ["list_projects"], reviewRequired: false, editable: true, updatedAt: "2026-09-18", files, content: "Review" };
 let client: QueryClient;
 function mount() { render(<LanguageProvider><QueryClientProvider client={client}><CopilotSkillsPanel /></QueryClientProvider></LanguageProvider>); }
-beforeEach(() => { cleanup(); vi.resetAllMocks(); client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); vi.mocked(api.listCopilotSkills).mockResolvedValue({ skills: [skill] }); vi.mocked(api.getCopilotSkill).mockResolvedValue({ skill }); });
+beforeEach(() => { cleanup(); vi.resetAllMocks(); client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); vi.mocked(api.listCopilotSkills).mockResolvedValue({ skills: [skill] }); vi.mocked(api.getCopilotSkill).mockResolvedValue({ skill }); });
 it("imports pasted SKILL.md as a separate disabled package", async () => {
   vi.mocked(api.importCopilotSkill).mockResolvedValue({ skill }); mount(); fireEvent.click(screen.getByRole("button", { name: "导入 Skill" }));
   fireEvent.change(screen.getByLabelText("SKILL.md 正文"), { target: { value: files[0]!.content } }); fireEvent.click(screen.getByRole("button", { name: "导入并保留为停用" }));
@@ -30,10 +30,29 @@ it("blocks incompatible enablement and clearly shows dependencies", async () => 
   vi.mocked(api.listCopilotSkills).mockResolvedValue({ skills: [{ ...skill, compatible: false, incompatibilityReasons: ["script_execution_unsupported"] }] }); mount();
   expect(await screen.findByRole("switch", { name: "Review" })).toHaveProperty("disabled", true); expect(screen.getByText(/script_execution_unsupported/)).toBeTruthy(); expect(screen.getByText(/依赖工具: list_projects/)).toBeTruthy();
 });
-it("requires explicit current-version review for preserved builtin copies", async () => {
-  const builtin = { ...skill, kind: "builtin-playbook" as const, currentVersion: "2.0.0", reviewRequired: true }; vi.mocked(api.listCopilotSkills).mockResolvedValue({ skills: [builtin] }); vi.mocked(api.getCopilotSkill).mockResolvedValue({ skill: builtin }); vi.mocked(api.updateCopilotSkill).mockResolvedValue({ skill: builtin }); mount();
-  expect(await screen.findByRole("switch", { name: "Review" })).toHaveProperty("disabled", true); fireEvent.click(screen.getByRole("button", { name: "详情与版本" })); await screen.findByRole("textbox", { name: "SKILL.md" }); fireEvent.click(screen.getByRole("button", { name: "保存完整文件包" }));
+it("ordinary save never acknowledges a builtin update; keeping edits requires explicit review", async () => {
+  const builtin = { ...skill, kind: "builtin-playbook" as const, isEnabled: true, currentVersion: "2.0.0", reviewRequired: true, bundled: { version: "2.0.0", files: [{ path: "SKILL.md", content: "Official new instructions" }] } };
+  vi.mocked(api.listCopilotSkills).mockResolvedValue({ skills: [builtin] }); vi.mocked(api.getCopilotSkill).mockResolvedValue({ skill: builtin }); vi.mocked(api.updateCopilotSkill).mockResolvedValue({ skill: builtin }); mount();
+  expect(await screen.findByText("已开启，但当前不可用")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "详情与版本" }));
+  await screen.findByRole("textbox", { name: "SKILL.md" });
+  expect(screen.getByText("Official new instructions")).toBeTruthy();
+  const keep = screen.getByRole("button", { name: "保留编辑内容并完成核对" });
+  expect(keep).toHaveProperty("disabled", true);
+  fireEvent.click(screen.getByRole("button", { name: "保存完整文件包" }));
+  await waitFor(() => expect(api.updateCopilotSkill).toHaveBeenCalledWith("s1", { expectedRevisionId: "r1", files }));
+  await waitFor(() => expect(screen.getByRole("checkbox")).toHaveProperty("disabled", false));
+  fireEvent.click(screen.getByRole("checkbox", { name: "我已对照新版核对当前编辑内容" }));
+  fireEvent.click(keep);
   await waitFor(() => expect(api.updateCopilotSkill).toHaveBeenCalledWith("s1", { expectedRevisionId: "r1", files, reviewedVersion: "2.0.0" }));
+});
+it("adopts the previewed builtin version through a separate revision-bound action", async () => {
+  const builtin = { ...skill, kind: "builtin-playbook" as const, currentVersion: "2.0.0", reviewRequired: true, bundled: { version: "2.0.0", files: [{ path: "SKILL.md", content: "Official instructions" }] } };
+  vi.mocked(api.listCopilotSkills).mockResolvedValue({ skills: [builtin] }); vi.mocked(api.getCopilotSkill).mockResolvedValue({ skill: builtin }); vi.mocked(api.adoptBuiltinSkill).mockResolvedValue({ skill: builtin }); mount();
+  fireEvent.click(await screen.findByRole("button", { name: "详情与版本" }));
+  fireEvent.click(await screen.findByRole("button", { name: "采用内置新版" }));
+  await waitFor(() => expect(api.adoptBuiltinSkill).toHaveBeenCalledWith("s1", "r1", "2.0.0"));
+  expect(api.updateCopilotSkill).not.toHaveBeenCalled();
 });
 it("previews immutable historical files before revision-bound rollback", async () => {
   const revision = { id: "r0", version: "0.9.0", source: { kind: "upload" as const }, createdAt: "2026-09-17", packageDigest: "digest", fileCount: 2, action: "import" as const };

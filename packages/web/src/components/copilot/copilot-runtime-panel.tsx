@@ -35,11 +35,13 @@ const THINKING_EFFORT_OPTIONS: CopilotThinkingEffort[] = ["off", "low", "medium"
 export function CopilotStatusBar({
   onModelChange,
   controlsDisabled,
+  onSavingChange,
 }: {
   /** When provided, the model label becomes a picker. */
   onModelChange?: (modelId: string | null) => void;
   /** Disables both pickers, e.g. while a run is in flight. */
   controlsDisabled?: boolean;
+  onSavingChange?: (saving: boolean) => void;
 }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -65,10 +67,17 @@ export function CopilotStatusBar({
 
   const preferencesMutation = useMutation({
     mutationFn: updateCopilotPreferences,
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      queryClient.setQueryData(copilotPreferencesQueryKey, saved);
+      onModelChange?.(saved.modelId);
       void queryClient.invalidateQueries({ queryKey: copilotPreferencesQueryKey });
     },
   });
+
+  useEffect(() => {
+    if (preferencesReady) onModelChange?.(storedModelId);
+  }, [preferencesReady, storedModelId, onModelChange]);
+  useEffect(() => { onSavingChange?.(preferencesMutation.isPending); }, [preferencesMutation.isPending, onSavingChange]);
 
   // Self-heal a stored selection whose profile was deleted or disabled:
   // clear the parent's mirror and write modelId: null to the server. The ref
@@ -91,19 +100,18 @@ export function CopilotStatusBar({
 
   return (
     <div
-      className="flex items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground"
+      className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-1.5 text-xs text-muted-foreground"
       data-testid="copilot-status-bar"
     >
-      <span className="shrink-0">{t("copilot.currentModel")}</span>
+      <span className="sr-only shrink-0 sm:not-sr-only">{t("copilot.currentModel")}</span>
       {onModelChange ? (
         <select
           aria-label={t("copilot.currentModel")}
-          className="max-w-64 truncate rounded border border-border bg-background px-1 py-0.5 text-xs text-foreground"
+          className="min-w-0 max-w-64 flex-1 truncate rounded border border-border bg-background px-1 py-0.5 text-xs text-foreground sm:flex-none"
           value={storedModelId ?? ""}
-          disabled={!preferencesReady || controlsDisabled}
+          disabled={!preferencesReady || preferencesMutation.isPending || controlsDisabled}
           onChange={(event) => {
             const next = event.target.value || null;
-            onModelChange(next);
             void preferencesMutation.mutate({ modelId: next });
           }}
         >
@@ -120,12 +128,12 @@ export function CopilotStatusBar({
       ) : (
         <span className="truncate">{modelLabel}</span>
       )}
-      <span className="shrink-0">{t("copilot.thinkingEffort")}</span>
+      <span className="sr-only shrink-0 sm:not-sr-only">{t("copilot.thinkingEffort")}</span>
       <select
         aria-label={t("copilot.thinkingEffort")}
         className="rounded border border-border bg-background px-1 py-0.5 text-xs text-foreground"
         value={preferences.data?.thinkingEffort ?? "off"}
-        disabled={!preferencesReady || controlsDisabled}
+        disabled={!preferencesReady || preferencesMutation.isPending || controlsDisabled}
         onChange={(event) => {
           void preferencesMutation.mutate({ thinkingEffort: event.target.value as CopilotThinkingEffort });
         }}
@@ -136,7 +144,9 @@ export function CopilotStatusBar({
           </option>
         ))}
       </select>
-      <Badge variant="secondary" className="ml-auto gap-1.5 whitespace-nowrap">
+      {preferencesMutation.isError && <p role="alert" className="text-destructive">{t("copilot.preferencesFailed")}</p>}
+      {preferences.isError && <p role="alert" className="text-destructive">{t("copilot.loadError")}</p>}
+      <Badge variant="secondary" className="ml-auto hidden gap-1.5 whitespace-nowrap sm:inline-flex">
         <span className="size-1.5 rounded-full bg-emerald-500" />
         {t("copilot.nativeRuntime")}
       </Badge>

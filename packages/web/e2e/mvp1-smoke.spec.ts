@@ -5,6 +5,11 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { fillRecoveryKey } from "./register-user";
 
+const gatewayUrl =
+  process.env.NEXT_PUBLIC_GATEWAY_URL ??
+  process.env.FORGEBADGER_GATEWAY_URL ??
+  "http://127.0.0.1:48731";
+
 test("MVP-1 management console smoke", async ({ page }) => {
   const suffix = uniqueSuffix();
   const email = `mvp1-${suffix}@example.com`;
@@ -13,9 +18,11 @@ test("MVP-1 management console smoke", async ({ page }) => {
   const projectPath = `/tmp/forgebadger-mvp1-${suffix}`;
   const templateName = `MVP1 Template ${suffix}`;
 
-  await page.addInitScript(() => {
+  // The dev runtime script defaults to port 48731, so pin this page to the test Gateway.
+  await page.addInitScript((url) => {
     window.localStorage.setItem("forgebadger-language", "en");
-  });
+    window.__FORGEBADGER_RUNTIME__ = { gatewayBaseUrl: url };
+  }, gatewayUrl);
 
   await page.goto("/register");
   await page.fill('input[name="email"]', email);
@@ -104,7 +111,6 @@ async function bindProjectTemplate(page: Page, templateId: string): Promise<void
   expect(token).toBeTruthy();
   expect(projectId).toBeTruthy();
 
-  const gatewayUrl = process.env.FORGEBADGER_GATEWAY_URL ?? "http://127.0.0.1:48731";
   const response = await page.request.patch(`${gatewayUrl}/api/v1/projects/${projectId}`, {
     headers: { Authorization: `Bearer ${token}` },
     data: { templateId },

@@ -339,4 +339,61 @@ describe("durable conversation restoration", () => {
     expect(result.current.active?.pendingAction?.inputDigest).toBe("digest");
   });
 
+  it("does not replace a pending submission with the previous completed run during polling", async () => {
+    vi.useFakeTimers();
+    const blocked = deferred<{ runId: string }>();
+    const old = { ...runningRun, status: "completed" };
+    listRunsMock.mockResolvedValue({ runs: [old], activeRun: null });
+    getRunMock.mockResolvedValue({ run: old, pendingActions: [] });
+    sendMessageMock.mockReturnValueOnce(blocked.promise);
+    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1" }));
+    await act(async () => {});
+    let request!: Promise<string>;
+    act(() => { request = result.current.startRun("conv-1", "new question"); });
+    await act(async () => { vi.advanceTimersByTime(5000); });
+    expect(result.current.active?.status).toBe("pending");
+    getRunMock.mockResolvedValue({ run: { ...runningRun, id: "run-2" }, pendingActions: [] });
+    await act(async () => { blocked.resolve({ runId: "run-2" }); await request; });
+    expect(result.current.active?.runId).toBe("run-2");
+    vi.useRealTimers();
+  });
+
+  it("refreshes durable messages for a late task report without reviving a settled run", async () => {
+    const onSettled = vi.fn().mockResolvedValue(undefined);
+    getRunMock.mockResolvedValue({ run: { ...runningRun, status: "completed", revision: 3 }, pendingActions: [] });
+    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1", onSettled }));
+    await act(async () => {});
+    expect(result.current.active).toBeNull();
+    const previousCalls = onSettled.mock.calls.length;
+    dispatchRunUpdated({ run_id: "run-1", conversation_id: "conv-1", status: "completed", revision: 3, message: "CLI task completed" });
+    await act(async () => {});
+    expect(onSettled.mock.calls.length).toBeGreaterThan(previousCalls);
+    expect(result.current.active).toBeNull();
+  });
+
+  it("refreshes messages during reconciliation even if a late report event was lost", async () => {
+    const onSettled = vi.fn().mockResolvedValue(undefined);
+    getRunMock.mockResolvedValue({ run: { ...runningRun, status: "completed" }, pendingActions: [] });
+    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1", onSettled }));
+    await act(async () => {});
+    const previousCalls = onSettled.mock.calls.length;
+    await act(async () => { await result.current.reconcile(); });
+    expect(onSettled.mock.calls.length).toBeGreaterThan(previousCalls);
+  });
+
+  it("deduplicates ordered stream frames across reconnects and ignores superseded fences", async () => {
+    const { result,unmount }=renderHook(()=>useCopilotRun());
+    await act(async()=>{await result.current.startRun('conv-1','hello');});
+    const frame=(fence:number,sequence:number,text:string)=>({run_id:'run-1',conversation_id:'conv-1',text_step_id:'model-step',text_fence:fence,text_sequence:sequence,text_delta:text});
+    dispatchRunUpdated(frame(1,1,'first '));dispatchRunUpdated(frame(1,3,'third'));dispatchRunUpdated(frame(1,2,'second '));
+    dispatchRunUpdated(frame(1,1,'first '));expect(result.current.active?.text).toBe('first second third');
+    await act(async()=>{window.dispatchEvent(new Event(FORGEBADGER_GATEWAY_CONNECTED));});
+    dispatchRunUpdated(frame(1,3,'third'));expect(result.current.active?.text).toBe('first second third');
+    dispatchRunUpdated(frame(2,1,'replacement'));dispatchRunUpdated(frame(1,4,'stale'));
+    expect(result.current.active?.text).toBe('replacement');
+    dispatchRunUpdated({...frame(3,1,' next'),text_step_id:'new-step'});
+    dispatchRunUpdated({...frame(2,1,' stale'),text_step_id:'unknown-old-step'});
+    expect(result.current.active?.text).toBe('replacement next');unmount();
+  });
+
 });

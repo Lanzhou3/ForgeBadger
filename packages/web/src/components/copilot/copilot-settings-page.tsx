@@ -13,10 +13,14 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { SettingsCardHeader } from "@/components/settings/ui";
 import { CopilotMemoryPanel } from "./copilot-memory-panel";
 import { CopilotAutonomyPanel } from "./copilot-autonomy-panel";
-import { modelProvidersQueryKey } from "./copilot-runtime-panel";
+import { copilotPreferencesQueryKey, modelProvidersQueryKey } from "./copilot-runtime-panel";
+import { getCopilotPreferences } from "@/lib/copilot-api";
 import { CopilotSettingsShell } from "./copilot-settings-shell";
+import { useAutomationsCopy } from "./automations-copy";
 import { useExtensionsCopy } from "./extensions-copy";
 import { useSettingsCopy } from "./settings-copy";
 import { useLanguage } from "@/hooks/use-language";
@@ -33,6 +37,7 @@ export function CopilotSettingsPage() {
   const { t } = useLanguage();
   const copy = useSettingsCopy();
   const extensions = useExtensionsCopy();
+  const automations = useAutomationsCopy();
   const providers = useQuery({
     queryKey: modelProvidersQueryKey,
     queryFn: listModelProviders,
@@ -45,10 +50,12 @@ export function CopilotSettingsPage() {
     retry: false,
   });
   const models = (providers.data?.models ?? []).filter((model) => model.status !== "disabled");
-  const selected = models.find((model) => model.isDefault) ?? models[0];
-  const modelLabel = providers.isPending
+  const preferences = useQuery({ queryKey: copilotPreferencesQueryKey, queryFn: getCopilotPreferences, retry: false });
+  const selected = models.find((model) => model.id === preferences.data?.modelId)
+    ?? models.find((model) => model.isDefault) ?? models[0];
+  const modelLabel = providers.isPending || preferences.isPending
     ? extensions.loading
-    : providers.isError
+    : providers.isError || preferences.isError
       ? extensions.loadError
       : selected
         ? `${selected.providerName} / ${selected.name}`
@@ -85,8 +92,8 @@ export function CopilotSettingsPage() {
     {
       href: "/copilot/automations",
       icon: CalendarClock,
-      title: t("copilot.automationsTitle"),
-      description: t("copilot.automationsDescription"),
+      title: automations.title,
+      description: automations.description,
       delay: 360,
     },
   ];
@@ -97,30 +104,31 @@ export function CopilotSettingsPage() {
       title={t("copilot.settings")}
       description={t("copilot.settingsDescription")}
     >
-      <div className="space-y-5">
-        <section
-          className="forgebadger-animate-in space-y-3 rounded-lg border border-border bg-card p-4"
-          style={{ animationDelay: "120ms" }}
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <Cpu className="size-4 text-brand" />
-            <h2 className="text-sm font-semibold">{t("copilot.runtimeTitle")}</h2>
-            <Badge variant="secondary" className="ml-auto gap-1.5">
-              <span className="size-1.5 rounded-full bg-emerald-500" />
-              {t("copilot.nativeRuntime")}
-            </Badge>
-          </div>
-          <p className="text-xs text-muted-foreground">{t("copilot.runtimeDescription")}</p>
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2.5">
-            <p className="min-w-0 truncate text-xs">
-              <span className="text-muted-foreground">{t("copilot.currentModel")}: </span>
-              {modelLabel}
-            </p>
-            <Button asChild variant="outline" size="sm" className="shrink-0">
-              <Link href="/models">{copy.manageModels}</Link>
-            </Button>
-          </div>
-        </section>
+      <div className="space-y-4">
+        <Card className="forgebadger-animate-in" style={{ animationDelay: "120ms" }}>
+          <SettingsCardHeader
+            icon={<Cpu className="size-4" />}
+            title={t("copilot.runtimeTitle")}
+            description={t("copilot.runtimeDescription")}
+            action={
+              <Badge variant="secondary" className="gap-1.5">
+                <span className="size-1.5 rounded-full bg-emerald-500" />
+                {t("copilot.nativeRuntime")}
+              </Badge>
+            }
+          />
+          <CardContent>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2.5">
+              <p className="min-w-0 truncate text-xs">
+                <span className="text-muted-foreground">{t("copilot.currentModel")}: </span>
+                {modelLabel}
+              </p>
+              <Button asChild variant="outline" size="sm" className="shrink-0">
+                <Link href="/models">{copy.manageModels}</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
         <CopilotAutonomyPanel />
         <div className="grid gap-3 sm:grid-cols-2">
           {entries.map((entry) => {

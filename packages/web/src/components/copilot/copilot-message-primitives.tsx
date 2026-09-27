@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { AlertTriangle, Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, Loader2, Pencil, Wrench } from "lucide-react";
+import { AlertTriangle, Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Pencil, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,13 +59,15 @@ export function MessageRow({
   if (suppressRender) return null;
 
   if (message.kind === "tool_call") {
-    const status = pairedResult ? deriveToolStatus(pairedResult.content) : "running";
+    // A missing durable result does not prove that a tool is still running.
+    // Live execution state is shown by the run indicator, not inferred here.
+    const status = pairedResult ? deriveToolStatus(pairedResult.content) : "unknown";
     return (
       <details className="rounded-md border border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
         <summary className="flex cursor-pointer items-center gap-1.5 font-medium">
           <ToolStatusIcon status={status} />
           <Wrench className="size-3" />
-          <span>{t("copilot.toolCall")}{message.toolName ? `：${message.toolName}` : ""}</span>
+          <span className="min-w-0 break-all">{t("copilot.toolCall")}{message.toolName ? `：${message.toolName}` : ""}</span>
         </summary>
         {message.toolInputJson && (
           <pre className="mt-2 max-h-40 overflow-auto rounded bg-background p-2 text-[11px]">{message.toolInputJson}</pre>
@@ -79,7 +81,7 @@ export function MessageRow({
   if (message.kind === "tool_result") {
     return (
       <details className="max-w-[85%] rounded-md bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
-        <summary className="cursor-pointer font-medium">
+        <summary className="cursor-pointer break-all font-medium">
           {t("copilot.toolResult")} — {truncateContent(message.content)}
         </summary>
         <pre className="mt-2 max-h-40 overflow-auto rounded bg-background p-2 text-[11px]">{message.content}</pre>
@@ -87,7 +89,7 @@ export function MessageRow({
     );
   }
   if (message.kind === "error") {
-    return <div className="text-sm text-destructive">{message.content}</div>;
+    return <div className="break-words text-sm text-destructive">{message.content}</div>;
   }
 
   if (isUser && isEditing) {
@@ -127,7 +129,7 @@ export function MessageRow({
     return (
       <div className="group flex justify-end">
         <div className="relative max-w-[85%]">
-          <div className="whitespace-pre-wrap rounded-lg bg-brand px-3 py-1.5 text-sm text-brand-foreground">
+          <div className="whitespace-pre-wrap rounded-lg bg-brand px-3 py-1.5 text-sm text-brand-foreground [overflow-wrap:anywhere]">
             {message.content}
           </div>
           {canEdit && (
@@ -232,7 +234,7 @@ function truncateContent(content: string): string {
   return content.length > max ? `${content.slice(0, max)}…` : content;
 }
 
-type ToolStatus = "running" | "ok" | "error" | "denied";
+type ToolStatus = "unknown" | "ok" | "error" | "denied";
 
 function deriveToolStatus(resultContent: string): ToolStatus {
   // The orchestrator prefixes tool_result content so the UI can detect the
@@ -244,8 +246,8 @@ function deriveToolStatus(resultContent: string): ToolStatus {
 }
 
 function ToolStatusIcon({ status }: { status: ToolStatus }) {
-  if (status === "running") {
-    return <Loader2 className="size-3 animate-spin text-muted-foreground" aria-label="running" />;
+  if (status === "unknown") {
+    return <CircleHelp className="size-3 shrink-0 text-muted-foreground" aria-label="unknown" />;
   }
   if (status === "ok") {
     return <CheckCircle2 className="size-3 text-emerald-600 dark:text-emerald-400" aria-label="ok" />;

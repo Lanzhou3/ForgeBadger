@@ -1,8 +1,8 @@
 import { fetchJson } from './api';
 export interface ChannelPairing {id:string;accountId:string;accountRevision:number;status:string;revision:number;externalUserId:string|null;chatId:string|null;expiresAt:number}
 export interface ChannelIdentity {id:string;accountId:string;accountRevision:number;externalUserId:string;chatId:string;status:string}
-export interface ChannelRoute {id:string;identityId:string;projectId:string;conversationId:string;status:string}
-export interface ChannelDelivery {id:string;inboxId:string;phase:string;status:string;createdAt:number;receiptRecorded:boolean}
+export interface ChannelRoute {id:string;identityId:string;projectId:string;conversationId:string;status:string;authorityValid?:boolean}
+export interface ChannelDelivery {id:string;accountId:string;channel:'feishu'|'telegram';inboxId:string;phase:string;status:string;createdAt:number;receiptRecorded:boolean}
 const base='/api/v1/copilot/channels';
 const post=<T>(path:string,body:unknown={})=>fetchJson<T>(base+path,{method:'POST',body:JSON.stringify(body)});
 export async function getChannelRecords() {

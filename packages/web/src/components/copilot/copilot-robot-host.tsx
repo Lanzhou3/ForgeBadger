@@ -39,6 +39,10 @@ export function CopilotRobotHost() {
     [router]
   );
 
+  // The full workspace already provides chat and navigation. A second chat
+  // launcher here can cover the composer or settings actions.
+  if (pathname === "/copilot" || pathname?.startsWith("/copilot/")) return null;
+
   return (
     <div data-floating-copilot data-pet={petId}>
       {petId === "robot" && <RobotWidget
