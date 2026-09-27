@@ -74,12 +74,9 @@ import {
   applyConfigSync,
   previewConfig,
   previewConfigSync,
-  previewSkillSource,
   previewGitHubSkillSource,
-  installGitHubSkill,
   checkSkillUpdate,
   checkAllSkillUpdates,
-  updateRemoteSkill,
   refreshMarketplace,
   parseSkillRemoteProvenance,
   rotateApiKey,
@@ -688,12 +685,10 @@ describe("api client", () => {
     );
   });
 
-  it("installs and manages GitHub-backed remote Skills", async () => {
+  it("previews a GitHub Skill source and checks for updates", async () => {
     await previewGitHubSkillSource({ repo: "anthropics/skills", ref: "main" });
-    await installGitHubSkill({ repo: "anthropics/skills", path: "skills/pdf/SKILL.md" });
     await checkSkillUpdate("skill-1");
     await checkAllSkillUpdates();
-    await updateRemoteSkill("skill-1");
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -705,25 +700,12 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/skills/install/github",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ repo: "anthropics/skills", path: "skills/pdf/SKILL.md" }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      3,
       "http://127.0.0.1:48731/api/v1/skills/skill-1/check-update",
       expect.objectContaining({ method: "POST" })
     );
     expect(fetch).toHaveBeenNthCalledWith(
-      4,
+      3,
       "http://127.0.0.1:48731/api/v1/skills/check-updates",
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      5,
-      "http://127.0.0.1:48731/api/v1/skills/skill-1/update",
       expect.objectContaining({ method: "POST" })
     );
   });
@@ -1157,10 +1139,6 @@ describe("api client", () => {
       sourceId: "github",
       name: "review-workflow",
     });
-    await previewSkillSource({
-      sourceId: "github",
-      url: "https://raw.githubusercontent.com/acme/review/main/SKILL.md",
-    });
     await updateSkill("skill-1", { description: "Updated", visibility: "admin" });
     await listProjectSkills("project-1");
     await setProjectSkill("project-1", "skill-1", true);
@@ -1206,17 +1184,6 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       6,
-      "http://127.0.0.1:48731/api/v1/skills/install/preview",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          sourceId: "github",
-          url: "https://raw.githubusercontent.com/acme/review/main/SKILL.md",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      7,
       "http://127.0.0.1:48731/api/v1/skills/skill-1",
       expect.objectContaining({
         method: "PUT",
@@ -1224,7 +1191,7 @@ describe("api client", () => {
       })
     );
     expect(fetch).toHaveBeenNthCalledWith(
-      8,
+      7,
       "http://127.0.0.1:48731/api/v1/projects/project-1/skills",
       expect.objectContaining({
         headers: expect.objectContaining({
@@ -1233,7 +1200,7 @@ describe("api client", () => {
       })
     );
     expect(fetch).toHaveBeenNthCalledWith(
-      9,
+      8,
       "http://127.0.0.1:48731/api/v1/projects/project-1/skills/skill-1",
       expect.objectContaining({
         method: "POST",
@@ -1241,7 +1208,7 @@ describe("api client", () => {
       })
     );
     expect(fetch).toHaveBeenNthCalledWith(
-      10,
+      9,
       "http://127.0.0.1:48731/api/v1/skills/skill-1",
       expect.objectContaining({ method: "DELETE" })
     );

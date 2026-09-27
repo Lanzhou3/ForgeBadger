@@ -31,7 +31,6 @@ vi.mock("@/lib/api", async (importOriginal) => ({
   createSkill: vi.fn(), deleteSkill: vi.fn(), syncLocalSkills: vi.fn(), toggleSkill: vi.fn(), updateSkill: vi.fn(),
   checkSkillUpdate: vi.fn().mockResolvedValue({ updateAvailable: false, currentSha: "abc1234def", latestSha: "abc1234def" }),
   checkAllSkillUpdates: vi.fn().mockResolvedValue({ results: [] }),
-  updateRemoteSkill: vi.fn().mockResolvedValue({ skill: { id: "remote" } }),
 }));
 afterEach(cleanup);
 it("distinguishes resource packages from Markdown-only entries and shows skipped package reasons", async () => {

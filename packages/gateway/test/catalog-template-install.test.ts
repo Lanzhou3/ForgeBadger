@@ -200,7 +200,7 @@ describe("catalog template install", () => {
     assert.equal(body.code, 1);
   });
 
-  it("installs a Skill package from a tenant-owned catalog item", async () => {
+  it("requires reviewed preview for a Skill catalog install", async () => {
     const auth = await register("catalog-skill-install@example.com");
     const item = new CatalogRepository(db, auth.userId).replaceItems("clawhub", [
       {
@@ -227,11 +227,8 @@ describe("catalog template install", () => {
     });
     const body = (await installRes.json()) as CatalogInstallBody;
 
-    assert.equal(installRes.status, 201, JSON.stringify(body));
-    assert.equal(body.data?.skill?.name, "review-skill");
-    assert.equal(body.data?.skill?.source, "catalog:clawhub");
-    assert.equal(body.data?.skill?.isEnabled, false);
-    assert.equal(body.data?.catalogItem.externalId, "review-skill");
+    assert.equal(installRes.status, 409, JSON.stringify(body));
+    assert.match(body.message ?? '', /Preview and review/);
   });
 
 

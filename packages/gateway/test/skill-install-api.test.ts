@@ -75,7 +75,7 @@ describe("Skill source installation API", () => {
       method: "POST",
       headers: jsonHeaders(ownerToken),
       body: JSON.stringify({
-        sourceId: "github",
+        sourceId: "local",
         name: "review-workflow",
         content: "# Review Workflow\n"
       })
@@ -85,7 +85,7 @@ describe("Skill source installation API", () => {
     assert.equal(installRes.status, 201, JSON.stringify(installBody));
     assert.ok(installBody.data);
     assert.equal(installBody.data.skill.name, "review-workflow");
-    assert.equal(installBody.data.skill.source, "github");
+    assert.equal(installBody.data.skill.source, "local");
     assert.equal(installBody.data.skill.isEnabled, false);
 
     const otherRead = await fetch(`${baseUrl}/api/v1/skills/${installBody.data.skill.id}`, {

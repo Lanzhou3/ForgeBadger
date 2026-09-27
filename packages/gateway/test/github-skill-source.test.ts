@@ -146,7 +146,8 @@ describe("listSkillFiles", () => {
   function treeFetcher() {
     return recordingFetcher((url) => {
       if (url.startsWith("https://api.github.com/repos/octo/hello/git/trees/")) {
-        return jsonResponse(tree);
+        const directory = decodeURIComponent(new URL(url).pathname.split('/trees/')[1]!).split(':')[1];
+        return jsonResponse(directory ? {...tree,tree:tree.tree.filter(item=>item.path.startsWith(`${directory}/`)).map(item=>({...item,path:item.path.slice(directory.length+1)}))} : tree);
       }
       return jsonResponse({}, 404);
     });
@@ -198,16 +199,16 @@ describe("listSkillFiles", () => {
     const { fetcher } = recordingFetcher(() => jsonResponse({ tree: [], truncated: true }));
     await assert.rejects(
       () => listSkillFiles({ owner: "octo", repo: "hello", sha: "sha1", fetcher, resolveHost: allowTestResolver() }),
-      /1000-entry limit/
+      /10000-entry limit/
     );
   });
 
-  it("rejects trees over 1000 entries", async () => {
-    const entries = Array.from({ length: 1001 }, (_, index) => ({ path: `f${index}.txt`, type: "blob" }));
+  it("rejects trees over 10000 entries", async () => {
+    const entries = Array.from({ length: 10001 }, (_, index) => ({ path: `f${index}.txt`, type: "blob" }));
     const { fetcher } = recordingFetcher(() => jsonResponse({ tree: entries, truncated: false }));
     await assert.rejects(
       () => listSkillFiles({ owner: "octo", repo: "hello", sha: "sha1", fetcher, resolveHost: allowTestResolver() }),
-      /1000-entry limit/
+      /10000-entry limit/
     );
   });
 

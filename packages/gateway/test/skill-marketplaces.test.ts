@@ -1,3 +1,4 @@
+import { skillFixture } from "./fixtures/skill-registry.js";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import Database from "better-sqlite3";
@@ -195,221 +196,64 @@ describe("parseMarketplaceManifest skills expansion", () => {
   });
 });
 
-describe("refreshGitHubMarketplace", () => {
-  it("stores marketplace plugins as catalog items with marketplace metadata", async () => {
-    const db = createTestDb();
-    const user = new UserRepository(db).create("marketplace@example.com", "hash");
-    const { fetcher } = recordingFetcher((url) => {
-      if (url === "https://api.github.com/repos/octo/hello") {
-        return jsonResponse({ default_branch: "main" });
-      }
-      if (url === "https://api.github.com/repos/octo/hello/commits/main") {
-        return jsonResponse({ sha: "commitsha1" });
-      }
-      if (url.startsWith("https://raw.githubusercontent.com/octo/hello/commitsha1/")) {
-        return textResponse(JSON.stringify(marketplaceManifest));
-      }
-      return jsonResponse({}, 404);
-    });
-
-    const result = await refreshGitHubMarketplace({
-      db,
-      userId: user.id,
-      repo: "octo/hello",
-      fetcher,
-      resolveHost: allowTestResolver()
-    });
-
-    assert.equal(result.marketplaceName, "demo-marketplace");
-    assert.equal(result.sha, "commitsha1");
-    assert.equal(result.source.type, "skill");
-    assert.equal(result.source.sourceId, "demo-marketplace");
-    assert.equal(result.items.length, 3);
-    assert.equal(result.skipped.length, 3);
-
-    const pdfItem = result.items.find((item) => item.externalId === "pdf");
-    assert.ok(pdfItem);
-    const pdfMetadata = JSON.parse(pdfItem.metadata ?? "{}") as {
-      marketplace?: { repo?: string; sha?: string; pluginName?: string; skillPath?: string };
-      skillPackage?: unknown;
-    };
-    assert.equal(pdfMetadata.marketplace?.repo, "octo/hello");
-    assert.equal(pdfMetadata.marketplace?.sha, "commitsha1");
-    assert.equal(pdfMetadata.marketplace?.pluginName, "pdf");
-    assert.equal(pdfMetadata.marketplace?.skillPath, "plugins/pdf");
-    assert.equal(pdfMetadata.skillPackage, undefined, "marketplace items must not embed content");
-
-    const externalItem = result.items.find((item) => item.externalId === "external");
-    const externalMetadata = JSON.parse(externalItem?.metadata ?? "{}") as {
-      marketplace?: { repo?: string; sha?: string; ref?: string };
-    };
-    assert.equal(externalMetadata.marketplace?.repo, "other/tool");
-    assert.equal(externalMetadata.marketplace?.ref, "main");
-    assert.equal(externalMetadata.marketplace?.sha, undefined, "external repos stay unpinned until refresh fetches them");
-
-    db.close();
+describe('refreshGitHubMarketplace',()=>{
+  it('indexes actual nested Skills instead of advertising bare plugin directories',async()=>{
+    const f=skillFixture();
+    try {
+      f.files['.claude-plugin/marketplace.json']=JSON.stringify({name:'same-name',owner:{name:'octo'},plugins:[{name:'tools',source:'./plugins/tools'},{name:'empty',source:'./plugins/empty'}]});
+      f.files['plugins/tools/skills/helper/SKILL.md']='---\nname: helper\ndescription: Helps\n---\nHelper';
+      const result=await refreshGitHubMarketplace({db:f.db,userId:f.owner.id,repo:'octo/demo',...f.options});
+      assert.equal(result.source.sourceId,'github:octo/demo');assert.equal(result.marketplaceName,'same-name');
+      assert.deepEqual(result.items.map(item=>item.name).sort(),['helper','review']);
+      const helper=result.items.find(item=>item.name==='helper')!;
+      assert.equal(JSON.parse(helper.metadata!).marketplace.skillPath,'plugins/tools/skills/helper/SKILL.md');
+      assert.equal(JSON.parse(helper.metadata!).marketplace.sha,'1'.repeat(40));
+      assert.equal(new CatalogRepository(f.db,f.other.id).listItems().length,0);
+    } finally {f.db.close();}
   });
-
-  it("falls back to plain SKILL.md discovery when the repo has no marketplace.json", async () => {
-    const db = createTestDb();
-    const user = new UserRepository(db).create("marketplace-fallback@example.com", "hash");
-    const tree = {
-      tree: [
-        { path: "SKILL.md", type: "blob" },
-        { path: "skills/pdf/SKILL.md", type: "blob" },
-        { path: "readme.md", type: "blob" }
-      ],
-      truncated: false
-    };
-    const { fetcher } = recordingFetcher((url) => {
-      if (url === "https://api.github.com/repos/octo/plain") {
-        return jsonResponse({ default_branch: "main" });
-      }
-      if (url === "https://api.github.com/repos/octo/plain/commits/main") {
-        return jsonResponse({ sha: "plainsha1" });
-      }
-      if (url.startsWith("https://api.github.com/repos/octo/plain/git/trees/")) {
-        return jsonResponse(tree);
-      }
-      if (url.startsWith("https://raw.githubusercontent.com/octo/plain/plainsha1/")) {
-        return jsonResponse({}, 404);
-      }
-      return jsonResponse({}, 404);
-    });
-
-    const result = await refreshGitHubMarketplace({
-      db,
-      userId: user.id,
-      repo: "octo/plain",
-      fetcher,
-      resolveHost: allowTestResolver()
-    });
-
-    assert.equal(result.marketplaceName, undefined);
-    assert.equal(result.source.sourceId, "octo/plain");
-    assert.deepEqual(
-      result.items.map((item) => item.externalId).sort(),
-      ["SKILL.md", "skills/pdf/SKILL.md"]
-    );
-    const item = result.items.find((entry) => entry.externalId === "skills/pdf/SKILL.md");
-    const metadata = JSON.parse(item?.metadata ?? "{}") as { marketplace?: { skillPath?: string; sha?: string } };
-    assert.equal(metadata.marketplace?.skillPath, "skills/pdf");
-    assert.equal(metadata.marketplace?.sha, "plainsha1");
-
-    const listed = new CatalogRepository(db, user.id).listItems();
-    assert.equal(listed.length, 2);
-    db.close();
+  it('refreshes standalone Skill repositories and preserves the snapshot on malformed metadata',async()=>{
+    const f=skillFixture();
+    try {
+      const input={db:f.db,userId:f.owner.id,repo:'octo/demo',...f.options};
+      const result=await refreshGitHubMarketplace(input);assert.equal(result.items.length,1);
+      assert.equal(result.items[0]?.name,'review');
+      f.files['skills/review/SKILL.md']='not a skill';
+      const partial=await refreshGitHubMarketplace(input);assert.equal(partial.skipped.length,1);assert.equal(JSON.parse(partial.items[0]!.metadata!).stale,true);
+      assert.equal(new CatalogRepository(f.db,f.owner.id).listItems()[0]?.name,'review');
+    } finally {f.db.close();}
   });
-
-  it("surfaces refresh errors instead of writing partial catalog state", async () => {
-    const db = createTestDb();
-    const user = new UserRepository(db).create("marketplace-error@example.com", "hash");
-    const { fetcher } = recordingFetcher((url) => {
-      if (url === "https://api.github.com/repos/octo/missing") {
-        return jsonResponse({}, 404);
-      }
-      return jsonResponse({}, 404);
-    });
-
-    await assert.rejects(
-      () =>
-        refreshGitHubMarketplace({
-          db,
-          userId: user.id,
-          repo: "octo/missing",
-          fetcher,
-          resolveHost: allowTestResolver()
-        }),
-      /not found \(404\)/
-    );
-    assert.equal(new CatalogRepository(db, user.id).listSources().length, 0);
-    db.close();
+  it('checks active ownership again after remote requests',async()=>{
+    const f=skillFixture();
+    try {
+      const fetcher=f.options.fetcher!;
+      await assert.rejects(refreshGitHubMarketplace({db:f.db,userId:f.owner.id,repo:'octo/demo',...f.options,fetcher:async(...args)=>{const response=await fetcher(...args);f.users.update(f.owner.id,{status:'disabled'});return response;}}),/inactive/);
+      assert.equal(new CatalogRepository(f.db,f.owner.id).listItems().length,0);
+    } finally {f.db.close();}
   });
-
-  it("rejects repos with subpaths or refs", async () => {
-    const db = createTestDb();
-    const user = new UserRepository(db).create("marketplace-shape@example.com", "hash");
-    const { fetcher } = recordingFetcher(() => jsonResponse({}, 404));
-    await assert.rejects(
-      () =>
-        refreshGitHubMarketplace({
-          db,
-          userId: user.id,
-          repo: "octo/hello/subdir",
-          fetcher,
-          resolveHost: allowTestResolver()
-        }),
-      /owner\/repo/
-    );
-    db.close();
-  });
-
-  it("stores anthropics/skills-style expanded entries with per-skill metadata", async () => {
-    const db = createTestDb();
-    const user = new UserRepository(db).create("skills-style@example.com", "hash");
-    const manifest = {
-      name: "anthropic-agent-skills",
-      owner: { name: "anthropics" },
-      plugins: [
-        {
-          name: "example-skills",
-          source: "./",
-          skills: ["./skills/pdf", "./skills/docx"]
-        },
-        { name: "solo-plugin", source: "./" }
-      ]
-    };
-    const { fetcher } = recordingFetcher((url) => {
-      if (url === "https://api.github.com/repos/anthropics/skills") {
-        return jsonResponse({ default_branch: "main" });
-      }
-      if (url === "https://api.github.com/repos/anthropics/skills/commits/main") {
-        return jsonResponse({ sha: "skillsha1" });
-      }
-      if (url.startsWith("https://raw.githubusercontent.com/anthropics/skills/skillsha1/")) {
-        return textResponse(JSON.stringify(manifest));
-      }
-      return jsonResponse({}, 404);
-    });
-
-    const result = await refreshGitHubMarketplace({
-      db,
-      userId: user.id,
-      repo: "anthropics/skills",
-      fetcher,
-      resolveHost: allowTestResolver()
-    });
-
-    assert.equal(result.marketplaceName, "anthropic-agent-skills");
-    assert.equal(result.skipped.length, 0);
-    assert.equal(result.items.length, 3);
-
-    const pdfItem = result.items.find((item) => item.externalId === "skills/pdf");
-    assert.ok(pdfItem);
-    assert.equal(pdfItem.name, "pdf");
-    const pdfMetadata = JSON.parse(pdfItem.metadata ?? "{}") as {
-      marketplace?: { repo?: string; sha?: string; pluginName?: string; skillPath?: string };
-    };
-    assert.equal(pdfMetadata.marketplace?.repo, "anthropics/skills");
-    assert.equal(pdfMetadata.marketplace?.sha, "skillsha1");
-    assert.equal(pdfMetadata.marketplace?.pluginName, "example-skills");
-    assert.equal(pdfMetadata.marketplace?.skillPath, "skills/pdf");
-
-    const soloItem = result.items.find((item) => item.externalId === "solo-plugin");
-    assert.ok(soloItem);
-    const soloMetadata = JSON.parse(soloItem.metadata ?? "{}") as { marketplace?: { skillPath?: string } };
-    assert.equal(soloMetadata.marketplace?.skillPath, undefined, "root-source skills pin no skillPath");
-
-    db.close();
+  it('rejects repositories with implicit subpaths',async()=>{
+    const f=skillFixture();try {await assert.rejects(refreshGitHubMarketplace({db:f.db,userId:f.owner.id,repo:'octo/demo/skills',...f.options}),/owner\/repo/);}finally{f.db.close();}
   });
 });
+describe('MARKETPLACE_SEEDS',()=>{it('uses Skill-oriented repositories',()=>assert.deepEqual([...MARKETPLACE_SEEDS],['anthropics/skills','vercel-labs/agent-skills','openai/skills']));});
 
-describe("MARKETPLACE_SEEDS", () => {
-  it("lists the curated seed marketplaces", () => {
-    assert.deepEqual([...MARKETPLACE_SEEDS], [
-      "anthropics/claude-plugins-official",
-      "anthropics/skills",
-      "anthropics/claude-plugins-community"
-    ]);
-  });
+it('retains external plugin Skills if ref or tree discovery becomes unavailable',async()=>{
+  const f=skillFixture();let unavailable=false;
+  f.files['.claude-plugin/marketplace.json']=JSON.stringify({name:'market',owner:{name:'octo'},plugins:[{name:'external',source:{source:'github',repo:'other/plugin'}}]});
+  const fetcher:NonNullable<typeof f.options.fetcher>=async(url,init)=>{
+    if(url.includes('/other/plugin')) {
+      if(unavailable)return new Response('Limited',{status:429});
+      if(url.includes('/git/trees/'))return Response.json({tree:[{path:'SKILL.md',type:'blob'}],truncated:false});
+      if(url.includes('/commits/'))return new Response('b'.repeat(40));
+      if(url.startsWith('https://raw.'))return new Response('---\nname: external\ndescription: External skill\n---\nExternal');
+      return Response.json({default_branch:'main'});
+    }
+    return f.options.fetcher!(url,init);
+  };
+  try {
+    const input={db:f.db,userId:f.owner.id,repo:'octo/demo',...f.options,fetcher};
+    assert.equal((await refreshGitHubMarketplace(input)).items.length,2);
+    unavailable=true;const partial=await refreshGitHubMarketplace(input);
+    assert.deepEqual(partial.items.map(item=>item.name).sort(),['external','review']);
+    assert.equal(JSON.parse(partial.items.find(item=>item.name==='external')!.metadata!).stale,true);
+  } finally {f.db.close();}
 });

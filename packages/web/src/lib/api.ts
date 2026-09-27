@@ -424,6 +424,7 @@ export interface UpdateTelegramIntegrationConfigInput {
 }
 
 export interface ChannelDiagnosticCheck {
+  status?: 'passed' | 'failed' | 'untested' | 'pending';
   key: "credentials" | "connection" | "identity" | "route" | "model" | "delivery";
   ok: boolean;
   detail: string;
@@ -523,6 +524,10 @@ export interface SkillRemoteProvenanceLastCheck {
 }
 
 export interface SkillRemoteProvenance {
+  storage?: "database";
+  legacyGlobalMirror?: boolean;
+  sourceUrl?: string;
+  packageHash?: string;
   kind: "github" | "marketplace" | string;
   repo: string;
   ref: string;
@@ -963,6 +968,34 @@ export interface AdapterDiscovery {
 
 export type RuntimeAdapterId = AdapterDiscovery["id"];
 
+export interface AdapterUpdateStatus {
+  id: RuntimeAdapterId;
+  state: "missing" | "check_failed" | "up_to_date" | "update_available";
+  installedVersion?: string;
+  latestVersion?: string;
+  latestSource?: "npm" | "homebrew";
+  command: string;
+  installCommand: string;
+  installRequiresNode?: string;
+  error?: string;
+}
+
+export interface AdapterInstallResult {
+  id: RuntimeAdapterId;
+  command: string;
+  installedVersion?: string;
+  commandAvailable: boolean;
+}
+
+export interface AdapterUpdateResult {
+  id: RuntimeAdapterId;
+  previousVersion: string;
+  installedVersion: string;
+  latestVersion: string;
+  command: string;
+  versionStillBehind: boolean;
+}
+
 export type CredentialMode = "host_environment" | "stored_encrypted_key";
 
 export interface SkillInput {
@@ -994,38 +1027,10 @@ export interface SkillInstallInput {
   enable?: boolean;
 }
 
-export interface RemoteSkillPreview {
-  name: string;
-  description?: string;
-  version: string;
-  content: string;
-  sizeBytes: number;
-  provenance: {
-    sourceId: string;
-    url: string;
-    kind: "manifest" | "raw-skill";
-    skillId?: string;
-    fetchedAt: string;
-  };
-}
-
-export interface SkillSourcePreviewInput {
-  sourceId: string;
-  url: string;
-  skillId?: string;
-  timeoutMs?: number;
-}
-
 export interface GitHubSkillSourcePreviewInput {
   /** "owner/repo" or "owner/repo/sub/path" shorthand. */
   repo: string;
   ref?: string;
-}
-
-export interface GitHubSkillInstallInput {
-  repo: string;
-  ref?: string;
-  path: string;
 }
 
 export interface GitHubSkillPreviewEntry {
@@ -1754,6 +1759,18 @@ export async function discoverAdapters(): Promise<{ adapters: AdapterDiscovery[]
   return fetchJson("/api/v1/adapters/discovery") as Promise<{ adapters: AdapterDiscovery[] }>;
 }
 
+export async function checkAdapterUpdates(refresh = false): Promise<{ updates: AdapterUpdateStatus[]; canUpdate: boolean; canInstall: boolean }> {
+  return fetchJson(`/api/v1/adapters/updates${refresh ? "?refresh=true" : ""}`) as Promise<{ updates: AdapterUpdateStatus[]; canUpdate: boolean; canInstall: boolean }>;
+}
+
+export async function updateAdapter(id: RuntimeAdapterId): Promise<AdapterUpdateResult> {
+  return fetchJson(`/api/v1/adapters/${id}/update`, { method: "POST", timeoutMs: 200_000 }) as Promise<AdapterUpdateResult>;
+}
+
+export async function installAdapter(id: RuntimeAdapterId): Promise<AdapterInstallResult> {
+  return fetchJson(`/api/v1/adapters/${id}/install`, { method: "POST", timeoutMs: 330_000 }) as Promise<AdapterInstallResult>;
+}
+
 export async function createGateASession(cwd: string): Promise<GateASession> {
   const { session } = await fetchJson<{ session: GateASession }>("/api/v1/gate-a/sessions", {
     method: "POST",
@@ -2117,12 +2134,15 @@ export interface McpStatus {
   endpoint: string;
 }
 
-export type McpTokenScope = "read" | "operate";
+export type McpTokenScope = "read" | "operate" | "cli_dispatch";
 
 export interface McpToken {
   id: string;
   name: string;
   scopes: McpTokenScope[];
+  allowedRoot: string | null;
+  projectIds: string[] | null;
+  expiresAt: string | null;
   createdAt: string;
   lastUsedAt: string | null;
   revoked: boolean;
@@ -2142,6 +2162,9 @@ export async function listMcpTokens(): Promise<{ tokens: McpToken[] }> {
 export async function createMcpToken(input: {
   name: string;
   scopes: McpTokenScope[];
+  allowedRoot?: string;
+  projectIds?: string[];
+  expiresInHours?: number | null;
 }): Promise<{ token: McpToken; plaintext: string }> {
   return fetchJson<{ token: McpToken; plaintext: string }>("/api/v1/mcp/tokens", {
     method: "POST",
@@ -2814,7 +2837,7 @@ export async function startSession(id: string): Promise<unknown> {
   return fetchJson(`/api/v1/sessions/${id}/start`, { method: "POST" });
 }
 
-export async function stopSession(id: string): Promise<unknown> {
+export async function stopSession(id: string): Promise<{ session: { warning?: string; terminalStopped?: boolean; stopScope?: string; externalExecutionStopped?: null } }> {
   return fetchJson(`/api/v1/sessions/${id}/stop`, { method: "POST" });
 }
 
@@ -2906,15 +2929,6 @@ export async function installSkill(data: SkillInstallInput): Promise<{ skill: Sk
   }) as Promise<{ skill: Skill; source: SkillSource }>;
 }
 
-export async function previewSkillSource(
-  data: SkillSourcePreviewInput
-): Promise<{ preview: RemoteSkillPreview }> {
-  return fetchJson("/api/v1/skills/install/preview", {
-    method: "POST",
-    body: JSON.stringify(data),
-  }) as Promise<{ preview: RemoteSkillPreview }>;
-}
-
 export async function updateSkill(id: string, data: SkillUpdateInput): Promise<{ skill: Skill }> {
   return fetchJson(`/api/v1/skills/${id}`, {
     method: "PUT",
@@ -2942,15 +2956,6 @@ export async function previewGitHubSkillSource(
   }) as Promise<GitHubSkillSourcePreview>;
 }
 
-export async function installGitHubSkill(
-  data: GitHubSkillInstallInput
-): Promise<{ skill: Skill }> {
-  return fetchJson("/api/v1/skills/install/github", {
-    method: "POST",
-    body: JSON.stringify(data),
-  }) as Promise<{ skill: Skill }>;
-}
-
 export async function checkSkillUpdate(id: string): Promise<SkillUpdateCheckResult> {
   return fetchJson(`/api/v1/skills/${encodeURIComponent(id)}/check-update`, {
     method: "POST",
@@ -2961,12 +2966,6 @@ export async function checkAllSkillUpdates(): Promise<SkillUpdateCheckSummary> {
   return fetchJson("/api/v1/skills/check-updates", {
     method: "POST",
   }) as Promise<SkillUpdateCheckSummary>;
-}
-
-export async function updateRemoteSkill(id: string): Promise<{ skill: Skill }> {
-  return fetchJson(`/api/v1/skills/${encodeURIComponent(id)}/update`, {
-    method: "POST",
-  }) as Promise<{ skill: Skill }>;
 }
 
 export async function listProjectSkills(projectId: string): Promise<{ skills: ProjectSkill[] }> {

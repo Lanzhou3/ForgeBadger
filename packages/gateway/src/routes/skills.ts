@@ -9,7 +9,6 @@ import {
   buildSkillInstallContent,
   getSkillSource,
   listSkillSources,
-  previewRemoteSkillSource,
   validateSkillName
 } from "../services/skill-sources.js";
 import {
@@ -18,14 +17,8 @@ import {
   resolveGitHubRef,
   type GitHubRequestOptions
 } from "../services/github-skill-source.js";
-import {
-  checkRemoteSkillUpdate,
-  installRemoteSkill,
-  SkillInstallConflictError,
-  SkillNotRemoteError,
-  updateRemoteSkill
-} from "../services/skill-remote-install.js";
-import { removeManagedSkill } from "../services/skill-fs-install.js";
+import { createSkillRegistryRoutes } from './skill-registry.js';
+import { skillInstallService } from '../services/skill-install-service.js';
 import { listSkillTemplates } from "../services/skill-templates.js";
 import { syncLocalSkills } from "../services/local-skills.js";
 import { seedBuiltinSkills } from "../services/builtin-skills.js";
@@ -60,30 +53,20 @@ const installSkillSchema = z.object({
   enable: z.boolean().optional()
 });
 
-const previewSkillInstallSchema = z.object({
-  sourceId: z.string().min(1),
-  url: z.string().url(),
-  skillId: z.string().optional(),
-  timeoutMs: z.number().int().positive().optional()
-});
-
 const githubPreviewSchema = z.object({
   repo: z.string().min(1),
   ref: z.string().optional(),
   timeoutMs: z.number().int().min(100).max(30000).optional()
 });
 
-const githubInstallSchema = z.object({
-  repo: z.string().min(1),
-  ref: z.string().optional(),
-  path: z.string().min(1),
-  enable: z.boolean().optional(),
-  timeoutMs: z.number().int().min(100).max(30000).optional()
-});
-
 export function createSkillRoutes(db: Database, remoteOptions: GitHubRequestOptions = {}): Router {
   const router = Router();
   router.use(authenticate);
+  router.use(createSkillRegistryRoutes(db, remoteOptions));
+  const installer = skillInstallService(db, remoteOptions);
+  const previewRequired = (_req: unknown, res: import('express').Response) => {
+    res.status(409).json({ code: 1, message: 'Preview and review the package before installing', details: { reason: 'PREVIEW_REQUIRED', endpoint: '/api/v1/skills/registry/preview' } });
+  };
 
   router.get("/skills", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
@@ -142,26 +125,7 @@ export function createSkillRoutes(db: Database, remoteOptions: GitHubRequestOpti
     });
   });
 
-  router.post("/skills/install/preview", async (req, res) => {
-    const parseResult = previewSkillInstallSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({ code: 1, message: "Invalid input" });
-      return;
-    }
-    try {
-      const preview = await previewRemoteSkillSource(parseResult.data);
-      res.json({
-        code: 0,
-        data: { preview },
-        message: ""
-      });
-    } catch (error) {
-      res.status(400).json({
-        code: 1,
-        message: error instanceof Error ? error.message : "Remote Skill preview failed"
-      });
-    }
-  });
+  router.post("/skills/install/preview", previewRequired);
 
   router.post("/skills/install", async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
@@ -178,25 +142,8 @@ export function createSkillRoutes(db: Database, remoteOptions: GitHubRequestOpti
     try {
       validateSkillName(parseResult.data.name);
       const repo = new SkillRepository(db, userId);
-      if (parseResult.data.url) {
-        const preview = await previewRemoteSkillSource({
-          sourceId: source.id,
-          url: parseResult.data.url,
-          skillId: parseResult.data.skillId
-        });
-        const skill = repo.create({
-          name: parseResult.data.name || preview.name,
-          description: parseResult.data.description ?? preview.description,
-          source: `${source.id}:${preview.provenance.kind}`,
-          content: preview.content,
-          version: parseResult.data.version ?? preview.version,
-          isEnabled: parseResult.data.enable ?? false
-        });
-        res.status(201).json({
-          code: 0,
-          data: { skill, source, preview },
-          message: ""
-        });
+      if (parseResult.data.url || source.id !== 'local') {
+        previewRequired(req, res);
         return;
       }
 
@@ -261,47 +208,7 @@ export function createSkillRoutes(db: Database, remoteOptions: GitHubRequestOpti
     }
   });
 
-  router.post("/skills/install/github", async (req, res) => {
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const parseResult = githubInstallSchema.safeParse(req.body ?? {});
-    if (!parseResult.success) {
-      res.status(400).json({ code: 1, message: "Invalid input" });
-      return;
-    }
-    try {
-      const locator = parseGitHubSkillLocator(parseResult.data.repo);
-      const result = await installRemoteSkill({
-        db,
-        userId,
-        repo: `${locator.owner}/${locator.repo}`,
-        path: parseResult.data.path,
-        ...(parseResult.data.ref ? { ref: parseResult.data.ref } : {}),
-        ...(parseResult.data.enable !== undefined ? { enable: parseResult.data.enable } : {}),
-        ...(parseResult.data.timeoutMs !== undefined ? { timeoutMs: parseResult.data.timeoutMs } : {}),
-        ...remoteOptions,
-        kind: "github",
-        source: `github:${locator.owner}/${locator.repo}`
-      });
-      res.status(201).json({
-        code: 0,
-        data: {
-          skill: result.skill,
-          provenance: result.provenance,
-          installedToAgentsHome: result.installedToAgentsHome
-        },
-        message: ""
-      });
-    } catch (error) {
-      if (error instanceof SkillInstallConflictError) {
-        res.status(409).json({ code: 1, message: error.message });
-        return;
-      }
-      res.status(400).json({
-        code: 1,
-        message: error instanceof Error ? error.message : "GitHub Skill install failed"
-      });
-    }
-  });
+  router.post("/skills/install/github", previewRequired);
 
   router.post("/skills/check-updates", async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
@@ -310,7 +217,7 @@ export function createSkillRoutes(db: Database, remoteOptions: GitHubRequestOpti
     const results = [];
     for (const skill of remoteSkills) {
       try {
-        results.push(await checkRemoteSkillUpdate({ db, userId, skill, ...remoteOptions }));
+        results.push(await installer.checkUpdate(userId, skill.id));
       } catch (error) {
         results.push({
           skillId: skill.id,
@@ -334,23 +241,19 @@ export function createSkillRoutes(db: Database, remoteOptions: GitHubRequestOpti
   router.post("/skills/:id/check-update", async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const repo = new SkillRepository(db, userId);
-    const skill = repo.getById(req.params.id);
+    const skill = repo.getOwnedById(req.params.id);
     if (!skill) {
       res.status(404).json({ code: 1, message: "Skill not found" });
       return;
     }
     try {
-      const check = await checkRemoteSkillUpdate({ db, userId, skill, ...remoteOptions });
+      const check = await installer.checkUpdate(userId, skill.id);
       res.json({
         code: 0,
         data: check,
         message: ""
       });
     } catch (error) {
-      if (error instanceof SkillNotRemoteError) {
-        res.status(400).json({ code: 1, message: error.message });
-        return;
-      }
       res.status(400).json({
         code: 1,
         message: error instanceof Error ? error.message : "Update check failed"
@@ -358,32 +261,7 @@ export function createSkillRoutes(db: Database, remoteOptions: GitHubRequestOpti
     }
   });
 
-  router.post("/skills/:id/update", async (req, res) => {
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    const repo = new SkillRepository(db, userId);
-    const skill = repo.getById(req.params.id);
-    if (!skill) {
-      res.status(404).json({ code: 1, message: "Skill not found" });
-      return;
-    }
-    try {
-      const result = await updateRemoteSkill({ db, userId, skill, ...remoteOptions });
-      res.json({
-        code: 0,
-        data: { skill: result.skill, provenance: result.provenance },
-        message: ""
-      });
-    } catch (error) {
-      if (error instanceof SkillNotRemoteError) {
-        res.status(400).json({ code: 1, message: error.message });
-        return;
-      }
-      res.status(400).json({
-        code: 1,
-        message: error instanceof Error ? error.message : "Skill update failed"
-      });
-    }
-  });
+  router.post("/skills/:id/update", previewRequired);
 
   router.get("/skills/:id", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
@@ -423,20 +301,12 @@ export function createSkillRoutes(db: Database, remoteOptions: GitHubRequestOpti
   router.delete("/skills/:id", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const repo = new SkillRepository(db, userId);
-    const skill = repo.getById(req.params.id);
+    const skill = repo.getOwnedById(req.params.id);
     if (!skill) {
       res.status(404).json({ code: 1, message: "Skill not found" });
       return;
     }
     repo.delete(req.params.id);
-    if (skill.remoteProvenance) {
-      try {
-        removeManagedSkill(skill.name);
-      } catch {
-        // Best-effort cleanup of the managed AGENTS_HOME mirror; the DB row
-        // (already deleted) remains authoritative.
-      }
-    }
     res.json({
       code: 0,
       data: {},
@@ -447,7 +317,7 @@ export function createSkillRoutes(db: Database, remoteOptions: GitHubRequestOpti
   router.post("/skills/:id/toggle", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const repo = new SkillRepository(db, userId);
-    const skill = repo.getById(req.params.id);
+    const skill = repo.getOwnedById(req.params.id);
     if (!skill) {
       res.status(404).json({ code: 1, message: "Skill not found" });
       return;

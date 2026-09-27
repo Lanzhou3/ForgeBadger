@@ -1,5 +1,5 @@
 import { readSkillResourceManifest } from "./skill-resources.js";
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -188,6 +188,8 @@ function findSkillFiles(root: string, limit: number): string[] {
 
 function walk(current: string, depth: number, files: string[], limit: number, visitedDirs: Set<string>, approvedRoot: string): void {
   if (files.length >= limit || depth > maxSkillDepth) return;
+  // Legacy remote mirrors have no tenant ownership. Never re-import them as local assets.
+  if (existsSync(path.join(current, ".forgebadger-managed.json"))) return;
   const realCurrent = safeRealpath(current);
   if (!realCurrent || visitedDirs.has(realCurrent) || !insideRoot(realCurrent, approvedRoot)) return;
   visitedDirs.add(realCurrent);

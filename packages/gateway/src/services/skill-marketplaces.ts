@@ -1,10 +1,11 @@
 import { z } from "zod";
+import { UserRepository } from "../db/repositories/user-repository.js";
 
 import {
   CatalogRepository,
   type CatalogItem,
   type CatalogSource,
-  type CreateCatalogItemInput
+  type CreateCatalogItemInput,
 } from "../db/repositories/catalog-repository.js";
 import type { Database } from "../db/types.js";
 import {
@@ -12,7 +13,8 @@ import {
   listSkillFiles,
   parseGitHubSkillLocator,
   resolveGitHubRef,
-  type GitHubRequestOptions
+  parseSkillMarkdownFrontmatter,
+  type GitHubRequestOptions,
 } from "./github-skill-source.js";
 
 /**
@@ -29,27 +31,31 @@ import {
  */
 
 export const MARKETPLACE_SEEDS = [
-  "anthropics/claude-plugins-official",
   "anthropics/skills",
-  "anthropics/claude-plugins-community"
+  "vercel-labs/agent-skills",
+  "openai/skills",
 ] as const;
 
 const marketplaceJsonPath = ".claude-plugin/marketplace.json";
 
-const marketplaceSchema = z.object({
-  name: z.string().min(1),
-  owner: z.object({ name: z.string().min(1) }).passthrough(),
-  plugins: z
-    .array(
-      z.object({
-        name: z.string().min(1),
-        source: z.unknown(),
-        description: z.string().optional(),
-        version: z.string().optional()
-      }).passthrough()
-    )
-    .default([])
-}).passthrough();
+const marketplaceSchema = z
+  .object({
+    name: z.string().min(1),
+    owner: z.object({ name: z.string().min(1) }).passthrough(),
+    plugins: z
+      .array(
+        z
+          .object({
+            name: z.string().min(1),
+            source: z.unknown(),
+            description: z.string().optional(),
+            version: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .default([]),
+  })
+  .passthrough();
 
 export interface MarketplacePluginOrigin {
   /** GitHub repo that hosts the plugin content. */
@@ -98,7 +104,10 @@ export interface RefreshGitHubMarketplaceResult {
   marketplaceName?: string | undefined;
 }
 
-export function parseMarketplaceManifest(json: unknown, hostRepo: string): ParseMarketplaceResult {
+export function parseMarketplaceManifest(
+  json: unknown,
+  hostRepo: string,
+): ParseMarketplaceResult {
   const manifest = marketplaceSchema.parse(json);
   const plugins: NormalizedMarketplacePlugin[] = [];
   const skipped: SkippedMarketplacePlugin[] = [];
@@ -112,12 +121,15 @@ export function parseMarketplaceManifest(json: unknown, hostRepo: string): Parse
     for (const entry of expanded.entries) {
       const normalized = normalizePluginSource(entry.source, hostRepo);
       if ("reason" in normalized) {
-        skipped.push({ name: entry.pluginName ?? entry.name, reason: normalized.reason });
+        skipped.push({
+          name: entry.pluginName ?? entry.name,
+          reason: normalized.reason,
+        });
         continue;
       }
       const item: NormalizedMarketplacePlugin = {
         name: entry.name,
-        origin: normalized.origin
+        origin: normalized.origin,
       };
       if (entry.description) item.description = entry.description;
       if (plugin.version) item.version = plugin.version;
@@ -146,10 +158,18 @@ type ExpandedPluginResult = { entries: PluginEntrySpec[] } | { reason: string };
  * `skills: ["./skills/pdf", ...]`). Anything else stays a single entry.
  */
 function expandPluginEntries(
-  plugin: { name: string; source?: unknown; description?: string | undefined; version?: string | undefined } & Record<string, unknown>
+  plugin: {
+    name: string;
+    source?: unknown;
+    description?: string | undefined;
+    version?: string | undefined;
+  } & Record<string, unknown>,
 ): ExpandedPluginResult {
   const { name, source, description } = plugin;
-  if (typeof source !== "string" || (source.trim() !== "" && source.trim() !== "." && !source.startsWith("./"))) {
+  if (
+    typeof source !== "string" ||
+    (source.trim() !== "" && source.trim() !== "." && !source.startsWith("./"))
+  ) {
     return { entries: [{ name, source, description }] };
   }
   const skillsRaw = plugin.skills;
@@ -172,7 +192,7 @@ function expandPluginEntries(
       source: `./${fullPath}`,
       description,
       pluginName: name,
-      externalId: fullPath
+      externalId: fullPath,
     });
   }
   if (entries.length === 0) {
@@ -181,9 +201,14 @@ function expandPluginEntries(
   return { entries };
 }
 
-type NormalizeSourceResult = { origin: MarketplacePluginOrigin } | { reason: string };
+type NormalizeSourceResult =
+  | { origin: MarketplacePluginOrigin }
+  | { reason: string };
 
-function normalizePluginSource(source: unknown, hostRepo: string): NormalizeSourceResult {
+function normalizePluginSource(
+  source: unknown,
+  hostRepo: string,
+): NormalizeSourceResult {
   if (typeof source === "string") {
     const dir = normalizeRelativeDir(source);
     if (dir === "") {
@@ -204,8 +229,10 @@ function normalizePluginSource(source: unknown, hostRepo: string): NormalizeSour
   }
   const record = source as Record<string, unknown>;
   const kind = record.source;
-  const ref = typeof record.ref === "string" && record.ref ? record.ref : undefined;
-  const sha = typeof record.sha === "string" && record.sha ? record.sha : undefined;
+  const ref =
+    typeof record.ref === "string" && record.ref ? record.ref : undefined;
+  const sha =
+    typeof record.sha === "string" && record.sha ? record.sha : undefined;
 
   if (kind === "github") {
     if (typeof record.repo !== "string" || !isSafeRepo(record.repo)) {
@@ -214,19 +241,27 @@ function normalizePluginSource(source: unknown, hostRepo: string): NormalizeSour
     const origin: MarketplacePluginOrigin = { repo: record.repo.toLowerCase() };
     if (ref) origin.ref = ref;
     if (sha) origin.sha = sha;
-    if (typeof record.path === "string" && isSafeRelativePath(record.path)) origin.path = record.path;
+    if (typeof record.path === "string" && isSafeRelativePath(record.path))
+      origin.path = record.path;
     return { origin };
   }
 
   if (kind === "git-subdir") {
-    if (typeof record.url !== "string" || typeof record.path !== "string" || !isSafeRelativePath(record.path)) {
+    if (
+      typeof record.url !== "string" ||
+      typeof record.path !== "string" ||
+      !isSafeRelativePath(record.path)
+    ) {
       return { reason: "invalid git-subdir source" };
     }
     const locator = parseGitHubUrlOnly(record.url);
     if (!locator) {
       return { reason: "git-subdir source is not a github.com URL" };
     }
-    const origin: MarketplacePluginOrigin = { repo: `${locator.owner}/${locator.repo}`, path: record.path };
+    const origin: MarketplacePluginOrigin = {
+      repo: `${locator.owner}/${locator.repo}`,
+      path: record.path,
+    };
     if (ref) origin.ref = ref;
     if (sha) origin.sha = sha;
     return { origin };
@@ -235,11 +270,14 @@ function normalizePluginSource(source: unknown, hostRepo: string): NormalizeSour
   if (kind === "npm" || kind === "archive" || kind === "command") {
     return { reason: `${kind} sources are not supported for Skill install` };
   }
-  return { reason: `unsupported source kind ${typeof kind === "string" ? `"${kind}"` : ""}`.trim() };
+  return {
+    reason:
+      `unsupported source kind ${typeof kind === "string" ? `"${kind}"` : ""}`.trim(),
+  };
 }
 
 export async function refreshGitHubMarketplace(
-  input: RefreshGitHubMarketplaceInput
+  input: RefreshGitHubMarketplaceInput,
 ): Promise<RefreshGitHubMarketplaceResult> {
   const locator = parseGitHubSkillLocator(input.repo);
   if (locator.subpath || locator.ref) {
@@ -247,116 +285,236 @@ export async function refreshGitHubMarketplace(
   }
   const { db, userId, repo: _repo, label, ...requestOptions } = input;
   const hostRepo = `${locator.owner}/${locator.repo}`;
-  const resolved = await resolveGitHubRef({ owner: locator.owner, repo: locator.repo, ...requestOptions });
+  const resolved = await resolveGitHubRef({
+    owner: locator.owner,
+    repo: locator.repo,
+    ...requestOptions,
+  });
   const sha = resolved.sha;
 
+  const sourceId = `github:${hostRepo.toLowerCase()}`;
   const catalogRepo = new CatalogRepository(db, userId);
-  const upsertInput = {
-    sourceId: "",
-    type: "skill" as const,
-    label: label?.trim() || hostRepo,
-    url: `https://github.com/${hostRepo}`,
-    lastRefreshedAt: new Date()
-  };
-
-  let marketplaceFile: { content: string } | undefined;
+  let manifest: ParseMarketplaceResult | undefined;
   try {
-    marketplaceFile = await fetchSkillFile({
+    const file = await fetchSkillFile({
       owner: locator.owner,
       repo: locator.repo,
       sha,
       path: marketplaceJsonPath,
-      ...requestOptions
+      ...requestOptions,
     });
+    manifest = parseMarketplaceManifest(JSON.parse(file.content), hostRepo);
   } catch (error) {
-    if (error instanceof Error && error.message.includes("(404)")) {
-      marketplaceFile = undefined;
-    } else {
+    if (!(error instanceof Error && error.message.includes("(404)")))
       throw error;
+  }
+  const skipped = manifest?.skipped ?? [];
+  const locations = new Map<
+    string,
+    {
+      repo: string;
+      sha: string;
+      ref: string;
+      path: string;
+      pluginName?: string;
+    }
+  >();
+  const hostFiles = await listSkillFiles({
+    owner: locator.owner,
+    repo: locator.repo,
+    sha,
+    ...requestOptions,
+  });
+  for (const file of hostFiles.files)
+    locations.set(`${hostRepo}/${file.path}`, {
+      repo: hostRepo,
+      sha,
+      ref: resolved.ref,
+      path: file.path,
+    });
+  const external = new Map<string, NormalizedMarketplacePlugin>();
+  for (const plugin of manifest?.plugins ?? []) {
+    if (plugin.origin.repo === hostRepo) continue;
+    external.set(
+      `${plugin.origin.repo}@${plugin.origin.sha ?? plugin.origin.ref ?? ""}:${plugin.origin.path ?? ""}`,
+      plugin,
+    );
+  }
+  const failedOrigins: Array<{
+    origin: MarketplacePluginOrigin;
+    reason: string;
+  }> = [];
+  let processed = 0;
+  for (const plugin of external.values()) {
+    if (++processed > 8) {
+      const reason =
+        "External repository budget reached; add its repository directly";
+      skipped.push({ name: plugin.name, reason });
+      failedOrigins.push({ origin: plugin.origin, reason });
+      continue;
+    }
+    try {
+      const remote = parseGitHubSkillLocator(plugin.origin.repo);
+      const version = plugin.origin.sha
+        ? {
+            sha: plugin.origin.sha,
+            ref: plugin.origin.ref ?? plugin.origin.sha,
+          }
+        : await resolveGitHubRef({
+            ...remote,
+            ...(plugin.origin.ref ? { ref: plugin.origin.ref } : {}),
+            ...requestOptions,
+          });
+      const found = await listSkillFiles({
+        ...remote,
+        sha: version.sha,
+        ...(plugin.origin.path ? { subpath: plugin.origin.path } : {}),
+        ...requestOptions,
+      });
+      if (!found.files.length)
+        skipped.push({
+          name: plugin.name,
+          reason: "Plugin contains no discoverable Skill",
+        });
+      for (const file of found.files)
+        locations.set(`${plugin.origin.repo}/${file.path}`, {
+          repo: plugin.origin.repo,
+          sha: version.sha,
+          ref: version.ref,
+          path: file.path,
+          pluginName: plugin.name,
+        });
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : "Discovery failed";
+      skipped.push({ name: plugin.name, reason });
+      failedOrigins.push({ origin: plugin.origin, reason });
     }
   }
-
-  if (marketplaceFile) {
-    let manifestJson: unknown;
-    try {
-      manifestJson = JSON.parse(marketplaceFile.content);
-    } catch {
-      throw new Error("Marketplace manifest is not valid JSON");
-    }
-    const manifest = parseMarketplaceManifest(manifestJson, hostRepo);
-    upsertInput.sourceId = manifest.marketplaceName;
-    const source = catalogRepo.upsertSource(upsertInput);
-    const items = catalogRepo.replaceItems(
-      manifest.marketplaceName,
-      manifest.plugins.map((plugin) => marketplacePluginToItem(manifest.marketplaceName, plugin, hostRepo, sha))
+  const entries = [...locations.values()];
+  if (entries.length > 256)
+    throw new Error("Source exceeds 256 Skills; add a smaller repository");
+  const previousItems = new Map(
+    catalogRepo
+      .listItems()
+      .filter((item) => item.sourceId === sourceId && item.itemType === "skill")
+      .map((item) => [item.externalId, item]),
+  );
+  const items: CreateCatalogItemInput[] = [];
+  for (let start = 0; start < entries.length; start += 4) {
+    await Promise.all(
+      entries.slice(start, start + 4).map(async (location) => {
+        try {
+          const [owner, repo] = location.repo.split("/");
+          const file = await fetchSkillFile({
+            owner: owner!,
+            repo: repo!,
+            sha: location.sha,
+            path: location.path,
+            ...requestOptions,
+          });
+          const metadata = parseSkillMarkdownFrontmatter(file.content);
+          if (!metadata.name || !metadata.description)
+            throw new Error("SKILL.md requires name and description");
+          items.push({
+            sourceId,
+            itemType: "skill",
+            externalId: `${location.repo}/${location.path}`,
+            name: metadata.name,
+            description: metadata.description,
+            version: metadata.version,
+            metadata: {
+              marketplace: {
+                repo: location.repo,
+                sha: location.sha,
+                ref: location.ref,
+                skillPath: location.path,
+                pluginName: location.pluginName,
+              },
+              canonicalId: `github:${location.repo}/${location.path}`,
+            },
+          });
+        } catch (error) {
+          const reason =
+            error instanceof Error ? error.message : "Metadata unavailable";
+          skipped.push({ name: location.path, reason });
+          const previous = previousItems.get(
+            `${location.repo}/${location.path}`,
+          );
+          if (previous)
+            items.push({
+              sourceId,
+              itemType: "skill",
+              externalId: previous.externalId,
+              name: previous.name,
+              description: previous.description ?? undefined,
+              version: previous.version ?? undefined,
+              metadata: {
+                ...JSON.parse(previous.metadata ?? "{}"),
+                stale: true,
+                lastError: reason,
+              },
+            });
+        }
+      }),
+    );
+  }
+  if (!items.length && skipped.length)
+    throw new Error(
+      "No valid Skills could be read; existing catalog is preserved",
+    );
+  for (const previous of previousItems.values()) {
+    const metadata = JSON.parse(previous.metadata ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    const origin = metadata.marketplace as
+      | { repo?: string; skillPath?: string }
+      | undefined;
+    const failure = failedOrigins.find(
+      (failed) =>
+        origin?.repo === failed.origin.repo &&
+        (!failed.origin.path ||
+          origin.skillPath?.startsWith(`${failed.origin.path}/`)),
+    );
+    if (
+      failure &&
+      !items.some((item) => item.externalId === previous.externalId)
+    )
+      items.push({
+        sourceId,
+        itemType: "skill",
+        externalId: previous.externalId,
+        name: previous.name,
+        description: previous.description ?? undefined,
+        version: previous.version ?? undefined,
+        metadata: { ...metadata, stale: true, lastError: failure.reason },
+      });
+  }
+  // Publish source metadata and items together; a failed refresh preserves the old snapshot.
+  return db.transaction(() => {
+    if (new UserRepository(db).findById(userId)?.status !== "active")
+      throw new Error("Source owner is inactive");
+    const source = catalogRepo.upsertSource({
+      sourceId,
+      type: "skill",
+      label: label?.trim() || hostRepo,
+      url: `https://github.com/${hostRepo}`,
+      lastRefreshedAt: new Date(),
+    });
+    const saved = catalogRepo.replaceItems(
+      sourceId,
+      items.sort((a, b) => a.externalId.localeCompare(b.externalId)),
+      "skill",
     );
     return {
       source,
-      items,
-      skipped: manifest.skipped,
+      items: saved,
+      skipped,
       sha,
-      marketplaceName: manifest.marketplaceName
+      ...(manifest ? { marketplaceName: manifest.marketplaceName } : {}),
     };
-  }
-
-  // No marketplace manifest: fall back to plain Skill repository discovery so
-  // first-party repos (e.g. anthropics/skills) are still browsable.
-  const discovered = await listSkillFiles({ owner: locator.owner, repo: locator.repo, sha, ...requestOptions });
-  upsertInput.sourceId = hostRepo;
-  const source = catalogRepo.upsertSource(upsertInput);
-  const items = catalogRepo.replaceItems(
-    hostRepo,
-    discovered.files.map((file) => ({
-      sourceId: hostRepo,
-      itemType: "skill" as const,
-      externalId: file.path,
-      name: file.name,
-      metadata: {
-        marketplace: {
-          repo: hostRepo,
-          sha,
-          pluginName: file.name,
-          skillPath: skillDirFromFilePath(file.path)
-        }
-      }
-    }))
-  );
-  return { source, items, skipped: [], sha };
-}
-
-function marketplacePluginToItem(
-  marketplaceName: string,
-  plugin: NormalizedMarketplacePlugin,
-  hostRepo: string,
-  hostSha: string
-): CreateCatalogItemInput {
-  const origin = plugin.origin;
-  const sha = origin.sha ?? (origin.repo === hostRepo ? hostSha : undefined);
-  const metadata: Record<string, unknown> = {
-    marketplace: {
-      repo: origin.repo,
-      pluginName: plugin.pluginName ?? plugin.name,
-      ...(origin.path !== undefined ? { skillPath: origin.path } : {}),
-      ...(origin.ref !== undefined ? { ref: origin.ref } : {}),
-      ...(sha !== undefined ? { sha } : {})
-    }
-  };
-  const item: CreateCatalogItemInput = {
-    sourceId: marketplaceName,
-    itemType: "skill",
-    externalId: plugin.externalId ?? plugin.name,
-    name: plugin.name,
-    metadata
-  };
-  if (plugin.description) item.description = plugin.description;
-  if (plugin.version) item.version = plugin.version;
-  return item;
-}
-
-function skillDirFromFilePath(filePath: string): string | undefined {
-  const index = filePath.lastIndexOf("/SKILL.md");
-  if (index <= 0) return undefined;
-  return filePath.slice(0, index);
+  })();
 }
 
 function isSafeRepo(repo: string): boolean {
@@ -372,7 +530,9 @@ function isSafeRelativePath(path: string): boolean {
     path.length > 0 &&
     !path.startsWith("/") &&
     !path.includes("\\") &&
-    !path.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
+    !path
+      .split("/")
+      .some((segment) => segment === "" || segment === "." || segment === "..")
   );
 }
 
@@ -389,15 +549,19 @@ function basenameOf(path: string): string | undefined {
   return segments.length > 0 ? segments[segments.length - 1] : undefined;
 }
 
-function parseGitHubUrlOnly(url: string): { owner: string; repo: string } | undefined {
+function parseGitHubUrlOnly(
+  url: string,
+): { owner: string; repo: string } | undefined {
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== "https:" || parsed.hostname !== "github.com") return undefined;
+    if (parsed.protocol !== "https:" || parsed.hostname !== "github.com")
+      return undefined;
     const segments = parsed.pathname.split("/").filter(Boolean);
     if (segments.length < 2) return undefined;
     const owner = segments[0] as string;
     const repo = (segments[1] as string).replace(/\.git$/u, "");
-    if (!/^[A-Za-z0-9_.-]+$/u.test(owner) || !/^[A-Za-z0-9_.-]+$/u.test(repo)) return undefined;
+    if (!/^[A-Za-z0-9_.-]+$/u.test(owner) || !/^[A-Za-z0-9_.-]+$/u.test(repo))
+      return undefined;
     return { owner, repo };
   } catch {
     return undefined;

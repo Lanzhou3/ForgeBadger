@@ -22,7 +22,6 @@ import {
   parseSkillRemoteProvenance,
   syncLocalSkills,
   toggleSkill,
-  updateRemoteSkill,
   updateSkill,
   type Skill,
   type SkillInput,
@@ -37,6 +36,9 @@ import {
   type VisibilityFilter,
 } from "@/lib/visibility";
 import { useLanguage } from "@/hooks/use-language";
+import { SkillNavigation } from '@/components/skills/SkillNavigation';
+import { SkillPackageReview } from '@/components/skills/SkillPackageReview';
+import { SkillHistory } from '@/components/skills/SkillHistory';
 import { cn } from "@/lib/utils";
 
 const emptySkillForm: SkillInput = {
@@ -49,7 +51,8 @@ const emptySkillForm: SkillInput = {
 };
 
 export default function SkillsPage() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const [updateId, setUpdateId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const [form, setForm] = useState<SkillInput>(emptySkillForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -58,7 +61,7 @@ export default function SkillsPage() {
   const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>("all");
   const [error, setError] = useState("");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error: listError } = useQuery({
     queryKey: ["skills"],
     queryFn: listSkills,
   });
@@ -147,10 +150,8 @@ export default function SkillsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
   });
 
-  const updateRemoteMutation = useMutation({
-    mutationFn: updateRemoteSkill,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
-  });
+  const actionError = listError ?? toggleMutation.error ?? deleteMutation.error ?? syncMutation.error ?? checkUpdateMutation.error ?? checkAllUpdatesMutation.error;
+  const failedChecks = checkAllUpdatesMutation.data?.results.filter(result => result.error) ?? [];
 
   const startEdit = (skill: Skill) => {
     setEditingId(skill.id);
@@ -192,7 +193,7 @@ export default function SkillsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
+    <div className="mx-auto max-w-6xl space-y-6 p-4 pt-16 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{t("skills.title")}</h1>
@@ -200,7 +201,7 @@ export default function SkillsPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
-            <Link href="/skills/install">
+            <Link href="/skills/discover">
               <Plus className="size-4" />
               {t("skills.install")}
             </Link>
@@ -232,6 +233,10 @@ export default function SkillsPage() {
         </div>
       </div>
 
+      <SkillNavigation />
+      {actionError ? <p role="alert" className="text-sm text-destructive">{actionError.message}</p> : null}
+      {failedChecks.length ? <div role="alert" className="space-y-1 text-sm text-destructive">{failedChecks.map(result => <p key={result.skillId}>{result.name}: {result.error}</p>)}</div> : null}
+      {updateId ? <SkillPackageReview input={{ skillId: updateId }} onClose={() => setUpdateId(null)} /> : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant={sourceFilter === "all" ? "default" : "outline"}
@@ -480,7 +485,7 @@ export default function SkillsPage() {
               </p>
             </div>
             <Button asChild size="sm" variant="outline">
-              <Link href="/skills/install">
+              <Link href="/skills/discover">
                 <Plus className="size-4" />
                 {t("skills.install")}
               </Link>
@@ -496,7 +501,7 @@ export default function SkillsPage() {
             return (
               <div key={skill.id}>
                 <div
-                  className="flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
+                  className="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
                   style={{ animationDelay: `${index * 40}ms` }}
                 >
                   <span
@@ -510,6 +515,7 @@ export default function SkillsPage() {
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {t(skill.resourceManifest ? "skills.resourcePackage" : "skills.markdownOnly")}
                     </p>
+                    {provenance && (provenance.storage !== 'database' || provenance.legacyGlobalMirror) ? <p className="mt-1 text-xs text-amber-600 dark:text-amber-300">{language === 'en' ? 'Legacy global copy may remain active. Removing or disabling here does not remove that copy.' : '旧全局副本可能仍被 CLI 加载；此处停用或删除不会移除该副本。'}</p> : null}
                     {skill.description && (
                       <div className="mt-0.5 truncate text-xs text-muted-foreground">
                         {skill.description}
@@ -520,9 +526,9 @@ export default function SkillsPage() {
                     <Badge variant="outline">{sourceLabel(skill.source)}</Badge>
                     <Badge variant="outline">{skill.version ?? "1.0.0"}</Badge>
                     {provenance && (
-                      <Badge variant="outline" title={`${provenance.repo}@${provenance.resolvedCommitSha}`}>
-                        <Github className="mr-1 size-3" />
-                        {provenance.repo}@{provenance.resolvedCommitSha.slice(0, 7)}
+                      <Badge variant="outline" title={provenance.sourceUrl ?? `${provenance.repo}@${provenance.resolvedCommitSha}`}>
+                        {provenance.repo ? <Github className="mr-1 size-3" /> : null}
+                        {provenance.repo || provenance.kind}@{provenance.resolvedCommitSha.slice(0, 7)}
                       </Badge>
                     )}
                     {updateAvailable && (
@@ -546,7 +552,7 @@ export default function SkillsPage() {
                           variant="ghost"
                           size="icon"
                           onClick={() => checkUpdateMutation.mutate(skill.id)}
-                          disabled={checkUpdateMutation.isPending || updateRemoteMutation.isPending}
+                          disabled={checkUpdateMutation.isPending}
                         >
                           <RefreshCw
                             className={
@@ -561,13 +567,11 @@ export default function SkillsPage() {
                             size="icon"
                             className="text-amber-600"
                             onClick={() => {
-                              if (window.confirm(t("skills.updateConfirm"))) {
-                                updateRemoteMutation.mutate(skill.id);
-                              }
+                              setUpdateId(skill.id);
                             }}
-                            disabled={updateRemoteMutation.isPending}
+                            disabled={false}
                           >
-                            <CircleArrowUp className={updateRemoteMutation.isPending ? "size-4 animate-spin" : "size-4"} />
+                            <CircleArrowUp className="size-4" />
                             <span className="sr-only">{t("skills.updateSkill")}</span>
                           </Button>
                         )}
@@ -605,6 +609,7 @@ export default function SkillsPage() {
                     <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background p-3 text-xs">
                       {skill.content?.trim() || t("skills.previewEmpty")}
                     </pre>
+                    {provenance ? <SkillHistory skillId={skill.id} /> : null}
                   </div>
                 )}
               </div>
