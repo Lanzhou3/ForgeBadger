@@ -40,6 +40,16 @@ Browser xterm.js → Gateway WebSocket → authenticated JSON-line IPC
 - Sessions launch using structured adapter plans and host-environment credentials.
   No provider secrets are injected at session launch. Programmatic submission
   uses adapter-aware bracketed paste, readiness checks and one Enter through IPC.
+- Codex launches with `--no-daemon` (verified with CLI 0.157.1) so each PTY's
+  hooks inherit that session's notification identity instead of a shared Codex
+  daemon's stale environment. The installed CLI must support this flag. Existing
+  Codex sessions need a CLI restart to adopt it; restarting Gateway alone does
+  not replace running CLIs. Notification HTTP/transport failures produce a
+  credential-free warning and never fail the CLI turn.
+  The same diagnostics apply to the generated OpenCode/PI reporters. Claude
+  also forwards `StopFailure`; terminal `attention` events are eligible for
+  browser notifications when permission and opt-in allow them. Kimi setup
+  consolidates exact duplicate managed hooks while preserving custom rules.
 - Stop/delete is explicit. Upgrade does not terminate legacy tmux/psmux processes
   or uninstall system software. Operators must finish and retire old sessions
   themselves; those processes cannot be adopted by Session Server.
@@ -199,7 +209,7 @@ Gateway 的 `startCopilotRuntime` 负责恢复扫描及关停，租户 stack 仍
 
 迁移 0068 增加 run 输入/版本/lease/revision、`copilot_run_steps`、消息和审批步骤关联、会话级记忆归属。旧版活跃 run 明确失败、旧 pending action 过期，保留原数据且不重放。新版同会话仅允许一个活跃 run。终态模型响应和 completed 原子提交；恢复只重试安全读取，已经开始却无回执的写操作进入 indeterminate，执行异常也按可能存在部分副作用保守处理。
 
-取消先更新数据库终态和 fence，再 abort 本机请求；在途写步骤标记结果未知，迟到回执只能补充证据。关停停止续租，最多等待一秒 drain 后由 lease 到期触发保守恢复。运行记录和回执随会话隐藏继续保留。回滚应暂停新版执行器并保留账本，不能在新版未决运行存在时启动旧版写执行器。
+取消先更新数据库终态和 fence，再 abort 本机请求；在途写步骤标记结果未知，迟到回执只能补充证据。关停停止续租，最多等待一秒 drain 后由 lease 到期触发保守恢复。会话隐藏只阻止 pending/running/awaiting_approval；indeterminate 或取消后未确认的写入不阻止隐藏。运行记录、步骤和回执继续保留，未知作用不重放；编辑历史仍受未决写入保护。编辑请求按目标消息和完整上下文去重，先确认请求身份再截断历史。回滚应暂停新版执行器并保留账本，不能在新版未决运行存在时启动旧版写执行器。
 
 OpenAI 和 Anthropic 的工具往返均由持久 transcript 投影；压缩以完整用户回合为边界。摘要写入校验历史和执行权；记忆按 tenant/global/project/conversation 精确匹配。P1 项目授权和混合项目总览见下节；飞书、Telegram 和自治项目经理闭环仍属于后续阶段。
 
@@ -209,7 +219,7 @@ OpenAI 和 Anthropic 的工具往返均由持久 transcript 投影；压缩以�
 
 迁移 `0069_copilot_platform_actions.sql` 与前向补充 `0070_copilot_platform_action_recovery.sql` 增加 `copilot_grants`、`platform_action_intents`、`platform_action_receipts`、`copilot_conversation_grants`、`project_manager_management` 和 `session_writer_leases`，关联采用租户复合外键。0069 保留已实际应用的原始 SQL/hash；0070 补 conversation 租户复合约束、writer 表与外部执行 lease，并把无租约的旧 executing intent 标为 indeterminate。升级使旧活跃 run 失败、旧 pending action 过期，保留历史而不以旧审批执行新命令。仅新空会话可绑定 Grant；绑定不可切换，撤销后也不解除。模型工具、查询资源、记忆召回均按实际关联过滤，未授权全局上下文不能进入模型输入。
 
-Grant 明确项目、能力、规范化根目录、到期时间、动作次数和并发数；目前 actor 是当前 owner，没有跨用户或渠道身份委派。Intent 固化参数摘要、资源 revision、Grant revision、策略版本、actor、有效期和租户内唯一幂等键。执行前复核当前身份、工具开关、策略、资源与预算；数据库动作、回执和预算在 IMMEDIATE 事务内提交，外部动作先持久 claim 再执行，claim 使用 30 秒租约、每 10 秒续租；过期孤立 claim 保守恢复为未知，不重放。外部回执与 intent 终态同事务提交；迟到确认可补充事实。P0 run 恢复读取已持久化的平台回执，避免把已确认数据库作用错误投影为未知。外部结果未知时保留占用和证据、不重试副作用。P0 步骤仅引用这些结果，不形成第二条独立写入路径。自动 post-turn memory curation 已退出 orchestrator；持久记忆通过统一 `memory.write` 命令授权，包括旧的 memory entries HTTP 创建入口。
+Grant 明确项目、能力、规范化根目录、到期时间、动作次数和并发数；目前 actor 是当前 owner，没有跨用户或渠道身份委派。Intent 固化参数摘要、资源 revision、Grant revision、策略版本、actor、有效期和租户内唯一幂等键。执行前复核当前身份、策略、资源与预算；Copilot 来源（包括旧来源记录）的意图在预览、执行及异步等待后复核项目自治和工具开关，显式 Web 主人操作不受 Copilot 开关阻断；数据库动作、回执和预算在 IMMEDIATE 事务内提交，外部动作先持久 claim 再执行，claim 使用 30 秒租约、每 10 秒续租；过期孤立 claim 保守恢复为未知，不重放。外部回执与 intent 终态同事务提交；迟到确认可补充事实。P0 run 恢复读取已持久化的平台回执，避免把已确认数据库作用错误投影为未知。外部结果未知时保留占用和证据、不重试副作用。P0 步骤仅引用这些结果，不形成第二条独立写入路径。自动 post-turn memory curation 已退出 orchestrator；持久记忆通过统一 `memory.write` 命令授权，包括旧的 memory entries HTTP 创建入口。
 
 `SessionWriterLeases` 在正式 Gateway 组合中持久化到 SQLite，以规范化 workspace 为排他范围，租户/会话校验和单调 fence 防止别名目录、过期或旧进程继续写入。程序化提交在 staging 前、等待后和 Enter 前复核；WebSocket 键盘及缓冲 flush 同样检查。显式 takeover 先失效旧 token 再交回人工，已 staging 的不确定效果不重放。四种生产 adapter 均为 `manual_only`；自动任务执行和 dispatch 在启动前拒绝，项目的 `cli` 分类不表示 CLI 沙箱权限已验证。
 
@@ -1599,8 +1609,16 @@ IDs, user-edited content, enable choices or inert project associations. Reposito
 reads and mutations always include the selected target; the default is CLI.
 
 The bundled Playbook catalog declares current versions and required tools. Exact
-unedited v1 builtin bodies/metadata can upgrade to v2 during target-scoped seed;
-modified copies remain preserved and require owner review against currentVersion.
+unedited builtin packages matching archived release fingerprints upgrade in the
+revision service, with the previous package captured first. Seeding only creates
+missing packages. Explicit edit/rollback heads, extra files and unknown content
+remain preserved for review. `reviewedBuiltinVersion` is persisted separately in
+the revision snapshot: acknowledging custom content never relabels its version as
+an official release. Adopting a previewed builtin explicitly replaces the whole
+package and preserves history, ID and enabled state. Ordinary saves cannot clear
+pending review, and the UI distinguishes switched-on from actually available.
+Bundle changes must retain the new fingerprint in `copilot-skill-baselines.ts`;
+a regression test prevents forgetting this upgrade baseline.
 Grant contexts additionally require byte-equal canonical name/description/body;
 source labels alone are not trusted. Full edited/global content stays outside
 Grant model context. UI, slash listings and tool loads use the same availability
@@ -1632,6 +1650,43 @@ calling remains the model invocation protocol, not a third installable object.
 Builtin ForgeBadger tools execute in process through the existing platform command
 and approval paths. The outward `/mcp` endpoint still exposes only platform tools;
 it does not proxy installed external servers.
+
+### External MCP private-project workflow (2026-09-25)
+
+External MCP may prepare a private project and submit a Project Manager task
+packet through the existing Session Server path. This requires a token with
+explicit `operate` and `cli_dispatch` scopes. New grants select existing owner
+project IDs with canonical directory snapshots in `mcp_access_tokens.allowed_projects`.
+They may be permanent (`expires_at IS NULL`) or time-limited. All permission
+levels, including read-only, enforce selected IDs and current directory snapshots.
+Unselected nested projects and moved nested grants invalidate parent access;
+session directories must match their resource project. Global catalogs and
+new project creation/import are excluded from these grants. Revocation remains
+immediate. The UI provides project multi-selection, lifetime selection, and a
+copyable JSON connection template.
+
+Migration 0118 leaves `allowed_projects` NULL on legacy tokens. Legacy CLI
+grants retain a canonical allowed root and an expiry no longer than seven days;
+older account read/operate tokens retain their original permissions. Project
+paths and linked session working directories are checked at preview and
+execution checkpoints.
+Credential directories are excluded. This is a
+Gateway project-selection boundary, not an OS sandbox for CLI child processes.
+Their host credentials, native permissions, and network access still apply.
+Revocation,
+expiry, and owner status are checked again before terminal staging and Enter.
+The adapter must be enabled in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS`.
+
+External writes with such tokens use a caller-stable `operationId` namespaced
+by token ID. Platform action receipts handle retries, and the task-packet
+attempt record prevents a second prompt after uncertain delivery. Arbitrary
+session text dispatch remains excluded. Template application binds a preview
+digest and creates missing files only; modified or unsafe files require owner
+review. Terminal screens, errors, and receipts receive pattern-based redaction
+at the MCP boundary.
+CLI completion can advance a task to `ready_for_review`; independent acceptance
+and `done` remain owner decisions. Shared Delivery projects retain their
+separate execution authority and cannot use this private-project workflow.
 
 Skills use standard YAML-frontmatter `SKILL.md` plus a bounded UTF-8 file bundle.
 Paste, file upload and public HTTPS raw Markdown imports create disabled packages.
@@ -1837,3 +1892,227 @@ revoked; plan revisions prevent an older in-flight drain applying obsolete hando
 The delivery recovery sweep resumes these durable operations without replaying
 verification, CLI prompts or uncertain Git merges. See [API contracts](API.md#team-administration-and-invitation-contracts)
 and [operator workflows](PERSONAL-TEAM-WORKFLOWS.md) for request fields and states.
+
+### CLI Skill discovery and package lifecycle
+
+Gateway owns remote discovery and installation; Web only calls `/api/v1/skills/registry/*`.
+`skill-discovery.ts` federates tenant-scoped GitHub catalog snapshots, ClawHub public
+search and an opt-in skills.sh compatibility provider. Complete package resolution
+uses `skill-registry-package.ts`; `skill-package.ts` validates bounded UTF-8 files
+and hashes sorted path/content pairs. Shared HTTP transport pins public DNS
+addresses and never follows redirects or sends GitHub credentials to raw hosts.
+
+`SkillInstallService` binds reviewed packages to an owner, operation, base hash and
+five-minute single-use token. SQLite content/resource manifests are authoritative;
+installation, optional project selection and `cli_skill_revisions` snapshots share
+a transaction. Revision retention is 20 per Skill; deletion cascades history.
+Legacy metadata format survives repeated restoration. Copilot runtime histories
+and authority remain separate. Gateway restart invalidates outstanding previews.
+
+No new remote package is materialized into host-global `.agents/skills`. Project
+configuration preview/sync remains the filesystem activation boundary, including
+existing collision/obsolete-resource checks. Old marked global mirrors are preserved,
+excluded from local scanning, and surfaced in UI as potentially still active.
+Binary packages and full plugin/hook execution remain unsupported. Source errors
+retain useful cached entries and do not remove Template items sharing a source ID.
+
+### Copilot reliability delivery (2026-09-26)
+
+The current authority contract is the project autonomy switch, exact platform
+intents/receipts, tenant scope and per-tool policy. Historical references above
+to Copilot Grants describe retired behavior; migration 0105 removed that model.
+Repository instructions and Skills are descriptive context, never executable
+authority.
+
+Migrations 0108/0109 add durable execution phase, per-run budgets, model-call
+accounting, follow-up queues and linked research/review jobs. The default run
+limit is 500,000 charged tokens and 30 minutes from first execution, including
+approval/restart elapsed time. Every model call reserves estimated usage before
+sending; missing usage or interrupted responses retain a conservative charge.
+Titles and summaries are also charged. This is approximate governance, not a
+billing or strict tokenizer guarantee; a provider response can exceed its
+reservation, after which further model/tool work is refused. HTTP retries are
+limited to two retries for 429/502/503/504 with Retry-After and cancellation;
+accepted streams, ambiguous network failures and tool effects are not replayed.
+
+Chinese recall uses bounded segmented literal matching; invalid/empty optional
+recall cannot fail a turn. Compaction folds complete history turns in bounded
+batches and advances summary coverage only after every batch succeeds. Model
+profile contextWindow informs a conservative application-character budget with
+headroom. The selected project's permitted root AGENTS.md contributes redacted,
+size-limited context and its content hash. File listing/search preserve existing
+secret/hidden/symlink restrictions. Tool discovery supports common Chinese terms.
+
+Queued messages live outside the transcript until an immediate transaction
+admits a run and marks the queue row started. Durable keys prevent duplicate
+promotion, cancellation competes with promotion atomically, and recovery excludes
+busy conversations before its bounded scan. The Web uses TanStack Query for queue
+state and reconciles durable phases through the existing event/REST path.
+
+`research_project` creates one stable child per originating run/step. Child
+conversations are isolated from global memory and retain the original explicit
+model selection. Persisted executionMode and an execution-time project read
+whitelist block write tools, external MCP, cross-project reads and recursion,
+even when a model forges a hidden tool call. Children allow at most 6 model steps,
+120,000 charged tokens and 5 minutes, sharing the parent's aggregate token limit.
+Synchronous research also inherits the remaining parent time and cancellation.
+Cross-worker recovery waits for the same durable child instead of spawning a
+replacement or claiming a pending analysis is complete.
+
+Optional task review is admitted atomically with the original verified completion
+report, keyed by dispatch attempt. Fresh checks bind origin run, project, intent,
+confirmed receipt, exact task attempt, prompt/runtime identity and persisted
+notification evidence. Delayed reviews use their own 5-minute execution window,
+retain aggregate parent usage accounting and inherit its explicit model. A
+bounded cursor publishes the review once into the original conversation; revoked
+origins cannot publish. Analysis never changes a work item to accepted, dispatches
+repairs or substitutes for independent tests. The UI opt-in states that extra
+model usage is involved.
+
+Migration 0110 adds tenant/run/step-bound encrypted tool artifacts. Only explicit
+project-scoped built-in reads can retain full redacted snapshots beyond the
+48-KiB receipt cap (2 MiB each / 16 MiB per run / 64 MiB per user / seven days).
+The existing message-to-run-to-step provenance chain remains mandatory for
+readback. Artifacts publish inside the same lease-fenced receipt transaction;
+optional archive failure leaves a usable preview and never replays a tool.
+Expiry cleanup is bounded to 100 rows per user per sweep; expired content counts
+against retained-byte quotas until deleted. Conversation/step deletion cascades.
+Readback verifies the encrypted identity/digest and current project ownership,
+root and source path boundaries. Terminal, aggregate and external MCP output is
+excluded. A complete snapshot can still describe a bounded/truncated tool page.
+
+The read-only Git source tool reads index/tree metadata, filters paths and modes,
+then requests only permitted regular blobs by fixed object ID. It generates its
+own display hunks, bypassing external diff/textconv/filter behavior. Git uses an
+isolated environment with fsmonitor/hooks, lazy fetch and all remote transports
+disabled. Metadata directories are recursively checked for symlinks/special
+files before and after Git calls; external gitdirs/alternates are rejected.
+Traversal and subprocess output/time are bounded. Paging scans 40 candidates,
+returns at most 20 changed files and can return an empty intermediate page.
+Read-only research inherits the same current project and cancellation checks.
+
+
+#### Streaming, read concurrency, metering and repair (third delivery)
+
+Public text is provisional and identified by run/model-step/fence/sequence.
+`PublicTextStream` buffers incomplete identifiers and shares credential-field
+recognition with durable redaction. Potential credentials freeze the remaining
+response until validated completion; private thinking remains encrypted replay
+only. Official MiniMax endpoints request separated reasoning, and OpenAI-compatible
+streams request final usage. Unknown providers retain protocol validation.
+
+Read concurrency is an explicit whitelist, at most three pending local reads.
+Writes, approvals, external tools, discovery and delegation are serial barriers.
+Each operation retains authorization and lease fencing; all in-flight reads
+settle before advancing. Asynchronous receipts are reconstructed in original
+model tool-call order. Cancelled/superseded workers cannot publish or advance.
+
+Migration 0111 extends model-call receipts with model identity, immutable
+owner-configured per-million-token pricing, and integer nano-USD costs. Main,
+summary, title, memory and linked-child calls share the ledger. Cache and
+reasoning details are normalized without double charging; unavailable counts or
+rates remain explicitly unknown. Reservations remain conservative estimates;
+provider-reported completion usage supplies measured counts. There is no universal
+exact preflight tokenizer or provider invoice reconciliation.
+
+Migration 0112 adds tenant-bound repair jobs and an explicit root revocation
+timestamp. The opt-in root and immutable failed sandbox evidence authorize at most
+two attempts. Each child is a project-restricted run with one submission slot,
+fixed original source/check scope, fresh patch approval and independent retesting.
+Current parent conversation/message provenance, owner/tool/project authority,
+receipt identity and source digests are rechecked at admission, approval and
+sandbox execution. Edits, including identical-text edits, revoke old authority.
+The existing durable child relation supplies aggregate token budgets and
+cancellation. Recovery and reporting use bounded rotating cursors; transactional
+uniqueness prevents duplicate admission. No candidate is applied or accepted.
+
+The reproducible evaluation script is
+`packages/gateway/scripts/evaluate-copilot.ts`; retained reports are under
+`packages/gateway/evaluations/`. Two synthetic same-model baseline/harness trials
+use fixed independent sandbox assertions and explicit call/time/token limits.
+The current MiniMax-M3 result is baseline 2/2, harness 1/2; one harness task reached
+the four-call limit. This exposes overhead and limited task efficiency, rather
+than establishing superiority over VS Code/GitHub Copilot or other agents.
+Actual CLI-task benchmarking, statistically meaningful quality comparisons,
+other providers and physical Windows/WSL acceptance are not established here.
+
+#### Post-implementation design review (0113, 2026-09-26)
+
+The initial manual Chinese stop-word list and Chinese `instr` fallback were
+removed after reproducing subject loss (`用户` -> empty; `用户权限` -> `权限`),
+query/index normalization mismatch, and common-word ranking noise. Memory now
+uses one full document/query analyzer (NFKC, lowercase, Intl word segmentation)
+and the existing FTS5 index/BM25 scorer. Explicit search keeps every analyzed term
+or reports a budget error; automatic recall has a separate bounded query policy.
+Body indexing preserves repetitions and the entire supported document, including
+its tail. No custom vocabulary or manual term weights are introduced.
+
+`copilot_memory_search_index` is derived metadata with a composite tenant/memory
+foreign key and an algorithm/ICU/Unicode version fingerprint. New writes are
+atomic with index/metadata publication. Migration 0113 preserves original text;
+missing/obsolete markers drive bounded, restartable 64-row transactions. Source
+updates/deletes invalidate indexes via triggers, including cascade deletion.
+All requested scopes must be ready before retrieval. Rebuild progress commits
+before a separate DEFERRED read transaction checks readiness and reads all results
+from one snapshot; this avoids both lost rebuild progress and false-empty results
+from a competing SQLite/WAL writer. Runtime indexing failure is isolated per user.
+
+The review also reproduced and repaired two unrelated correctness defects:
+
+- A thinking-parameter compatibility retry previously re-resolved the preferred
+  model, so a concurrent preference switch could change the actual model while
+  retaining the old price snapshot. The retry now reuses the same resolved
+  provider/model/credentials, fetch policy, cancellation signal and deadline;
+  only thinking parameters change. The next logical call resolves new preferences.
+- Browser stream fencing previously applied only per model step. A late event
+  from an older worker's different step could enter the new response. The
+  accumulator now tracks the highest fence per run as well as per-step sequence,
+  rejecting older-worker frames across all step identities.
+
+Reviewed controls intentionally retained: the explicit safe-read concurrency
+allowlist and three-operation limit; credential-introducer buffering until safe
+completion; two repair revisions with one approved immutable submission each;
+unknown usage/pricing as unknown rather than zero. These are safety/resource
+policies, distinct from semantic word deletion. Lexical recall still needs broader
+relevance evaluation; ICU segmentation is not a domain ontology, FTS5 corpus
+statistics are not per-tenant learned weights, and the existing scope allocation
+is not a semantic cross-scope reranker. No claim of universally optimal retrieval
+or improved real-model benchmark scores follows from these regression tests.
+
+
+### Copilot measured efficiency and bounded overflow recovery (2026-09-26)
+
+- Discovery scores only the effective name/description catalog with BM25 and
+  NFKC/word segmentation. Chinese capability descriptions belong to their tool
+  definitions. Exact identifiers do not broaden to similar tools. The fixed
+  discovery fixture records development and holdout results separately; a
+  remaining holdout miss is retained instead of extending a synonym table.
+- Dynamic recall is inserted before the latest user turn, outside correlated
+  tool batches, with complete memory IDs and text. Entries exceeding the recall
+  budget are omitted whole. Prior conversation prefixes stay stable. The
+  Anthropic serializer uses an ephemeral cache marker on the system text block;
+  OpenAI wire messages remain unchanged. Savings require provider measurements.
+- `context-recovery.ts` owns one bounded attempt after a structured rejected
+  overflow. It fixes the model profile for context assembly, summary and retry,
+  preserves the run deadline and meters auxiliary calls. The ledger increments
+  the existing attempt and writes a recovery marker before summary/inference.
+  Crash retries conservatively consume the allowance; an interrupted recovery
+  marker stops the resumed run. No historical tool replay or source mutation.
+- Ordinary compaction retains best-effort fallback; overflow recovery requires
+  successful strict compaction and an actually smaller projection. Every summary
+  batch checks authority before and after I/O; authority loss is never swallowed
+  by normal fallback. Current goals and immutable context are not silently cut.
+- No-progress compares complete canonical receipts in durable model-round order,
+  not individual parallel tool completions. Three identical rounds or three
+  repetitions of two alternating rounds stop before another inference. Only
+  stable local readers are eligible; search/diff previews are excluded.
+- `evaluations/fixtures/discovery-v1.json` and the offline quality runner are
+  deterministic contract evidence. The expanded live evaluator has three coding
+  fixtures, including a two-file CommonJS boundary, six model calls per arm and
+  checks installed only after model output. Its v2 results cannot be treated as
+  a matched rerun of v1. Failed/unknown-usage outcomes remain in all reports.
+
+Remaining limitations: context admission still uses character estimates, not a
+provider-usage feedback controller or exact tokenizer; memory is lexical; the
+small live fixture set is not an industry benchmark; no measured prompt-cache
+savings or cross-platform sandbox acceptance is implied.

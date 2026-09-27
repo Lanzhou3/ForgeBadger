@@ -4,6 +4,11 @@
 
 This document summarizes the current REST and WebSocket contract. `docs/TECH-ARCHITECTURE.md` remains the full architecture reference.
 
+Current Copilot authority (2026-09-26): migration 0105 retired Copilot Grants.
+Older sections mentioning `/copilot/grants`, `grantId` or Grant-bound scope are
+historical references, not active API contracts. Current authorization uses
+project autonomy, tenant scope, tool policy and exact platform-action receipts.
+
 ## 1. Base Rules
 
 - Base path: `/api/v1`
@@ -474,8 +479,8 @@ All responses use the standard `{code,data,message}` envelope and authenticated 
 | `GET /api/v1/copilot/runs/:id` | `{run,pendingActions,steps}`; run includes revision and stopReason, actions include full inputJson/inputDigest, stepId and toolCallId. Steps retain execution receipts. |
 | `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/decide` | `{approved}`; persists a single decision and returns `{resumed,runId}`. The original run continues asynchronously, including after rejection. |
 | `POST /api/v1/copilot/runs/:id/cancel` | Awaits durable cancellation; returns `{cancelled,runId}`. It does not undo effects already sent to a CLI. |
-| `POST /api/v1/copilot/conversations/:id/edit-message` | Validates that messageId is a user text in the URL conversation. Active or unresolved writes return 409. Clears summary, preserves run/step receipts and admits an edited turn atomically. |
-| `DELETE /api/v1/copilot/conversations/:id` | Hides an inactive conversation while retaining execution evidence; unresolved executions return 409. Repeated deletion returns 404. |
+| `POST /api/v1/copilot/conversations/:id/edit-message` | Accepts `{messageId,content,clientRequestId?,modelId?,projectId?,toolDiscovery?}`. Validates a user text in the URL conversation. Active or unresolved writes return 409. Clears summary, preserves run/step receipts and admits the edit atomically. Matching request-key retries return the original run before truncation; changed targets or context return 409 `COPILOT_REQUEST_CONFLICT`. |
+| `DELETE /api/v1/copilot/conversations/:id` | Hides a conversation while retaining messages, runs, steps and receipts. Only `pending`, `running` or `awaiting_approval` runs return 409 `COPILOT_CONVERSATION_BUSY`; terminal runs (including `indeterminate` or cancelled unknown writes) can be hidden without replaying effects. Repeated deletion returns 404. |
 
 Run terminal states are `completed`, `failed`, `cancelled`, `stopped` (for example `step_budget_exhausted`) and `indeterminate` (unconfirmed side effects). `pending`, `running` and `awaiting_approval` remain active. Cancellation may retain an indeterminate write step; a later receipt records the outcome without reviving the run. There is no automatic retry endpoint for unknown writes.
 
@@ -538,7 +543,14 @@ listed in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` (default empty) â otherwise t
 reject with `ADAPTER_AUTONOMY_UNVERIFIED` before any effect. Delivery uses
 bracketed-paste staging plus a single Enter with consumption confirmation;
 indeterminate delivery surfaces as `COPILOT_DELIVERY_UNCONFIRMED` and is never
-auto-retried. When `FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED` is also
+auto-retried. Claude folded multiline pastes are recognized only inside the
+current composer, with the placeholder's additional-line count matching the
+submitted prompt's newline count. The entire composer must be empty before
+staging; a folded paste is confirmed consumed only when the composer returns
+to empty. Footer changes, partial redraws and unknown screens are not receipts.
+Remote replies distinguish indeterminate delivery, cancellation, budget stops
+and invalid model responses instead of reporting them as task completion.
+When `FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED` is also
 on, a dispatch supervisor advances grant-dispatched work items to
 `ready_for_review` (task completed) or `blocked` (task failed) from session
 hook notifications; acceptance to `done` stays with the owner.
@@ -580,13 +592,45 @@ and `forgebadger doctor` remain read-only and install no system software.
 
 - `GET /api/v1/adapters/discovery`
 
-Returns local AI CLI command discovery for Claude Code, OpenCode, Codex, and
-Kimi Code. All four adapters are launch-supported when the corresponding local
+Returns local AI CLI command discovery for Claude Code, OpenCode, Codex, Kimi
+Code, and Pi. All five adapters are launch-supported when the corresponding local
 command is available. `launchEnabled` is false when the command check fails, and
 session creation/start returns `409` before Session Server launch in that case. Every
 adapter reports the `terminal` runtime mode; the former Codex
 `app-server-stdio`/`app-server-websocket` prototype modes were removed on
 2026-08-14.
+
+- `GET /api/v1/adapters/updates` checks installed CLI versions against the
+  latest version published by each CLI's official npm package, except a
+  Homebrew-installed OpenCode CLI, which uses the published version of its
+  official Homebrew tap or Homebrew core formula. It returns one
+  status per adapter (`missing`, `check_failed`, `up_to_date`, or
+  `update_available`), installed/latest versions and `latestSource` when known, the fixed official
+  update and npm install commands, and `canUpdate`/`canInstall` for the
+  authenticated user. Missing Kimi Code and Pi statuses include
+  `installRequiresNode` when the `node` command on Gateway's `PATH` is below
+  22.19.0. Version checks do not change installed software. Results are cached
+  for 60 seconds across users; instance admins may pass `?refresh=true` to
+  recheck immediately. Homebrew formula releases may lag npm releases.
+- `POST /api/v1/adapters/:adapterId/update` requires an active instance admin
+  with a Bearer credential; cookie-only requests are rejected.
+  It rechecks availability, executes only the adapter's fixed official command
+  (`claude update`, `opencode upgrade`, `codex update`, `kimi upgrade --yes`, or
+  `pi update --self`), then probes the installed version again. For a Homebrew
+  OpenCode install, the command specifies the published formula version and
+  `--method brew` so the CLI refreshes its tap before upgrading. Only one update
+  may run at a time; the response reports whether the installed version is
+  still behind its installation channel's available version. Existing terminal sessions are not
+  restarted by this endpoint.
+- `POST /api/v1/adapters/:adapterId/install` requires an active instance admin
+  with a Bearer credential. It installs a missing CLI with its fixed official
+  npm command, then checks whether the CLI command is visible on Gateway's
+  `PATH`. It rejects an already installed CLI, an uncertain discovery result,
+  missing npm, or unmet Node.js requirements. Only one CLI install or update
+  may run at a time. Existing terminal sessions are not restarted. npm uses
+  the Gateway host's npm registry configuration; version checks use
+  `registry.npmjs.org`. The OpenCode adapter currently tracks the `opencode-ai`
+  package documented under OpenCode's `/docs` channel.
 
 ### Projects
 
@@ -1311,14 +1355,11 @@ Skills may carry `visibility: "private" | "shared" | "admin"`. Shared Skills
 are readable by other users; admin Skills are readable by their owner and users
 with `role = "admin"`. Owner-scoped write checks remain unchanged.
 
-Skill source management currently exposes Local, ClawHub, and GitHub source
-definitions. Install creates a tenant-owned Skill row using either supplied
-content, source-specific starter content, or a previewed remote source.
-Remote preview accepts `{ sourceId, url, skillId?, timeoutMs? }`, fetches either
-a ClawHub/GitHub-style manifest or raw `SKILL.md` with timeout and size limits,
-validates the Skill name, and returns content plus provenance. Remote and
-catalog-installed Skills are stored disabled by default; users must explicitly
-enable them before project rendering or session use.
+`GET /skills/sources` retains the legacy manual source definitions. Local manual
+creation uses `/skills` or `/skills/install` with `sourceId: "local"`. Remote
+installation uses the reviewed registry flow below. New remote Skills are saved
+as private, disabled, tenant-owned records; optional project selection overrides
+that project's selection only. Configuration preview/sync activates the files.
 
 `GET /api/v1/skills/templates` returns static quick-create templates for plan,
 review, verify, debug, and release workflows. Each template includes a Skill
@@ -1341,73 +1382,76 @@ created/updated/skipped counts.
 `POST /api/v1/skills/local-sync` runs the same discovery explicitly for the Web
 console rescan action.
 
-#### Remote GitHub Skills
+#### Remote Skill discovery and reviewed packages
 
-GitHub-backed install fetches single-file `SKILL.md` content through the
-GitHub REST API (no git client) and pins every install to a resolved commit
-SHA. All requests are HTTPS-only, validated against the outbound host
-blocklist (including every redirect hop), bounded by a â¤30s timeout, and
-limited to `api.github.com` / `raw.githubusercontent.com`. Repositories whose
-git tree exceeds 1000 entries (or is truncated) are rejected. `GITHUB_TOKEN`
-may be configured to raise the anonymous 60 req/h API limit; ForgeBadger sends
-it as a Bearer token on every GitHub request.
+The Web console uses `/skills`, `/skills/discover` and `/skills/sources`.
+`/skills/install` displays the discovery page for existing links.
 
-- `POST /api/v1/skills/install/github/preview` accepts
-  `{ repo: "owner/repo[/sub/path]" | https://github.com/owner/repo[/tree/<ref>/<path>], ref?, timeoutMs? }`
-  and returns `{ sha, ref, repo, skills: [{ path, name }] }`. Discovery follows
-  ecosystem conventions: repository root, `skills/`, `.claude/skills/`,
-  `.agents/skills/`, and directories referenced by
-  `.claude-plugin/marketplace.json`.
-- `POST /api/v1/skills/install/github` accepts `{ repo, ref?, path, enable?, timeoutMs? }`,
-  fetches the `SKILL.md` at the resolved commit, creates the Skill row with
-  `source: "github:<owner>/<repo>"` (disabled unless `enable: true`), mirrors
-  the file into `${AGENTS_HOME}/skills/<slug>/` with a
-  `.forgebadger-managed.json` marker, and returns the Skill plus its
-  `remoteProvenance`. A name conflict returns 409.
-- `POST /api/v1/skills/:id/check-update` resolves the latest commit for the
-  provenance ref, persists `lastCheck` on the Skill, and returns
-  `{ updateAvailable, currentSha, latestSha }`. Non-remote Skills return 400.
-- `POST /api/v1/skills/check-updates` runs the same check serially for every
-  remote Skill owned by the user and returns `{ results }` (per-Skill errors
-  are reported inline instead of failing the batch).
-- `POST /api/v1/skills/:id/update` re-fetches the `SKILL.md` at the latest
-  commit, refreshes content/version/`resolvedCommitSha`/`contentHash` in the DB
-  row and the managed mirror file, and preserves the current enablement state.
-  If the upstream Skill was renamed, the update is refused (400) and the Skill
-  must be uninstalled and reinstalled.
-- `DELETE /api/v1/skills/:id` additionally removes the managed
-  `${AGENTS_HOME}/skills/<name>` directory, but only when the
-  `.forgebadger-managed.json` marker is present; user-owned directories are
-  never deleted.
+| Endpoint | Input and result |
+| --- | --- |
+| `GET /api/v1/skills/registry/search` | `q` (max 160), `provider=all\|github\|clawhub\|skills-sh`, `page` (zero-based), `includeSkillsSh=true\|false`; returns `items`, `total`, `page`, `hasMore`, per-provider `statuses` |
+| `GET /api/v1/skills/registry/sources` | Tenant-owned GitHub sources with sync status and refresh time |
+| `POST /api/v1/skills/registry/bootstrap` | Starts bounded background refresh of curated sources; disabled sources stay disabled |
+| `POST /api/v1/skills/registry/sources` | `{ repo: "owner/repo" }`; adds or refreshes a source (up to 20 configured sources) |
+| `DELETE /api/v1/skills/registry/sources/:id` | Encoded `sourceId`, e.g. `github:owner/repo`; disables source and removes only its Skill catalog items, preserving installed Skills and Template items |
+| `POST /api/v1/skills/registry/preview` | `{ locator }` to install, `{ skillId }` to update, `{ skillId, revisionId }` to restore; returns complete package, provenance, file changes, operation and a five-minute opaque token |
+| `POST /api/v1/skills/registry/install` | `{ token, operation: "install"\|"update"\|"rollback", skillId?, projectId? }`; atomically consumes the exact reviewed package once; returns `{ skill, projectId? }` |
+| `GET /api/v1/skills/:id/revisions` | Owner-only retained revision summaries, newest first; at most 20 versions |
 
-Remote Skills carry a `remoteProvenance` JSON column:
+Locators are `{ kind: "github", repo, path?, ref?, skillName? }`,
+`{ kind: "clawhub", owner, slug, version? }`, or
+`{ kind: "raw", url }` for an allowlisted standalone `SKILL.md` URL. GitHub
+search uses tenant-owned cached indexes; ClawHub uses its public search API
+when the query has at least two characters. skills.sh search is explicitly
+opt-in and uses a compatibility adapter; it is not a guaranteed stable API.
+Provider failures return partial results and status messages. Remote search
+results are cached for 60 seconds; HTTP 429 honors bounded Retry-After backoff.
+GitHub aliases are merged only when the full tenant catalog and installed
+provenance identify a unique repository/path.
 
-```json
-{
-  "kind": "github" | "marketplace",
-  "repo": "owner/repo",
-  "ref": "main",
-  "path": "skills/pdf/SKILL.md",
-  "resolvedCommitSha": "abc123...",
-  "contentHash": "sha256:...",
-  "installedAt": "ISO-8601",
-  "marketplaceSourceId": "claude-plugins-official",
-  "pluginName": "document-skills",
-  "lastCheck": { "checkedAt": "ISO-8601", "latestCommitSha": "def456...", "updateAvailable": true }
-}
-```
+GitHub resolves refs using the small SHA representation, requests selected
+subtrees directly, and fetches every package file at the same commit. Complete
+UTF-8 packages are limited to 65 files (including SKILL.md), 128 KiB per file
+and 1 MiB total. Binary files, symlinks, submodules, unsafe paths, duplicate
+case-insensitive paths and file/directory collisions reject the package.
+Tree responses are bounded to 4 MiB and 10,000 entries; truncated trees reject
+with an actionable error. All network requests validate public HTTPS endpoints
+and pin validated DNS addresses to the actual socket. Redirects are refused.
+`GITHUB_TOKEN`, if configured on the Gateway host, is sent only to
+`api.github.com`, never to raw content hosts or other providers.
 
-`ref`, `marketplaceSourceId`, `pluginName`, and `lastCheck` are omitted when not
-applicable.
+ClawHub resolution verifies publisher identity, pins a hosted version, checks
+upstream block flags and verifies every file against its published SHA-256.
+This is integrity checking, not a guarantee that Skill instructions are safe.
+No downloaded scripts, hooks or dependency installers execute during installation.
 
-Known limitations:
+Previews are owner-bound, held in bounded Gateway memory and expire after five
+minutes or a Gateway restart. A newer preview replaces that user's prior one.
+Install rechecks active ownership, project ownership and the current package
+base before a transaction. It does not resolve the mutable upstream ref again.
+Conflicts (including local edits, changed package, reused token or name conflict)
+return 409; ownership misses return 404. Update checks compare the entire
+package hash, including resource-only changes. `/skills/:id/check-update` and
+`/skills/check-updates` retain their response shapes and persist `lastCheck`.
 
-- Single-file install only: Skills with `scripts/`, `references/`, or other
-  auxiliary files install just the `SKILL.md`; auxiliary files are not fetched.
-- GitHub anonymous API access is rate-limited to 60 req/h; configure
-  `GITHUB_TOKEN` when checking many Skills for updates.
-- Manual edits to managed files under `~/.agents/skills` are not synced back
-  into the database (local discovery skips non-local sources).
+Snapshots live in tenant-scoped `cli_skill_revisions`; historical plain-Markdown
+packages keep their original metadata and can be restored repeatedly. This
+history is separate from Copilot Skill runtime revisions. Delete cascades the
+CLI revision history. Update/rollback preserve current enablement and require
+project config synchronization before existing exported files change.
+
+Remote provenance adds `storage: "database"`, `packageHash`, `canonicalId`,
+`locator` and `sourceUrl` to the existing origin fields. New remote installs do
+not write or delete `${AGENTS_HOME}/skills`. Old directories bearing
+`.forgebadger-managed.json` are excluded from local discovery and retained for
+manual review. The UI warns that those legacy copies may still be loaded by a
+CLI even after a ForgeBadger Skill is disabled/deleted; updating a legacy row
+preserves that warning.
+
+Legacy `/skills/install/preview`, `/skills/install/github`, `/skills/:id/update`,
+the remote branch of `/skills/install`, and Skill catalog direct-install all
+return `409` with `details.reason: "PREVIEW_REQUIRED"` and the new preview
+endpoint. `/skills/install/github/preview` remains a repository file-list API.
 
 ### Remote Catalogs
 
@@ -1423,19 +1467,14 @@ and stores Skill or template catalog item metadata separately from installed
 local content. Refresh never installs a Skill or imports a template; install
 remains an explicit user action.
 
-`POST /api/v1/catalog/marketplace-refresh` accepts `{ repo: "owner/repo", label?, timeoutMs? }`
-and imports a Claude Code plugin marketplace from GitHub. When the repository
-contains `.claude-plugin/marketplace.json`, its plugins become `itemType:
-"skill"` catalog items under a source named after the marketplace, with
-`metadata.marketplace` (`repo`, `sha`, `pluginName`, optional `ref` and
-`skillPath`) instead of embedded content. Plugins using `npm`, `archive`, or
-`command` sources are skipped and reported in the response `skipped` list.
-When no marketplace manifest exists, the repository is scanned as a plain Skill
-repo (same discovery rules as the GitHub install preview) and every discovered
-`SKILL.md` becomes an item. Curated seed marketplaces are exposed via the Web
-console (`anthropics/claude-plugins-official`, `anthropics/skills`,
-`anthropics/claude-plugins-community`); nothing is fetched automatically at
-startup.
+`POST /api/v1/catalog/marketplace-refresh` accepts `{ repo: "owner/repo", label?, timeoutMs? }`.
+It discovers actual `SKILL.md` files, including nested plugin Skills and bounded
+external GitHub plugin sources, under `sourceId: "github:<owner>/<repo>"`.
+Bare plugin roots do not become installable Skills. Unsupported npm, archive
+and command sources are reported as skipped. Metadata/file discovery failures
+preserve corresponding prior entries with stale metadata; refresh does not
+install anything. The discovery page bootstraps `anthropics/skills`,
+`vercel-labs/agent-skills` and `openai/skills` on demand, not at Gateway startup.
 
 Template catalog items use `itemType: "template"` and carry a `templatePackage`
 metadata object with the same shape as template export/import packages.
@@ -1443,15 +1482,10 @@ metadata object with the same shape as template export/import packages.
 from a template catalog item. Catalog item reads and installs are tenant
 scoped.
 
-Skill catalog items use `itemType: "skill"` and carry a `skillPackage`
-metadata object with name, description, version, and content. Install creates a
-tenant-owned Skill row with `source: "catalog:<sourceId>"`. Marketplace skill
-items (carrying `metadata.marketplace`) instead re-fetch the `SKILL.md` from
-the pinned GitHub commit at install time, create the Skill with
-`source: "catalog:<sourceId>"`, `remoteProvenance.kind: "marketplace"`, and
-mirror the file into `${AGENTS_HOME}/skills` like a direct GitHub install;
-plugins without a declared `skillPath` resolve it only when the repository
-contains exactly one Skill.
+Skill catalog rows remain readable for migration compatibility. Direct Skill
+catalog installation returns `PREVIEW_REQUIRED`; callers select an explicit
+registry locator, review the complete package and consume its preview token.
+Template catalog installation is unchanged.
 
 ### Audit Logs
 
@@ -1488,8 +1522,8 @@ Query parameters:
 
 Notifications are tenant-scoped and persisted in SQLite. Gateway stores session
 lifecycle events, accepted AI CLI hook notifications from Claude Code,
-OpenCode, Codex, and Kimi Code (permission prompts and denials, task
-completion/interruption/failure, session end), and app action results before
+OpenCode, Codex, Kimi Code and Pi (confirmed user-input prompts and main-session
+completion/failure), and app action results before
 broadcasting them on
 `/ws/events`. The Web console uses these APIs to hydrate notification history
 after reload, persist read state, mark all notifications read, and clear the
@@ -1501,17 +1535,47 @@ no session context (`sessionId` is null), and an `action`
 payload; they are also pushed live as `app_action_notification` events on
 `/ws/events`.
 
-The built-in Claude Code template writes `.claude/settings.json` hooks for
-`PermissionRequest`, `PermissionDenied`, and `Notification(permission_prompt)`.
-Session create and restart merge ForgeBadger hooks into
-`.claude/settings.local.json` before starting Claude Code, so imported projects
-can receive permission, `Stop`, and `SessionEnd` notifications even before a
-manual template sync. OpenCode project plugins subscribe to `permission.asked`,
-`session.idle`, and `session.error`. Codex project hooks subscribe to
-`PermissionRequest`, `Stop`, and `SessionEnd`; Codex may require one-time hook
-trust approval through `/hooks`. Kimi project hooks subscribe to
-`PermissionRequest`, `Stop`, `Interrupt`, `StopFailure`, `SessionEnd`, and
-`Notification(task.completed)`.
+CLI notifications are classified by lifecycle semantics rather than the selected
+approval mode or arbitrary message keywords. `PermissionDenied`, `Interrupt`,
+`SessionEnd`, subagent completion and background `Notification(task.completed)`
+are accepted without broadcasting or creating notification rows. Main `Stop`
+and `StopFailure` remain completion/failure signals; a CLI end-of-turn signal
+cannot independently prove the whole user objective or acceptance checks passed.
+
+- Claude uses `Notification(permission_prompt)` (the actual waiting dialog,
+  normally delayed about six seconds), not the pre-decision `PermissionRequest`.
+  The latter can be resolved by a hook or automatic reviewer. Child lifecycle
+  events carrying `agent_id` are filtered, while real user-input notifications
+  still reach the user even when a child agent initiated the request.
+- Codex pre-review `PermissionRequest` lacks reliable reviewer identity, so it
+  is not a notification. ForgeBadger launches its TUI with only
+  `tui.notifications=["approval-requested"]`, OSC 9 delivery and the `always`
+  notification condition. This changes notification settings, not approval
+  policy. Structured `Stop` hooks provide main-session completion.
+- Kimi Code keeps its documented just-before-user-prompt `PermissionRequest`.
+  Generic `Notification` task events describe background work, so they are not
+  promoted to main completion. Managed Kimi hooks live in its global config,
+  not a project-local hook block.
+- OpenCode checks native `parentID` through the SDK, emits root busy-to-idle
+  transitions once and omits the idle echo after failure. Permission notices wait
+  one second and recheck the server's pending list; replied/auto-resolved requests
+  are dropped. Failed metadata lookup does not invent a root completion.
+- Pi only forwards `agent_settled` and `ui_prompt_start` from contexts with a UI;
+  headless child CLI processes inheriting ForgeBadger environment do not alert.
+
+Unclassified terminal BEL and completion prose are not interpreted as approvals.
+Known Codex approval OSC messages and OpenCode pending-input OSC 777 messages
+remain supported. Reliable lifecycle alerts require managed hooks/plugins; when
+hooks are disabled, a bare bell alone cannot establish completion or human input.
+Existing CLI processes need restart to load the updated launch options/plugins;
+the Gateway filter also handles older hook payloads without changing their
+permission decisions or custom hook configuration.
+
+Source contracts: [Claude hooks](https://code.claude.com/docs/en/hooks#notification),
+[Codex TUI notifications](https://github.com/openai/codex/blob/main/codex-rs/tui/src/chatwidget/notifications.rs),
+[Kimi Code hooks](https://moonshotai.github.io/kimi-code/en/customization/hooks),
+[OpenCode notification lifecycle](https://github.com/anomalyco/opencode/blob/dev/packages/tui/src/feature-plugins/system/notifications.ts).
+
 ForgeBadger bounds generated Codex `SessionEnd` handlers to Codex's three-second
 maximum and aborts their local Gateway forwarding request after 2.5 seconds;
 other generated Codex handlers retain a five-second timeout.
@@ -1521,6 +1585,117 @@ managed plugin whose Gateway request aborts after 4.5 seconds. Headers interpola
 `FORGEBADGER_SESSION_ID` and
 `FORGEBADGER_ATTACH_TOKEN` from the Session Server launch environment. The endpoint also
 accepts the legacy wrapper payload used by older command-hook templates.
+
+#### Feishu notification cards
+
+- `GET /api/v1/notifications/feishu` returns `{ config, ready, blocker, targets }`.
+- `PUT /api/v1/notifications/feishu` replaces the personal subscription with
+  `{ enabled, targetId, types, webBaseUrl, revision }`. The revision must match
+  the current version (initially `0`); stale updates return `409` with
+  `details.code=CONFIG_CONFLICT`. Identical updates preserve the revision.
+  Legacy `identityId` requests still select a private-chat target. Supplying
+  conflicting `targetId` and `identityId` values is rejected as `TARGET_CONFLICT`.
+  Arbitrary chat IDs, names, recipient types or availability fields are not accepted.
+  Invalid Web addresses return `400`/`WEB_URL_INVALID`; unexpected server failures
+  return `500`/`INTERNAL_ERROR`, without exposing internal messages.
+- `POST /api/v1/notifications/feishu/targets/refresh` accepts `{}` and returns
+  `{ targets }`. Private targets come from confirmed, current-account identities.
+  Group candidates come from this user's configured chat IDs, authorized group
+  routes and previously verified directory entries. The service intersects these
+  with the current bot's group list using Feishu's `/im/v1/chats` API. Group names
+  are bounded and redacted. Results are tenant/account-revision scoped. Each
+  target includes `id`, `kind`, `name`, `chatId`, account/revision metadata,
+  `available`, and `reason`. Reads use the cached directory; refreshes are explicit,
+  coalesced per user, bounded to 20 seconds and 20 pages of 100 groups. Partial,
+  failed or stale-account refreshes do not overwrite a complete directory.
+- `GET /api/v1/notifications/feishu/deliveries` returns the latest 30 delivery
+  metadata records: `id`, `type`, `status`, `errorCode`, and `createdAt`.
+- `POST /api/v1/notifications/feishu/test` accepts only `{ requestId }` (UUID)
+  and returns `202` with `{ id, status }`. Reusing the same request ID returns
+  the existing record, including after configuration changes. It cannot
+  supply arbitrary message content or a recipient.
+
+The subscription defaults off. Types are `attention`, `failure`, `completion`
+(selected by default), `lifecycle`, `app_action`, and `automation`. These map
+to persisted CLI notifications, app-action results, and automation result
+notifications; ordinary Copilot runs do not emit a notification merely by
+finishing. Existing notification history is not backfilled.
+
+Saving an enabled subscription explicitly authorizes outbound notifications to
+one selected private chat or verified group. Group targets are never selected
+automatically; the UI identifies that group members can see the chosen notification
+types. Inbound command allowlists, project autonomy and remote-operation routes
+are independent and unchanged. A confirmed private chat does not need to be in
+the inbound command allowlist to receive notifications.
+
+Enablement and every send require an active user, current enabled Feishu account,
+enabled integration, and valid target. Emergency stop prevents delivery. Private
+targets retain identity-revocation checks. Group sends check the bot's current
+membership through `/im/v1/chats/:chatId/members/is_in_chat`; missing group-read
+permissions are reported in delivery records, and no message is sent. The app
+needs access to the group-list and membership-check APIs for group notifications.
+Settings and delivery metadata remain tenant scoped. Disabling is possible after
+the target becomes stale. Configuration changes cancel pending deliveries; sends
+recheck the exact subscription/target versions and source notification after
+network waits and immediately before the message request.
+
+Target unavailability and recovery increment its revision so old queued work
+cannot revive. Updating a group name or verification timestamp preserves the
+revision. Migration `0120` retains existing private subscriptions and cancels
+old pending entries (`TARGET_MIGRATED`) rather than redirecting them. Existing
+in-flight and completed delivery records retain their prior outcome semantics.
+
+The local notification and durable delivery entry are created in one SQLite
+transaction. Invalid notification authority skips external delivery without
+blocking local notification persistence. Queued attention and test cards expire
+after 10 minutes; other types expire after 24 hours. Definite pre-send failures
+and HTTP 429 receive bounded retries (up to five attempts). A send with no
+reliable receipt, or an expired in-flight lease, becomes `unknown` and is not
+automatically resent. Other statuses are `pending`, `sending`, `delivered`,
+`failed`, and `cancelled`; `delivered` means Feishu acknowledged the message,
+not that the user read it. Gateway restarts resume pending entries.
+
+Cards use Feishu JSON 2.0 `interactive` messages with bounded, redacted plain
+text and no approval actions. An optional `webBaseUrl` enables view buttons
+using canonical ForgeBadger paths; credentials, query strings, fragments,
+and non-HTTP(S) schemes are rejected. Use an address reachable from the
+receiving device. Leaving it empty sends summary cards without a button.
+
+CLI cards lead with a recent user-request excerpt when available, falling back
+to the session name; short/full session IDs remain available for identification.
+The event appears once in the header (for example, “回复结束”), without repeated
+progress or acceptance boilerplate. The original timestamp uses the Gateway's
+local timezone with an explicit UTC offset. Existing notification title, tool
+and error detail remain plain text.
+
+Codex and Claude managed hooks include `UserPromptSubmit`. After session-token
+authentication, the Gateway stores a redacted, bounded 600-character excerpt in
+`sessions.last_prompt`; child-agent prompts do not replace it. Redaction happens
+before truncation and is repeated when rendering older notification payloads.
+Prompt submission does not generate a notification or wake Copilot. When valid
+native session/turn metadata exists, a separate tenant- and ForgeBadger-session-
+scoped snapshot is retained (up to 128 per session; cascades on session deletion).
+Lifecycle notifications copy only the matching native session/turn excerpt into
+their payload, labelled “最近请求”. Claude events without a turn ID match only
+the same native session's no-turn snapshot. Unknown turns, invalid/missing native
+metadata and child-agent events fall back to the session name, without borrowing
+another request. Later requests cannot rewrite old cards. Existing CLI sessions
+must reload/restart to load newly added hooks; other adapters without native
+identity metadata fall back to the session name. Migration does not associate
+preexisting `last_prompt` values with an inferred native identity.
+No arbitrary transcript path or terminal history is read for this feature.
+
+Before each Copilot model call, recent CLI notifications are projected as optional
+historical observations. Channel conversations use their currently authorized
+route's project; Web conversations use the selected project or projects referenced
+by their prior tool calls. An unscoped fresh Web conversation receives none.
+Queries require tenant ownership and agreement between the event's project and
+the current session's project. Deleted sessions, revoked channel scopes and events
+older than seven days are excluded. At most eight sessions' latest notifications
+are included; small context budgets can omit observations without displacing the
+user goal or tool evidence. Observations do not create model turns or duplicate
+chat messages, and do not depend on successful Feishu delivery. CLI reply/session
+end remains distinct from overall task acceptance in model context.
 
 ### Activities
 
@@ -1610,9 +1785,27 @@ independent, no SSE streams or session state are kept, and `GET`/`DELETE`
 return `405`. The endpoint speaks MCP/JSON-RPC semantics, not the project
 response envelope.
 
-Authentication uses long-lived access tokens managed through the REST routes
+Authentication uses access tokens managed through the REST routes
 above (standard JWT/session auth + envelope). `POST /api/v1/mcp/tokens` accepts
-`{ name, scopes? }` (`scopes â ["read","operate"]`, default `["read"]`) and
+`{ name, scopes?, projectIds, expiresInHours }` for new project grants.
+`projectIds` selects 1–200 existing projects owned by the caller; duplicates are
+removed. The server stores IDs and canonical directory snapshots. An explicit
+`expiresInHours: null` means permanent until revoked; an integer from 1 to
+87600 selects a finite lifetime. Scopes are `read`, `operate`, and
+`cli_dispatch` (default `read`); `cli_dispatch` also requires `operate`.
+All scopes on a project grant are limited to the selected projects. Missing,
+foreign, moved, or retargeted project directories are refused. A parent project
+cannot expose an unselected nested project: select nested projects together;
+new nested projects or changed nested snapshots invalidate access to the parent.
+Runtime working directories must match the resource's own selected project.
+
+Legacy `{ name, scopes?, allowedRoot?, expiresInHours? }` requests remain
+compatible: CLI grants require a canonical root and 1–168 hour expiry.
+Legacy account read/operate grants reject root and expiry fields. Do not mix
+`projectIds` with `allowedRoot`. Existing tokens retain their original scope
+and expiration; migration never expands their authority. Token create/list
+payloads include `projectIds` (null for legacy grants), `allowedRoot`, and
+`expiresAt` (null for permanent tokens). It
 returns the plaintext token (`fbmcp_â¦`) exactly once; only its SHA-256 hash is
 stored. `GET` lists the caller's tokens without any secret material; `DELETE`
 revokes immediately. MCP requests present the token as
@@ -1620,35 +1813,73 @@ revokes immediately. MCP requests present the token as
 request and revocation takes effect at once.
 
 The tool surface reuses the native Copilot platform tools
-(`services/agent/tools`): read tools (`list_projects`, `get_project`,
-`list_sessions`, `get_session`, `get_session_output`, `list_skills`,
-`load_skill`, `search_memory`, `list_memory`, `get_usage_summary`,
+(`services/agent/tools`). Legacy account tokens without `cli_dispatch` expose read tools
+(`list_projects`, `get_project`,
+`list_sessions`, `get_session`, `get_session_output`, `list_playbooks`,
+`load_playbook`, `read_skill_resource`, `search_memory`, `list_memory`, `get_usage_summary`,
 `pm_overview`, `pm_list_task_packets`, `pm_get_task_packet`,
-`project_graph_*`) are available to every token; operate tools
+`project_graph_*`) subject to owner tool settings and runtime availability; operate tools
 (`create_project`, `update_project`, `start_session`, `stop_session`,
 `pm_create_work_item`, `pm_update_work_item`,
 `pm_update_management`, `pm_prepare_task_packet`, `write_memory`) require the
 `operate` scope and are hidden from `tools/list` without it. CLI-control tools
-(`dispatch_task_to_session`, `pm_execute_task_packet`) are never exposed over
-MCP, regardless of scope. The `operate`
+(`dispatch_task_to_session`) remain unavailable. `pm_execute_task_packet`,
+`import_project`, and `apply_project_config` require both `operate` and
+`cli_dispatch`; task execution also requires an autonomy-enabled adapter.
+Project grants of every scope and legacy CLI tokens use a narrower
+development-workflow tool list. Project grants exclude global tools and
+`create_project`, `import_project`, and `list_templates`: selecting existing
+projects does not authorize new projects or the global template catalog.
+CLI scope also exposes `preview_project_config` and `get_mcp_operation`.
+Legacy CLI tokens additionally gain `list_templates`; their reads and writes
+are limited to the selected root. `create_project`
+accepts `templateId` and `techStack`.
+The `operate`
 scope is the owner's standing authorization: platform command intents are
 previewed and approved inline with `owner_action` authority (the interactive
 approval loop does not exist for MCP callers), and every call still passes zod
 input validation, the security policy engine, the owner's per-tool enable
 settings, and the 48KB output cap. Operations the security policy marks as
-high-risk approval-gated (for example `create_project` with a path outside the
-home directory) are refused rather than auto-approved, and `write_memory` with
+high-risk approval-gated (for example `create_project` outside the home directory
+with an older token) are refused rather than auto-approved, and `write_memory` with
 `scope: "session"` is rejected because session memory is bound to a Copilot
 conversation. Error responses on this endpoint use JSON-RPC error envelopes
 (`-32700` parse error, `-32603` internal error), never the project REST
 envelope. Tenant isolation is unchanged â all tools
 execute with the token owner's `userId`.
 
-Client configuration example (Claude Code):
+Every operate call made with a `cli_dispatch` token requires a stable
+`operationId` (1–100 ASCII letters, digits, `_` or `-`, beginning with a letter
+or digit). Reuse it with the same payload on retry. `get_mcp_operation` returns
+the durable intent and receipt, including indeterminate outcomes without
+replaying the effect. The token is rechecked at execution checkpoints before
+terminal staging and Enter. The allowed root limits project paths and linked
+session working directories Gateway selects; it does not sandbox a spawned
+CLI's filesystem access or network traffic. It is checked against real paths;
+credential directories are excluded. MCP terminal output and receipts receive
+pattern-based secret redaction; errors are redacted too. Import registers an
+existing directory. Configuration apply
+requires a matching preview digest, uses host credentials, creates missing
+files only, and refuses modified or unsafe files. Task-packet dispatch uses
+Session Server and the adapter autonomy allowlist. Completion evidence can
+advance a task to `ready_for_review`, not independently verified or `done`.
+Native CLI trust prompts require the owner at the terminal.
 
-```bash
-claude mcp add --transport http forgebadger http://127.0.0.1:48731/mcp \
-  --header "Authorization: Bearer fbmcp_â¦"
+JSON connection template for clients supporting `mcpServers` (other clients,
+including Codex TOML configuration, use their own format for the same URL and
+Bearer token). The Web console shows a placeholder normally and offers a
+copyable configuration containing the token only in the creation dialog.
+
+```json
+{
+  "mcpServers": {
+    "forgebadger": {
+      "type": "http",
+      "url": "http://127.0.0.1:48731/mcp",
+      "headers": { "Authorization": "Bearer <TOKEN>" }
+    }
+  }
+}
 ```
 
 ## 4. WebSocket Contract
@@ -1748,7 +1979,7 @@ MVP-0 must enforce:
 
 ## 6. API Shape Gate
 
-Before frontend implementation begins, `.claude/rules/api.md`, `CLAUDE.md`, `docs/TECH-ARCHITECTURE.md`, and this file must agree on the response envelope.
+Before frontend implementation begins, `.claude/rules/api.md`, `AGENTS.md`, `docs/TECH-ARCHITECTURE.md`, and this file must agree on the response envelope.
 
 ## 7. Retired Legacy Internal APIs
 
@@ -1771,7 +2002,7 @@ endpoints do not themselves expose a public inbound relay.
 | GET | `/identities` | `{ identities }`; latest 100 |
 | POST | `/identities/:id/revoke` | `{}` â `{ revoked: true }`; also revokes identity routes and outstanding account pairings |
 | POST | `/routes` | `{ identityId, grantId }` â `{ route }`; 201, creates a fresh native grant-bound conversation atomically |
-| GET | `/routes` | `{ routes }`; latest 100 |
+| GET | `/routes` | `{ routes }`; latest 100; each includes read-only `authorityValid` |
 | POST | `/routes/:id/revoke` | `{}` â `{ revoked: true }` |
 
 A trusted SDK transport must first claim a pairing using the private sender/chat
@@ -1809,16 +2040,65 @@ the inbox payload; the existing native transcript retains its current storage
 contract.
 
 `adoptNext` atomically binds one pending message to one native run, in receipt
-order per route, skipping busy conversations so other routes can progress. The
+order per conversation, skipping busy conversations so other chats and topics on the same authorization route can progress. The
 native runtime owns execution and recovery after adoption. Channel ownership and
 action provenance persist independently of route/step joins; missing authority
 fails closed. Revocation prevents later outputs and authorized effects, but
 cannot undo an external effect that has already started.
 
-`result` returns an authorized snapshot from the native run ledger. This slice
-adds no public inbound endpoints, remote approval cards or Telegram transport.
+`result` returns an authorized snapshot from the native run ledger. No public
+inbound approval endpoint is exposed. Feishu approvals use authenticated SDK
+card callbacks; Telegram uses account-scoped long polling and Web approvals.
 
 ### Default native Feishu runtime and result delivery
+
+Native Feishu and Telegram inputs support `/help`, `/new`, `/stop`, `/status` and `/model`
+as gateway control commands. They require the same paired identity, current
+account revision, allowed chat and project authority as ordinary input. They
+execute transactionally after deduplication and enqueue encrypted `command`
+receipts in `channel_deliveries`; no model or idle execution slot is required.
+Unknown slash commands and unexpected arguments receive explicit local feedback.
+`/skills` and `/playbooks` retain the existing Copilot local-reply behavior.
+`/pair <code>` remains a separate private-chat pairing flow. Telegram accepts
+`/command@CurrentBot`; commands addressed to other bots are ignored.
+
+`/status` reports only the current conversation's active/research tasks and queued
+inputs. `/stop` cancels that scope's active runs/research descendants, pending
+channel inputs and Web follow-ups in one transaction, then aborts in-flight model
+requests after commit. It does not kill CLI sessions or undo external operations.
+`/new` creates a fresh current conversation while retaining history; it waits for
+active tasks, queued inputs and unsettled/unprojected replies to finish. It does
+not reset project/global memory. The original route remains the authority root.
+Migration 0116 pins accepted inputs to their conversation and backfills adopted
+inputs from their run. Adoption and delivery reject a changed conversation scope.
+Duplicate control messages return the original receipt without reapplying their
+effects, including after a Gateway restart. A reply failure does not roll back a
+committed command; send authorization is still checked against current authority.
+
+`/model` and `/model status` show the effective model and whether it is fixed for
+this remote session or inherited from the existing Copilot preferences/default.
+`/model list [page]` lists ten locally usable Model Center profiles per page;
+it performs no provider discovery or remote connectivity test. Select with
+`/model <provider-key/model-id>`, a unique exact model ID/name, or the unambiguous
+profile UUID printed in the list. Model IDs containing `/` are supported.
+Ambiguous, foreign, disabled or incompatible choices are rejected without changing
+the selection. `/model default` clears the session choice even when no default is
+usable. Model commands never disclose credentials, headers or endpoint URLs.
+
+Migration 0117 stores the profile UUID on the tenant/chat/thread-scoped channel
+session. `/new` preserves this choice, and no global preference is modified.
+Changing it requires no active task/research descendant, pending channel input or
+Web follow-up in that scope; viewing current/list remains available while busy.
+Adoption copies a fixed choice into the durable run input. Runtime model resolution
+rechecks profile/provider state, credentials and supported chat protocol; explicitly
+non-chat profiles are rejected, while empty legacy capability metadata remains
+compatible. Deleted or unusable fixed models produce a failed run and terminal
+reply, with no silent fallback. The session pin survives deletion so the owner can
+repair the configuration, select another model or clear it with `/model default`.
+Web requests with their own explicit model and other remote scopes are unchanged.
+This follows the session-scoped selection and explicit reset pattern described by
+[OpenClaw](https://github.com/openclaw/openclaw/blob/main/docs/concepts/models.md),
+and the busy-session switching guard in [Hermes](https://github.com/NousResearch/hermes-agent/blob/main/gateway/run.py).
 
 `createGatewayApp` now constructs a native Feishu runtime by default, while
 retaining runtime injection for tests. Only active users with enabled accounts,
@@ -1831,15 +2111,56 @@ Results use `channel_deliveries`, never the historical Feishu inbox/outbox.
 Completed tasks return only the final assistant text, excluding inline `<think>`
 reasoning blocks (including an unclosed tail). Empty answers use a fixed Web
 notice. Filtering also applies to older pending payloads without modifying the
-native transcript. Other terminal states use a fixed status notice. Each pending approval receives a deduplicated text notice
-directing the owner to Web Copilot; this does not authorize a remote decision.
-Encoded JSON text is capped at 12 KB with a continuation notice. Payloads are
-encrypted, and uniqueness is scoped by tenant, input message and phase.
+native transcript. Other terminal states use a fixed status notice. Each pending
+approval for a Feishu-originated task receives one `interactive` card with the
+redacted request, exact tool parameters and single-action approve/reject buttons.
+The `approval-card-v1:<pendingActionId>` phase uses the same durable outbox and
+confirmed send receipts. Existing confirmed legacy text notices can receive the
+new card once; unknown/in-flight legacy deliveries are not replayed. Telegram
+continues to receive a text notice directing the owner to Web Copilot.
 
-Sending requires current route/grant/account/chat authority, matching native
+Enable `card.action.trigger` under Feishu's callback configuration using the
+long-connection transport. The callback uses SDK-authenticated operator/chat
+metadata, never identity fields from button values. It requires the original
+paired sender, exact confirmed message receipt, current account revision,
+active route/project authority and matching conversation (including topics).
+HMAC values bind tenant, delivery, run, action, input/resources digest, decision
+and expiry. Cards expire after 24 hours or the platform intent's earlier expiry.
+Incomplete/oversized previews and missing stop-session target evidence omit the
+approve button; Web remains available for full inspection. Free-form chat text
+does not approve actions. This does not forward unrelated Web tasks to channels.
+
+Web and Feishu use the same synchronous `recordApprovalDecision` transaction,
+including tool availability and pending run/step/digest checks. The callback
+does not run tools or wait for a model: it commits a decision, records an audit
+entry, returns a toast and removes buttons while retaining the request/target
+summary. The existing recovery pump resumes the native run. Repeated clicks,
+conflicting Web decisions, revoked authority and changed inputs cannot repeat
+effects. There is no new database migration or public HTTP approval relay.
+Telegram's encoded JSON text remains capped at 12 KB with a continuation notice.
+Feishu retains up to 64 KiB of UTF-8 reply text plus a Web continuation notice.
+Its sender uses `post` messages with Markdown `md` rows, parsed into blocks with
+a GFM lexer. Code blocks are separate rows; oversized individual blocks become
+readable plain-text parts without splitting surrogate pairs or leaving broken
+Markdown delimiters. Each serialized message fragment is bounded to 10 KB before
+recipient/UUID fields. Formatted output is additionally bounded to 23 content
+parts and 192 KiB, followed by at most one Web notice; unused reference definitions
+are not copied to rows. The bounded notice is sent outside any cut code fence.
+Payloads are encrypted, and uniqueness is scoped by tenant, input message and phase.
+
+Feishu checkpoints each confirmed logical part. UUIDs derive from delivery ID,
+formatter version, part index and format; only a definite post-content-format
+rejection permits a plain-text fallback for that same part. Generic parameter
+errors, rate limits, missing receipts, network failures and 5xx responses never
+trigger fallback sends. A fallback preserves code literals and link destinations.
+Between confirmed parts, batches yield after four sends or eight seconds without
+consuming the failed-send retry budget. New workers resume from the persisted
+part index. Authorization is checked before every part and fallback. An in-flight
+timeout or failed checkpoint remains unknown, with no automatic resend.
+
+Sending requires current route/project/account/chat authority, matching native
 phase, an unexpired owned claim and a live runtime. Checks run again after token
-and DNS awaits. Confirmed receipts are `delivered`; provider rejection or token
-failure is `failed`; ambiguous message responses/network failures and expired
+and DNS awaits. Confirmed receipts are `delivered`; permanent provider rejection is `failed`. Definite rate limits and pre-send token failures schedule a bounded retry (up to five attempts) using `next_attempt_at`; `retry_after` is honored without holding a worker lease. Telegram checkpoints each accepted chunk and resumes from the first unsent chunk. Ambiguous message responses/network failures and expired
 in-flight claims are `unknown`. Obsolete/unauthorized notices are `cancelled`.
 Only `pending` records are sent. Neither failed nor unknown records are retried
 automatically. Late receipts cannot overwrite an expired/replaced claim.
@@ -1851,6 +2172,24 @@ provider deduplication window. This change does not replay historical queues.
 Live activation and an actual recipient-visible send require separate operator
 verification; local composition tests use external I/O substitutes.
 
+Accepted Feishu messages receive a `Typing` reaction on the original message.
+Four independent feedback lanes keep reaction I/O out of ingress and text delivery.
+Only recent inputs (within two minutes of admission) can create it; delivered
+responses, including approval notices, end it. Rejected/cancelled/failed inputs,
+failed or uncertain delivery, revoked authority and a 30-minute safety lifetime
+also trigger cleanup. No Telegram reaction or extra chat message is introduced.
+`feishu_typing_reactions` stores claims and reaction receipts. Uncertain creates
+are reconciled by paginated lookup of the same application's `Typing`, never by
+repeating the create. Cleanup retries use backoff; provider failures do not fail
+the task or its response. An empty lookup after an uncertain create is rechecked
+for two minutes from the attempt, allowing delayed provider visibility; responses
+delayed beyond this bounded recovery window remain a provider-side limitation.
+Reaction permissions must be granted to the Feishu app.
+Cleanup is a limited compensating action after route revocation/account disable
+or emergency stop: it requires the same tenant, active user and original app ID,
+but not the old route or account revision. Changing app ID retains the old receipt
+without using the replacement application's credentials to delete it.
+
 ### Owner channel management UI and delivery diagnostics
 
 `/copilot/channels` is linked from Copilot settings. Owners configure a write-only
@@ -1858,35 +2197,106 @@ App Secret, check connection status, stop the channel, create a short-lived
 pairing, explicitly acknowledge the exact claimed private sender/chat and confirm
 the current revision. Candidate changes invalidate previous acknowledgement.
 Secrets and one-time pairing tokens stay out of query/mutation cache, URL and
-local storage. Saving account configuration increments its revision and requires
-new pairing/binding; the page states this before submission.
+local storage. Identical account saves preserve the revision, connection state and pairing. Credential or enablement changes increment the revision and require new pairing/binding; existing stale identities are never reactivated automatically.
 
-The page reuses project/action grant management, previews projects, capabilities,
-allowed roots, expiry, action budget and concurrency, then creates a separate
-channel-bound conversation. Invalid grants/identities are not selectable. Route
-status reflects associated authority invalidation even when the stored route is
-still active. Owners can revoke identities/routes or open the bound Copilot
-conversation using its existing `?c=` navigation for Web approvals.
+The page selects an owned project with Copilot autonomy enabled and binds the
+confirmed private identity to it. Invalid identities are not selectable. Route
+status reflects account, identity and project authorization even when the stored
+route remains active. Owners can revoke identities/routes or open the bound
+Copilot conversation using its existing `?c=` navigation for Web approvals.
 
 `GET /api/v1/copilot/channels/deliveries` requires active-user authentication and
 returns `{ deliveries }` (standard envelope, `Cache-Control: no-store`). It lists
 at most 100 newest records for that tenant, explicitly selecting only `id`,
-`inboxId`, `phase`, `status`, `createdAt`, and boolean `receiptRecorded`. Payload,
+`inboxId`, `accountId`, `channel`, `phase`, `status`, `createdAt`, and boolean `receiptRecorded`. Payload,
 claim token, peer IDs and provider message IDs are never returned. The UI labels
 unknown outcomes as uncertain and offers no resend action.
+
+### Channel message reliability and conversation scope
+
+`channel_route_sessions` maps each authorized route and `(chat_type, chat_id,
+thread_id)` to a channel-owned Copilot conversation. Private history is preserved;
+groups and topics receive separate histories. Every execution revalidates the
+parent route, identity, account, project autonomy and chat allowlist. Telegram
+retains `message_thread_id`; Feishu uses actual `thread_id` and replies to the
+persisted inbound message. A Feishu quote `root_id` alone does not create a topic.
+Deleting the parent route conversation revokes all child conversation authority,
+including Web admission, approval resumption and development effects; rejection
+and cancellation remain available. The target child must also remain active.
+Route listings project `authorityValid` through the same base authority check;
+this does not prove a specific chat passes the allowlist or that live delivery
+works. Older responses without this field are shown as unknown in the Web UI.
+Setup controls explain missing connection configuration, current identity,
+project selection or an existing binding. Configuration failures and emergency
+stop block new pairing/confirmation/binding, while cancellation and revocation
+remain available. Configuring credentials alone does not grant remote access.
+
+Message deduplication uses `(user_id, account_id, chat_id, message_id)` plus the
+provider event/alias key. Legacy rows without plaintext chat metadata are matched
+against their encrypted source, never guessed from the paired private identity.
+Telegram confirms a batch prefix only after durable admission and cursor commit;
+a temporary storage failure stops that batch, while definite input/authorization
+rejections may be acknowledged. Cursors are fenced by tenant/account/revision.
+Ingress fenced during account reconciliation is a retryable lifecycle interruption,
+not a definite authorization rejection: the client closes without advancing the
+cursor and reconnects even for an unchanged account if an update was interrupted.
+
+Migration `0114_channel_reliability` preserves transcripts. Before native or
+development recovery starts, unfinished legacy channel runs with unknown stored
+chat scope are cancelled through the run ledger, invalidating claims and pending
+actions. Queued, unadopted messages acquire the correct scoped conversation on
+adoption. This one-time interruption avoids resuming old mixed-context tasks.
+
+`GET /api/v1/channels/:channel/diagnostics` adds `status` per check:
+`passed | failed | untested | pending`; compatibility `ok` is true only for a
+passed check. No delivery history is untested; pending/sending is in progress;
+cancelled/failed/unknown is not success. Model configuration follows Copilot's
+preferred active model, then the default fallback, and explicitly does not claim
+live model connectivity. The UI scopes identities/routes/receipts to the selected
+account, loads the two channels independently, and exposes chat allowlists for both.
+
+### Copilot project Git status
+
+`get_project_git_status({projectId})` is an owner-scoped read tool, available in
+normal and project-scoped research runs and in the initial discovery tool set.
+Use it to answer workspace cleanliness and uncommitted-count questions.
+It returns `counts` (`total`, `staged`, `unstaged`, `untracked`, `conflicted`,
+`stagedAndUnstaged`), `byStatus` (Git XY codes), `clean`, `complete`, `observedAt`,
+`unit: unique_git_status_paths` and explicit scope notes. Total deduplicates raw
+path bytes; renames count their destination once. Categories can overlap,
+including staged deletions that remain untracked. Conflicts count separately.
+No filenames or file contents are returned. Hidden, credential-shaped, binary,
+large and symlink paths still contribute to counts; diff content filters and
+pagination do not apply. Untracked directories expand into individual paths;
+Git treats nested untracked repositories as one entry. Ignored files and submodule
+worktree changes are excluded; staged gitlink changes are included without
+entering submodules. `complete` means the bounded command output was fully parsed,
+not that concurrent worktree edits were frozen.
+
+The reader uses a temporary Git metadata directory containing a fixed HEAD,
+index and allowlisted configuration snapshot, reusing only validated objects.
+It preserves safe effective core configuration and exclusion/attribute settings,
+never runs project filters/hooks/helpers, and never refreshes the source index.
+Active clean/process/required filters or sparse checkout fail explicitly as
+unsupported; linked/external gitdirs retain the existing unsupported-root boundary.
+The 10-second deadline, metadata-size caps and 8 MiB output cap fail without
+returning a misleading partial zero. Errors mean the count is unknown.
+`read_project_diff` remains a content-page tool and returns
+`repositoryStatus: not_assessed`; empty pages never establish workspace cleanliness.
 
 ### Copilot request identity and context
 
 `clientRequestId` is optional, nonempty, and at most 128 characters. Its unique
 scope is `(userId, conversationId, clientRequestId)`. Use a fresh key for each
 intentional message; preserve it when retrying an uncertain response. The digest
-covers content, explicit model/project, effective Grant, source, and admission
-mode. Current user, conversation, project, channel and Grant scope are rechecked
+covers content, explicit model/project, source, admission options and supplied
+review/discovery/edit context. Current user, conversation, project and channel
+scope are rechecked
 before any cached run is returned. The key deduplicates message admission, not
 conversation creation. Legacy callers without a key retain existing behavior.
 
 The full Copilot chat offers explicit project context. The Gateway verifies
-ownership and any bound Grant, then includes the selected ID/name in the model
+project ownership and channel scope, then includes the selected ID/name in the model
 context. Selection grants no additional tool authority. JSON/SSE model replies
 must be structurally valid; partial or unsuccessful tool batches are not committed.
 Text deltas may be tentative until the durable run reaches a terminal state.
@@ -1898,20 +2308,59 @@ model and profile. Summaries and different models receive public content instead
 The run inspector omits encrypted replay and exposes only versioned termination
 diagnostics (`type: model_response`, `finishReason`, `toolCallCount`); parser failures
 record `model_response_error` with a fixed diagnostic rather than raw provider data.
+Connection failures record `model_connection_error` with `code`, a fixed safe
+`reason`, and `diagnostic` (`category`, allowlisted `nativeCodes`, `stage`,
+`delivery`, `attempts`, `elapsedMs`, `retryScope: connection_fetch`). Categories
+separate DNS, TCP, TLS, timeout, cancellation and unclassified connection errors.
+The same safe details appear as a durable error message in the Web conversation;
+raw errors, hosts, credentials, request bodies and certificates are not retained.
+Attempts count connections within one HTTP fetch, not the separate HTTP-status
+retry loop. Only allowlisted transient errors with `delivery: not_sent` retry
+(maximum three attempts, 100/200 ms backoff, shared deadline). The HTTP request
+is released only after TCP / TLS connection establishment; once release starts,
+connection errors never retry, including response interruption and synchronous
+send errors. Existing HTTP 429/502/503/504 retry behavior is unchanged.
+
 A normal text-only model stop ends the conversation turn, not the project task.
 No fixed project-management sequence or natural-language completion heuristic is
 imposed by the runtime.
 
-The model-only `read_tool_result({messageId,offset?,length?})` tool returns up to
-6,000 UTF-16 characters of a persisted redacted receipt in the current conversation.
-It verifies the source run/step, current/original authority, current source-tool
-visibility and referenced resources. Deleted, unrelated, legacy unassociated,
-external MCP, Skill and nested readback receipts are rejected. This retrieves only
-saved content; it cannot recover output already discarded by the original 48 KiB
-receipt cap. `nextOffset`, `totalChars` and `originalOutputTruncated` describe paging
-and retained evidence. No additional HTTP endpoint is introduced.
+The model-only `read_tool_result({messageId,projectId?,offset?,length?})` tool
+returns up to 6,000 UTF-16 characters in the current conversation (offset up to
+2,097,152). It verifies the source message/run/step, current/original authority,
+source-tool visibility and referenced resources; restricted research additionally
+requires its inherited projectId. Deleted, unrelated, legacy unassociated,
+external MCP, Skill and nested readback receipts are rejected.
 
-### Persistent Copilot grants
+Oversized built-in project reads now retain a complete redacted, encrypted
+snapshot alongside the <=48 KiB receipt preview: `get_project`,
+`list_project_files`, `read_project_file`, `search_project_files` and
+`read_project_diff` only. Limits are 2 MiB UTF-8 per artifact, 16 MiB per run,
+64 MiB per user and seven days of retention. Archive publication and the source
+receipt share a lease-fenced transaction. Storage failure preserves the preview
+and never retries an operation. Readback revalidates the current project owner,
+root and source paths; snapshots are historical evidence, not current file state.
+Terminal output, aggregate queries and external tools are never archived.
+`artifactStatus` distinguishes available, expired, missing, too_large, quota,
+unavailable and legacy output. `nextOffset`, `totalChars` and
+`originalOutputTruncated` describe the selected saved content; an archived tool
+page can itself be truncated. Original outputs discarded before this change
+cannot be recovered. No additional HTTP endpoint is introduced.
+
+`read_project_diff({projectId,mode?,includeUntracked?,offset?})` is a model-only
+read tool: working compares allowed source files to the index; staged compares
+index to HEAD. It returns redacted display hunks and source hashes, not an
+executable patch. Each page scans at most 40 candidate paths and returns at most
+20 changed files; follow nextOffset even for an empty page. Metadata is bounded
+at 2,000 candidate paths and 20,000 Git entries, with a 10-second overall deadline.
+Files above 64 KiB, hidden/secret paths, symlinks, gitlinks and binary text are
+excluded. External gitdirs, worktrees using gitdir indirection, alternates and
+nested Git metadata links are unsupported. Lazy fetch and all remote transports
+are disabled; no external diff, textconv, fsmonitor or hooks run. Concurrent
+filesystem changes may invalidate the snapshot; skipped paths are not clean-file
+evidence. This tool shares existing tenant/project and restricted-research checks.
+
+### Historical reference: retired Copilot grants
 
 `POST /api/v1/copilot/grants` requires explicit `expiresAt` and `maxActions`.
 Each accepts a positive integer or `null`; `null` means no time expiry or no
@@ -1939,7 +2388,7 @@ repository reads expose null and writes encode null as zero. No migration was
 needed; preactivation inspection found no historical zero-bound grants.
 
 
-### Grant list cleanup and channel activation
+### Historical reference: Grant cleanup and channel activation
 
 Deleted grants retain a non-active tombstone for immutable conversation, action and
 channel references; they never restore owner authority. Tenant-scoped grant lists
@@ -1984,7 +2433,7 @@ never exposed over MCP. The capability settings list reports every tool with
 `available`/`unavailableReason`; attempts to toggle retired/unknown names return
 404. `enabled` is a configured preference, `available` is runtime availability,
 and `authorization` describes `read` or `approval_or_grant`.
-Actual resource authorization is always checked again during execution.
+Actual resource authorization is always checked again during execution. Copilot-origin intents (including legacy origins) recheck project autonomy and Copilot tool preferences at preview, execution and asynchronous checkpoints. These Copilot switches do not disable explicitly authenticated owner Web actions.
 
 Direct user turns automatically approve routine scoped platform actions under
 the risk policy; `approval_or_grant` is the capability family, not a promise
@@ -2030,8 +2479,9 @@ The Web entrypoint `/copilot/extensions` contains Skills and Connections tabs.
 | --- | --- | --- |
 | GET | `/skills` | `{ skills }` summaries, without full bundle content |
 | POST | `/skills/imports` | `{ source: { kind: "paste" or "upload", label? }, files: [{ path, content }] }` or `{ source: { kind: "url", url } }`; returns `{ skill }`, initially disabled |
-| GET | `/skills/:id` | `{ skill }` with current revision and all files |
+| GET | `/skills/:id` | `{ skill }` with current revision, all files, and `bundled: { version, files }` for builtin comparison (null for imports) |
 | PUT | `/skills/:id` | `{ expectedRevisionId, files, reviewedVersion? }`; returns `{ skill }` |
+| POST | `/skills/:id/adopt-builtin` | `{ expectedRevisionId, version }`; replaces the entire package with the specified current builtin, preserving history and the enabled switch; stale revision/version is 409 |
 | PUT | `/skills/:id/enabled` | `{ expectedRevisionId, enabled }`; returns `{ skill }` |
 | GET | `/skills/:id/revisions` | `{ revisions }`, newest 100 retained revision summaries |
 | GET | `/skills/:id/revisions/:revisionId` | `{ revision }`, including files |
@@ -2044,7 +2494,15 @@ The Web entrypoint `/copilot/extensions` contains Skills and Connections tabs.
 
 Skill summaries include `revisionId`, `source`, `kind`, `isEnabled`, `available`,
 `unavailableReason`, `compatible`, `incompatibilityReasons`, `requiredTools`,
-`reviewRequired`, `version` and `currentVersion`. Installation accepts up to 65
+`reviewRequired`, `version`, `currentVersion`, `customized` and `reviewedBuiltinVersion`.
+Ordinary saves preserve content version and do not acknowledge builtin updates.
+Explicit `reviewedVersion` records compatibility review separately from package version;
+the client must show the new bundle and obtain an explicit review decision. Saving a
+new version string in frontmatter alone cannot bypass the review requirement.
+Untouched builtin packages matching archived fingerprints upgrade automatically in an
+append-only transaction. Modified/unknown packages and explicit edit/rollback heads
+are retained for review. Pending review blocks loading even if the enabled switch is on.
+Installation accepts up to 65
 UTF-8 files, 128 KiB per file and 1 MiB combined, including root `SKILL.md`.
 Paths, YAML and UTF-8 are validated; a rejected import writes nothing. Up to 32
 non-builtin packages may be installed per owner. URL imports retrieve only the
@@ -2569,3 +3027,154 @@ broaden Copilot read/accept authority. Repeated identical links are idempotent; 
 an already stale binding returns 409 `ARTIFACT_LINK_STALE`. Task deletion cascades link
 rows, while artifact deletion is restricted while it is referenced. Linking does not
 change task progress, Copilot acceptance or Git state.
+
+### Copilot reliability APIs (2026-09-26)
+
+All endpoints remain Gateway-owned, JWT authenticated, tenant scoped and use the
+standard `{ code, data, message }` envelope. Message and edit requests accept the
+optional boolean `reviewTaskResults` (default false). This authorizes a bounded
+read-only review of a verified task result; it does not authorize another CLI
+submission, edits, test execution, acceptance or deployment. Internal
+`executionMode`, `parentRunId` and review provenance cannot be supplied over HTTP.
+
+| Method | Path below `/api/v1/copilot` | Contract |
+|---|---|---|
+| POST | `/conversations/:id/followups` | Same content/model/project options as messages; `clientRequestId` required. Returns `{ followup: { id, status, runId } }`. At most 10 queued per conversation; same key/body returns the same item; different body conflicts. |
+| GET | `/conversations/:id/followups` | `{ followups }`; up to 100 rows, pending first. Rows expose redacted content, status, runId, error and createdAt; no internal request digest or authority metadata. |
+| DELETE | `/followups/:id` | `{ cancelled: boolean }`; succeeds only for this owner's still-queued item. A promoted item must be cancelled via its run. |
+| GET | `/runs/:id` | Run additionally exposes `phase`, `phaseStartedAt`, and `usage: { chargedTokens, reportedTokens, estimatedCalls, calls, costUsd, knownCostUsd, unpricedCalls }`. |
+
+Phases are `queued`, `context`, `summarizing`, `model`, `tool`,
+`awaiting_approval`, `finished`. Usage includes auxiliary and linked child model
+calls. `chargedTokens` mixes provider-reported counts and conservative estimates;
+it is a governance counter, not an invoice or exact token/cost measurement.
+Queued input is added to history only when transactionally promoted after the
+conversation's active run ends. Promotion rechecks current authorization.
+
+Native tools add `search_project_files` (literal text, redacted snippets, line
+numbers) and `research_project` (isolated read-only analysis). Search continuation
+uses **both** `nextOffset` and `nextLineOffset`, passed back as `offset` and
+`lineOffset`. Search scans up to 100 permitted files per call, each at most 64 KiB;
+listing additionally bounds traversal to 20,000 entries and depth 10. These
+results are not proof that excluded or oversized files have no matches.
+`read_project_file` supports offset slices of permitted files up to 1 MiB;
+controlled patch/test source limits remain 64 KiB per file.
+
+### Copilot streaming, metering and controlled repair
+
+Message/edit/follow-up bodies additionally accept `repairFailedChecks?: boolean`
+(default false). Only the originating user's explicit opt-in permits a repair
+analysis after a verified `checks_failed` development task. Each root permits at
+most two repair revisions, one immutable submission per child, and fresh exact
+owner approval before each sandbox retest. Original source files, permitted
+change paths and check hashes/content remain fixed. No automatic source apply,
+CLI dispatch, test weakening, acceptance or deployment is authorized.
+Deleting the original conversation, editing/truncating its request (even with
+identical text), revoking project autonomy, disabling the actor/tool, source
+changes or revoking repair stops subsequent authorized work and sandbox checks.
+Repair admission/results append links and receipts to the original conversation;
+Gateway events plus polling refresh the Web view.
+
+| Method | Path below `/api/v1/copilot` | Contract |
+|---|---|---|
+| GET | `/token-rates/:modelId` | `{ rates, currency: "USD", basis: "owner_configured_per_million_tokens" }`; `rates` is null until configured. Tenant-owned model profile ID required. |
+| PUT | `/token-rates/:modelId` | Required `inputUsdPerMillion`, `outputUsdPerMillion`; optional `cachedInputUsdPerMillion`, `cacheWriteUsdPerMillion`. Each rate 0..1,000,000, at most six decimals. 0 means free; omitted optional rates mean unknown. Changes affect future calls only. |
+| GET | `/runs/:runId/usage` | `{ usage, calls }` including linked research/review/repair children and auxiliary calls. Calls expose safe model identity, immutable pre-call price snapshot, normalized token counts, measurement kind, timestamps and cost. Never credentials, request payloads or private reasoning. |
+| DELETE | `/runs/:runId/repairs` | `{ revoked: true }`; persistently revokes the root repair chain and cancels its active children/queued or running sandbox tasks. A repair child's ID resolves to its root. Does not alter immutable request JSON or erase evidence. |
+
+`reportedTokens` contains validated provider-reported totals. Missing/interrupted
+usage keeps a conservative reservation in `chargedTokens` and increments
+`estimatedCalls`; it is never presented as measured zero. Normalized input counts
+include cache reads/writes; reasoning tokens are an output subset. `costUsd` is
+null if any included call lacks applicable usage/pricing; `knownCostUsd` preserves
+the priced subtotal and `unpricedCalls` its missing coverage. These calculations
+are configured estimates of cost, not invoices. Preflight reservations are not
+an exact local tokenizer for arbitrary providers.
+
+`copilot_run_updated` public text frames include `text_step_id`, `text_fence` and
+`text_sequence` alongside `text_delta`. The Web client orders/deduplicates frames,
+replaces text for a higher execution fence, ignores older fences and replaces
+provisional output with durable history at settlement. Incomplete tokens are
+buffered; possible credential introducers freeze the remaining response until
+redaction and valid completion. Private reasoning is never a public text stream.
+
+### Copilot memory search index (0113)
+
+`GET /api/v1/copilot/memory/search` and native `search_memory` preserve all
+analyzed query terms and use AND matching. No handwritten stop-word list removes
+subjects, negations or short terms. Explicit queries accept at most 512 input
+characters and 24 distinct analyzed terms; oversize queries fail with HTTP 400
+instead of silently dropping words (`details.code=AGENT_MEMORY_QUERY_TOO_LONG`
+for the term limit). Result `limit` is 1..20, default 10. Punctuation-only queries
+return no matches without sending an empty expression to FTS5.
+
+Memory indexing and queries use the same NFKC/lowercase/Intl word segmentation;
+FTS5 then applies its existing tokenizer and BM25 ranking. This is lexical search,
+not exact substring matching or semantic interpretation of negation/synonyms.
+Full documents retain term order and repetitions; query budgets do not truncate
+indexed documents. Automatic context recall separately bounds its free-form query,
+uses OR matching, and keeps the existing scoped result allocation.
+
+Migration 0113 adds tenant-bound tokenizer-version metadata, retaining original
+memory text. Old/obsolete indexes rebuild in transactions of at most 64 entries.
+New writes index immediately. If a requested scope set is not fully ready, search
+returns HTTP 503, `Retry-After: 5`, and
+`details.code=AGENT_MEMORY_INDEX_BUILDING`; it never presents a partial result as
+complete or an unavailable index as an empty match set. Automatic context recall
+is optional and defers while building. The runtime retries bounded batches in the
+background; a failing tenant batch does not stop other users' recovery.
+Readiness, ownership validation and all queries share one database read snapshot,
+after committed rebuild progress, including multi-scope recall.
+
+
+### Copilot discovery and bounded context recovery (2026-09-26)
+
+`discover_tools` ranks the current authorized tool names/descriptions with lexical
+BM25. Exact underscore-separated tool identifiers resolve only that tool (or no
+result when unavailable). Descriptions state supported query languages: English
+for the whole catalog; Chinese for tools with Chinese descriptions. No global
+synonym expansion, arbitrary no-hit fallback or permission changes. Discovery
+receipts remain signed and intersected with current tool visibility on use.
+
+Provider HTTP 400/413 is classified as context overflow only for bounded,
+recognized structured rejections. The run may consume one recovery allowance for
+that model step, use a smaller strict context and retry the same model. Completed
+tools are never replayed. Ordinary HTTP errors and accepted-stream failures do
+not enter context recovery. A repeated overflow fails with
+`AGENT_CONTEXT_OVERFLOW`; an unchanged projection fails with
+`COPILOT_CONTEXT_RECOVERY_NO_GAIN`. Existing character-budget errors still apply.
+
+Runs interrupted after recovery was durably occupied stop on restart with
+`COPILOT_CONTEXT_RECOVERY_INTERRUPTED`. They do not silently restart that recovery.
+Three identical complete local-read rounds (AAA or ABABAB) stop with
+`COPILOT_NO_PROGRESS`; one parallel batch is one round. Detection is limited to
+`read_project_file`, `list_project_files`, and `get_project`; partial, redacted,
+failed, external, polling and write results are barriers. Search/diff snippets
+are excluded. These reasons use the existing run status/stop-reason envelope;
+there is no new endpoint, approval bypass or migration.
+
+
+### Copilot session stop target contract
+
+`get_session_output` returns its own `sessionId` and, for a stable live screen,
+a server-generated `target` with `observationId`, `taskTitle`, title source,
+project/session labels, observation time, evidence excerpt and runtime revision.
+The observation is stored in the existing run-step receipt; terminal text is
+untrusted evidence, not a native Codex thread identifier.
+
+Copilot `stop_session` requires `{ sessionId, observationId, expectedTitle }`.
+The observation must be completed, live, within 15 minutes, owned by the same
+user and Copilot conversation, and match the current runtime generation.
+`expectedTitle` must equal the observed `taskTitle`. Title and generation are
+checked before input cancellation and again inside the session lifecycle lock.
+Approval displays the target saved in `platformIntent.resources_json.stopTarget`;
+missing evidence in pre-upgrade approvals requires a fresh read and approval.
+
+Legacy Codex terminals without a known `--no-daemon` launch plan are rejected
+by Copilot with `SESSION_EXECUTION_SCOPE_UNVERIFIED`; no shared daemon is stopped.
+Direct owner `POST /api/v1/sessions/:id/stop` keeps its ID-only request and
+`data.session` response. The session result additionally reports
+`terminalStopped: true`, `stopScope: "terminal_process_group"`, and
+`externalExecutionStopped: null`; legacy Codex also returns a `warning` displayed
+in the Web console. This receipt never claims detached work or a shared daemon
+has stopped or released a native thread lock.
