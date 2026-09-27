@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { LanguageProvider } from '@/hooks/use-language';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { FeishuNotificationSettings } from './FeishuNotificationSettings';
 import * as api from '@/lib/feishu-notifications-api';
@@ -22,7 +23,7 @@ beforeEach(()=>{
 });
 afterEach(()=>{cleanup();client.clear();});
 async function mount(available=true) {
-  render(<QueryClientProvider client={client}><FeishuNotificationSettings available={available}/></QueryClientProvider>);
+  render(<LanguageProvider><QueryClientProvider client={client}><FeishuNotificationSettings available={available}/></QueryClientProvider></LanguageProvider>);
   await screen.findByRole('switch',{name:'接收 ForgeBadger 通知'});
 }
 function toggle(){return screen.getByRole('switch',{name:'接收 ForgeBadger 通知'});}
