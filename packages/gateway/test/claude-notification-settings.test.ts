@@ -27,6 +27,7 @@ describe("Claude notification settings", () => {
       "FORGEBADGER_ATTACH_TOKEN"
     ]);
     assert.equal(settings.hooks.PermissionDenied[0]?.hooks[0]?.type, "http");
+    assert.equal(settings.hooks.UserPromptSubmit[0]?.hooks[0]?.type, "http");
     assert.equal(settings.hooks.Stop[0]?.hooks[0]?.type, "http");
     assert.equal(settings.hooks.SessionEnd[0]?.hooks[0]?.type, "http");
     assert.equal(settings.hooks.Notification[0]?.matcher, "permission_prompt");
@@ -56,6 +57,7 @@ describe("Claude notification settings", () => {
     const settings = JSON.parse(await readFile(settingsPath, "utf8"));
     assert.equal(result.changed, true);
     assert.equal(settings.hooks.Stop[0].hooks[0].command, "echo done");
+    assert.equal(settings.hooks.UserPromptSubmit[0].hooks[0].type, "http");
     assert.equal(settings.hooks.PermissionRequest[0].hooks[0].type, "http");
     assert.equal(
       settings.hooks.PermissionRequest[0].hooks[0].url,

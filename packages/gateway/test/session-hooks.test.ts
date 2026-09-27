@@ -93,7 +93,7 @@ describe("Claude Code session hook route", () => {
     }
   });
 
-  it("accepts Claude Code raw PermissionRequest hook payloads from HTTP hooks", async () => {
+  it("accepts but filters Claude Code raw PermissionRequest hook payloads from HTTP hooks", async () => {
     const user = new UserRepository(db).create("hook-http@example.com", "hash");
     const project = new ProjectRepository(db, user.id).create({
       name: "HTTP Hook Project",
@@ -108,7 +108,8 @@ describe("Claude Code session hook route", () => {
       attachToken: "http-session-token",
       runtimeSessionName: "of-http-hook-session"
     });
-    const eventPromise = waitForEvent(eventBus);
+    const events: ForgeBadgerEvent[] = [];
+    eventBus.on("event", event => events.push(event as ForgeBadgerEvent));
 
     const res = handleClaudeNotificationHook(
       db,
@@ -126,15 +127,7 @@ describe("Claude Code session hook route", () => {
     );
 
     assert.equal(res.status, 200);
-    const event = await eventPromise;
-    assert.equal(event.type, "claude_notification");
-    if (event.type === "claude_notification") {
-      assert.equal(event.sessionId, session.id);
-      assert.equal(event.hookEventName, "PermissionRequest");
-      assert.equal(event.notificationType, "permission_prompt");
-      assert.equal(event.toolName, "Bash");
-      assert.match(event.message, /permission/i);
-    }
+    assert.equal(events.length, 0, "pre-review, outcome and untyped prose are not actionable prompts");
   });
 
   it("accepts Claude Code permission prompt Notification payloads from hook forwarding", async () => {
@@ -217,7 +210,7 @@ describe("Claude Code session hook route", () => {
     }
   });
 
-  it("infers permission prompt notifications from Claude Code message-only hook payloads", async () => {
+  it("accepts but filters permission prompt notifications from Claude Code message-only hook payloads", async () => {
     const user = new UserRepository(db).create("hook-notification-message@example.com", "hash");
     const project = new ProjectRepository(db, user.id).create({
       name: "Message Hook Project",
@@ -232,7 +225,8 @@ describe("Claude Code session hook route", () => {
       attachToken: "message-session-token",
       runtimeSessionName: "of-message-hook-session"
     });
-    const eventPromise = waitForEvent(eventBus);
+    const events: ForgeBadgerEvent[] = [];
+    eventBus.on("event", event => events.push(event as ForgeBadgerEvent));
 
     const res = handleClaudeNotificationHook(
       db,
@@ -246,16 +240,10 @@ describe("Claude Code session hook route", () => {
     );
 
     assert.equal(res.status, 200);
-    const event = await eventPromise;
-    assert.equal(event.type, "claude_notification");
-    if (event.type === "claude_notification") {
-      assert.equal(event.notificationType, "permission_prompt");
-      assert.equal(event.toolName, "Bash");
-      assert.match(event.message, /permission/i);
-    }
+    assert.equal(events.length, 0, "pre-review, outcome and untyped prose are not actionable prompts");
   });
 
-  it("accepts Claude Code raw PermissionDenied hook payloads from HTTP hooks", async () => {
+  it("accepts but filters Claude Code raw PermissionDenied hook payloads from HTTP hooks", async () => {
     const user = new UserRepository(db).create("hook-denied@example.com", "hash");
     const project = new ProjectRepository(db, user.id).create({
       name: "Denied Hook Project",
@@ -270,7 +258,8 @@ describe("Claude Code session hook route", () => {
       attachToken: "denied-session-token",
       runtimeSessionName: "of-denied-hook-session"
     });
-    const eventPromise = waitForEvent(eventBus);
+    const events: ForgeBadgerEvent[] = [];
+    eventBus.on("event", event => events.push(event as ForgeBadgerEvent));
 
     const res = handleClaudeNotificationHook(
       db,
@@ -285,15 +274,7 @@ describe("Claude Code session hook route", () => {
     );
 
     assert.equal(res.status, 200);
-    const event = await eventPromise;
-    assert.equal(event.type, "claude_notification");
-    if (event.type === "claude_notification") {
-      assert.equal(event.sessionId, session.id);
-      assert.equal(event.hookEventName, "PermissionDenied");
-      assert.equal(event.notificationType, "permission_denied");
-      assert.equal(event.toolName, "Bash");
-      assert.match(event.message, /denied/i);
-    }
+    assert.equal(events.length, 0, "pre-review, outcome and untyped prose are not actionable prompts");
   });
 
   it("rejects hook events with an invalid session token", async () => {
@@ -308,7 +289,7 @@ describe("Claude Code session hook route", () => {
     assert.deepEqual(res.body, { code: 1, message: "Invalid session token" });
   });
 
-  it("normalizes completion, interruption, failure, and end events across adapters", async () => {
+  it("normalizes main completion and failure events across adapters", async () => {
     const user = new UserRepository(db).create("hook-lifecycle@example.com", "hash");
     const project = new ProjectRepository(db, user.id).create({
       name: "Lifecycle Project",
@@ -326,9 +307,7 @@ describe("Claude Code session hook route", () => {
 
     const cases = [
       ["Stop", "task_completed"],
-      ["Interrupt", "task_interrupted"],
-      ["StopFailure", "task_failed"],
-      ["SessionEnd", "session_ended"]
+      ["StopFailure", "task_failed"]
     ] as const;
 
     for (const [hookEventName, notificationType] of cases) {
@@ -353,7 +332,8 @@ describe("Claude Code session hook route", () => {
       }
     }
 
-    const backgroundEventPromise = waitForEvent(eventBus);
+    const backgroundEvents: ForgeBadgerEvent[] = [];
+    eventBus.on("event", event => backgroundEvents.push(event as ForgeBadgerEvent));
     handleClaudeNotificationHook(
       db,
       eventBus,
@@ -366,11 +346,7 @@ describe("Claude Code session hook route", () => {
       session.id,
       createNotificationDeduper()
     );
-    const backgroundEvent = await backgroundEventPromise;
-    assert.equal(backgroundEvent.type, "claude_notification");
-    if (backgroundEvent.type === "claude_notification") {
-      assert.equal(backgroundEvent.notificationType, "task_completed");
-    }
+    assert.equal(backgroundEvents.length, 0);
   });
 
   it("accepts PI extension payloads and labels them as PI", async () => {
@@ -429,22 +405,12 @@ describe("Claude Code session hook route", () => {
       assert.equal(event.message, "PI is waiting for your confirm: Run bash command");
     }
 
-    // session_shutdown -> SessionEnd
-    eventPromise = waitForEvent(eventBus);
-    res = handleClaudeNotificationHook(
-      db,
-      eventBus,
-      { hook_event_name: "SessionEnd", adapter: "pi" },
-      "pi-token",
-      session.id
-    );
+    // Process shutdown is not completion of a user task.
+    const shutdownEvents: ForgeBadgerEvent[] = [];
+    eventBus.on("event", event => shutdownEvents.push(event as ForgeBadgerEvent));
+    res = handleClaudeNotificationHook(db,eventBus,{hook_event_name:"SessionEnd",adapter:"pi"},"pi-token",session.id);
     assert.equal(res.status, 200);
-    event = await eventPromise;
-    assert.equal(event.type, "claude_notification");
-    if (event.type === "claude_notification") {
-      assert.equal(event.notificationType, "session_ended");
-      assert.equal(event.message, "PI session ended");
-    }
+    assert.equal(shutdownEvents.length, 0);
   });
 });
 

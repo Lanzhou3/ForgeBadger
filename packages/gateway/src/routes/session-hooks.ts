@@ -6,10 +6,13 @@ import { z } from "zod";
 import { projects, sessions } from "../db/schema.js";
 import type { Database } from "../db/types.js";
 import type { Session } from "../db/repositories/session-repository.js";
+import { SessionRepository } from "../db/repositories/session-repository.js";
+import { nativePromptIdentity, notificationPromptSummary, SessionNotificationPromptRepository } from '../db/repositories/session-notification-prompt-repository.js';
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import { recordActivity } from "../services/activity-events.js";
 import { defaultNotificationDeduper, type NotificationDeduper } from "../services/notification-dedupe.js";
-import { redactSensitiveContent } from "../lib/redaction.js";
+import { shouldNotifyCliHook } from '../services/cli-notification-policy.js';
+import { redactAgentText } from '../services/agent/redaction.js';
 
 const claudeHookEventSchema = z.object({
   hook_event_name: z.string().optional(),
@@ -21,7 +24,11 @@ const claudeHookEventSchema = z.object({
   tool_name: z.string().optional(),
   adapter: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional(),
   reason: z.string().optional(),
-  error: z.string().optional()
+  error: z.string().optional(),
+  prompt: z.string().optional(),
+  agent_id: z.unknown().optional(),
+  session_id: z.unknown().optional(),
+  turn_id: z.unknown().optional()
 }).passthrough();
 
 const wrappedClaudeNotificationSchema = z.object({
@@ -131,7 +138,7 @@ export function handleClaudeNotificationHook(
     traceClaudeNotificationHook("reject", {
       reason: "missing_session_token",
       sessionId: parsed.sessionId,
-      hookEventName: redactSensitiveContent(parsed.event.hook_event_name ?? "Notification")
+      hookEventName: redactAgentText(parsed.event.hook_event_name ?? "Notification")
     });
     return { status: 401, body: { code: 1, message: "Missing session token" } };
   }
@@ -148,24 +155,43 @@ export function handleClaudeNotificationHook(
     traceClaudeNotificationHook("reject", {
       reason: "invalid_session_token",
       sessionId: parsed.sessionId,
-      hookEventName: redactSensitiveContent(parsed.event.hook_event_name ?? "Notification")
+      hookEventName: redactAgentText(parsed.event.hook_event_name ?? "Notification")
     });
     return { status: 401, body: { code: 1, message: "Invalid session token" } };
   }
 
-  const hookEventName = redactSensitiveContent(parsed.event.hook_event_name ?? "Notification");
-  const notificationType = redactSensitiveContent(normalizeNotificationType(
+  const native = nativePromptIdentity(parsed.event.session_id, parsed.event.turn_id);
+  const isSubagent = parsed.event.agent_id !== undefined && parsed.event.agent_id !== null && parsed.event.agent_id !== '';
+  if (parsed.event.hook_event_name === 'UserPromptSubmit') {
+    // Metadata only: no notification, model wake-up, transcript read or CLI input.
+    // Child-agent prompts must not overwrite the human's latest request.
+    if (!isSubagent && parsed.event.prompt?.trim()) {
+      const lastPrompt = notificationPromptSummary(parsed.event.prompt);
+      db.transaction(() => {
+        new SessionRepository(db, session.userId).update(session.id, { lastPrompt });
+        if (native) new SessionNotificationPromptRepository(db, session.userId).save(session.id, native, parsed.event.prompt!);
+      }).immediate();
+    }
+    return { status: 200, body: { code: 0, data: { accepted: true }, message: '' } };
+  }
+
+  const hookEventName = redactAgentText(parsed.event.hook_event_name ?? "Notification");
+  if (!shouldNotifyCliHook(parsed.event.adapter ?? session.aiTool, parsed.event)) {
+    return { status: 200, body: { code: 0, data: { accepted: true }, message: '' } };
+  }
+  const notificationType = redactAgentText(normalizeNotificationType(
     hookEventName,
     parsed.event.notification_type,
     parsed.event.message
   ));
-  if (deduper.shouldDrop(session.id, notificationType, "hook", Date.now())) {
+  const dedupeKey = native ? JSON.stringify([session.id, native.sessionId, native.turnId ?? '', isSubagent]) : session.id;
+  if (deduper.shouldDrop(dedupeKey, notificationType, "hook", Date.now())) {
     traceClaudeNotificationHook("deduped", { sessionId: session.id, notificationType });
     return { status: 200, body: { code: 0, data: { accepted: true }, message: "" } };
   }
   const originalToolName = parsed.event.tool_name ?? inferPermissionToolName(parsed.event.message);
-  const toolName = originalToolName ? redactSensitiveContent(originalToolName) : undefined;
-  const message = redactSensitiveContent(notificationMessage(parsed.event, hookEventName, notificationType, toolName));
+  const toolName = originalToolName ? redactAgentText(originalToolName) : undefined;
+  const message = redactAgentText(notificationMessage(parsed.event, hookEventName, notificationType, toolName));
   const activityType = notificationType;
 
   const adapter = parsed.event.adapter;
@@ -174,13 +200,15 @@ export function handleClaudeNotificationHook(
     userId: session.userId,
     sessionId: session.id,
     projectId: session.projectId,
-    ...(row?.projectName ? { projectName: redactSensitiveContent(row.projectName) } : {}),
-    sessionName: redactSensitiveContent(session.name),
+    ...(row?.projectName ? { projectName: redactAgentText(row.projectName) } : {}),
+    sessionName: redactAgentText(session.name),
+    ...(native ? { nativeSessionId: native.sessionId, ...(native.turnId ? { nativeTurnId: native.turnId } : {}) } : {}),
+    ...(isSubagent ? { nativeSubagent: true } : {}),
     hookEventName,
     notificationType,
     message,
     adapter: adapter ?? "claude",
-    ...(parsed.event.title ? { title: redactSensitiveContent(parsed.event.title) } : {}),
+    ...(parsed.event.title ? { title: redactAgentText(parsed.event.title) } : {}),
     ...(toolName ? { toolName } : {})
   });
   recordActivity({
@@ -199,7 +227,9 @@ export function handleClaudeNotificationHook(
       ...(toolName ? { toolName } : {})
     }
   });
-  deduper.record(session.id, notificationType, "hook", Date.now());
+  deduper.record(dedupeKey, notificationType, "hook", Date.now());
+  // Terminal-native echoes have no native identity; keep their coarse bucket.
+  if (dedupeKey !== session.id) deduper.record(session.id, notificationType, 'hook', Date.now());
 
   return { status: 200, body: { code: 0, data: { accepted: true }, message: "" } };
 }

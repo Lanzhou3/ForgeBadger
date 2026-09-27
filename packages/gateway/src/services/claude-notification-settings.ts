@@ -28,9 +28,11 @@ export interface ClaudeHookSettings {
   allowedHttpHookUrls: string[];
   httpHookAllowedEnvVars: string[];
   hooks: Record<string, unknown> & {
+    UserPromptSubmit: ClaudeHookGroup[];
     PermissionRequest: ClaudeHookGroup[];
     PermissionDenied: ClaudeHookGroup[];
     Stop: ClaudeHookGroup[];
+    StopFailure: ClaudeHookGroup[];
     SessionEnd: ClaudeHookGroup[];
     Notification: ClaudeHookGroup[];
   };
@@ -42,6 +44,7 @@ export function buildForgeBadgerClaudeHookSettings(gatewayUrl: string): ClaudeHo
     allowedHttpHookUrls: [forgeBadgerHookUrlAllowlist(gatewayUrl)],
     httpHookAllowedEnvVars: forgeBadgerHookEnvVars(),
     hooks: {
+      UserPromptSubmit: [{ hooks: [httpHook] }],
       PermissionRequest: [
         {
           hooks: [httpHook]
@@ -57,6 +60,7 @@ export function buildForgeBadgerClaudeHookSettings(gatewayUrl: string): ClaudeHo
           hooks: [httpHook]
         }
       ],
+      StopFailure: [{ hooks: [httpHook] }],
       SessionEnd: [
         {
           hooks: [httpHook]
@@ -98,6 +102,8 @@ function mergeForgeBadgerHookSettings(
   const hooks: Record<string, unknown> = { ...existingHooks };
   const forgeBadgerHook = buildForgeBadgerHttpHook(gatewayUrl);
 
+  hooks.UserPromptSubmit = ensureHookGroup(hooks.UserPromptSubmit, undefined, forgeBadgerHook);
+
   hooks.PermissionRequest = ensureHookGroup(
     hooks.PermissionRequest,
     undefined,
@@ -109,6 +115,7 @@ function mergeForgeBadgerHookSettings(
     forgeBadgerHook
   );
   hooks.Stop = ensureHookGroup(hooks.Stop, undefined, forgeBadgerHook);
+  hooks.StopFailure = ensureHookGroup(hooks.StopFailure, undefined, forgeBadgerHook);
   hooks.SessionEnd = ensureHookGroup(hooks.SessionEnd, undefined, forgeBadgerHook);
   hooks.Notification = ensureHookGroup(
     hooks.Notification,

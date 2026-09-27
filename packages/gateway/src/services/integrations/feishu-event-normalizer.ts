@@ -74,7 +74,7 @@ function normalizeMessage(
   const senderOpenId = readString(senderId.open_id);
   const text = parseText(message.content);
   if (!messageId || !chatId || !senderOpenId || !text) return undefined;
-  const threadId = readString(message.thread_id) ?? readString(message.root_id);
+  const threadId = readString(message.thread_id);
   const mentions = Array.isArray(message.mentions) ? message.mentions : [];
   const mentionedBot = options.botOpenId
     ? mentions.some((mention) => isRecord(mention) && isRecord(mention.id)

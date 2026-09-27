@@ -108,10 +108,32 @@ describe("notification dedupe", () => {
     }
     // All entries above are expired at nowMs=100_000; recording evicts them.
     deduper.record("s100", "task_completed", "hook", 100_000);
+    assert.equal(deduper.size, 1);
     assert.equal(
       deduper.shouldDrop("s100", "task_completed", "terminal", 101_000),
       true,
     );
+  });
+
+  it("bounds active buckets and evicts the least recently recorded identity", () => {
+    const deduper = createNotificationDeduper({ maxBuckets: 2 });
+    deduper.record("a", "task_completed", "hook", 0);
+    deduper.record("b", "task_completed", "hook", 1);
+    deduper.record("a", "task_completed", "terminal", 2);
+    deduper.record("c", "task_completed", "hook", 3);
+    assert.equal(deduper.size, 2);
+    assert.equal(deduper.shouldDrop("a", "task_completed", "hook", 4), true);
+    assert.equal(deduper.shouldDrop("b", "task_completed", "hook", 4), false);
+    assert.equal(deduper.shouldDrop("c", "task_completed", "hook", 4), true);
+  });
+
+  it("keeps hook and terminal expiry independent after repeated recordings", () => {
+    const deduper = createNotificationDeduper({ windowMs: 100 });
+    deduper.record("a", "task_completed", "hook", 0);
+    for (let i = 1; i <= 100; i++) deduper.record("a", "task_completed", "terminal", i);
+    assert.equal(deduper.size, 1);
+    assert.equal(deduper.shouldDrop("a", "task_completed", "hook", 101), false);
+    assert.equal(deduper.shouldDrop("a", "task_completed", "terminal", 101), true);
   });
 
   it("exposes a process-wide default deduper", () => {

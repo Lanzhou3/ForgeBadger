@@ -1,3 +1,7 @@
+import { z } from 'zod';
+import { TelegramCursorRepository } from '../../db/repositories/telegram-cursor-repository.js';
+import { ChannelIdentityError } from './channel-identity-service.js';
+import { ChannelIngressRejection } from './native-channel-inbox.js';
 import type { Database } from "../../db/types.js";
 import { TelegramChannelRepository } from "../../db/repositories/telegram-channel-repository.js";
 import { TelegramIntegrationRepository } from "../../db/repositories/telegram-integration-repository.js";
@@ -97,14 +101,23 @@ export function createNativeTelegramRuntime(db: Database, key: string, io: Nativ
   const supervisor = new TelegramConnectionSupervisor({
     createPollingClient: (config, callbacks, handlers) => createTelegramPollingClient({
       token: config.botToken,
+      cursor: new TelegramCursorRepository(db, config.userId, config.accountId, config.configRevision),
       callbacks,
       handlers,
       ...(io.fetch ? { fetch: io.fetch } : {}),
       ...(io.validate ? { validate: io.validate } : {})
     }),
-    createHandlers: (entry) => ({
-      onMessage: createTelegramNativeIngress({ db, userId: entry.userId, masterKey: key, accountId: entry.accountId, accountRevision: entry.configRevision })
-    }),
+    createHandlers: (entry) => {
+      const receive = createTelegramNativeIngress({ db, userId: entry.userId, masterKey: key, accountId: entry.accountId, accountRevision: entry.configRevision });
+      return { onMessage: event => {
+        try { return receive(event); }
+        catch (error) {
+          // Definitive input/authority rejection must not poison the polling queue.
+          if (error instanceof ChannelIdentityError || error instanceof ChannelIngressRejection || error instanceof z.ZodError) return {status:'rejected'};
+          throw error;
+        }
+      } };
+    },
     accounts: {
       listEnabled: () => userIds().flatMap((userId) => { try { const found = account(userId); return found ? [found] : []; } catch { return []; } }),
       get: account,

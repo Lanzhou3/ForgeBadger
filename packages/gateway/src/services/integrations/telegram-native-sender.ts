@@ -1,6 +1,5 @@
 import type { Database } from "../../db/types.js";
 import { TelegramChannelRepository } from "../../db/repositories/telegram-channel-repository.js";
-import { assertResolvedPublicHttpsEndpoint } from "../network-policy.js";
 import type { NativeChannelSender } from "../channels/native-channel-delivery.js";
 import { TelegramApiError, TelegramBotApi, type TelegramBotApiIO } from "./telegram-bot-api.js";
 
@@ -20,8 +19,8 @@ function chunkText(text: string): string[] {
 }
 
 /**
- * Plain-text sends only (no parse_mode). A 429 or any non-definitive outcome
- * is reported as `unknown` so the delivery ledger never claims success.
+ * Plain-text sends only (no parse_mode). Definite rate limits return a durable retry; ambiguous network outcomes
+ * remain unknown to avoid duplicate messages.
  */
 export function createTelegramNativeSender(db: Database, userId: string, key: string, io: TelegramBotApiIO = {}): NativeChannelSender {
   return async (input) => {
@@ -35,19 +34,20 @@ export function createTelegramNativeSender(db: Database, userId: string, key: st
     });
     const parts = chunkText(input.text);
     if (parts.length === 0) return { status: "delivered" };
-    let lastMessageId = 0;
+    let lastMessageId: number | undefined;
     try {
-      for (const part of parts) {
+      for (let index = input.nextPart ?? 0; index < parts.length; index++) {
         authorize();
-        lastMessageId = await api.sendMessage(input.peer.chatId, part, signal);
+        lastMessageId = await api.sendMessage(input.peer.chatId, parts[index]!, signal, input.peer.threadId, authorize);
+        input.checkpoint?.(index + 1, String(lastMessageId));
       }
     } catch (error) {
       if (error instanceof TelegramApiError) {
-        if (error.status === 429) return { status: "unknown" };
+        if (error.status === 429) return { status: "retry", retryAfterMs: (error.retryAfterSeconds ?? 1) * 1000 };
         if (error.status >= 400 && error.status < 500) return { status: "failed" };
       }
       return { status: "unknown" };
     }
-    return { status: "delivered", messageId: String(lastMessageId) };
+    return { status: "delivered", ...(lastMessageId !== undefined ? {messageId: String(lastMessageId)} : {}) };
   };
 }

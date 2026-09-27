@@ -69,9 +69,11 @@ export class TelegramBotApi {
     return `https://api.telegram.org/bot${this.token}/${method}`;
   }
 
-  private async call(method: string, body: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+  private async call(method: string, body: Record<string, unknown>, signal: AbortSignal, authorize?: () => void): Promise<unknown> {
     const endpoint = this.endpoint(method);
     await this.validate(endpoint);
+    signal.throwIfAborted();
+    authorize?.();
     const response = await this.request(endpoint, {
       method: "POST",
       redirect: "error",
@@ -114,8 +116,8 @@ export class TelegramBotApi {
     return parsed.data;
   }
 
-  async sendMessage(chatId: string, text: string, signal: AbortSignal): Promise<number> {
-    const result = await this.call("sendMessage", { chat_id: chatId, text }, signal);
+  async sendMessage(chatId: string, text: string, signal: AbortSignal, threadId?: string, authorize?: () => void): Promise<number> {
+    const result = await this.call("sendMessage", { chat_id: chatId, text, ...(threadId ? { message_thread_id: Number(threadId) } : {}) }, signal, authorize);
     const parsed = sendMessageResultSchema.safeParse(result);
     if (!parsed.success) throw new TelegramApiError(200, "TELEGRAM_RESPONSE_INVALID_JSON");
     return parsed.data.message_id;

@@ -117,7 +117,7 @@ for (const change of ['expire', 'rotate', 'emergency', 'allowlist', 'cancel'] as
       const issued = f.service.createPairing({ channel: 'feishu', accountId: f.account.id });
       const claimed = f.service.claimPairing(issued.token, f.peer);
       if (change === 'expire') f.db.prepare('UPDATE channel_pairings SET expires_at=0 WHERE id=?').run(claimed.id);
-      if (change === 'rotate') f.accounts.upsertAccount({ appId: f.account.appId, enabled: true });
+      if (change === 'rotate') f.accounts.upsertAccount({ appId: f.account.appId, appSecret: 'rotated-test-secret', enabled: true });
       if (change === 'emergency') f.config.upsertConfig({ emergencyDisabled: true });
       if (change === 'allowlist') f.config.upsertConfig({ allowedChatIds: ['other-chat'] });
       if (change === 'cancel') f.service.cancelPairing(claimed.id);
@@ -148,7 +148,7 @@ it('permits explicit new pairing after account rotation and enforces composite t
   const f = fixture();
   try {
     const first = f.pair(); const old = f.service.createRoute({ identityId: first.id, projectId: f.project.id });
-    f.peer.accountRevision = f.accounts.upsertAccount({ appId: f.account.appId, enabled: true }).configRevision;
+    f.peer.accountRevision = f.accounts.upsertAccount({ appId: f.account.appId, appSecret: 'rotated-test-secret', enabled: true }).configRevision;
     const next = f.pair(); const route = f.service.createRoute({ identityId: next.id, projectId: f.project.id });
     assert.notEqual(route.conversationId, old.conversationId);
     assert.throws(() => f.service.admit(old.id, f.peer));
@@ -204,6 +204,9 @@ it('serves authenticated owner management through the mounted Gateway, without a
     const created = await request('/routes', { identityId: identity.id, projectId: f.project.id });
     assert.equal(created.status, 201);
     const route = (await created.json()).data.route;
+    const routeListing = await request('/routes');
+    assert.equal(routeListing.headers.get('cache-control'), 'no-store');
+    assert.equal((await routeListing.json()).data.routes.find((item: { id: string }) => item.id === route.id)?.authorityValid, true);
     assert.deepEqual((await (await request('/routes', undefined, f.other.id)).json()).data.routes, []);
     assert.equal((await request(`/identities/${identity.id}/revoke`, {}, f.other.id)).status, 403);
     assert.ok(f.service.admit(route.id, f.peer));
@@ -215,7 +218,7 @@ it('serves authenticated owner management through the mounted Gateway, without a
     new NativeChannelDelivery(f.db,f.user.id,f.key,async()=>{throw new Error('must not send');}).project();
     const metadataResponse=await request('/deliveries');assert.equal(metadataResponse.headers.get('cache-control'),'no-store');
     const metadata=(await metadataResponse.json()).data.deliveries;assert.equal(metadata.length,1);
-    assert.deepEqual(Object.keys(metadata[0]).sort(),['createdAt','id','inboxId','phase','receiptRecorded','status']);
+    assert.deepEqual(Object.keys(metadata[0]).sort(),['accountId','channel','createdAt','id','inboxId','phase','receiptRecorded','status']);
     assert.equal(JSON.stringify(metadata).includes('private prompt'),false);
     assert.deepEqual((await (await request('/deliveries',undefined,f.other.id)).json()).data.deliveries,[]);
     assert.equal((await request(`/identities/${identity.id}/revoke`, {})).status, 200);
@@ -526,6 +529,33 @@ it('blocks approval resumption after channel revocation before changing its pend
   }finally{f.db.close();}
 });
 
+it('deleting a route parent blocks child approval resumption but permits rejection and cancellation', async () => {
+  const f = inboxFixture();
+  try {
+    f.config.upsertConfig({ allowedChatIds: [f.peer.chatId, 'group'] });
+    const group = { ...f.peer, chatId: 'group', chatType: 'group' as const, mentionedBot: true as const };
+    f.inbox.receive(group, incoming('child'));
+    const adopted = f.inbox.adoptNext();
+    if (adopted.status !== 'adopted') return assert.fail('admission required');
+    const ledger = new CopilotRunLedger(f.db, f.user.id);
+    const claim = ledger.claim(adopted.runId, 'owner', 30000)!;
+    const step = ledger.addStep(adopted.runId, { kind: 'tool', toolName: 'test', toolCallId: 'approve-child', inputJson: '{}', effect: 'write' });
+    ledger.waitApproval(claim, step);
+    const action = ledger.log.listPendingActions(adopted.runId)[0]!;
+    let effects = 0;
+    const runtime = createCopilotOrchestrator({ db: f.db, masterKey: f.key, eventBus: new ForgeBadgerEventBus(),
+      toolRegistry: createAgentToolRegistry([{ name: 'test', description: 'test', risk: 'write', requiresApproval: true,
+        inputSchema: z.object({}), execute: async () => { effects++; return []; } }]), llm: llmFixture });
+    assert.equal(ledger.log.deleteConversation(f.route.conversationId), true);
+    await assert.rejects(runtime.resumeAfterApproval({ userId: f.user.id, runId: adopted.runId, actionId: action.id, approved: true }), /CHANNEL_AUTHORITY_REJECTED/);
+    assert.equal(ledger.log.getPendingAction(action.id)?.status, 'pending');
+    assert.equal(effects, 0);
+    assert.equal(ledger.decide(adopted.runId, action.id, false), true);
+    assert.equal(ledger.log.getPendingAction(action.id)?.status, 'rejected');
+    assert.equal(ledger.cancel(adopted.runId), true);
+  } finally { f.db.close(); }
+});
+
 it('rechecks authority at an external command fence after an await',async()=>{
   const f=inboxFixture();
   try {
@@ -643,8 +673,12 @@ it('default Gateway composition receives, adopts, executes and delivers without 
     sessionManager:new InMemorySessionManager({async listSessions(){return[];},async createSession(){},async killSession(){},async capturePane(){return '';}} as never),
     apiKeyStore:new InMemoryApiKeyStore({masterKey:f.key}),llmFetch:async()=>Response.json({choices:[{message:{content:'Native end-to-end fixture result'}}]}),
     nativeFeishuIO:{sdkFactory:{createWebSocketClient:(_config,callbacks,incomingHandlers)=>{handlers=incomingHandlers;return {start:async()=>{callbacks.onReady?.();},close:()=>{closed++;},getConnectionStatus:()=>({state:'connected',reconnectAttempts:0})};}},
-      validate:async()=>{},fetch:async url=>{
+      validate:async()=>{},fetch:async (url,init)=>{
         if(String(url).includes('/auth/'))return Response.json({code:0,tenant_access_token:'fixture-token'});
+        if(String(url).includes('/reactions')) {
+          if(init?.method==='GET')return Response.json({code:0,data:{items:[],has_more:false,page_token:''}});
+          return Response.json({code:0,data:{reaction_id:'composed-typing'}});
+        }
         sends++;return Response.json({code:0,data:{message_id:'om-composed'}});
       }}
   });
@@ -707,13 +741,15 @@ it('does not let a late receipt overwrite an expired claim',async()=>{
     assert.equal(f.db.prepare('SELECT status FROM channel_deliveries').get().status,'unknown');
   }finally{release?.();f.db.close();}
 });
-it('bounds encoded reply size and skips already projected history',async()=>{
+it('bounds Feishu durable reply size and skips already projected history',async()=>{
   const f=inboxFixture();
   try {
     const run=completedInput(f);
     new CopilotRunLedger(f.db,f.user.id).append(run.runId,{role:'assistant',kind:'text',content:'汉字"\\\n'.repeat(20_000)});
     let sent='';const worker=new NativeChannelDelivery(f.db,f.user.id,f.key,async input=>{sent=input.text;return {status:'delivered',messageId:'om'};});
-    await worker.runOnce(new AbortController().signal);assert.ok(Buffer.byteLength(JSON.stringify({text:sent}))<=12_000);assert.ok(sent.includes('截断'));
+    await worker.runOnce(new AbortController().signal);
+    assert.ok(Buffer.byteLength(sent,'utf8')<=66_000);assert.ok(Buffer.byteLength(sent,'utf8')>12_000);
+    assert.ok(sent.endsWith('内容过长，请在 Web Copilot 查看完整结果。'));
     for(let n=0;n<25;n++) {completedInput(f,`history-${n}`);await worker.runOnce(new AbortController().signal);}
     completedInput(f,'latest');await worker.runOnce(new AbortController().signal);
     assert.equal(f.db.prepare("SELECT count(*) n FROM channel_deliveries WHERE status='delivered'").get().n,27);

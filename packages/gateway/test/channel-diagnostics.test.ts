@@ -25,8 +25,50 @@ import { InMemoryApiKeyStore } from '../src/secrets/api-key-store.js';
 import { InMemorySessionManager } from '../src/services/session-manager.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { RuntimeAuthorizationInvalidator } from '../src/services/runtime-authorization-invalidation.js';
+import { notificationContext } from '../src/services/agent/notification-context.js';
+import { SessionRepository } from '../src/db/repositories/session-repository.js';
+import { NotificationRepository } from '../src/db/repositories/notification-repository.js';
 
 const migrationsFolder = fileURLToPath(new URL('../src/db/migrations', import.meta.url));
+
+it('projects notifications into a remote conversation using its current route, without trusting TurnInput projectId', () => {
+  const f = fixture();
+  try {
+    const account = f.accounts.upsertAccount({ appId: 'context', appSecret: randomBytes(24).toString('hex'), enabled: true });
+    f.config.upsertConfig({ enabled: true, emergencyDisabled: false });
+    const peer: TrustedChannelPeer = { channel: 'feishu', accountId: account.id, accountRevision: account.configRevision,
+      externalUserId: 'context-owner', chatId: 'context-private', chatType: 'p2p' };
+    const issued = f.service.createPairing({ channel: 'feishu', accountId: account.id });
+    const claimed = f.service.claimPairing(issued.token, peer);
+    const identity = f.service.confirmPairing(claimed.id, { revision: claimed.revision, externalUserId: peer.externalUserId, chatId: peer.chatId });
+    const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
+    f.projects.setCopilotAutonomy(f.project.id, true);
+    const session = new SessionRepository(f.db, f.user.id).create({ projectId: f.project.id, name: 'review', aiTool: 'codex', workingDir: f.project.path });
+    new NotificationRepository(f.db, f.user.id).create({ type: 'claude_notification', titleKey: 'notifications.taskCompleted',
+      message: 'review finished', href: '', sessionId: session.id, payload: { project_id: f.project.id, notification_type: 'task_completed', last_prompt: 'review 通知' } });
+    const elsewhere = f.projects.create({ name: 'elsewhere', path: '/tmp/notice-other-route', aiTool: 'codex' });
+    const otherSession = new SessionRepository(f.db, f.user.id).create({ projectId: elsewhere.id, name: 'secret', aiTool: 'codex', workingDir: elsewhere.path });
+    new NotificationRepository(f.db, f.user.id).create({ type: 'claude_notification', titleKey: 'notifications.taskCompleted',
+      message: 'PRIVATE_OTHER_PROJECT', href: '', sessionId: otherSession.id, payload: { notification_type: 'task_completed', project_id: f.project.id } });
+    const inbox = new NativeChannelInbox(f.db, f.user.id, f.key);
+    inbox.receive(peer, { eventId: 'context-event', messageId: 'context-message', text: '刚才的通知呢' });
+    const adopted = inbox.adoptNext(); assert.equal(adopted.status, 'adopted');
+    if (adopted.status !== 'adopted') throw new Error('fixture');
+    const run = new CopilotRunLedger(f.db, f.user.id).get(adopted.runId)!;
+    const input = JSON.parse(run.input_json);
+    assert.equal(input.projectId, undefined);
+    assert.match(JSON.stringify(notificationContext(f.db, input)), /review 通知/);
+    assert.doesNotMatch(JSON.stringify(notificationContext(f.db, { ...input, projectId: elsewhere.id })), /PRIVATE_OTHER_PROJECT/);
+    f.config.upsertConfig({ emergencyDisabled: true });
+    assert.throws(() => notificationContext(f.db, input), /CHANNEL_AUTHORITY_REJECTED/);
+    f.config.upsertConfig({ emergencyDisabled: false });
+    // Simulate an orphaned legacy channel conversation; do not fall back to Web scope.
+    f.db.pragma('foreign_keys = OFF');
+    f.db.prepare('DELETE FROM channel_routes WHERE id=?').run(route.id);
+    f.db.pragma('foreign_keys = ON');
+    assert.throws(() => notificationContext(f.db, input), /CHANNEL_AUTHORITY_REJECTED/);
+  } finally { f.db.close(); }
+});
 
 function fixture() {
   const db = new Sqlite(':memory:');
@@ -44,7 +86,7 @@ function fixture() {
   return { db, user, key, accounts, config, telegramAccounts, telegramConfig, projects, project, service, models };
 }
 
-type Check = { key: string; ok: boolean; detail: string; fixHint: string };
+type Check = { status?: string; key: string; ok: boolean; detail: string; fixHint: string };
 type Checks = Record<string, Check>;
 
 async function serve(f: ReturnType<typeof fixture>) {
@@ -123,7 +165,7 @@ it('reports every check with an actionable fix hint when nothing is configured',
   }
 });
 
-it('returns all-green diagnostics for a fully wired channel', async () => {
+it('reports delivered channel checks separately from untested model connectivity', async () => {
   const f = fixture();
   const { account, peer } = pairFeishu(f);
   f.accounts.updateAccountHealth(account.id, { state: 'connected', lastConnectedAt: new Date() });
@@ -145,7 +187,8 @@ it('returns all-green diagnostics for a fully wired channel', async () => {
   try {
     const all = await checks('/feishu/diagnostics');
     for (const check of Object.values(all)) {
-      assert.equal(check.ok, true, `${check.key} should pass: ${check.detail}`);
+      assert.equal(check.ok, check.key !== 'model', `${check.key}: ${check.detail}`);
+      if(check.key==='model') assert.equal(check.status,'untested');
       assert.equal(check.fixHint, '');
     }
     assert.match(all.connection!.detail, /connected/);
@@ -175,8 +218,8 @@ it('surfaces stale identity and an autonomy-off route with targeted fix hints', 
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 
-  // Re-saving credentials bumps the revision and silently invalidates identity and route.
-  f.accounts.upsertAccount({ appId: 'diag', enabled: true });
+  // Changing credentials fences the old identity and route; an identical save does not.
+  f.accounts.upsertAccount({ appId: 'diag', appSecret: 'rotated-secret', enabled: true });
   f.accounts.updateAccountHealth(account.id, { state: 'connected', lastConnectedAt: new Date() });
   ({ server, checks } = await serve(f));
   try {
@@ -280,7 +323,7 @@ it('surfaces AGENT_NO_MODEL and generic failure categories in channel replies', 
   f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
   f.projects.setCopilotAutonomy(f.project.id, true);
 
-  const failWith = async (reason: string): Promise<string> => {
+  const failWith = async (reason: string, status: 'failed' | 'indeterminate' | 'stopped' | 'cancelled' = 'failed'): Promise<string> => {
     const inbox = new NativeChannelInbox(f.db, f.user.id, f.key);
     inbox.receive(peer, { eventId: `evt-${reason}`, messageId: `msg-${reason}`, text: 'run' });
     const adopted = inbox.adoptNext();
@@ -288,7 +331,7 @@ it('surfaces AGENT_NO_MODEL and generic failure categories in channel replies', 
     if (adopted.status !== 'adopted') throw new Error('fixture');
     const ledger = new CopilotRunLedger(f.db, f.user.id);
     const claim = ledger.claim(adopted.runId, 'owner', 30_000)!;
-    ledger.finish(claim, 'failed', reason);
+    ledger.finish(claim, status, reason);
     let sent = '';
     const worker = new NativeChannelDelivery(f.db, f.user.id, f.key, async input => { input.authorize(); sent = input.text; return { status: 'delivered', messageId: 'om' }; });
     worker.project();
@@ -298,6 +341,17 @@ it('surfaces AGENT_NO_MODEL and generic failure categories in channel replies', 
 
   try {
     assert.equal(await failWith('AGENT_NO_MODEL'), '任务失败：尚未配置模型，请先在 Web 控制台的 Model Center 配置模型提供商。');
+    assert.match(await failWith('AGENT_LLM_DNS_ERROR'), /域名解析失败/);
+    assert.match(await failWith('AGENT_LLM_TLS_ERROR'), /TLS/);
+    assert.match(await failWith('AGENT_LLM_TIMEOUT'), /超时/);
+    assert.match(await failWith('AGENT_LLM_FAILED'), /该错误未保留具体原因/);
+    assert.match(await failWith('AGENT_LLM_INVALID_RESPONSE'), /模型返回的数据格式或流式响应不符合协议/);
+    const unconfirmed = await failWith('tool_effect_unconfirmed', 'indeterminate');
+    assert.match(unconfirmed, /可能已执行/);
+    assert.match(unconfirmed, /不会自动重发/);
+    assert.doesNotMatch(unconfirmed, /任务已结束/);
+    assert.match(await failWith('COPILOT_TIME_BUDGET', 'stopped'), /时间上限/);
+    assert.match(await failWith('user_cancelled', 'cancelled'), /已取消/);
     assert.equal(await failWith('AGENT_PROVIDER_INACTIVE'), '任务失败：AGENT_PROVIDER_INACTIVE，请在 Web Copilot 查看详情。');
     assert.equal(await failWith('socket hang up'), '任务失败：执行错误，请在 Web Copilot 查看详情。');
   } finally { f.db.close(); }

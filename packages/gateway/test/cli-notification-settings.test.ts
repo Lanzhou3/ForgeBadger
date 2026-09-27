@@ -13,7 +13,7 @@ import {
 } from "../src/services/cli-notification-settings.js";
 
 describe("CLI lifecycle notification settings", () => {
-  it("merges Codex permission, completion, and session-end hooks", async () => {
+  it("merges Codex user-prompt, permission, completion, and session-end hooks", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "forgebadger-codex-hooks-"));
     const hooksPath = path.join(root, ".codex", "hooks.json");
     await mkdir(path.dirname(hooksPath), { recursive: true });
@@ -26,6 +26,7 @@ describe("CLI lifecycle notification settings", () => {
 
     assert.equal(result.changed, true);
     assert.equal(settings.hooks.Stop[0].hooks[0].command, "echo existing");
+    assert.match(settings.hooks.UserPromptSubmit[0].hooks.at(-1).command, /forgebadger-notify\.mjs/);
     assert.match(settings.hooks.PermissionRequest[0].hooks.at(-1).command, /forgebadger-notify\.mjs/);
     assert.match(settings.hooks.Stop[0].hooks.at(-1).command, /forgebadger-notify\.mjs/);
     assert.match(settings.hooks.SessionEnd[0].hooks.at(-1).command, /forgebadger-notify\.mjs/);

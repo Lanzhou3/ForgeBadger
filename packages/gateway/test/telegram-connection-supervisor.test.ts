@@ -82,7 +82,7 @@ describe("TelegramConnectionSupervisor", () => {
     await supervisor.reconcileAccount("user-1");
     old.callbacks.onReady?.();
     old.callbacks.onError?.(new Error("late error"));
-    await old.handlers.onMessage?.(undefined as never);
+    assert.throws(() => old.handlers.onMessage?.(undefined as never), /TELEGRAM_INGRESS_STALE/);
     await flushAsyncCallbacks();
     assert.equal(supervisor.getHealth("user-1").configRevision, 2);
     assert.equal(supervisor.getHealth("user-1").state, "connecting");
@@ -90,6 +90,15 @@ describe("TelegramConnectionSupervisor", () => {
     assert.equal(admitted, 0);
     assert.equal(fixture.delays.length, 0);
     await supervisor.stop();
+  });
+
+  it("rejects ingress when no handler is registered", async () => {
+    const fixture = createFixture();
+    const supervisor = fixture.createSupervisor();
+    try {
+      await supervisor.start();
+      assert.throws(() => fixture.handles[0]!.handlers.onMessage?.(undefined as never), /TELEGRAM_INGRESS_UNAVAILABLE/);
+    } finally { await supervisor.stop(); }
   });
 
   it("does not resurrect a disabled account through a stale error or retry", async () => {

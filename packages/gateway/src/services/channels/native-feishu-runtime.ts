@@ -8,6 +8,9 @@ import { NativeChannelInbox, createFeishuNativeIngress } from './native-channel-
 import { NativeChannelDelivery, type NativeChannelSender } from './native-channel-delivery.js';
 import { createFeishuNativeSender } from '../integrations/feishu-native-sender.js';
 import { createTelegramNativeSender } from '../integrations/telegram-native-sender.js';
+import { FeishuTypingWorker } from './feishu-typing-worker.js';
+import { FeishuNotificationWorker } from '../notifications/feishu-notification-worker.js';
+import { FeishuApprovalService, type RecordChannelApproval } from './feishu-approval.js';
 
 export interface NativeFeishuIO {
   sdkFactory?: Pick<FeishuSdkFactory,'createWebSocketClient'>;
@@ -21,13 +24,8 @@ export function createNativeChannelSender(db:Database,userId:string,key:string,i
   return async input=>input.peer.channel==='telegram'?telegramSender(input):feishuSender(input);
 }
 
-export interface NativeFeishuIO {
-  sdkFactory?: Pick<FeishuSdkFactory,'createWebSocketClient'>;
-  fetch?: typeof fetch;
-  validate?: typeof import('../network-policy.js').assertResolvedPublicHttpsEndpoint;
-}
 /** The system scheduler enumerates tenant IDs; every subsequent business read is tenant-scoped. */
-export function createNativeFeishuRuntime(db:Database,key:string,io:NativeFeishuIO={}):FeishuChannelRuntime {
+export function createNativeFeishuRuntime(db:Database,key:string,io:NativeFeishuIO={},recordApproval?: (userId:string,input:Parameters<RecordChannelApproval>[0])=>boolean):FeishuChannelRuntime {
   const userIds=()=> (db.prepare("SELECT id FROM users WHERE status='active' ORDER BY id").all() as {id:string}[]).map(u=>u.id);
   const account=(userId:string):FeishuSupervisorAccount|undefined=>{
     if(!db.prepare("SELECT 1 FROM users WHERE id=? AND status='active'").get(userId))return undefined;
@@ -39,7 +37,13 @@ export function createNativeFeishuRuntime(db:Database,key:string,io:NativeFeishu
   };
   const supervisor=new FeishuConnectionSupervisor({
     sdkFactory:io.sdkFactory??new FeishuSdkFactory(),
-    createHandlers:entry=>({onMessage:createFeishuNativeIngress({db,userId:entry.userId,masterKey:key,accountId:entry.accountId,accountRevision:entry.configRevision})}),
+    createHandlers:entry=>({
+      onMessage:createFeishuNativeIngress({db,userId:entry.userId,masterKey:key,accountId:entry.accountId,accountRevision:entry.configRevision}),
+      onCardAction:envelope=>new FeishuApprovalService(db,entry.userId,key).handle(envelope,entry.accountId,entry.configRevision,input=>{
+        if(!recordApproval)throw new Error('CHANNEL_APPROVAL_RUNTIME_UNAVAILABLE');
+        return recordApproval(entry.userId,input);
+      })
+    }),
     accounts:{
       listEnabled:()=>userIds().flatMap(userId=>{try {const found=account(userId);return found?[found]:[];}catch{return [];}}),
       get:account,
@@ -54,10 +58,14 @@ export function createNativeFeishuRuntime(db:Database,key:string,io:NativeFeishu
   // Four bounded lanes share a round-robin cursor; each tenant has at most one active sender.
   let cursor=0;
   const active=new Set<string>();
+  let reactionCursor=0;
+  const activeReactions=new Set<string>();
+  let notificationCursor=0;
+  const activeNotifications=new Set<string>();
   return new FeishuChannelRuntime({supervisor,
     // HTTP/WS owns process lifetime, as with the native recovery pump.
     setInterval:(callback,ms)=>{const timer=setInterval(callback,ms);timer.unref();return timer;},
-    workers:Array.from({length:4},()=>async (signal:AbortSignal)=>{
+    workers:[...Array.from({length:4},()=>async (signal:AbortSignal)=>{
     if(signal.aborted || !db.open)return;
     const ids=userIds();if(!ids.length)return;
     const userId=ids[cursor++%ids.length]!;
@@ -67,5 +75,22 @@ export function createNativeFeishuRuntime(db:Database,key:string,io:NativeFeishu
       new NativeChannelInbox(db,userId,key).adoptNext();
       await new NativeChannelDelivery(db,userId,key,createNativeChannelSender(db,userId,key,io)).runOnce(signal);
     }finally{active.delete(userId);}
-  })});
+  }), ...Array.from({length:4},()=>async (signal:AbortSignal)=>{
+    if(signal.aborted || !db.open)return;
+    const ids=userIds();if(!ids.length)return;
+    const userId=ids[reactionCursor++%ids.length]!;
+    if(activeReactions.has(userId))return;
+    activeReactions.add(userId);
+    try {
+      await new FeishuTypingWorker(db,userId,key,io).runOnce(signal);
+    }finally{activeReactions.delete(userId);}
+  }),async(signal:AbortSignal)=>{
+    if(signal.aborted || !db.open)return;
+    const ids=userIds();if(!ids.length)return;
+    const userId=ids[notificationCursor++%ids.length]!;
+    if(activeNotifications.has(userId))return;
+    activeNotifications.add(userId);
+    try{await new FeishuNotificationWorker(db,userId,key,io).runOnce(signal);}
+    finally{activeNotifications.delete(userId);}
+  }]});
 }

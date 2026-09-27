@@ -1,3 +1,6 @@
+import { FeishuIntegrationRepository } from '../../db/repositories/feishu-integration-repository.js';
+import { TelegramIntegrationRepository } from '../../db/repositories/telegram-integration-repository.js';
+import { CopilotPreferencesRepository } from '../../db/repositories/copilot-preferences-repository.js';
 import type { Database } from '../../db/types.js';
 import { ChannelIdentityRepository } from '../../db/repositories/channel-identity-repository.js';
 import { ProjectRepository } from '../../db/repositories/project-repository.js';
@@ -9,6 +12,7 @@ export type ChannelDiagnosticKey = 'credentials' | 'connection' | 'identity' | '
 export interface ChannelDiagnosticCheck {
   key: ChannelDiagnosticKey;
   ok: boolean;
+  status?: 'passed' | 'failed' | 'untested' | 'pending';
   detail: string;
   fixHint: string;
 }
@@ -68,15 +72,17 @@ export function runChannelDiagnostics(db: Database, userId: string, masterKey: s
     checks.push({ key: 'identity', ok: false, detail: '尚无已确认身份。', fixHint: pairingHint(label) });
     checks.push({ key: 'route', ok: false, detail: '尚无渠道授权路由。', fixHint: routeHint('missing') });
   } else {
-    checks.push(connectionCheck(account, label, channel));
+    const config = channel === 'telegram' ? new TelegramIntegrationRepository(db,userId).getConfig() : new FeishuIntegrationRepository(db,userId).getConfig();
+    const enabled = account.enabled === 1 && config.enabled && !config.emergencyDisabled;
+    checks.push(enabled ? connectionCheck(account, label, channel) : {key:'connection',ok:false,detail:'渠道已停用或已紧急停止。',fixHint:'请在远程渠道设置中确认配置并启用渠道。'});
     checks.push(identityCheck(identities, account, label));
-    checks.push(routeCheck(db, userId, records, identities, account, label));
+    checks.push(enabled ? routeCheck(db, userId, records, identities, account, label) : {key:'route',ok:false,detail:'渠道已停用，现有绑定不能执行远程操作。',fixHint:'请先启用渠道，再检查身份与项目授权。'});
   }
 
   checks.push(modelCheck(db, userId, masterKey));
-  checks.push(account ? deliveryCheck(db, userId, account.id) : { key: 'delivery', ok: false, detail: '尚无消息回传记录。', fixHint: credentialHints[channel] });
+  checks.push(account ? deliveryCheck(db, userId, account.id) : { key: 'delivery', ok: false, status: 'untested', detail: '尚无消息回传记录。', fixHint: credentialHints[channel] });
 
-  return { channel, generatedAt: now, checks };
+  return { channel, generatedAt: now, checks: checks.map(c=>({...c,status:c.status ?? (c.ok ? 'passed' : 'failed')})) };
 }
 
 function connectionCheck(account: ChannelAccountRow, label: string, channel: ChannelPlatform): ChannelDiagnosticCheck {
@@ -90,7 +96,7 @@ function connectionCheck(account: ChannelAccountRow, label: string, channel: Cha
     ? `请先在「远程渠道」设置页启用${label}并保存凭证。`
     : channel === 'telegram'
       ? '保存并启用后会自动建立 long polling 连接；若长时间停留在此状态，请检查 Bot Token 是否有效或网络是否可达。'
-      : '请检查应用凭证是否有效、Gateway 所在网络是否可达飞书开放平台；重新保存凭证后需重新配对。';
+      : '请检查应用凭证是否有效、Gateway 所在网络是否可达飞书开放平台；更换凭证后需重新配对。';
   return { key: 'connection', ok: false, detail, fixHint };
 }
 
@@ -112,7 +118,7 @@ function routeCheck(db: Database, userId: string, records: ChannelIdentityReposi
   const conversations = new CopilotConversationLog(db, userId);
   let problem: string | undefined;
   let problemRouteId: string | undefined;
-  for (const route of records.listRoutes()) {
+  for (const route of records.listRoutes().filter(route=>identities.some(identity=>identity.id===route.identityId && identity.accountId===account.id))) {
     if (route.status !== 'active') continue;
     const owner = identities.find(identity => identity.id === route.identityId);
     if (!owner || owner.status !== 'active') { problem = problem ?? 'identity'; continue; }
@@ -141,7 +147,9 @@ function routeCheck(db: Database, userId: string, records: ChannelIdentityReposi
 function modelCheck(db: Database, userId: string, masterKey: string): ChannelDiagnosticCheck {
   const repo = new ModelProviderRepository(db, userId, masterKey);
   const profiles = repo.listModelProfiles();
-  const profile = profiles.find(candidate => candidate.isDefault) ?? profiles[0];
+  const preferredId = new CopilotPreferencesRepository(db,userId,masterKey).get().modelId;
+  const preferred = profiles.find(p=>p.id===preferredId && p.status==='active');
+  const profile = preferred ?? profiles.find(candidate => candidate.isDefault) ?? profiles[0];
   if (!profile) {
     return { key: 'model', ok: false, detail: 'Model Center 尚未配置任何模型。', fixHint: modelHint('missing') };
   }
@@ -162,7 +170,7 @@ function modelCheck(db: Database, userId: string, masterKey: string): ChannelDia
   if (!baseUrl) {
     return { key: 'model', ok: false, detail: `提供商「${provider.name}」未配置 Base URL。`, fixHint: modelHint('baseUrl') };
   }
-  return { key: 'model', ok: true, detail: `已配置可用模型「${profile.name}」。`, fixHint: '' };
+  return { key: 'model', ok: false, status: 'untested', detail: `已配置模型「${profile.name}」；尚未进行模型连通性测试。`, fixHint: '' };
 }
 
 function deliveryCheck(db: Database, userId: string, accountId: string): ChannelDiagnosticCheck {
@@ -171,8 +179,10 @@ function deliveryCheck(db: Database, userId: string, accountId: string): Channel
     JOIN channel_messages m ON m.user_id = d.user_id AND m.id = d.inbox_id
     WHERE d.user_id = ? AND m.account_id = ? ORDER BY d.rowid DESC LIMIT 1
   `).get(userId, accountId) as { status: string; createdAt: number } | undefined;
-  if (!last) return { key: 'delivery', ok: true, detail: '尚无消息回传记录。', fixHint: '' };
+  if (!last) return { key: 'delivery', ok: false, status:'untested', detail: '尚无消息回传记录。', fixHint: '' };
   const detail = `最近回传：${last.status}（${new Date(last.createdAt).toISOString()}）。`;
+  if (last.status === 'pending' || last.status === 'sending') return { key:'delivery',ok:false,status:'pending',detail,fixHint:'' };
+  if (last.status === 'cancelled') return { key:'delivery',ok:false,status:'failed',detail,fixHint:'回传已取消，请检查当前身份与项目授权。' };
   if (last.status === 'failed' || last.status === 'unknown') {
     return { key: 'delivery', ok: false, detail, fixHint: '最近一条回复发送失败：请检查渠道连接状态与凭证；若刚重新保存过凭证，请确认已完成重新配对。' };
   }

@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
+import { parse as parseToml } from "smol-toml";
 
 import { safeResolve } from "../lib/safe-resolve.js";
 import { expandUserPath } from "../lib/user-path.js";
@@ -30,7 +32,7 @@ const kimiHookEvents = [
   "SessionEnd",
   "Notification"
 ] as const;
-const codexEvents = ["PermissionRequest", "Stop", "SessionEnd"] as const;
+const codexEvents = ["UserPromptSubmit", "PermissionRequest", "Stop", "SessionEnd"] as const;
 
 /**
  * Materialize the project-local Codex hook bundle without replacing user
@@ -140,13 +142,13 @@ export default function (pi) {
   const attachToken = process.env.FORGEBADGER_ATTACH_TOKEN || "";
   if (!sessionId || !gatewayUrl || !attachToken) return;
 
-  const post = (hookEventName, extra) => {
+  const post = async (hookEventName, extra) => {
     try {
       const url =
         gatewayUrl.replace(/\\/+$/u, "") +
         "/api/v1/session-hooks/claude-notification/" +
         encodeURIComponent(sessionId);
-      return fetch(url, {
+      const response = await fetch(url, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -155,18 +157,26 @@ export default function (pi) {
         },
         body: JSON.stringify({ hook_event_name: hookEventName, adapter: "pi", ...extra }),
         signal: AbortSignal.timeout(4500)
-      }).catch(() => {});
+      });
+      if (!response.ok) {
+        const hint = response.status === 401
+          ? " Restart this CLI session from ForgeBadger to refresh its notification identity."
+          : " Check that the ForgeBadger Gateway is available.";
+        console.warn("[ForgeBadger notifications] Delivery failed (HTTP " + response.status + ")." + hint);
+      }
     } catch {
-      // Notification delivery is fail-open and must never break the CLI.
-      return Promise.resolve();
+      // Fail-open; never print credentials, response bodies, or exception messages.
+      console.warn("[ForgeBadger notifications] Delivery failed: could not reach Gateway.");
     }
   };
 
-  pi.on("agent_settled", () => {
+  pi.on("agent_settled", (_event, context) => {
+    if (context?.hasUI !== true) return;
     post("Stop");
   });
 
-  pi.on("ui_prompt_start", (event) => {
+  pi.on("ui_prompt_start", (event, context) => {
+    if (context?.hasUI !== true) return;
     const title = typeof event.title === "string" && event.title ? event.title : "";
     const kind = typeof event.kind === "string" && event.kind ? event.kind : "input";
     post("PermissionRequest", {
@@ -234,10 +244,12 @@ function mergeCodexHookGroups(value: unknown, command: CodexHookCommand): CodexH
 }
 
 function mergeKimiHookText(existing: string, scriptPath: string): string {
-  const preserved = existing
-    .replace(/\n?# ForgeBadger managed notification hooks: start\n[\s\S]*?# ForgeBadger managed notification hooks: end\n?/u, "")
-    .replace(/\n+$/u, "");
   const command = `node ${shellQuote(scriptPath)}`;
+  const unmarked = existing.replace(
+    /\n?# ForgeBadger managed notification hooks: start\r?\n[\s\S]*?# ForgeBadger managed notification hooks: end\r?\n?/gu,
+    ""
+  );
+  const preserved = removeDuplicateKimiHooks(unmarked, command).replace(/\n+$/u, "");
   const managed = kimiHookEvents.flatMap((event) => [
     "[[hooks]]",
     `event = ${JSON.stringify(event)}`,
@@ -247,6 +259,41 @@ function mergeKimiHookText(existing: string, scriptPath: string): string {
   ]);
   const prefix = preserved.length > 0 ? `${preserved}\n\n` : "";
   return `${prefix}# ForgeBadger managed notification hooks: start\n${managed.join("\n")}# ForgeBadger managed notification hooks: end\n`;
+}
+
+/** Retire only exact managed definitions; user matchers/commands/timeouts survive. */
+function removeDuplicateKimiHooks(text: string, command: string): string {
+  const doc = parseKimiHookConfig(text);
+  if (!Array.isArray(doc.hooks)) return text;
+  const managed = (hook: unknown): boolean => isRecord(hook)
+    && hook.command === command && hook.timeout === 5
+    && kimiHookEvents.some((event) => event === hook.event)
+    && Object.keys(hook).every((key) => ["event", "command", "timeout"].includes(key));
+  const retained = doc.hooks.filter((hook) => !managed(hook));
+  if (retained.length === doc.hooks.length) return text;
+  const candidate = text.split(/(?=^\s*\[)/mu).filter((section) => {
+    if (!/^\s*\[\[hooks\]\]/u.test(section)) return true;
+    try {
+      const parsed = parseToml(section);
+      return !Array.isArray(parsed.hooks) || parsed.hooks.length !== 1 || !managed(parsed.hooks[0]);
+    } catch { return true; }
+  }).join("");
+  if (retained.length) doc.hooks = retained;
+  else delete doc.hooks;
+  // Text splitting is only an editing aid. Parsing the entire result proves
+  // multiline strings, nested tables and unrelated settings remain unchanged.
+  if (!isDeepStrictEqual(parseKimiHookConfig(candidate), doc)) {
+    throw new Error("Cannot safely consolidate Kimi notification hooks");
+  }
+  return candidate;
+}
+
+function parseKimiHookConfig(text: string): Record<string, unknown> {
+  try { return parseToml(text); }
+  catch {
+    // TOML parser errors include source excerpts, which can contain credentials.
+    throw new Error("Invalid Kimi configuration; notification hooks unchanged");
+  }
 }
 
 function forwardingScript(adapter: NotificationAdapter): string {
@@ -270,7 +317,7 @@ process.stdin.on("end", async () => {
     adapter === "codex" ? 'payload.hook_event_name === "SessionEnd" ? 2500 : 4500' : "4500"
   };
   try {
-    await fetch(
+    const response = await fetch(
       gatewayUrl.replace(/\\/+$/u, "") + "/api/v1/session-hooks/claude-notification/" + encodeURIComponent(sessionId),
       {
         method: "POST",
@@ -283,8 +330,16 @@ process.stdin.on("end", async () => {
         signal: AbortSignal.timeout(requestTimeoutMs)
       }
     );
+    if (!response.ok) {
+      const hint = response.status === 401
+        ? " Restart this CLI session from ForgeBadger to refresh its notification identity."
+        : " Check that the ForgeBadger Gateway is available.";
+      console.warn("[ForgeBadger notifications] Delivery failed (HTTP " + response.status + ")." + hint);
+    }
   } catch {
-    // Notification delivery is fail-open and must never block the CLI.
+    // Never print URLs, tokens, response bodies, or exception messages.
+    // Delivery remains fail-open so a notification cannot fail the CLI turn.
+    console.warn("[ForgeBadger notifications] Delivery failed: could not reach Gateway.");
   }
 });
 `;

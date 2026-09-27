@@ -5,14 +5,16 @@ import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { NotificationRepository, type Notification } from "../db/repositories/notification-repository.js";
 import { SessionRepository, type Session } from "../db/repositories/session-repository.js";
 import type { Database } from "../db/types.js";
+import { createFeishuNotificationRoutes } from './feishu-notifications.js';
 
 const listQuerySchema = z.object({
   category: z.enum(["session_event", "app_action"]).optional()
 }).strict();
 
-export function createNotificationRoutes(db: Database): Router {
+export function createNotificationRoutes(db: Database, notificationOptions?: import('./feishu-notifications.js').FeishuNotificationRouteOptions): Router {
   const router = Router();
   router.use(authenticate);
+  router.use('/feishu',createFeishuNotificationRoutes(db,notificationOptions));
 
   router.get("/", (req, res) => {
     const query = listQuerySchema.safeParse(req.query ?? {});

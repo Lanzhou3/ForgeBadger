@@ -25,7 +25,8 @@ export interface TelegramPollingClientOptions extends TelegramBotApiIO {
   callbacks: TelegramPollingCallbacks;
   handlers: TelegramPollingHandlers;
   longPollTimeoutSeconds?: number;
-  maxBackoffMs?: number;
+  cursor?: { load(): number | undefined; save(nextOffset: number): void };
+  requestTimeoutMs?: number;
   jitter?: () => number;
 }
 
@@ -43,7 +44,7 @@ export function createTelegramPollingClient(options: TelegramPollingClientOption
     ...(options.validate ? { validate: options.validate } : {})
   });
   const timeoutSeconds = options.longPollTimeoutSeconds ?? 25;
-  const maxBackoffMs = options.maxBackoffMs ?? 30_000;
+
   const jitter = options.jitter ?? Math.random;
   const callbacks = options.callbacks;
   const handlers = options.handlers;
@@ -71,15 +72,15 @@ export function createTelegramPollingClient(options: TelegramPollingClientOption
   };
 
   async function run(signal: AbortSignal): Promise<void> {
-    const identity = await api.getMe(signal);
+    const identity = await api.getMe(AbortSignal.any([signal, AbortSignal.timeout(options.requestTimeoutMs ?? 15_000)]));
     callbacks.onIdentity?.(identity);
-    let offset: number | undefined;
+    let offset = options.cursor?.load();
     let throttled = false;
     let ready = false;
     while (!signal.aborted) {
       let updates: unknown[];
       try {
-        updates = await api.getUpdates(offset, timeoutSeconds, signal);
+        updates = await api.getUpdates(offset, timeoutSeconds, AbortSignal.any([signal, AbortSignal.timeout(options.requestTimeoutMs ?? (timeoutSeconds + 15) * 1000)]));
       } catch (error) {
         if (signal.aborted) return;
         if (error instanceof TelegramApiError && error.status === 429 && error.retryAfterSeconds !== undefined) {
@@ -87,7 +88,7 @@ export function createTelegramPollingClient(options: TelegramPollingClientOption
             callbacks.onReconnecting?.();
             throttled = true;
           }
-          await sleep(Math.min(error.retryAfterSeconds * 1000, maxBackoffMs), signal);
+          await sleep(error.retryAfterSeconds * 1000, signal);
           continue;
         }
         throw error;
@@ -102,15 +103,19 @@ export function createTelegramPollingClient(options: TelegramPollingClientOption
       }
       for (const update of updates) {
         const updateId = (update as { update_id?: unknown }).update_id;
-        if (typeof updateId === "number") offset = Math.max(offset ?? -1, updateId) + 1;
+        if (!Number.isSafeInteger(updateId)) throw new Error('TELEGRAM_UPDATE_ID_INVALID');
+        if (signal.aborted) return;
         const event = normalizeTelegramUpdate(update, identity);
-        if (!event) continue;
-        // A single handler failure must never kill the poller.
-        try {
-          await handlers.onMessage?.(event);
-        } catch {
-          // ignored
+        if (event) {
+          if (!handlers.onMessage) throw new Error('TELEGRAM_INGRESS_UNAVAILABLE');
+          // A durable handler failure rejects this batch; the supervisor reconnects
+          // from the last committed cursor. Later updates must not leapfrog it.
+          await handlers.onMessage(event);
         }
+        if (signal.aborted) return;
+        const next = Math.max(offset ?? 0, Number(updateId) + 1);
+        options.cursor?.save(next);
+        offset = next;
       }
       if (updates.length === 0) await sleep(200 + jitter() * 300, signal);
     }

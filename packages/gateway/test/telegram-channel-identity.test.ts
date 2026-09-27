@@ -145,14 +145,14 @@ it('feishu ingress admits a mentioned group message with the mention stripped an
     }
     assert.equal((f.db.prepare('SELECT count(*) n FROM channel_messages').get() as { n: number }).n, 1);
 
-    // No mention, thread replies and pairing attempts in a group stay out of the inbox.
+    // Mentioned thread replies are admitted; unmentioned messages and group pairings are ignored.
     assert.equal(handle(event('没人提到机器人'), { botOpenId: 'bot-open-id' }).status, 'ignored');
     const threaded = { sender: { sender_id: { open_id: 'ou-owner' } }, message: { message_id: 'thread-msg', chat_id: 'oc-group', chat_type: 'group', message_type: 'text', thread_id: 'om-thread', mentions: [{ id: { open_id: 'bot-open-id' } }], content: JSON.stringify({ text: '@_user_1 话题回复' }) } };
-    assert.equal(handle(threaded, { botOpenId: 'bot-open-id' }).status, 'ignored');
+    assert.equal(handle(threaded, { botOpenId: 'bot-open-id' }).status, 'admitted');
     const issued = f.service.createPairing({ channel: 'feishu', accountId: f.feishuAccount.id });
     assert.equal(handle(event(`/pair ${issued.token}`, 'group', [{ id: { open_id: 'bot-open-id' }, name: 'Bot' }]), { botOpenId: 'bot-open-id' }).status, 'ignored');
     assert.equal(f.service.records.pairing(issued.pairing.id)?.status, 'pending');
-    assert.equal((f.db.prepare('SELECT count(*) n FROM channel_messages').get() as { n: number }).n, 1);
+    assert.equal((f.db.prepare('SELECT count(*) n FROM channel_messages').get() as { n: number }).n, 2);
   } finally { f.db.close(); }
 });
 

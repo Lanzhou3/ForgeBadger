@@ -7,10 +7,9 @@
  * CLI hook route produces, so the web UI toasts uniformly regardless of
  * channel.
  *
- * Mapping is intentionally heuristic (Phase 1); live per-CLI tuning is
- * Phase 2. Bells only mean "needs attention" for CLIs whose idle prompts
- * rely on BEL (Claude Code, Kimi Code) — for the rest the bell is ambient
- * terminal noise and the notification is dropped as "unsupported".
+ * Only known user-facing prompt formats are actionable. Bells and arbitrary
+ * completion prose lack event/agent identity and are not promoted to alerts.
+ * Structured hooks supply main-session lifecycle notifications.
  */
 import { eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -124,78 +123,21 @@ function mapTerminalNotification(
   aiTool: string,
   notification: TerminalNotification
 ): MappedTerminalNotification | undefined {
-  const label = adapterLabel(aiTool);
-  switch (notification.kind) {
-    case "bell":
-      // BEL is ambient for CLIs that use explicit OSC notifications; only
-      // Claude Code and Kimi Code signal idle prompts with a bare bell.
-      if (aiTool !== "claude" && aiTool !== "kimi") return undefined;
-      return { type: "attention", message: `${label} needs your attention` };
-    case "osc":
-      if (notification.code === 9) {
-        // Defense in depth: the daemon scanner already drops auxiliary OSC 9
-        // sub-commands (e.g. `9;4` progress bars); guard again in case a
-        // future path bypasses it.
-        if (isOsc9AuxiliaryPayload(notification.text)) {
-          return undefined;
-        }
-        const text = notification.text.trim();
-        return {
-          type: "permission_prompt",
-          message: text || `${label} needs your attention`
-        };
-      }
-      if (notification.code === 99) {
-        const { alert, title } = parseKittyOsc99Payload(notification.text);
-        const haystack = `${title ?? ""} ${alert ?? ""}`.toLowerCase();
-        let type = "permission_prompt";
-        if (/(error|fail)/.test(haystack)) {
-          type = "task_failed";
-        } else if (/(complete|idle|done)/.test(haystack)) {
-          type = "task_completed";
-        }
-        return { type, message: title ?? "OpenCode notification" };
-      }
-      // code 777 (iTerm2-style): scanner already filtered to verb "notify"
-      // with both title and body present.
-      const title = notification.title.trim();
-      const body = notification.body.trim();
-      return {
-        type: "permission_prompt",
-        message: title || body || label,
-        ...(title ? { title } : {})
-      };
+  // BEL and arbitrary notification prose carry no event kind or agent identity.
+  // Completion comes from structured root-session hooks, not text heuristics.
+  if (notification.kind === "bell") return undefined;
+  if (notification.code === 9 && isOsc9AuxiliaryPayload(notification.text)) return undefined;
+  const text = notification.code === 777
+    ? `${notification.title.trim()}: ${notification.body.trim()}` : notification.text.trim();
+  if (aiTool === "codex" && /^(Approval requested(?::| by )|Codex wants to edit )/.test(text)) {
+    return { type: "permission_prompt", message: text };
   }
-}
-
-/**
- * Minimal kitty OSC 99 parameter parse (`A=...;T=...`, semicolon-separated).
- * Heuristic by design — only the A/T fields are needed for classification.
- */
-function parseKittyOsc99Payload(payload: string): { alert?: string; title?: string } {
-  const result: { alert?: string; title?: string } = {};
-  for (const part of payload.split(";")) {
-    const eqIndex = part.indexOf("=");
-    if (eqIndex <= 0) continue;
-    const value = part.slice(eqIndex + 1);
-    switch (part.slice(0, eqIndex)) {
-      case "A":
-        result.alert = value;
-        break;
-      case "T":
-        result.title = value;
-        break;
-    }
+  // OpenCode's TUI uses these fixed messages only for its pending input UI.
+  if (aiTool === "opencode" && notification.code === 777
+    && /^(Permission needs input|Question needs input)$/.test(notification.body.trim())) {
+    return { type: "permission_prompt", message: text };
   }
-  return result;
-}
-
-function adapterLabel(aiTool: string): string {
-  if (aiTool === "opencode") return "OpenCode";
-  if (aiTool === "codex") return "Codex";
-  if (aiTool === "kimi") return "Kimi Code";
-  if (aiTool === "pi") return "PI";
-  return "Claude Code";
+  return undefined;
 }
 
 function activityStatus(notificationType: string): "info" | "warning" | "error" {

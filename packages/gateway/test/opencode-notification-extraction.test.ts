@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 
 import { FORGEBADGER_OPENCODE_PLUGIN_TEMPLATE } from "../src/services/opencode-notification-settings.js";
 
@@ -48,7 +48,7 @@ const EXPECTED_PERMISSION_BODY = {
   notification_type: "permission_prompt",
   message: "bash /tmp/x.sh, /tmp/y.sh",
   tool_name: "bash",
-  adapter: "opencode"
+  adapter: "opencode", session_id: "sess-opencode-1"
 };
 
 describe("OpenCode plugin event extraction (realistic fixture)", () => {
@@ -60,11 +60,13 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
   before(async () => {
     pluginDir = await mkdtemp(path.join(tmpdir(), "forgebadger-opencode-extract-"));
     loadCounter = 0;
+    mock.timers.enable({apis:["setTimeout"]});
     captured = null;
     originalFetch = globalThis.fetch;
   });
 
   after(() => {
+    mock.timers.reset();
     globalThis.fetch = originalFetch;
     for (const key of ENV_KEYS) {
       delete process.env[key];
@@ -102,9 +104,20 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
     const file = path.join(pluginDir, `forgebadger-permission-notify-${loadCounter}.js`);
     await writeFile(file, FORGEBADGER_OPENCODE_PLUGIN_TEMPLATE, "utf8");
     const mod = (await import(pathToFileURL(file).href)) as {
-      ForgeBadgerPermissionNotify: () => Promise<PluginHandler>;
+      ForgeBadgerPermissionNotify: (input: unknown) => Promise<PluginHandler>;
     };
-    return mod.ForgeBadgerPermissionNotify();
+    let pending: Array<{id:string;sessionID:string}> = [];
+    const plugin = await mod.ForgeBadgerPermissionNotify({client:{
+      session:{get:async()=>({data:{id:"sess-opencode-1"}})},
+      permission:{list:async()=>({data:pending})}
+    }});
+    return {event:async input=>{
+      const props=input.event?.properties as {id?:string;sessionID?:string}|undefined;
+      pending=props?.id && props.sessionID?[{id:props.id,sessionID:props.sessionID}]:[];
+      await plugin.event(input);
+      mock.timers.tick(1000);
+      await new Promise(resolve=>setImmediate(resolve));
+    }};
   }
 
   it("POSTs the expected body for a realistic permission.asked event", async () => {
@@ -158,7 +171,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
     assert.equal(captured?.body.message, "permission");
   });
 
-  it("falls back to a generic message when properties are missing", async () => {
+  it("does not invent a pending permission when properties are missing", async () => {
     setEnv({
       FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
       FORGEBADGER_SESSION_ID: "sess-opencode-1",
@@ -169,9 +182,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
     await handler.event({ event: { id: "evt-3", type: "permission.asked" } });
 
-    assert.ok(captured);
-    assert.equal(captured?.body.message, "OpenCode permission request");
-    assert.equal(captured?.body.tool_name, "OpenCode");
+    assert.equal(captured, null);
   });
 
   it("derives tool_name from metadata.tool when tool is a reference object", async () => {
@@ -254,20 +265,22 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
     mockFetch();
     const handler = await loadHandler();
 
-    await handler.event({ event: { id: "evt-idle", type: "session.idle", properties: {} } });
+    await handler.event({event:{type:"session.status",properties:{sessionID:"sess-opencode-1",status:{type:"busy"}}}});
+    await handler.event({ event: { id: "evt-idle", type: "session.idle", properties: {sessionID:"sess-opencode-1"} } });
     assert.deepEqual(captured?.body, {
       hook_event_name: "Stop",
       notification_type: "task_completed",
       message: "OpenCode task completed",
-      adapter: "opencode"
+      adapter: "opencode", session_id: "sess-opencode-1"
     });
 
-    await handler.event({ event: { id: "evt-error", type: "session.error", properties: {} } });
+    await handler.event({event:{type:"session.status",properties:{sessionID:"sess-opencode-1",status:{type:"busy"}}}});
+    await handler.event({ event: { id: "evt-error", type: "session.error", properties: {sessionID:"sess-opencode-1"} } });
     assert.deepEqual(captured?.body, {
       hook_event_name: "StopFailure",
       notification_type: "task_failed",
       message: "OpenCode task failed",
-      adapter: "opencode"
+      adapter: "opencode", session_id: "sess-opencode-1"
     });
   });
 

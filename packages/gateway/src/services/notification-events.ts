@@ -1,4 +1,5 @@
-import { NotificationRepository, type CreateNotificationInput } from "../db/repositories/notification-repository.js";
+import { type CreateNotificationInput } from "../db/repositories/notification-repository.js";
+import { NotificationService } from './notification-service.js';
 import type { Database } from "../db/types.js";
 import type {
   AppActionNotificationEvent,
@@ -6,7 +7,8 @@ import type {
   ForgeBadgerEvent,
   ForgeBadgerEventBus
 } from "./event-bus.js";
-import { redactSensitiveContent } from "../lib/redaction.js";
+import { redactAgentText } from './agent/redaction.js';
+import { nativePromptIdentity, SessionNotificationPromptRepository } from '../db/repositories/session-notification-prompt-repository.js';
 
 type PersistableNotificationEvent = ClaudeNotificationEvent | AppActionNotificationEvent;
 
@@ -32,7 +34,17 @@ export function attachNotificationPersistence(options: NotificationPersistenceOp
     if (!input) return;
 
     try {
-      const notification = new NotificationRepository(options.db, event.userId).create(input);
+      if (event.type === 'claude_notification') {
+        try {
+          const native = nativePromptIdentity(event.nativeSessionId, event.nativeTurnId);
+          const prompt = native && !event.nativeSubagent
+            ? new SessionNotificationPromptRepository(options.db, event.userId).find(event.sessionId, native) : undefined;
+          if (prompt && input.payload && typeof input.payload === 'object') {
+            input.payload = { ...input.payload, last_prompt: prompt };
+          }
+        } catch { /* Optional identity enrichment must not suppress lifecycle notifications. */ }
+      }
+      const notification = new NotificationService(options.db, event.userId).create(input);
       if (isPersistableNotificationEvent(event)) {
         event.notificationId = notification.id;
         event.notificationCreatedAt = notification.createdAt;
@@ -55,7 +67,7 @@ export function notificationInputFromEvent(event: ForgeBadgerEvent): CreateNotif
       }
       const adapter = event.adapter ?? "claude";
       const titleKey = notificationTitleKey(event.notificationType, adapter);
-      const safe = redactSensitiveContent;
+      const safe = redactAgentText;
       const message = safe(event.toolName ? `${event.toolName}: ${event.message}` : event.message);
       return {
         type: event.type,
@@ -65,6 +77,9 @@ export function notificationInputFromEvent(event: ForgeBadgerEvent): CreateNotif
         sessionId: event.sessionId,
         payload: {
           session_id: event.sessionId,
+          ...(event.nativeSessionId ? { native_session_id: event.nativeSessionId } : {}),
+          ...(event.nativeTurnId ? { native_turn_id: event.nativeTurnId } : {}),
+          ...(event.nativeSubagent ? { native_subagent: true } : {}),
           ...(event.projectId ? { project_id: event.projectId } : {}),
           ...(event.projectName ? { project_name: safe(event.projectName) } : {}),
           ...(event.sessionName ? { session_name: safe(event.sessionName) } : {}),
@@ -82,15 +97,15 @@ export function notificationInputFromEvent(event: ForgeBadgerEvent): CreateNotif
         type: event.type,
         category: "app_action",
         titleKey: event.titleKey,
-        message: redactSensitiveContent(event.message),
+        message: redactAgentText(event.message),
         href: "/models",
         payload: {
           action: event.action,
           status: event.status,
-          message: redactSensitiveContent(event.message),
+          message: redactAgentText(event.message),
           ...(event.adapter ? { adapter: event.adapter } : {}),
           ...(event.providerId ? { provider_id: event.providerId } : {}),
-          ...(event.providerName ? { provider_name: redactSensitiveContent(event.providerName) } : {})
+          ...(event.providerName ? { provider_name: redactAgentText(event.providerName) } : {})
         }
       };
     case "session_created":

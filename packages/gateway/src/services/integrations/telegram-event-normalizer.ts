@@ -37,6 +37,9 @@ export function normalizeTelegramUpdate(update: unknown, bot: TelegramBotIdentit
   if (typeof messageId !== "number") return undefined;
   const text = msg.text;
   if (typeof text !== "string" || text.length < 1 || text.length > 32000) return undefined;
+  const addressed = /^\s*\/([A-Za-z][A-Za-z0-9_]{0,31})@([A-Za-z0-9_]+)(?=\s|$)/.exec(text);
+  if (addressed && addressed[2]!.toLowerCase() !== bot.username?.toLowerCase()) return undefined;
+  const normalizedText = addressed ? text.replace(addressed[0], `/${addressed[1]}`) : text;
   const from = msg.from;
   if (typeof from !== "object" || from === null) return undefined;
   const fromRecord = from as Record<string, unknown>;
@@ -58,8 +61,9 @@ export function normalizeTelegramUpdate(update: unknown, bot: TelegramBotIdentit
     messageId: String(messageId),
     chatId: String(chatId),
     chatType,
+    ...(Number.isSafeInteger(msg.message_thread_id) && Number(msg.message_thread_id) > 0 ? { threadId: String(msg.message_thread_id) } : {}),
     senderId: String(senderId),
-    text,
-    mentionedBot: computeMentionedBot(msg.entities, text, bot)
+    text: normalizedText,
+    mentionedBot: Boolean(addressed) || computeMentionedBot(msg.entities, text, bot)
   };
 }

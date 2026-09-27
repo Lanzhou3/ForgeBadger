@@ -161,7 +161,20 @@ export class TelegramConnectionSupervisor {
   private guardHandlers(entry: RuntimeEntry): TelegramPollingHandlers {
     const handlers = this.dependencies.createHandlers?.(entry.account) ?? this.handlers.get(entry.account.userId) ?? {};
     return {
-      onMessage: (event) => this.isActive(entry) ? handlers.onMessage?.(event) : undefined
+      onMessage: (event) => {
+        if (!this.isActive(entry)) {
+          // A reconcile fences ingress while reading configuration. Mark the old
+          // client before closing: close() can consume its rejection, and an
+          // unchanged-account reconcile must reconnect to replay this update.
+          if (this.started && this.runtimes.get(entry.account.userId) === entry && !entry.failed) {
+            entry.failed = true;
+            this.closeEntry(entry);
+          }
+          throw new Error('TELEGRAM_INGRESS_STALE');
+        }
+        if (!handlers.onMessage) throw new Error('TELEGRAM_INGRESS_UNAVAILABLE');
+        return handlers.onMessage(event);
+      }
     };
   }
 

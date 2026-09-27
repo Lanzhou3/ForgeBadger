@@ -120,16 +120,16 @@ describe("createTelegramNativeSender", () => {
     const fixture = createSender(text, [() => okResponse(501), () => okResponse(502)]);
     await fixture.send();
 
-    assert.deepEqual(fixture.events, ["authorize", "fetch-0", "authorize", "fetch-1"]);
+    assert.deepEqual(fixture.events, ["authorize", "authorize", "fetch-0", "authorize", "authorize", "fetch-1"]);
   });
 
-  it("reports a 429 throttle as unknown", async () => {
+  it("schedules a definite 429 throttle for retry", async () => {
     const fixture = createSender("hello", [() => apiErrorResponse(429, {
       ok: false, error_code: 429, description: "Too Many Requests", parameters: { retry_after: 5 }
     })]);
     const result = await fixture.send();
 
-    assert.deepEqual(result, { status: "unknown" });
+    assert.deepEqual(result, { status: "retry", retryAfterMs: 5000 });
   });
 
   it("reports a 400 client error as failed", async () => {

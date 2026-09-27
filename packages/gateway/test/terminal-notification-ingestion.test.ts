@@ -32,7 +32,7 @@ it("redacts terminal-native notification text before WebSocket events and persis
 
     const result = ingestTerminalNotification({
       db, eventBus, sessionId: session.id,
-      notification: { kind: "osc", code: 777, title: `Permission ${marker}`, body: "Approve?" }
+      notification: { kind: "osc", code: 777, title: `Permission ${marker}`, body: "Permission needs input" }
     });
 
     assert.deepEqual(result, { handled: true });

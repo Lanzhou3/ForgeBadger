@@ -28,6 +28,8 @@ export const notificationDedupeWindowMs = 10_000;
 export interface NotificationDeduperOptions {
   /** Suppression window in milliseconds. Default: notificationDedupeWindowMs. */
   windowMs?: number;
+  /** Maximum active identity/type buckets. Oldest recorded bucket is evicted. */
+  maxBuckets?: number;
 }
 
 export interface NotificationDeduper {
@@ -40,8 +42,10 @@ interface DedupeEntry {
   at: number;
 }
 
-export function createNotificationDeduper(options: NotificationDeduperOptions = {}): NotificationDeduper {
+export function createNotificationDeduper(options: NotificationDeduperOptions = {}): NotificationDeduper & { readonly size: number } {
   const windowMs = options.windowMs ?? notificationDedupeWindowMs;
+  const maxBuckets = options.maxBuckets ?? 4_096;
+  if (!Number.isInteger(maxBuckets) || maxBuckets < 1) throw new RangeError("maxBuckets must be a positive integer");
   const entries = new Map<string, DedupeEntry[]>();
 
   function keyFor(sessionId: string, notificationType: string): string {
@@ -54,6 +58,7 @@ export function createNotificationDeduper(options: NotificationDeduperOptions = 
   }
 
   return {
+    get size() { return entries.size; },
     shouldDrop(sessionId, notificationType, source, nowMs) {
       const list = entries.get(keyFor(sessionId, notificationType));
       if (!list) return false;
@@ -64,10 +69,23 @@ export function createNotificationDeduper(options: NotificationDeduperOptions = 
       return false;
     },
     record(sessionId, notificationType, source, nowMs) {
+      // Sweep all identities, including native turns which may never recur.
+      for (const [storedKey, storedList] of entries) {
+        const active = prune(storedList, nowMs);
+        if (active.length) entries.set(storedKey, active);
+        else entries.delete(storedKey);
+      }
       const key = keyFor(sessionId, notificationType);
-      const list = prune(entries.get(key) ?? [], nowMs);
+      // Only the latest timestamp for each source affects suppression.
+      const list = (entries.get(key) ?? []).filter((entry) => entry.source !== source);
       list.push({ source, at: nowMs });
+      entries.delete(key);
       entries.set(key, list);
+      while (entries.size > maxBuckets) {
+        const oldest = entries.keys().next().value;
+        if (oldest === undefined) break;
+        entries.delete(oldest);
+      }
     }
   };
 }

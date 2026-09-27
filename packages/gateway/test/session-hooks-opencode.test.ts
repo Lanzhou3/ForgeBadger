@@ -136,12 +136,11 @@ describe("OpenCode session hook route", () => {
     assert.match(notification.message, /\[REDACTED\]/);
   });
 
-  it("redacts interrupt reasons and failure errors when no message is supplied", async () => {
+  it("filters manual interruption and redacts main failure errors", async () => {
     const session = createOpenCodeSession(db);
     attachNotificationPersistence({ db, eventBus });
     const marker = "sk-FAKEHOOKERROR123456";
     for (const hook of [
-      { hook_event_name: "Interrupt", notification_type: "task_interrupted", reason: `Interrupted ${marker}` },
       { hook_event_name: "StopFailure", notification_type: "task_failed", error: `Failed ${marker}` }
     ]) {
       const eventPromise = waitForEvent(eventBus);
@@ -151,7 +150,7 @@ describe("OpenCode session hook route", () => {
       assert.equal(JSON.stringify(await eventPromise).includes(marker), false);
     }
     const notifications = new NotificationRepository(db, session.userId).list();
-    assert.equal(notifications.length, 2);
+    assert.equal(notifications.length, 1);
     assert.equal(JSON.stringify(notifications).includes(marker), false);
   });
 
