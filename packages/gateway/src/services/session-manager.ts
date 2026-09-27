@@ -254,22 +254,22 @@ export class InMemorySessionManager {
        assertManagedSessionAccess(this.db,input.userId,input.sessionId,input.launchPlan.cwd);
       }
       if(this.db&&authority){generation={runtimeName:runtimeSessionName,launchNonce:randomUUID(),daemon:authority};new SessionRuntimeConfirmationRepository(this.db,input.userId).begin(input.sessionId,generation);}
+      const env: Record<string, string> = {
+        ...input.launchPlan.env,
+        FORGEBADGER_SESSION_ID: session.id,
+        FORGEBADGER_USER_ID: input.userId,
+        FORGEBADGER_ATTACH_TOKEN: session.attachToken
+      };
+      // Codex disables colors even for NO_COLOR="". Omit the variable entirely;
+      // the Session Server also excludes the host value via buildSanitizedEnv.
+      delete env.NO_COLOR;
       await this.backend.createSession({
         name: runtimeSessionName,
         ...(generation?{launchNonce:generation.launchNonce,expectedDaemon:generation.daemon}:{}),
         cwd: input.launchPlan.cwd,
         command: input.launchPlan.command,
         args: input.launchPlan.args,
-        env: {
-          ...input.launchPlan.env,
-          FORGEBADGER_SESSION_ID: session.id,
-          FORGEBADGER_USER_ID: input.userId,
-          FORGEBADGER_ATTACH_TOKEN: session.attachToken,
-          // The Web terminal renders ANSI colors, so a NO_COLOR=1 leaked from
-          // the host shell must be overridden to empty — CLI TUIs (e.g.
-          // Claude Code) then render in color instead of monochrome.
-          NO_COLOR: ""
-        }
+        env
       });
       try { if(this.db) assertManagedSessionAccess(this.db,input.userId,input.sessionId,input.launchPlan.cwd); }
       catch(error) { if(generation)await this.confirmSessionExecutionStopped(input.userId,input.sessionId,true);else await this.backend.killSession(runtimeSessionName);throw error; }

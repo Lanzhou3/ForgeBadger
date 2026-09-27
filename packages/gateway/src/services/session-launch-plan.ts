@@ -90,10 +90,10 @@ export async function prepareAdapterLaunchExtras(
 }
 
 /**
- * FORGEBADGER_DISABLE_CLI_HOOKS: comma-separated adapter names whose hook
- * injection is skipped because the terminal-native channel (OSC 9/99/BEL
- * interception) covers them. Only claude/kimi/opencode have a terminal
- * channel; codex/pi are silently ignored (they must keep their hooks).
+ * FORGEBADGER_DISABLE_CLI_HOOKS: skip hook injection for claude/kimi/opencode.
+ * Disabling hooks removes structured lifecycle notifications; generic terminal
+ * bells cannot safely recover them. Codex/pi are silently ignored because
+ * those adapters require their managed hooks/extensions.
  */
 export function disabledCliHookAdapters(
   value: string | undefined = process.env.FORGEBADGER_DISABLE_CLI_HOOKS

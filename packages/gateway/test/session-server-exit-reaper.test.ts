@@ -58,12 +58,15 @@ it("exit reaper retires an exited session once its process group is gone", posix
 
 it("exit reaper keeps an exited session while its process group has survivors", posixOnly, async () => {
   const server = new SessionServer();
+  const dir = mkdtempSync(join(tmpdir(), "fb-reaper-linger-"));
+  const ready = join(dir, "child-ready");
+  const quotedReady = `'${ready.replace(/'/gu, "'\\''")}'`;
   try {
     const handle = await server.createSession({
       sessionId: "reap-linger",
       userId: "u1",
       attachToken: "tok",
-      launchPlan: launchPlan("(trap '' HUP; sleep 30) & exit 0")
+      launchPlan: launchPlan(`(trap '' HUP; : > ${quotedReady}; sleep 30) & while [ ! -f ${quotedReady} ]; do sleep 0.01; done; exit 0`)
     });
     await waitFor(() => handle.status === "exited");
     const stop = server.startExitReaper(20);
@@ -79,6 +82,7 @@ it("exit reaper keeps an exited session while its process group has survivors", 
     assert.equal(server.hasSession("reap-linger"), false);
   } finally {
     await server.destroy();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

@@ -14,7 +14,7 @@ import type { CommandRunner } from "./lib/dependency-check.js";
 import type { FeishuChannelRuntime } from "./services/integrations/feishu-channel-runtime.js";
 import type { RegistrationMode } from "./routes/auth.js";
 import type { LocalAccountRecovery } from "./services/local-account-recovery.js";
-import type { AgentStackDeps } from "./services/agent/agent-stack.js";
+import { buildAgentStack, type AgentStackDeps } from "./services/agent/agent-stack.js";
 import { startAutomationScheduler, type AutomationScheduler } from "./services/automation/scheduler.js";
 import { startCopilotRuntime } from "./services/agent/runtime.js";
 import { attachDispatchSupervisor, type DispatchSupervisor } from "./services/agent/dispatch-supervisor.js";
@@ -177,7 +177,8 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
 
   const copilotRuntime = startCopilotRuntime(copilotAgent);
   const recoveryReady = copilotRuntime.ready;
-  const feishuChannelRuntime = options.feishuChannelRuntime ?? createNativeFeishuRuntime(options.db,options.masterKey,options.nativeFeishuIO);
+  const feishuChannelRuntime = options.feishuChannelRuntime ?? createNativeFeishuRuntime(options.db,options.masterKey,options.nativeFeishuIO,
+    (userId,input)=>buildAgentStack(copilotAgent,userId).orchestrator.recordApprovalDecision({userId,...input}));
   const telegramChannelRuntime = options.telegramChannelRuntime ?? createNativeTelegramRuntime(options.db,options.masterKey,options.nativeTelegramIO);
 
   const app = createServer({
@@ -197,7 +198,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     accountRecovery: options.accountRecovery,
     copilotAgent,
     runtimeAuthorizationInvalidator,
-    mcpEnabled: options.mcpEnabled,
+    mcpEnabled: runtimeSettings?.effective().mcpEnabled ?? options.mcpEnabled,
     runtimeSettings
   });
 

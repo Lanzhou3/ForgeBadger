@@ -15,6 +15,7 @@ import { IpcServer } from "../src/services/session-server/ipc-server.js";
 import { createPlatformAdapter } from "../src/services/session-server/platform-adapter.js";
 import { SessionServerClient } from "../src/services/session-server-client.js";
 import type { LaunchPlanPayload } from "../src/services/session-server/ipc-protocol.js";
+import { confirmedStopHostAvailable } from "./fixtures/confirmed-stop-host.js";
 
 let testCounter = 0;
 function uniqueIpcPath(): string {
@@ -82,7 +83,7 @@ describe("Session Server IPC", () => {
     }
   });
 
-  it("kills session via IPC", async () => {
+  it("kills session via IPC", { skip: !confirmedStopHostAvailable }, async () => {
     const ipcPath = uniqueIpcPath();
     const { ipcServer, client } = await startPair(ipcPath, cwd);
     try {

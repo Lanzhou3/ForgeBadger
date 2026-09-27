@@ -41,7 +41,12 @@ export function createAdapterLaunchPlan(input: AdapterLaunchPlanInput): LaunchPl
     case "codex":
       return {
         command: "codex",
-        args: modelArgs(input.adapter, input.model),
+        // The shared Codex daemon retains its launch environment, including
+        // another terminal's hook identity. Keep execution inside this PTY's
+        // process tree so hooks inherit this session's id and attach token.
+        args: ["--no-daemon", "-c", 'tui.notifications=["approval-requested"]',
+          "-c", 'tui.notification_method="osc9"', "-c", 'tui.notification_condition="always"',
+          ...modelArgs(input.adapter, input.model)],
         cwd: input.projectRoot,
         env: input.env ?? {},
         secretEnvNames: input.secretEnvNames ?? [],

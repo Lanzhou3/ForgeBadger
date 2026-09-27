@@ -165,7 +165,7 @@ describe("session snapshot restore", () => {
     assert.equal(restoreRes.status, 200, JSON.stringify(body));
     assert.equal(createdBackendOptions.length, 1);
     // Host-environment launch: no provider/model flags are injected at start.
-    assert.deepEqual(createdBackendOptions[0]?.args, []);
+    assert.deepEqual(createdBackendOptions[0]?.args, ["--no-daemon", "-c", 'tui.notifications=["approval-requested"]', "-c", 'tui.notification_method="osc9"', "-c", 'tui.notification_condition="always"']);
   });
 
   it("does not restore another user's snapshot", async () => {

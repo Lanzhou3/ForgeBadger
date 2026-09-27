@@ -12,7 +12,7 @@ describe("Codex provider env isolation", () => {
     });
 
     assert.equal(plan.command, "codex");
-    assert.deepEqual(plan.args, []);
+    assert.deepEqual(plan.args, ["--no-daemon", "-c", 'tui.notifications=["approval-requested"]', "-c", 'tui.notification_method="osc9"', "-c", 'tui.notification_condition="always"']);
     assert.deepEqual(plan.secretEnvNames, []);
     assert.equal(plan.credentialMode, "host_environment");
     assert.equal(plan.env.OPENAI_API_KEY, undefined);

@@ -73,7 +73,7 @@ export async function buildProjectConfigRenderPlan(
   templateId: string,
   credentialMode: CredentialMode,
   dryRun: boolean,
-  options: { syncSkills?: ProjectConfigSkillSync } = {}
+  options: { syncSkills?: ProjectConfigSkillSync; readOnlyTemplates?: boolean } = {}
 ) {
   const projectRepo = new ProjectRepository(db, userId);
   const project = projectRepo.getById(projectId);
@@ -82,7 +82,7 @@ export async function buildProjectConfigRenderPlan(
   }
 
   const templateRepo = new TemplateRepository(db, userId);
-  const template = templateRepo.getById(templateId);
+  const template = options.readOnlyTemplates ? templateRepo.getSnapshotById(templateId) : templateRepo.getById(templateId);
   if (!template || !template.files) {
     throw new Error("Template not found");
   }

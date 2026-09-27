@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { renameSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -158,6 +159,26 @@ describe("writeConfigPlan", () => {
       success: false
     });
     assert.equal(await readFile(join(root, ".claude", "CLAUDE.md"), "utf8"), "# Incoming");
+  });
+
+  it("rechecks create-only parents after directory creation before opening a file", async (t) => {
+    if (process.platform === "win32") { t.skip("POSIX symlink fixture"); return; }
+    const root = await projectRoot();
+    const outside = await projectRoot();
+    let checks = 0;
+    const result = await writeConfigPlan(plan(root, [{ relativePath: ".claude/CLAUDE.md", content: "incoming" }]), {
+      createOnly: true,
+      beforeWrite() {
+        checks++;
+        if (checks !== 2) return;
+        // The parent was safe when the first check ran; swap it before open.
+        // The callback is synchronous, matching a local filesystem race.
+        renameSync(join(root, ".claude"), join(root, ".claude-old"));
+        symlinkSync(outside, join(root, ".claude"), "dir");
+      }
+    });
+    assert.equal(result.outcome, "rolled_back");
+    await assert.rejects(readFile(join(outside, "CLAUDE.md"), "utf8"), /ENOENT/);
   });
 });
 

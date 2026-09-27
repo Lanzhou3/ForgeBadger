@@ -29,6 +29,29 @@ const STAGED_PANES = {
 } as const;
 
 describe("programmatic terminal submit classifiers", () => {
+  it('recognizes Claude folded paste only in the current composer with matching newline count', () => {
+    const message = Array.from({ length: 35 }, (_, i) => `review line ${i}`).join('\n');
+    const needle = programmaticDeliveryNeedle(message);
+    const pane = '──────\n❯ [Pasted text #1 +34 lines]\n──────\n  auto mode on';
+    assert.equal(composerContainsStagedTask('claude', pane, message, needle), true);
+    for (const wrong of [pane.replace('+34', '+33'), pane.replace('#1', '#0'),
+      pane.replace('lines]', 'lines] extra input'), `[Pasted text #1 +34 lines]\n${READY_PANES.claude}`]) {
+      assert.equal(composerContainsStagedTask('claude', wrong, message, needle), false);
+    }
+    assert.equal(isProgrammaticComposerReady('claude', pane), false);
+    assert.equal(isProgrammaticComposerReady('claude', '──────\n❯\nexisting unsent draft\n──────'), false);
+    assert.equal(isProgrammaticComposerReady('claude', '──────\n❯\n[Pasted text #1 +34 lines]\n──────'), false);
+  });
+
+  it('does not confirm folded Claude input from unrelated screen changes or disappearance into an unknown screen', () => {
+    const needle = programmaticDeliveryNeedle('review changes');
+    const staged = '──────\n❯ [Pasted text #1 +34 lines]\n──────\n  auto mode on';
+    for (const current of [staged, staged.replace('auto mode on', '99% context left'),
+      staged.replace('+34', '+33'), '──────\n❯ [Pasted text #1 +34 li', '', 'Disconnected', 'Trust this directory?']) {
+      assert.equal(isProgrammaticTaskConsumed('claude', staged, current, needle), false);
+    }
+    assert.equal(isProgrammaticTaskConsumed('claude', staged, READY_PANES.claude, needle), true);
+  });
   it('distinguishes native Codex trust decisions from ordinary startup waiting', () => {
     assert.equal(isProgrammaticNativeApprovalRequired('codex', 'Do you trust the contents of this directory?\n› 1. Yes, continue'), true);
     assert.equal(isProgrammaticNativeApprovalRequired('codex', 'Hooks need review\n2. Trust all and continue'), true);

@@ -36,6 +36,7 @@ import type {
 } from "../src/services/session-manager.js";
 import type { TerminalBackendClient } from "../src/services/terminal-backend.js";
 import type { LaunchPlan } from "../src/adapters/claude.js";
+import { confirmedStopHostAvailable } from "./fixtures/confirmed-stop-host.js";
 
 const isWin = process.platform === "win32";
 
@@ -91,7 +92,7 @@ function ipcAcceptsConnections(ipcPath: string): Promise<boolean> {
 }
 
 describe("startup reuse", () => {
-  it("reuses a live daemon instead of spawning a second process", async () => {
+  it("reuses a live daemon instead of spawning a second process", { skip: !confirmedStopHostAvailable }, async () => {
     const ipcPath = uniqueIpcPath();
     const first = await track(startAndConnectSessionServer({ stateDir, ipcPath }));
     assert.strictEqual(first.reused, false);
@@ -156,7 +157,7 @@ describe("recovery after Gateway restart (daemon reuse)", () => {
     };
   }
 
-  it("reconciles a reused daemon: DB record recovered as detached, unknown session killed", async () => {
+  it("reconciles a reused daemon: DB record recovered as detached, unknown session killed", { skip: !confirmedStopHostAvailable }, async () => {
     const ipcPath = uniqueIpcPath();
     const integration = await track(startAndConnectSessionServer({ stateDir, ipcPath }));
 

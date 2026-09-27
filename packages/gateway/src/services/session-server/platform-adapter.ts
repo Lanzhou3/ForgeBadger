@@ -126,6 +126,11 @@ export function resolveWindowsShimCommand(
     : findWindowsExecutable(command, env);
   if (!shimPath || !/\.(?:cmd|bat)$/iu.test(shimPath)) return undefined;
 
+  // npm.cmd selects the Node executable and global prefix at runtime. Run the
+  // official shim through cmd.exe so an embedded Gateway Node cannot redirect
+  // global installs to a different prefix.
+  if (/(?:^|[\\/])npm\.cmd$/iu.test(shimPath)) return undefined;
+
   let content: string;
   try {
     content = readFileSync(shimPath, "utf8");

@@ -135,7 +135,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
     ...(deps.telegramChannelRuntime ? { channelRuntime: deps.telegramChannelRuntime } : {})
   }));
   app.use("/api/v1", createSkillRoutes(deps.db));
-  app.use("/api/v1/notifications", createNotificationRoutes(deps.db));
+  app.use("/api/v1/notifications", createNotificationRoutes(deps.db,{masterKey:deps.masterKey}));
   app.use("/api/v1/api-keys", createApiKeyRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/cli-config", createCliConfigRoutes(deps.db, deps.masterKey, {
     eventBus: deps.eventBus

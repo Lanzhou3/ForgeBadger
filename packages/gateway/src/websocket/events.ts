@@ -208,6 +208,7 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
         status: event.status,
         ...(event.source !== undefined ? { source: event.source } : {}),
         ...(event.textDelta !== undefined ? { text_delta: event.textDelta } : {}),
+        ...(event.textStepId !== undefined ? { text_step_id: event.textStepId, text_fence: event.textFence, text_sequence: event.textSequence } : {}),
         ...(event.thinkingDelta !== undefined ? { thinking_delta: event.thinkingDelta } : {}),
         ...(event.toolName ? { tool_name: event.toolName } : {}),
         ...(event.pendingActionId ? { pending_action_id: event.pendingActionId } : {}),

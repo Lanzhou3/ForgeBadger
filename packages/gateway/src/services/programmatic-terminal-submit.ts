@@ -135,6 +135,9 @@ const PI_BOX_BORDER = /^\s*─{20,}\s*$/u;
 // internally and expanded on submit, so the staged text itself never renders.
 // Matched against the whitespace-stripped composer.
 const PI_PASTE_MARKER = /\[paste#\d+(?:\+\d+lines?)?\]/u;
+// Claude 2.1.283 folds multiline input inside the current composer. The number
+// after '+' is the newline count, not the total number of lines (live verified).
+const CLAUDE_PASTE_COMPOSER = /^❯\[Pastedtext#[1-9]\d*\+(\d+)lines?\]$/u;
 // Box-bar/spacer slots above the status line that the busy spinner occupies.
 const PI_FOOTER_WINDOW = 4;
 // Max interior height when searching upward for the box's top border.
@@ -204,7 +207,7 @@ export function isProgrammaticComposerReady(adapter: AdapterId, pane: string): b
       // Input sent in that startup frame can be dropped before the editor is ready.
       return !/model:\s*loading\b/i.test(plain) && /›\s+Ask Codex to do anything/.test(composer);
     case "claude":
-      return /^\s*❯\s*$/m.test(composer) && /─{4,}/.test(plain);
+      return /^\s*❯\s*$/.test(composer) && /─{4,}/.test(plain);
     case "opencode":
       return /Ask anything\.\.\./.test(plain) && composer === "";
     case "kimi":
@@ -233,6 +236,13 @@ export function composerContainsStagedTask(
 ): boolean {
   if (composerContainsNeedle(adapter, pane, needle)) return true;
   const composer = normalizeComparable(currentProgrammaticComposer(adapter, pane));
+  if (adapter === 'claude') {
+    const marker = CLAUDE_PASTE_COMPOSER.exec(composer);
+    const newlines = message.split('\n').length - 1;
+    // SessionManager already proved an empty composer under the writer lease
+    // before staging. Reject partial markers, additional drafts and wrong sizes.
+    return marker !== null && newlines > 0 && Number(marker[1]) === newlines;
+  }
   if (adapter === "pi") {
     // The ready gate requires an empty composer, so a paste marker found here
     // can only come from the write that was just staged.
@@ -257,6 +267,11 @@ export function isProgrammaticTaskConsumed(
   needle: string
 ): boolean {
   if (normalizeComparable(currentPane) === normalizeComparable(stagedPane)) return false;
+  if (adapter === 'claude' && CLAUDE_PASTE_COMPOSER.test(normalizeComparable(currentProgrammaticComposer(adapter, stagedPane)))) {
+    // A footer redraw, a partially painted marker or an unknown screen is not
+    // evidence of consumption. Require the composer to return to empty.
+    return isProgrammaticComposerReady(adapter, currentPane);
+  }
   return !composerContainsNeedle(adapter, currentPane, needle);
 }
 

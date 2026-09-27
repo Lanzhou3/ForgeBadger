@@ -35,6 +35,9 @@ export interface ClaudeNotificationEvent {
   projectId?: string | undefined;
   projectName?: string | undefined;
   sessionName?: string | undefined;
+  nativeSessionId?: string | undefined;
+  nativeTurnId?: string | undefined;
+  nativeSubagent?: boolean | undefined;
   hookEventName: string;
   notificationType: string;
   message: string;
@@ -66,6 +69,9 @@ export interface CopilotRunUpdatedEvent {
   status: string;
   source?: "user" | "reactive" | "scheduled" | undefined;
   textDelta?: string | undefined;
+  textStepId?: string;
+  textFence?: number;
+  textSequence?: number;
   thinkingDelta?: string | undefined;
   toolName?: string | undefined;
   pendingActionId?: string | undefined;
