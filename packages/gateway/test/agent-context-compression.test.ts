@@ -125,6 +125,8 @@ describe("copilot context compression", () => {
     const result = await buildCompressedContext(log, conversation.id, llm);
     assert.equal(result.compressed, true);
     assert.ok(JSON.stringify(result.messages).length <= MAX_CONTEXT_CHARS);
+    assert.equal(log.getConversation(conversation.id)?.summary_covered_sequence ?? 0, 0);
+    db.close();
   });
 
   it("exposes a context budget constant for the harness", () => {
@@ -164,7 +166,9 @@ it("does not commit a summary after source history changes or ownership is lost"
         if (changeHistory) log.appendMessage(conversation.id, { role: "user", kind: "text", content: "changed" });
         return "stale";
       } } as unknown as AgentLlmClient;
-      await buildCompressedContext(log, conversation.id, llm, undefined, { canCommit: () => changeHistory });
+      const build = () => buildCompressedContext(log, conversation.id, llm, undefined, { canCommit: () => changeHistory });
+      if (changeHistory) await build();
+      else await assert.rejects(build(), /COPILOT_LEASE_LOST/);
       assert.equal(log.getConversation(conversation.id)?.summary, null);
     } finally { db.close(); }
   }
@@ -244,4 +248,28 @@ it('bounds summarizer input and oversized output without cutting tool argument J
     assert.equal(result.messages.at(-1)?.content,'newest goal');
     assert.ok((log.getConversation(c.id)?.summary?.length??0)<=4096);
   }finally{db.close();}
+});
+
+it('summarizes every uncovered turn before advancing coverage across a large backlog', async () => {
+  const db = createTestDb();
+  try {
+    const user = new UserRepository(db).create('backlog@example.test', 'hash');
+    const log = new CopilotConversationLog(db, user.id);
+    const c = log.createConversation();
+    for (let index = 0; index < 640; index++) {
+      log.appendMessage(c.id, { role: 'user', kind: 'text', content: `requirement-${index}: ${'x'.repeat(1800)}` });
+      log.appendMessage(c.id, { role: 'assistant', kind: 'text', content: 'Observed.' });
+    }
+    const seen = new Set<number>();
+    const llm = { async summarize({ messages }: { messages: AgentLlmMessage[] }) {
+      for (const message of messages) for (const match of message.content.matchAll(/requirement-(\d+):/g)) seen.add(Number(match[1]));
+      return 'Goals and evidence retained.';
+    } } as unknown as AgentLlmClient;
+    await buildCompressedContext(log, c.id, llm);
+    const covered = log.getConversation(c.id)!.summary_covered_sequence;
+    for (const row of log.listMessages(c.id).filter(row => row.sequence <= covered && row.role === 'user')) {
+      assert.ok(seen.has(Number(/requirement-(\d+)/.exec(row.content)![1])), `unseen covered message ${row.sequence}`);
+    }
+    assert.ok(covered > 0);
+  } finally { db.close(); }
 });

@@ -144,7 +144,8 @@ it('validates discover query and limit, caps activation, and rejects forged or c
 it('reduces the actual platform schema character footprint in optional initial discovery mode', async t => {
   const f = fixture(t); const allVisible = visibleToolSchemas(f.registry, { hasSessionManager: false });
   const selected = selectDiscoveredTools({ allVisible, steps: [], userId: f.userId, runId: 'new-run', masterKey: f.masterKey, enabled: true });
-  assert.ok(selected.length <= 8); assert.ok(selected.every(tool => DISCOVERY_CORE_TOOLS.has(tool.name)));
+  assert.ok(selected.length <= 10); // Includes the always-visible workspace status counter.
+  assert.ok(selected.some(tool => tool.name === 'get_project_git_status')); assert.ok(selected.every(tool => DISCOVERY_CORE_TOOLS.has(tool.name)));
   assert.ok(JSON.stringify(selected).length < JSON.stringify(allVisible).length / 2);
   assert.deepEqual(selectDiscoveredTools({ allVisible, steps: [], userId: f.userId, runId: 'new-run', masterKey: f.masterKey, enabled: false }), allVisible);
   t.diagnostic(`actual schema chars: full=${JSON.stringify(allVisible).length}, discovery initial=${JSON.stringify(selected).length}`);

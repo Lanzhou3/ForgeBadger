@@ -18,6 +18,66 @@ import { signJwt } from "../src/auth/jwt.js";
 import { createProjectManagementRoutes } from "../src/routes/project-management.js";
 import { errorHandler } from "../src/middleware/error-handler.js";
 import { fileURLToPath } from "node:url";
+import { CopilotToolPreferenceRepository } from "../src/db/repositories/copilot-tool-preference-repository.js";
+import { SessionRepository } from "../src/db/repositories/session-repository.js";
+import { InMemorySessionManager } from "../src/services/session-manager.js";
+import { SessionWriterLeases } from "../src/services/session-writer-leases.js";
+
+for (const origin of ["copilot", "legacy"] as const) it(`rechecks ${origin} Copilot authority after autonomy is revoked, including reused previews`, async () => {
+  const f = fixture();
+  try {
+    const projects = new ProjectRepository(f.db, f.user.id);
+    projects.setCopilotAutonomy(f.project.id, true);
+    const { runId, newStepId } = copilotRun(f.db, f.user.id);
+    const session = new SessionRepository(f.db, f.user.id).create({ projectId: f.project.id, name: "Session", aiTool: "kimi", workingDir: f.project.path });
+    const runtimeSessionName = "fb-autonomy-fixture";
+    const manager = new InMemorySessionManager({ async listSessions() { return [runtimeSessionName]; }, async hasSession() { return true; }, async createSession() {}, async killSession() {}, async capturePane() { return ""; } }, undefined, undefined, { db: f.db });
+    await manager.attachExistingSession({ userId: f.user.id, sessionId: session.id, runtimeSessionName,
+      launchPlan: { command: "kimi", args: [], cwd: f.project.path, env: {}, secretEnvNames: [], credentialMode: "host_environment" } });
+    new SessionWriterLeases({ db: f.db }).acquire({ userId: f.user.id, sessionId: session.id, workspace: f.project.path });
+    const key = newStepId();
+    const actions = new PlatformActions({ ...f.context, sessionManager: manager, actionOrigin: { kind: "copilot", runId, stepId: key } }, createPlatformCommands());
+    const request = { commandId: "session.takeover", input: { sessionId: session.id }, idempotencyKey: key };
+    const intent = actions.preview(request);
+    if (origin === "legacy") f.db.prepare("UPDATE platform_action_intents SET origin_kind='legacy',origin_run_id=NULL,origin_step_id=NULL WHERE id=?").run(intent.id);
+
+    projects.setCopilotAutonomy(f.project.id, false);
+    const resumed = new PlatformActions({ ...f.context, sessionManager: manager, actionOrigin: { kind: "owner_api" } }, createPlatformCommands());
+    await assert.rejects(resumed.execute(intent.id), /COPILOT_PROJECT_AUTONOMY_OFF/);
+    assert.throws(() => resumed.preview(request), /COPILOT_PROJECT_AUTONOMY_OFF/);
+    assert.throws(() => manager.assertManualInputAllowed(f.user.id, session.id), /SESSION_WRITER_BUSY/);
+    assert.equal(actions.intents.receipt(intent.id), undefined);
+    await resumed.executeOwner("session.takeover", { sessionId: session.id }, randomUUID());
+    assert.doesNotThrow(() => manager.assertManualInputAllowed(f.user.id, session.id));
+  } finally { f.db.close(); }
+});
+
+it("reuses a confirmed owner result without rerunning revision-dependent preconditions", async () => {
+  const f = fixture();
+  try {
+    const owner = new PlatformActions({ ...f.context, actionOrigin: { kind: "owner_api" } }, createPlatformCommands());
+    const input = { projectId: f.project.id, expectedRevision: 0, nextAction: "Review" };
+    const key = randomUUID();
+    const first = await owner.executeOwner("pm.management.update", input, key);
+    assert.deepEqual(await owner.executeOwner("pm.management.update", input, key), first);
+    assert.equal((first as { revision: number }).revision, 1);
+  } finally { f.db.close(); }
+});
+
+it("Copilot tool switches do not disable explicit owner actions", async () => {
+  const f = fixture();
+  try {
+    new ProjectRepository(f.db, f.user.id).setCopilotAutonomy(f.project.id, true);
+    new CopilotToolPreferenceRepository(f.db, f.user.id).setEnabled("pm_create_work_item", false);
+    const { runId, newStepId } = copilotRun(f.db, f.user.id);
+    const key = newStepId();
+    assert.throws(() => copilotActions(f.db, f.user.id, runId, key).preview({ commandId: "pm.work_item.create", input: { projectId: f.project.id, title: "Blocked" }, idempotencyKey: key }), /Tool disabled/);
+
+    const owner = new PlatformActions({ ...f.context, actionOrigin: { kind: "owner_api" } }, createPlatformCommands());
+    await owner.executeOwner("pm.work_item.create", { projectId: f.project.id, title: "Owner action" }, randomUUID());
+    assert.deepEqual(new ProjectManagerRepository(f.db, f.user.id).listWorkItems(f.project.id).map(item => item.title), ["Owner action"]);
+  } finally { f.db.close(); }
+});
 
 function fixture() {
   const db = new Database(":memory:");
@@ -28,6 +88,40 @@ function fixture() {
   const project = projects.create({ name: "Autonomy", path: "/tmp/copilot-autonomy-test", aiTool: "claude" });
   const foreign = new ProjectRepository(db, other.id).create({ name: "Foreign", path: "/tmp/copilot-autonomy-foreign", aiTool: "" });
   return { db, user, other, project, foreign, context: { db, userId: user.id } };
+}
+
+for (const revocation of ["autonomy", "tool"] as const) {
+  it(`rechecks ${revocation} after an external operation waits for the session mutex`, async () => {
+    const f = fixture();
+    let release!: () => void;
+    let execution: Promise<unknown> | undefined;
+    try {
+      const projects = new ProjectRepository(f.db, f.user.id);
+      projects.setCopilotAutonomy(f.project.id, true);
+      const session = new SessionRepository(f.db, f.user.id).create({ projectId: f.project.id, name: "Waiting", aiTool: "kimi", workingDir: f.project.path });
+      let launches = 0;
+      const manager = new InMemorySessionManager({ async listSessions() { return []; }, async createSession() { launches++; }, async killSession() {}, async capturePane() { return ""; } });
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const lock = manager.runExclusive(session.id, () => gate);
+      const { runId, newStepId } = copilotRun(f.db, f.user.id);
+      const stepId = newStepId();
+      const actions = new PlatformActions({ ...f.context, sessionManager: manager,
+        adapterCommandRunner: async () => ({ exitCode: 0, stdout: "kimi 1.0.0", stderr: "" }),
+        actionOrigin: { kind: "copilot", runId, stepId } }, createPlatformCommands());
+      const intent = actions.preview({ commandId: "session.start", input: { sessionId: session.id }, idempotencyKey: stepId });
+      execution = actions.execute(intent.id);
+      for (let i = 0; i < 100 && actions.intents.get(intent.id)?.status !== "executing"; i++) await new Promise(resolve => setTimeout(resolve, 2));
+      assert.equal(actions.intents.get(intent.id)?.status, "executing");
+      if (revocation === "autonomy") projects.setCopilotAutonomy(f.project.id, false);
+      else new CopilotToolPreferenceRepository(f.db, f.user.id).setEnabled("start_session", false);
+      release();
+      await lock;
+      await assert.rejects(execution, revocation === "autonomy" ? /COPILOT_PROJECT_AUTONOMY_OFF/ : /Tool disabled/);
+      assert.equal(launches, 0);
+      assert.equal(actions.intents.receipt(intent.id)?.outcome, "no_effect");
+      assert.equal(new SessionRepository(f.db, f.user.id).getById(session.id)?.status, "idle");
+    } finally { release?.(); await execution?.catch(() => undefined); f.db.close(); }
+  });
 }
 
 it("defaults new projects to copilot autonomy off and persists owner-scoped updates", () => {

@@ -47,6 +47,8 @@ interface MessageRow {
 }
 
 interface RunRow {
+  execution_phase: string;
+  phase_started_at: number | null;
   id: string;
   conversation_id: string;
   user_id: string;
@@ -125,7 +127,7 @@ export class CopilotConversationLog {
   }
 
   renameConversation(id: string, title: string): boolean {
-    const result = this.db.prepare(`UPDATE copilot_conversations SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?`)
+    const result = this.db.prepare(`UPDATE copilot_conversations SET title = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status != 'deleted'`)
       .run(title, Date.now(), id, this.userId);
     return result.changes > 0;
   }
@@ -140,8 +142,11 @@ export class CopilotConversationLog {
   deleteConversation(id: string): boolean {
     return this.db.transaction(()=>{
       if (!this.getConversation(id))return false;
-      this.assertEditable(id);
-      // Hide the conversation, retaining immutable execution evidence.
+      if (this.listRuns(id).some(run => ["pending", "running", "awaiting_approval"].includes(run.status))) {
+        throw new AgentError("COPILOT_CONVERSATION_BUSY", "Cancel the active run before deleting this conversation");
+      }
+      // Hiding does not edit or resolve execution evidence. Unknown outcomes
+      // and late receipts remain available in the ledger without replay.
       return this.db.prepare("UPDATE copilot_conversations SET status='deleted',updated_at=? WHERE id=? AND user_id=?").run(Date.now(),id,this.userId).changes>0;
     }).immediate();
   }
@@ -150,6 +155,12 @@ export class CopilotConversationLog {
       const row=this.db.prepare("SELECT sequence,conversation_id,role,kind FROM copilot_messages WHERE id=? AND user_id=?").get(messageId,this.userId) as {sequence:number;conversation_id:string;role:string;kind:string} | undefined;
       if (!row || (conversationId && row.conversation_id!==conversationId) || row.role!=="user" || row.kind!=="text")return;
       this.assertEditable(row.conversation_id);
+      // Editing even identical text revokes earlier repair authorization. Keep
+      // immutable run inputs and execution evidence intact for audit/recovery.
+      this.db.prepare(`UPDATE copilot_runs SET repair_revoked_at=? WHERE user_id=? AND conversation_id=?
+        AND (id IN (SELECT run_id FROM copilot_messages WHERE user_id=? AND conversation_id=? AND sequence>=?)
+          OR json_extract(input_json,'$.editMessageId') IN (SELECT id FROM copilot_messages WHERE user_id=? AND conversation_id=? AND sequence>=?))`)
+        .run(Date.now(),this.userId,row.conversation_id,this.userId,row.conversation_id,row.sequence,this.userId,row.conversation_id,row.sequence);
       if(newContent!==undefined) {
         this.db.prepare("UPDATE copilot_messages SET content=? WHERE user_id=? AND id=?").run(redactAgentText(newContent),this.userId,messageId);
         this.db.prepare("DELETE FROM copilot_messages WHERE user_id=? AND conversation_id=? AND sequence>?").run(this.userId,row.conversation_id,row.sequence);
@@ -309,6 +320,8 @@ function toMessage(row: MessageRow): AgentMessage {
 
 function toRun(row: RunRow): AgentRun {
   return {
+    phase: row.execution_phase,
+    ...(row.phase_started_at ? { phaseStartedAt: new Date(row.phase_started_at) } : {}),
     id: row.id,
     conversationId: row.conversation_id,
     userId: row.user_id,

@@ -18,13 +18,13 @@ function createTestDb(): Database.Database {
   return db;
 }
 
-function setupClient(db: Database.Database, apiFormat: ProviderApiFormat, response: unknown) {
+function setupClient(db: Database.Database, apiFormat: ProviderApiFormat, response: unknown, baseUrl = "https://stub.example") {
   const user = new UserRepository(db).create("thinking@example.com", "hash");
   const repo = new ModelProviderRepository(db, user.id, "abcdef0123456789abcdef0123456789");
   const provider = repo.createProviderProfile({
     name: "Stub",
     providerKey: "stub",
-    baseUrl: "https://stub.example",
+    baseUrl,
     authType: "api_key",
     apiFormat,
     supportedAdapters: ["opencode"]
@@ -328,4 +328,16 @@ describe("copilot llm preferences", () => {
       db.close();
     }
   });
+});
+
+it("requests separated reasoning only on official MiniMax endpoints and explicit streamed usage",async()=>{
+ for(const url of ['https://api.minimax.cn/v1','https://api.minimaxi.com/v1','https://stub.example']){
+  const db=createTestDb();try {
+   const {client,calls}=setupClient(db,'openai-compatible',{choices:[{message:{content:'answer',reasoning_content:'private'},finish_reason:'stop'}]},url);
+   const result=await client.stream({messages:[{role:'user',content:'hello'}],tools:[],maxOutputTokens:1024,onEvent:()=>{}});
+   assert.equal(calls[0]!.body.reasoning_split,url.includes('stub')?undefined:true);
+   assert.deepEqual(calls[0]!.body.stream_options,{include_usage:true});
+   assert.equal(calls[0]!.body.max_completion_tokens,1024);assert.equal(result.message,'answer');
+  }finally{db.close();}
+ }
 });

@@ -1,10 +1,11 @@
+import { rankCatalog } from './catalog-search.js';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { AgentLlmToolSchema } from './orchestrator-types.js';
 import type { RunStep } from './run-ledger.js';
 
-export const DISCOVERY_CORE_TOOLS = new Set(['list_projects', 'read_project_file', 'list_project_files',
-  'list_development_tasks', 'get_development_task', 'discover_tools', 'read_tool_result', 'list_playbooks']);
+export const DISCOVERY_CORE_TOOLS = new Set(['get_project_git_status', 'list_projects', 'read_project_file', 'list_project_files',
+  'list_development_tasks', 'get_development_task', 'search_project_files', 'discover_tools', 'read_tool_result', 'list_playbooks']);
 export const discoveryInputSchema = z.object({ query: z.string().trim().min(1).max(100), limit: z.number().int().min(1).max(12).default(8) }).strict();
 const receiptSchema = z.object({ version: z.literal(1), query: z.string().min(1).max(100),
   tools: z.array(z.object({ name: z.string().min(1).max(128), summary: z.string().max(240) }).strict()).max(12),
@@ -15,14 +16,8 @@ interface ToolSummary { name: string; summary: string }
 /** Search only caller-supplied current visible tools. Discovery never grants execution authority. */
 export function discoverToolSchemas(available: AgentLlmToolSchema[], query: string, limit = 8): ToolSummary[] {
   const input = discoveryInputSchema.parse({ query, limit });
-  const needle = input.query.toLowerCase();
-  const tokens = needle.split(/\s+/u);
-  return available.filter(tool => tool.name.length <= 128).map(tool => {
-    const name = tool.name.toLowerCase(), description = tool.description.toLowerCase();
-    const score = name === needle ? 1000 : tokens.reduce((sum, token) => sum + (name.includes(token) ? 10 : description.includes(token) ? 1 : 0), 0);
-    return { name: tool.name, summary: tool.description.slice(0, 240), score };
-  }).filter(tool => tool.score > 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
-    .slice(0, input.limit).map(({ name, summary }) => ({ name, summary }));
+  return rankCatalog(available.filter(tool => tool.name.length <= 128), input.query)
+    .slice(0, input.limit).map(tool => ({name:tool.name, summary:tool.description.slice(0,240)}));
 }
 
 function selectionProof(identity: DiscoveryIdentity, input: z.infer<typeof discoveryInputSchema>, names: string[]): string {

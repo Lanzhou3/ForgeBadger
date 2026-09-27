@@ -54,9 +54,9 @@ export class PlatformActions {
         if (user?.status !== 'active')
             throw new Error('Actor is not active');
     }
-    private checkPolicy(c: PlatformCommand, input: unknown) {
+    private checkPolicy(c: PlatformCommand, input: unknown, origin: ActionIntent['origin_kind'] | undefined = this.context.actionOrigin?.kind) {
         const prefs = new CopilotToolPreferenceRepository(this.context.db, this.context.userId);
-        if (Object.entries(TOOL_COMMANDS).some(([tool, command]) => command === c.id && !prefs.isEnabled(tool)))
+        if (origin === 'copilot' && Object.entries(TOOL_COMMANDS).some(([tool, command]) => command === c.id && !prefs.isEnabled(tool)))
             throw new Error("Tool disabled by owner");
         const toolName = Object.entries(TOOL_COMMANDS).find(([, id]) => id === c.id)?.[0] ?? c.id;
         const policyInput = c.id === 'project.create' && input && typeof input === 'object' && 'path' in input
@@ -66,33 +66,45 @@ export class PlatformActions {
             throw new Error(`Denied by security policy: ${decision.reason}`);
         return decision;
     }
+    private checkCopilotScope(origin: ActionIntent['origin_kind'] | undefined, resources: CommandResources, beforeExecution = true) {
+        if (origin !== 'copilot') return;
+        let reason: string | undefined;
+        if (!resources.projectIds.length) reason = 'COPILOT_GLOBAL_ACTION_REQUIRES_WEB: 请在 Web 控制台手动执行';
+        const projects = new ProjectRepository(this.context.db, this.context.userId);
+        for (const id of resources.projectIds) {
+            if (projects.getCopilotAutonomy(id)) continue;
+            const name = projects.getById(id)?.name ?? id;
+            reason = `COPILOT_PROJECT_AUTONOMY_OFF: 项目「${name}」未开启 Copilot 自治，请在 Web 控制台项目设置中开启后重试`;
+            break;
+        }
+        // An execution checkpoint can follow an earlier side effect. Only
+        // admission/preflight is known to have made no changes.
+        if (reason) throw beforeExecution ? new PlatformNoEffectError(reason) : new Error(reason);
+    }
+    private originKind(intent: ActionIntent): ActionIntent['origin_kind'] {
+        return intent.origin_kind === 'legacy' && this.intents.originConversation(intent.idempotency_key)
+            ? 'copilot' : intent.origin_kind;
+    }
     preview(raw: unknown): ActionIntent {
         this.activeActor();
+        this.context.externalAuthorize?.();
         const v = previewSchema.parse(raw);
         const c = this.commands.get(v.commandId);
         if (!c)
             throw new Error('Unknown platform command');
         const input = c.inputSchema.parse(v.input);
-        this.checkPolicy(c, input);
         const previous = this.intents.byKey(v.idempotencyKey);
+        this.checkPolicy(c, input, previous ? this.originKind(previous) : this.context.actionOrigin?.kind);
         if (previous) {
             if (previous.command_id !== c.id || previous.input_json !== canonical(input))
                 throw new Error('Idempotency key conflicts with payload');
+            this.context.externalAuthorize?.(JSON.parse(previous.resources_json) as CommandResources);
+            this.checkCopilotScope(this.originKind(previous), JSON.parse(previous.resources_json) as CommandResources);
             return previous;
         }
         const resources = c.resolve(this.context, input);
-        const origin = this.context.actionOrigin;
-        if (origin?.kind === 'copilot') {
-            if (!resources.projectIds.length)
-                throw new PlatformNoEffectError('COPILOT_GLOBAL_ACTION_REQUIRES_WEB: 请在 Web 控制台手动执行');
-            const projects = new ProjectRepository(this.context.db, this.context.userId);
-            for (const id of resources.projectIds) {
-                if (!projects.getCopilotAutonomy(id)) {
-                    const name = projects.getById(id)?.name ?? id;
-                    throw new PlatformNoEffectError(`COPILOT_PROJECT_AUTONOMY_OFF: 项目「${name}」未开启 Copilot 自治，请在 Web 控制台项目设置中开启后重试`);
-                }
-            }
-        }
+        this.context.externalAuthorize?.(resources);
+        this.checkCopilotScope(this.context.actionOrigin?.kind, resources);
         const digest = createHash('sha256').update(canonical({ commandId: c.id, input, resources, policyVersion: 1 })).digest('hex');
         return this.intents.create({ actor_user_id: this.context.userId, authority: 'owner_action', command_id: c.id, input_json: canonical(input), digest, resources_json: canonical(resources), policy_version: 1, expires_at: Date.now() + 15 * 60000, idempotency_key: v.idempotencyKey, status: 'approved' }, this.context.actionOrigin);
     }
@@ -100,8 +112,16 @@ export class PlatformActions {
         const conversationId=this.intents.originConversation(key);
         if(conversationId) assertChannelConversationAuthority(this.context.db,this.context.userId,conversationId);
     }
+    private commandContext(i: ActionIntent): CommandContext {
+        if (i.command_id !== 'session.stop' || this.originKind(i) !== 'copilot') return this.context;
+        const step = this.context.db.prepare('SELECT id,run_id FROM copilot_run_steps WHERE user_id=? AND id=?')
+            .get(this.context.userId, i.origin_step_id ?? i.idempotency_key) as { id: string; run_id: string } | undefined;
+        if (!step || (i.origin_run_id && step.run_id !== i.origin_run_id)) throw new Error('Copilot stop origin missing');
+        return { ...this.context, actionOrigin: { kind: 'copilot', runId: step.run_id, stepId: step.id } };
+    }
     private check(i: ActionIntent) {
         this.activeActor();
+        this.context.externalAuthorize?.(JSON.parse(i.resources_json) as CommandResources);
         this.intents.assertOriginActive(i.idempotency_key);
         this.checkChannelOrigin(i.idempotency_key);
         if (i.status !== 'approved' || i.expires_at <= Date.now() || i.policy_version !== 1)
@@ -110,16 +130,22 @@ export class PlatformActions {
         if (!c)
             throw new Error('Command unavailable');
         const input = c.inputSchema.parse(JSON.parse(i.input_json));
-        this.checkPolicy(c, input);
-        const resources = c.resolve(this.context, input);
+        this.checkPolicy(c, input, this.originKind(i));
+        const resources = c.resolve(this.commandContext(i), input);
+        this.checkCopilotScope(this.originKind(i), resources);
+        this.context.externalAuthorize?.(resources);
         if (canonical(resources) !== i.resources_json)
             throw new Error('Stale resource revision');
         return { c, input };
     }
     async execute(id: string) {
+        this.context.externalAuthorize?.();
         const old = this.intents.receipt(id);
-        if (old)
+        if (old) {
+            const prior = this.intents.get(id);
+            if (prior) this.context.externalAuthorize?.(JSON.parse(prior.resources_json) as CommandResources);
             return old;
+        }
         const i = this.intents.get(id);
         if (!i)
             throw new Error('Action not found');
@@ -127,7 +153,7 @@ export class PlatformActions {
             throw new Error('Action effect indeterminate; automatic replay prohibited');
         const { c, input } = this.check(i);
         if (c.prepare)
-            await c.prepare(this.context, input);
+            await c.prepare(this.commandContext(i), input);
         const preparedReceipt = this.intents.receipt(id);
         if(preparedReceipt) return preparedReceipt;
         if (c.effect === 'database') {
@@ -165,17 +191,20 @@ export class PlatformActions {
         let resourceBaseline = i.resources_json;
         const authorize = (checkRevision = true) => {
             this.activeActor();
+            this.context.externalAuthorize?.(JSON.parse(i.resources_json) as CommandResources);
             this.intents.assertOriginActive(i.idempotency_key);
             this.checkChannelOrigin(i.idempotency_key);
             if (i.expires_at <= Date.now()) throw new Error('Action expired');
             this.intents.assertExecutionOwner(id, checked.owner);
-            this.checkPolicy(checked.c, checked.input);
-            const resources = checked.c.resolve(this.context, checked.input);
+            this.checkPolicy(checked.c, checked.input, this.originKind(i));
+            const resources = checked.c.resolve(this.commandContext(i), checked.input);
+            this.checkCopilotScope(this.originKind(i), resources, false);
+            this.context.externalAuthorize?.(resources);
             if (checkRevision && canonical(resources) !== resourceBaseline) throw new Error('Stale resource revision');
             return resources;
         };
         try {
-            const result = await checked.c.execute({ ...this.context, actionIntentId: id,
+            const result = await checked.c.execute({ ...this.commandContext(i), actionIntentId: id,
                 authorize: () => { authorize(); },
                 checkpointResources: () => {
                     // Only trusted command code can checkpoint its own synchronous

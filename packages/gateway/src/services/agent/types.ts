@@ -75,6 +75,8 @@ export type AgentRunEvent =
 
 /** A run (one user turn and its tool steps). */
 export interface AgentRun {
+  phase?: string;
+  phaseStartedAt?: Date;
   id: string;
   conversationId: string;
   userId: string;

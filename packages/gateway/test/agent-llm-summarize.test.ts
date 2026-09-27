@@ -69,7 +69,10 @@ describe("copilot llm summarize", () => {
     assert.equal(calls.length, 1);
     const call = calls[0]!;
     assert.match(call.url, /\/v1\/messages$/);
-    assert.match(call.body.system as string, /conversation summarizer/);
+    const system = call.body.system as Array<{type:string;text:string;cache_control:unknown}>;
+    assert.equal(system[0]?.type, 'text');
+    assert.match(system[0]!.text, /conversation summarizer/);
+    assert.deepEqual(system[0]?.cache_control, {type:'ephemeral'});
     assert.equal((call.body.messages as unknown[]).length, 2);
   });
 

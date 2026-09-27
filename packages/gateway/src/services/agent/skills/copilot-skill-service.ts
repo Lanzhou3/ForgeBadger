@@ -3,7 +3,7 @@ import type { Database } from '../../../db/types.js';
 import { SkillRepository, type Skill } from '../../../db/repositories/skill-repository.js';
 import { CopilotSkillRevisionRepository, type CopilotSkillFile, type CopilotSkillSnapshot, type CopilotSkillSource, type SkillRevisionRecord, type SkillHead } from '../../../db/repositories/copilot-skill-revision-repository.js';
 import { BUILTIN_COPILOT_SKILLS, getCopilotSkill } from './copilot-skills.js';
-import { LEGACY_COPILOT_SKILLS } from './legacy-copilot-skills.js';
+import { isUnmodifiedBuiltin } from './copilot-skill-baselines.js';
 import { packageMainFile, parseCopilotSkillPackage, validateSkillFilePath } from './copilot-skill-package.js';
 
 export const MAX_IMPORTED_COPILOT_SKILLS = 32;
@@ -14,9 +14,9 @@ export interface CopilotSkillRow {
   version: string; currentVersion: string; revisionId: string; source: CopilotSkillSource;
   isEnabled: boolean; available: boolean; unavailableReason: string | null;
   compatible: boolean; incompatibilityReasons: string[]; requiredTools: string[];
-  reviewRequired: boolean; editable: boolean; updatedAt: string;
+  reviewRequired: boolean; customized: boolean; reviewedBuiltinVersion: string | null; editable: boolean; updatedAt: string;
 }
-export interface CopilotSkillDetail extends CopilotSkillRow { content: string; files: CopilotSkillFile[]; }
+export interface CopilotSkillDetail extends CopilotSkillRow { content: string; files: CopilotSkillFile[]; bundled: { version: string; files: CopilotSkillFile[] } | null; }
 export interface CopilotSkillUpdate { expectedRevisionId: string; files: CopilotSkillFile[]; reviewedVersion?: string | undefined; }
 
 /** Owns imports, immutable history and compatibility for both current and legacy API surfaces. */
@@ -28,7 +28,7 @@ export class CopilotSkillService {
     this.history = new CopilotSkillRevisionRepository(db, userId);
   }
   list(options: CopilotSkillQueryOptions = {}): CopilotSkillRow[] {
-    return this.details(options).map(({ content: _content, files: _files, ...row }) => row);
+    return this.details(options).map(({ content: _content, files: _files, bundled: _bundled, ...row }) => row);
   }
   details(options: CopilotSkillQueryOptions = {}): CopilotSkillDetail[] {
     this.prepare();
@@ -62,12 +62,22 @@ export class CopilotSkillService {
       const builtin = head.origin_kind === 'builtin' ? getCopilotSkill(row.name) : undefined;
       if (builtin) {
         if (next.name !== builtin.name) throw new Error('Builtin Skill name cannot change');
-        if (row.version !== builtin.version && input.reviewedVersion !== builtin.version) throw new Error('Review the current builtin Skill version before saving');
         if (input.reviewedVersion && input.reviewedVersion !== builtin.version) throw new Error('Builtin Skill version changed; reload before saving');
-        next = { ...next, version: builtin.version, requiredTools: [...builtin.requiredTools] };
-        next.files = next.files.map(file => file.path === 'SKILL.md' ? packageMainFile(next.name, next.description, next.version, next.content) : file);
+        next = { ...next, reviewedBuiltinVersion: input.reviewedVersion ?? snapshot.reviewedBuiltinVersion ?? snapshot.version,
+          requiredTools: [...new Set([...builtin.requiredTools, ...next.requiredTools])] };
       } else if (getCopilotSkill(next.name)) throw new Error('Builtin Skill names are reserved');
       this.commit(row, head.current_revision_id, 'update', next);
+      return this.describe(this.skills.getById(id)!, options);
+    })();
+  }
+  adoptBuiltin(id: string, expectedRevisionId: string, version: string, options: CopilotSkillQueryOptions = {}): CopilotSkillDetail {
+    this.prepare();
+    return this.db.transaction(() => {
+      const { row, head } = this.owned(id, expectedRevisionId);
+      const builtin = head.origin_kind === 'builtin' ? getCopilotSkill(row.name) : undefined;
+      if (!builtin) throw new Error('Builtin Skill not found');
+      if (version !== builtin.version) throw new Error('Builtin Skill version changed; reload before adopting');
+      this.commit(row, expectedRevisionId, 'builtin-update', builtinSnapshot(builtin));
       return this.describe(this.skills.getById(id)!, options);
     })();
   }
@@ -118,12 +128,11 @@ export class CopilotSkillService {
     const builtin = getCopilotSkill(current.name);
     if (current.kind !== 'builtin-playbook' || !builtin || version !== builtin.version) throw new Error('Review and save against the current bundled playbook version');
     return this.update(id, { expectedRevisionId: current.revisionId, reviewedVersion: version,
-      files: current.files.map(file => file.path === 'SKILL.md' ? packageMainFile(current.name, current.description, version, content) : file) }, options);
+      files: current.files.map(file => file.path === 'SKILL.md' ? packageMainFile(current.name, current.description, current.version, content) : file) }, options);
   }
   private prepare(): void {
     if (new UserRepository(this.db).findById(this.userId)?.status !== 'active') throw new Error('Skill owner is inactive');
     this.db.transaction(() => {
-      const initial = new Set(this.skills.listOwned().filter(row => !this.history.head(row.id)).map(row => row.id));
       for (const row of this.skills.listOwned()) this.capture(row);
       for (const builtin of BUILTIN_COPILOT_SKILLS) {
         const row = this.skills.getByName(builtin.name);
@@ -131,10 +140,11 @@ export class CopilotSkillService {
           this.skills.create({name:builtin.name,description:builtin.description,content:builtin.body,version:builtin.version,source:'builtin'});
           continue;
         }
-        const legacy = LEGACY_COPILOT_SKILLS.find(item => item.name === builtin.name);
-        if (initial.has(row.id) && row.source === 'builtin' && row.version === '1.0.0' && legacy &&
-          row.content === legacy.body && row.description === legacy.description) {
-          this.skills.update(row.id,{content:builtin.body,description:builtin.description,version:builtin.version});
+        const { head, snapshot } = this.owned(row.id);
+        const record = this.history.get(row.id, head.current_revision_id)!;
+        if (head.origin_kind === 'builtin' && row.version !== builtin.version &&
+            (record.action === 'legacy' || record.action === 'builtin-update') && isUnmodifiedBuiltin(snapshot)) {
+          this.commit(row, head.current_revision_id, 'builtin-update', builtinSnapshot(builtin));
         }
       }
       for (const row of this.skills.listOwned()) this.capture(row);
@@ -158,7 +168,7 @@ export class CopilotSkillService {
     if (expectedRevisionId !== undefined && head.current_revision_id !== expectedRevisionId) throw new Error('Skill revision changed; reload before saving');
     return { row, head, snapshot: JSON.parse(this.history.get(id, head.current_revision_id)!.snapshot_json) as CopilotSkillSnapshot };
   }
-  private commit(row: Skill, expected: string, action: 'update' | 'rollback', next: CopilotSkillSnapshot): void {
+  private commit(row: Skill, expected: string, action: 'update' | 'rollback' | 'builtin-update', next: CopilotSkillSnapshot): void {
     const collision = this.skills.getByName(next.name);
     if (collision && collision.id !== row.id) throw new Error('Skill name already exists');
     this.history.append(row.id, expected, action, next);
@@ -189,7 +199,8 @@ function describeSkill(row: Skill, snapshot: CopilotSkillSnapshot, head: SkillHe
   const trusted = !!bundled && snapshot.version === bundled.version && snapshot.name === bundled.name &&
     snapshot.description === bundled.description && snapshot.content === bundled.body && snapshot.files.length === 1 &&
     snapshot.files[0]?.path === 'SKILL.md' && snapshot.files[0]?.content === packageMainFile(bundled.name,bundled.description,bundled.version,bundled.body).content;
-  const reviewRequired = !!bundled && snapshot.version !== bundled.version;
+  const reviewedBuiltinVersion = bundled ? snapshot.reviewedBuiltinVersion ?? snapshot.version : null;
+  const reviewRequired = !!bundled && reviewedBuiltinVersion !== bundled.version;
   const missing = snapshot.requiredTools.filter(name => !options.availableToolNames?.includes(name));
   const compatible = snapshot.incompatibilityReasons.length === 0;
   const unavailableReason = !row.isEnabled ? 'disabled_by_owner' : reviewRequired ? 'playbook_review_required'
@@ -200,13 +211,20 @@ function describeSkill(row: Skill, snapshot: CopilotSkillSnapshot, head: SkillHe
     kind: bundled ? 'builtin-playbook' : 'imported', version: snapshot.version, currentVersion: bundled?.version ?? snapshot.version,
     revisionId: head?.current_revision_id ?? `legacy:${row.id}`, source: snapshot.source, isEnabled: row.isEnabled,
     available: unavailableReason === null, unavailableReason, compatible, incompatibilityReasons: snapshot.incompatibilityReasons,
-    requiredTools: snapshot.requiredTools, reviewRequired, editable: row.userId === userId,
+    requiredTools: snapshot.requiredTools, reviewRequired, customized: !!bundled && !trusted && !isUnmodifiedBuiltin(snapshot), reviewedBuiltinVersion, editable: row.userId === userId,
     updatedAt: new Date(record?.created_at ?? row.updatedAt?.getTime() ?? 0).toISOString(),
-    content: trusted ? bundled!.body : snapshot.content, files: snapshot.files };
+    content: trusted ? bundled!.body : snapshot.content, files: snapshot.files,
+    bundled: bundled ? { version: bundled.version, files: builtinSnapshot(bundled).files } : null };
 }
 
 /** Lightweight current catalog for the model context; callers supply its effective tools. */
 export function listAvailableCopilotSkillSummaries(db: Database, userId: string, options: CopilotSkillQueryOptions = {}) {
   return new CopilotSkillService(db,userId).list(options).filter(row=>row.available)
     .map(({id,revisionId,name,description})=>({id,revisionId,name,description}));
+}
+
+function builtinSnapshot(builtin: NonNullable<ReturnType<typeof getCopilotSkill>>): CopilotSkillSnapshot {
+  return { name: builtin.name, description: builtin.description, content: builtin.body, version: builtin.version,
+    files: [packageMainFile(builtin.name, builtin.description, builtin.version, builtin.body)],
+    source: { kind: 'builtin' }, requiredTools: [...builtin.requiredTools], incompatibilityReasons: [] };
 }

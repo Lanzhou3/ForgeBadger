@@ -15,13 +15,15 @@ import { createPlatformTools } from '../src/services/agent/tools/index.js';
 import type { AgentLlmClient } from '../src/services/agent/orchestrator-types.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { PlatformActions } from '../src/services/platform-commands/actions.js';
+import { createPlatformCommands } from '../src/services/platform-commands/catalog.js';
 import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
 
-function fixture(toolName: string, source: 'user' | 'reactive' | 'scheduled' = 'user') {
+function fixture(toolName: string, source?: 'reactive' | 'scheduled') {
   const db = new Database(':memory:');
   migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
   const user = new UserRepository(db).create('risk-test@example.com', 'test-hash');
   const project = new ProjectRepository(db, user.id).create({ name: 'test', path: '/tmp/copilot-risk-test', aiTool: 'codex' });
+  new ProjectRepository(db, user.id).setCopilotAutonomy(project.id, true);
   const log = new CopilotConversationLog(db, user.id);
   const conversation = log.createConversation();
   let calls = 0;
@@ -36,10 +38,10 @@ function fixture(toolName: string, source: 'user' | 'reactive' | 'scheduled' = '
   };
   const orchestrator = createCopilotOrchestrator({ db, masterKey: randomBytes(32).toString('hex'),
     toolRegistry: createAgentToolRegistry(createPlatformTools()), llm, eventBus: new ForgeBadgerEventBus() });
-  return { db, log, user, project, run: () => orchestrator.runTurn({ userId: user.id, conversationId: conversation.id, userText: 'Create a task', source }) };
+  return { db, log, user, project, run: () => orchestrator.runTurn({ userId: user.id, conversationId: conversation.id, userText: 'Create a task', ...(source ? { source } : {}) }) };
 }
 
-describe('Copilot risk-based owner approval', () => {
+describe('Copilot project autonomy', () => {
   it('executes routine task creation without a pending approval and persists its receipt', async () => {
     const f = fixture('pm_create_work_item');
     try {
@@ -51,9 +53,14 @@ describe('Copilot risk-based owner approval', () => {
     } finally { f.db.close(); }
   });
 
-  it('keeps global memory changes behind explicit confirmation', async () => {
+  it('rejects global memory writes from Copilot without creating an intent', async () => {
     const f = fixture('write_memory');
-    try { const runId = await f.run(); assert.equal(f.log.getRun(runId)?.status, 'awaiting_approval'); }
+    try {
+      const runId = await f.run();
+      assert.equal(f.log.getRun(runId)?.status, 'completed');
+      assert.equal((f.db.prepare('SELECT count(*) AS n FROM platform_action_intents').get() as {n:number}).n, 0);
+      assert.equal((f.db.prepare('SELECT count(*) AS n FROM copilot_memory').get() as {n:number}).n, 0);
+    }
     finally { f.db.close(); }
   });
 
@@ -67,8 +74,8 @@ describe('Copilot risk-based owner approval', () => {
     });
   }
 
-  it('rejects automatic approval from a different run or tool step', async () => {
-    const f = fixture('write_memory');
+  it('rejects a Copilot intent whose run or tool step does not match', async () => {
+    const f = fixture('pm_create_work_item');
     try {
       const runId = await f.run();
       const intent = f.db.prepare('SELECT id,origin_step_id FROM platform_action_intents').get() as { id: string; origin_step_id: string };
@@ -76,9 +83,9 @@ describe('Copilot risk-based owner approval', () => {
       const otherRun = new CopilotRunLedger(f.db, f.user.id).admit({ userId: f.user.id,
         conversationId: otherConversation.id, userText: 'Different request' }, 10);
       for (const origin of [{ runId: otherRun, stepId: intent.origin_step_id }, { runId, stepId: 'different-step' }]) {
-        const actions = new PlatformActions({ db: f.db, userId: f.user.id, actionOrigin: { kind: 'copilot', ...origin } }, new Map());
-        assert.throws(() => actions.approveRoutine(intent.id), /origin mismatch/);
-        assert.equal(actions.intents.get(intent.id)?.status, 'pending');
+        const actions = new PlatformActions({ db: f.db, userId: f.user.id, actionOrigin: { kind: 'copilot', ...origin } }, createPlatformCommands());
+        assert.throws(() => actions.preview({commandId:'pm.work_item.create',input:{projectId:f.project.id,title:'Different task'},idempotencyKey:'new-'+origin.runId+'-'+origin.stepId}),/origin key mismatch/);
+        assert.equal(actions.intents.get(intent.id)?.status, 'completed');
       }
     } finally { f.db.close(); }
   });

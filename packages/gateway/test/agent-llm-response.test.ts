@@ -160,7 +160,7 @@ it("enforces the deadline through a stalled SSE body and cleans up", async t => 
   let cancelled = false;
   const response = new Response(new ReadableStream({ cancel() { cancelled = true; } }), { headers: { "content-type": "text/event-stream" } });
   const { run, events } = setup(t, "openai", response, 10);
-  await assert.rejects(run(), { code: "AGENT_LLM_FAILED" });
+  await assert.rejects(run(), { code: "AGENT_LLM_TIMEOUT" });
   assert.equal(cancelled, true);
   assert.equal(events.length, 0);
 });

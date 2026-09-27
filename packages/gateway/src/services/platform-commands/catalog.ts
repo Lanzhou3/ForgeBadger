@@ -3,6 +3,7 @@ import { taskCloseInput, closeTask } from '../project-manager/task-progress.js';
 import { PlatformNoEffectError } from './errors.js';
 import {mutateAssignedTask} from '../project-manager/tasks.js';
 import {assertLegacyTaskExecution} from '../project-manager/access.js';
+import { importProject, applyMcpConfig } from '../mcp/project-workflow.js';
 import { createDevelopmentCommands } from '../development/commands.js';
 import { getAdapterLaunchStatus } from '../adapter-discovery.js';
 import { createHash } from 'node:crypto';
@@ -24,6 +25,7 @@ import type { CommandContext, PlatformCommand } from './types.js';
 const id = z.string().min(1).max(128);
 const projectInput = z.object({ projectId: id }).strict();
 export const projectCreateInput = z.object({ name: z.string().trim().min(1).max(200), path: z.string().trim().min(1).max(1024), description: z.string().max(2000).optional(), techStack: z.string().max(2000).optional(), templateId: id.optional() }).strict();
+export const projectConfigApplyInput = z.object({ projectId: id, templateId: id, expectedDigest: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
 export const workItemCreateInput = z.object({ projectId: id, title: z.string().min(1).max(256), description: z.string().max(4000).nullable().optional(), priority: z.number().int().min(0).max(100).optional(), acceptanceCriteria: z.array(z.string().max(1000)).max(50).optional(), stageId: id.nullable().optional() }).strict();
 const evidenceRef = z.object({ kind: z.string().trim().min(1).max(64).refine(value=>!/^(delivery|verified|verification|integrated)$/i.test(value),'Reserved delivery evidence kind').optional(), label: z.string().min(1).max(256).optional(), status: z.string().min(1).max(64).optional(), ref: z.string().min(1).max(512).optional(), path: z.string().min(1).max(512).optional(), sessionId: id.optional(), feishuChatId: id.optional(), feishuMessageId: id.optional(), createdAt: z.string().min(1).max(64).optional() }).strict();
 const workItemWithEvidence = workItemCreateInput.extend({assigneeId:id.nullable().optional(),reviewerId:id.nullable().optional(), status: z.literal('todo').optional(), evidenceRefs: z.array(evidenceRef).max(20).optional() });
@@ -48,7 +50,9 @@ function itemResources(ctx: CommandContext, input: unknown) {
     const item = new ProjectManagerRepository(ctx.db, ctx.userId).getWorkItem(v.projectId, v.workItemId);
     if (!item)
         throw new Error('Work item not found');
-    return { projectIds: [p.id], revision: createHash('sha256').update(canonical({ p, item, binding: (() => { const linked = resolveTaskPacketSession(ctx.db, ctx.userId, p.id, item); return linked ? { id: linked.id, projectId: linked.projectId, aiTool: linked.aiTool, workingDir: linked.workingDir } : null; })() })).digest('hex') };
+    const linked = resolveTaskPacketSession(ctx.db, ctx.userId, p.id, item);
+    const binding = linked ? { id: linked.id, projectId: linked.projectId, aiTool: linked.aiTool, workingDir: linked.workingDir } : null;
+    return { projectIds: [p.id], rootPaths: linked && linked.workingDir !== p.path ? [p.path, linked.workingDir] : [p.path], revision: createHash('sha256').update(canonical({ p, item, binding })).digest('hex') };
 }
 function sessionResources(ctx: CommandContext, input: unknown) {
     const v = z.object({ sessionId: id }).passthrough().parse(input);
@@ -56,7 +60,7 @@ function sessionResources(ctx: CommandContext, input: unknown) {
     if (!s)
         throw new Error('Session not found');
     project(ctx, s.projectId);
-    return { projectIds: [s.projectId], revision: createHash('sha256').update(canonical(s)).digest('hex') };
+    return { projectIds: [s.projectId], rootPaths: [s.workingDir], revision: createHash('sha256').update(canonical(s)).digest('hex') };
 }
 function taskAdapter(ctx: CommandContext, input: z.infer<typeof taskPrepareInput>) {
     const p = project(ctx, input.projectId);
@@ -90,7 +94,24 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 mkdirSync(root, { recursive: true });
                 if (!statSync(root).isDirectory())
                     throw new Error('Project root must be a directory');
-                return new ProjectRepository(ctx.db, ctx.userId).create({ ...v, path: canonicalRoot(root), aiTool: '' });
+                const finalRoot = canonicalRoot(root);
+                ctx.externalAuthorize?.({ projectIds: [], rootPaths: [finalRoot], revision: finalRoot });
+                return new ProjectRepository(ctx.db, ctx.userId).create({ ...v, path: finalRoot, aiTool: '' });
+            } }),
+        command({ id: 'project.import', effect: 'database', inputSchema: projectCreateInput,
+            resolve(_ctx, input) {
+                const root = canonicalRoot(projectCreateInput.parse(input).path);
+                return { projectIds: [], rootPaths: [root], revision: root };
+            },
+            execute(ctx, input) { return importProject(ctx.db, ctx.userId, projectCreateInput.parse(input), root => ctx.externalAuthorize?.({ projectIds: [], rootPaths: [root], revision: root })); } }),
+        command({ id: 'project.config.apply', effect: 'external', inputSchema: projectConfigApplyInput,
+            resolve: projectResources,
+            async execute(ctx, input) {
+                const v = projectConfigApplyInput.parse(input);
+                ctx.authorize?.();
+                const result = await applyMcpConfig(ctx.db, ctx.userId, v.projectId, v.templateId, v.expectedDigest, () => ctx.authorize?.());
+                ctx.authorize?.();
+                return result;
             } }),
         command({ id: 'project.metadata.update', effect: 'database', inputSchema: projectInput.extend({ name: z.string().min(1).max(200).optional(), description: z.string().max(2000).optional() }), resolve: projectResources,
             execute(ctx, input) {

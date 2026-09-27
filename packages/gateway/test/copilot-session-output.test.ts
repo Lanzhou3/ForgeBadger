@@ -64,7 +64,7 @@ describe('Copilot headless session output', () => {
     const other = new UserRepository(f.db).create('other-screen@test.dev', 'hash');
     f.manager.appendSessionOutput(f.session.id, 'private cached output');
     const output = await f.read(undefined, other.id);
-    assert.deepEqual(output, { found: false, output: '' });
+    assert.deepEqual(output, { sessionId: f.session.id, found: false, output: '' });
     await assert.rejects(f.manager.captureScreen(other.id, f.session.id), /SESSION_NOT_FOUND/);
     assert.equal(f.state.inspectReads, 0);
     assert.equal(f.state.historyReads, 0);
@@ -86,7 +86,7 @@ describe('Copilot headless session output', () => {
     const f = await fixture();
     f.state.fail = true;
     const output = await f.read();
-    assert.deepEqual(output, { found: true, live: false, source: 'unavailable', output: '', truncated: false, lineCount: 0 });
+    assert.deepEqual(output, { sessionId: f.session.id, found: true, live: false, source: 'unavailable', output: '', truncated: false, lineCount: 0 });
   });
 
   it('honors maxLines for snapshot and cache while keeping the full source line count', async () => {
@@ -126,7 +126,7 @@ describe('Copilot headless session output', () => {
     const tool = createSessionTools().find(item => item.name === 'get_session_output')!;
     const result = await executeAgentTool(tool, { sessionId: f.session.id }, { db: f.db, userId: f.user.id, masterKey: 'fixture', sessionManager: f.manager });
     // Tenant/path filtering hides inaccessible rows before snapshot/cache lookup.
-    assert.deepEqual(result, { ok: true, output: { found: false, output: '' } });
+    assert.deepEqual(result, { ok: true, output: { sessionId: f.session.id, found: false, output: '' } });
     assert.ok(!JSON.stringify(result).includes('private cache'));
     assert.equal(f.state.inspectReads, 0);
   });

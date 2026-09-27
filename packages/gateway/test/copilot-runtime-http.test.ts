@@ -43,10 +43,63 @@ it("HTTP accepts before model completion, restores durable runs, rejects busy ed
     const state=await snapshot.json() as {data:{activeRun:{id:string}}};assert.equal(state.data.activeRun.id,runId);
     const target=log.listMessages(c.id)[0]!;
     assert.equal((await post(`/conversations/${c.id}/edit-message`,{messageId:target.id,content:"edited"})).status,409);
+    const queuePath = `/conversations/${c.id}/followups`;
+    const queued = await post(queuePath, { content: 'after this', clientRequestId: 'queued-http' });
+    assert.equal(queued.status, 201);
+    const queueData = await queued.json() as { data: { followup: { id: string } } };
+    const repeated = await post(queuePath, { content: 'after this', clientRequestId: 'queued-http' });
+    assert.equal((await repeated.json() as typeof queueData).data.followup.id, queueData.data.followup.id);
+    assert.equal(log.listMessages(c.id).filter(m => m.role === 'user').length, 1);
+    assert.equal((await post(queuePath, { content: 'forged', clientRequestId: 'forged', executionMode: 'research' })).status, 400);
+    const deleted = await fetch(base + `/followups/${queueData.data.followup.id}`, { method: 'DELETE', headers });
+    assert.deepEqual((await deleted.json() as { data: unknown }).data, { cancelled: true });
+    const detail = await (await fetch(base + `/runs/${runId}`, { headers })).json() as { data: { run: { phase: string; usage: { calls: number } } } };
+    assert.equal(detail.data.run.phase, 'model'); assert.ok(detail.data.run.usage.calls >= 1);
     const cancelled=await post(`/runs/${runId}/cancel`);
     assert.deepEqual((await cancelled.json() as {data:unknown}).data,{cancelled:true,runId});
     release();await new Promise(resolve=>setTimeout(resolve,20));
     assert.equal(log.getRun(runId)?.status,"cancelled");
     assert.equal(log.listMessages(c.id).some(m=>m.content==="late"),false);
   } finally {release();await app.close();}
+});
+
+it('serves persisted connection diagnostics and transcript to the owner only', async () => {
+  const { createAgentPublicFetch } = await import('../src/services/agent/llm-public-fetch.js');
+  const db = new Database(':memory:');
+  migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+  const masterKey = 'a'.repeat(32), jwtSecret = 'b'.repeat(32);
+  const users = new UserRepository(db);
+  const owner = users.create('error-owner@test.dev', 'hash');
+  const other = users.create('error-other@test.dev', 'hash');
+  const auth = (user: typeof owner) => ({ Authorization: `Bearer ${signJwt({ userId: user.id, email: user.email }, jwtSecret)}`, 'Content-Type': 'application/json' });
+  const log = new CopilotConversationLog(db, owner.id);
+  const conversation = log.createConversation();
+  const models = new ModelProviderRepository(db, owner.id, masterKey);
+  const provider = models.createProviderProfile({ name: 'fixture', providerKey: 'fixture', baseUrl: 'https://8.8.8.8', apiFormat: 'openai', authType: 'api_key', supportedAdapters: ['opencode'] });
+  models.createCredential({ providerProfileId: provider.id, label: 'test', plaintextSecret: 'fixture-secret' });
+  models.createModelProfile({ providerProfileId: provider.id, name: 'fixture', modelId: 'fixture', capabilities: ['chat'], isDefault: true });
+  const app = createGatewayApp({ db, masterKey, jwtSecret,
+    sessionServerIpcPath: '/tmp/forgebadger-test-session-server.sock',
+    sessionManager: new InMemorySessionManager({ async listSessions() { return []; }, async createSession() {}, async killSession() {}, async capturePane() { return ''; } } as never),
+    apiKeyStore: new InMemoryApiKeyStore({ masterKey }),
+    llmFetch: createAgentPublicFetch({ resolveHost: async () => { throw Object.assign(new Error('private diagnostic host'), { code: 'ENOTFOUND' }); } }),
+  });
+  await new Promise<void>(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = app.server.address(); assert.ok(address && typeof address !== 'string');
+    const base = `http://127.0.0.1:${address.port}/api/v1/copilot`;
+    const accepted = await fetch(`${base}/conversations/${conversation.id}/messages`, { method: 'POST', headers: auth(owner), body: JSON.stringify({ content: 'Inspect' }) });
+    const { data: { runId } } = await accepted.json() as { data: { runId: string } };
+    for (let attempt = 0; attempt < 100 && log.getRun(runId)?.status !== 'failed'; attempt++) await new Promise(resolve => setTimeout(resolve, 20));
+    const response = await fetch(`${base}/runs/${runId}`, { headers: auth(owner) });
+    assert.equal(response.status, 200);
+    const body = await response.json() as { data: { run: { error: string }; steps: Array<{ result_json: string }> } };
+    assert.equal(body.data.run.error, 'AGENT_LLM_DNS_ERROR');
+    const receipt = JSON.parse(body.data.steps[0]!.result_json);
+    assert.deepEqual(receipt.diagnostic.nativeCodes, ['ENOTFOUND']);
+    assert.doesNotMatch(JSON.stringify(body), /private diagnostic host|fixture-secret/);
+    assert.match(log.listMessages(conversation.id).find(m => m.kind === 'error')!.content, /域名解析失败/);
+    assert.equal((await fetch(`${base}/runs/${runId}`, { headers: auth(other) })).status, 404);
+    assert.equal((await fetch(`${base}/runs/${runId}`)).status, 401);
+  } finally { await app.close(); }
 });

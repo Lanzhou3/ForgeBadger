@@ -16,6 +16,7 @@
 import type { AgentLlmClient, AgentLlmMessage } from "./orchestrator-types.js";
 import type { CopilotConversationLog } from "./conversation-log.js";
 import type { AgentMessage } from "./types.js";
+import { AgentError } from './types.js';
 import type { AgentMemoryRepository } from "./memory.js";
 
 export const MAX_CONTEXT_CHARS = 96_000;
@@ -30,6 +31,10 @@ export interface CompressedContext {
 }
 
 export interface CompressedContextOptions {
+  /** Optional live observations; never displace conversation evidence or trigger compression. */
+  observations?: AgentLlmMessage[];
+  /** Overflow recovery must stop if summarization cannot preserve the old head. */
+  strictCompression?: boolean;
   /** Serialized application-character bound, not a model token guarantee. */
   maxContextChars?: number;
   /** Internal complete assistant responses, keyed by their persisted transcript rows. */
@@ -64,14 +69,30 @@ export async function buildCompressedContext(
   modelId?: string,
   options: CompressedContextOptions = {}
 ): Promise<CompressedContext> {
+  const result = await buildBaseContext(log, conversationId, llm, modelId, options);
+  for (const observation of options.observations ?? []) {
+    const messages = assemble([], result.messages, observation);
+    if (fits(messages, options)) result.messages = messages;
+  }
+  return result;
+}
+
+async function buildBaseContext(
+  log: CopilotConversationLog,
+  conversationId: string,
+  llm: AgentLlmClient,
+  modelId?: string,
+  options: CompressedContextOptions = {}
+): Promise<CompressedContext> {
   const rows = log.listMessages(conversationId);
   const sourceFingerprint = JSON.stringify(rows);
-  const recall = buildRecallBlock(rows, options);
+  let recall: AgentLlmMessage | undefined;
+  try { recall = buildRecallBlock(rows, options); } catch { /* Optional recall must not fail the turn. */ }
 
   const prefix = options.prefixMessages ?? [];
   const initial = projectTranscript(rows, options.assistantMessages);
-  if (fits([...prefix, ...(recall ? [recall] : []), ...initial], options)) {
-    return { messages: [...prefix, ...(recall ? [recall] : []), ...initial], compressed: false };
+  if (fits(assemble(prefix, initial, recall), options)) {
+    return { messages: assemble(prefix, initial, recall), compressed: false };
   }
   // Fail before calling the summarizer if immutable instructions or the current
   // user goal cannot fit. No user instruction is silently cut.
@@ -88,21 +109,28 @@ export async function buildCompressedContext(
 
   let summary = existingSummary ?? "";
   if (headUncovered.length > 0) {
-    const toFold: AgentLlmMessage[] = [];
-    if (existingSummary) {
-      toFold.push({ role: "user", content: `Previous summary:\n${existingSummary.slice(0, 4096)}` });
-    } else if (headUncovered[0]?.role !== "user") {
-      // Anthropic requires the first message to be a user message.
-      toFold.push({ role: "user", content: "Conversation start." });
-    }
     try {
-      const boundedFold = boundedProjection(headUncovered, toFold, {
-      maxContextChars: options.maxContextChars ?? MAX_CONTEXT_CHARS,
-      reservedChars: Math.max(options.reservedChars ?? 0, 4096)
-      });
-      summary = await llm.summarize({ messages: boundedFold, ...(modelId !== undefined ? { modelId } : {}), ...(options.signal ? { signal: options.signal } : {}) });
-    } catch {
+      // Fold contiguous complete turns in batches. Never mark discarded turns as covered.
+      for (const batch of summaryBatches(headUncovered, options)) {
+        options.signal?.throwIfAborted();
+        assertContextAuthority(options);
+        const prefix: AgentLlmMessage[] = summary
+          ? [{ role: 'user', content: `Previous summary:\n${summary.slice(0, 4096)}` }]
+          : batch[0]?.role !== 'user' ? [{ role: 'user', content: 'Conversation start.' }] : [];
+        const messages = boundedProjection(batch, prefix, {
+          maxContextChars: options.maxContextChars ?? MAX_CONTEXT_CHARS,
+          reservedChars: Math.max(options.reservedChars ?? 0, 4096)
+        });
+        const next = await llm.summarize({ messages, ...(modelId !== undefined ? { modelId } : {}),
+          ...(options.signal ? { signal: options.signal } : {}) });
+        assertContextAuthority(options);
+        if (!next.trim()) throw new Error('COPILOT_EMPTY_SUMMARY');
+        summary = next.slice(0, 4096);
+      }
+    } catch (error) {
       if (options.signal?.aborted) throw options.signal.reason;
+      if (error instanceof AgentError && error.code === 'COPILOT_LEASE_LOST') throw error;
+      if (options.strictCompression) throw error;
       return { messages: boundedProjection(rows, prefix, options, recall), compressed: true };
     }
     summary = summary.slice(0, 4096);
@@ -115,6 +143,33 @@ export async function buildCompressedContext(
 
   const summaryMessage: AgentLlmMessage = { role: "user", content: `[会话摘要]\n${summary.slice(0, 4096)}` };
   return { messages: boundedProjection(tail, prefix, options, recall, summaryMessage), compressed: true };
+}
+
+function assertContextAuthority(options: CompressedContextOptions): void {
+  options.signal?.throwIfAborted();
+  if (options.canCommit && !options.canCommit())
+    throw new AgentError('COPILOT_LEASE_LOST','COPILOT_LEASE_LOST: context execution authority changed');
+}
+
+/** Batch only at user-turn boundaries, leaving room for the rolling summary. */
+function summaryBatches(rows: AgentMessage[], options: CompressedContextOptions): AgentMessage[][] {
+  const turns: AgentMessage[][] = [];
+  for (const row of rows) {
+    if (!turns.length || (row.role === 'user' && row.kind === 'text')) turns.push([]);
+    turns[turns.length - 1]!.push(row);
+  }
+  const budget = Math.max(1, (options.maxContextChars ?? MAX_CONTEXT_CHARS)
+    - Math.max(options.reservedChars ?? 0, 4096) - 8192);
+  const batches: AgentMessage[][] = [];
+  let batch: AgentMessage[] = [];
+  for (const turn of turns) {
+    if (batch.length && JSON.stringify(projectTranscript([...batch, ...turn])).length > budget) {
+      batches.push(batch); batch = [];
+    }
+    batch.push(...turn);
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
 }
 
 /** Build the `[相关记忆]` recall block from the most recent user text, if any. */
@@ -133,10 +188,22 @@ function buildRecallBlock(rows: AgentMessage[], options: CompressedContextOption
   const entries = memory.searchMulti(scopes, query, limit);
   if (entries.length === 0) return undefined;
 
-  const lines = entries.map((entry) => `- (${entry.scope}/${entry.kind}) ${entry.text}`);
-  let content = `[相关记忆]\n${lines.join("\n")}`;
-  if (content.length > budget) content = `${content.slice(0, budget)}…`;
+  let content = '[相关记忆]\n';
+  for (const entry of entries) {
+    const line = `- (${entry.scope}/${entry.kind}; id=${entry.id}) ${entry.text}\n`;
+    if (content.length + line.length <= budget) content += line;
+  }
+  if (content === '[相关记忆]\n') return undefined;
   return { role: "user", content };
+}
+
+/** Keep historical prefixes stable; never insert inside a tool call/result batch. */
+function assemble(prefix: AgentLlmMessage[], history: AgentLlmMessage[], recall?: AgentLlmMessage): AgentLlmMessage[] {
+  if (!recall) return [...prefix, ...history];
+  let latest = -1;
+  for (let i = history.length - 1; i >= 0; i--) if (history[i]!.role === 'user') { latest = i; break; }
+  const index = history[0]?.role === 'assistant' ? 0 : Math.max(0, latest);
+  return [...prefix, ...history.slice(0,index), recall, ...history.slice(index)];
 }
 
 function recentUserText(rows: AgentMessage[]): string | undefined {
@@ -240,11 +307,10 @@ function boundedProjection(rows: AgentMessage[], prefix: AgentLlmMessage[], opti
     throw new Error('COPILOT_CONTEXT_TOO_LARGE: immutable context or latest user goal exceeds budget');
   }
   let selected = rows;
-  const adjuncts = [...(recall ? [recall] : []), ...(summary ? [summary] : [])];
-  let projected = [...prefix, ...adjuncts, ...projectTranscript(selected, options.assistantMessages)];
+  const adjuncts = [...(summary ? [summary] : [])];
+  let projected = assemble([...prefix, ...adjuncts], projectTranscript(selected, options.assistantMessages), recall);
   if (fits(projected, options)) return projected;
   // Reduce optional recall before touching conversation evidence.
-  if (recall) adjuncts.shift();
   for (let limit = 8192; limit >= 128; limit = Math.floor(limit / 2)) {
     projected = [...prefix, ...adjuncts, ...projectTranscript(selected.map(row => compactRow(row, latest?.id, limit, options.assistantMessages)), options.assistantMessages)];
     if (fits(projected, options)) return projected;

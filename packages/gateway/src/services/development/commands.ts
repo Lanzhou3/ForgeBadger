@@ -1,3 +1,4 @@
+import { assertRepairPlan } from './repair-scope.js';
 import { z } from 'zod';
 import { ProjectRepository } from '../../db/repositories/project-repository.js';
 import { PlatformActionRepository } from '../../db/repositories/platform-action-repository.js';
@@ -17,6 +18,12 @@ export function assertDevelopmentSandboxAvailable(){
 export function ownedProject(ctx:Pick<CommandContext,'db'|'userId'>,projectId:string) {
  const project=new ProjectRepository(ctx.db,ctx.userId).getById(projectId);if(!project)throw new Error('DEVELOPMENT_PROJECT_NOT_FOUND');return project;
 }
+function repairContext(ctx:CommandContext,raw:unknown) {
+ const intent=ctx.actionIntentId?new PlatformActionRepository(ctx.db,ctx.userId).get(ctx.actionIntentId):undefined;
+ const runId=intent?.origin_run_id??(ctx.actionOrigin?.kind==='copilot'?ctx.actionOrigin.runId:undefined);
+ const stepId=intent?.origin_step_id??(ctx.actionOrigin?.kind==='copilot'?ctx.actionOrigin.stepId:undefined);
+ return runId&&stepId?assertRepairPlan(ctx.db,ctx.userId,runId,stepId,raw):undefined;
+}
 function taskResources(ctx:CommandContext,raw:unknown) {
  const v=developmentTaskInput.passthrough().parse(raw);ownedProject(ctx,v.projectId);
  const row=new DevelopmentTaskRepository(ctx.db,ctx.userId).get(v.taskId,v.projectId);if(!row)throw new Error('DEVELOPMENT_TASK_NOT_FOUND');
@@ -35,13 +42,16 @@ function verifyEvidence(ctx:CommandContext,raw:unknown) {
 }
 export function createDevelopmentCommands():PlatformCommand[] {
  return [{id:'development.task.submit',capability:'development.task.submit',effect:'database',inputSchema:developmentPlanSchema,
-  resolve(ctx,raw){const plan=developmentPlanSchema.parse(raw),p=prepareSource(ownedProject(ctx,plan.projectId).path,plan);assertDevelopmentSandboxAvailable();return {projectIds:[plan.projectId],rootPaths:[p.root],revision:hashText(JSON.stringify([p.root,p.sourceDigest,p.outputDigest,p.recipeDigest]))};},
+  resolve(ctx,raw){repairContext(ctx,raw);const plan=developmentPlanSchema.parse(raw),p=prepareSource(ownedProject(ctx,plan.projectId).path,plan);assertDevelopmentSandboxAvailable();return {projectIds:[plan.projectId],rootPaths:[p.root],revision:hashText(JSON.stringify([p.root,p.sourceDigest,p.outputDigest,p.recipeDigest]))};},
   execute(ctx,raw){
    assertDevelopmentSandboxAvailable();
    const plan=developmentPlanSchema.parse(raw),p=prepareSource(ownedProject(ctx,plan.projectId).path,plan);
    const intent=ctx.actionIntentId?new PlatformActionRepository(ctx.db,ctx.userId).get(ctx.actionIntentId):undefined;
    if(!intent||intent.status!=='executing'||!['copilot','owner_api'].includes(intent.origin_kind))throw new Error('DEVELOPMENT_APPROVAL_REQUIRED');
+   const repair=repairContext(ctx,raw);
+   if(repair && (repair.submitted_task_id || repair.submission_step_id!==intent.origin_step_id))throw new Error('COPILOT_REPAIR_SUBMISSION_LIMIT');
    const task=new DevelopmentTaskRepository(ctx.db,ctx.userId).create({project_id:plan.projectId,goal:plan.goal,plan_json:JSON.stringify(plan),recipe_digest:p.recipeDigest,source_digest:p.sourceDigest,output_digest:p.outputDigest,intent_id:intent.id,origin_run_id:intent.origin_run_id,origin_step_id:intent.origin_step_id,project_root:p.root});
+   if(repair)ctx.db.prepare('UPDATE copilot_repair_jobs SET submitted_task_id=? WHERE user_id=? AND id=? AND submitted_task_id IS NULL').run(task.id,ctx.userId,repair.id);
    return {taskId:task.id,recipeDigest:task.recipe_digest,status:task.status};
   }},
   {id:'development.task.cancel',capability:'development.task.cancel',effect:'database',inputSchema:developmentTaskInput,resolve:taskResources,execute(ctx,raw){const v=developmentTaskInput.parse(raw);return taskSummary(new DevelopmentTaskRepository(ctx.db,ctx.userId).cancel(v.taskId,v.projectId));}},

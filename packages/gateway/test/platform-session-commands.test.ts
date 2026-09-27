@@ -84,11 +84,16 @@ for (const change of ['disabled','expired','resource'] as const) test(`a ${chang
  try{
  migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
  const user=new UserRepository(db).create('waiting-start@test.dev','hash');const p=new ProjectRepository(db,user.id).create({name:'p',path:'/tmp',aiTool:'codex'});
+ new ProjectRepository(db,user.id).setCopilotAutonomy(p.id,true);
+ const {CopilotRunLedger}=await import('../src/services/agent/run-ledger.js');
+ const ledger=new CopilotRunLedger(db,user.id);const conversation=ledger.log.createConversation();
+ const runId=ledger.admit({userId:user.id,conversationId:conversation.id,userText:'Start session'},2);
+ const step=ledger.addStep(runId,{kind:'tool',toolName:'start_session',effect:'write'});
  const repo=new SessionRepository(db,user.id);const s=repo.create({projectId:p.id,name:'s',aiTool:'codex',workingDir:'/tmp'});
  let launches=0;const manager=new InMemorySessionManager({async createSession(){launches++;},async killSession(){},async listSessions(){return[];},async capturePane(){return '';}});
  const gate=new Promise<void>(r=>{release=r;});const lock=manager.runExclusive(s.id,async()=>gate);
- const actions=new PlatformActions({db,userId:user.id,sessionManager:manager,adapterCommandRunner:async()=>({exitCode:0,stdout:'codex 1.0.0',stderr:''})},new Map(createSessionCommands().map(c=>[c.id,c])));
- const intent=actions.preview({commandId:'session.start',input:{sessionId:s.id},idempotencyKey:'blocked-start'});
+ const actions=new PlatformActions({db,userId:user.id,sessionManager:manager,actionOrigin:{kind:'copilot',runId,stepId:step.id},adapterCommandRunner:async()=>({exitCode:0,stdout:'codex 1.0.0',stderr:''})},new Map(createSessionCommands().map(c=>[c.id,c])));
+ const intent=actions.preview({commandId:'session.start',input:{sessionId:s.id},idempotencyKey:step.id});
  const execution=actions.execute(intent.id);
  for(let n=0;n<100&&actions.intents.get(intent.id)?.status!=='executing';n++)await new Promise(r=>setTimeout(r,1));
  assert.equal(actions.intents.get(intent.id)?.status,'executing');

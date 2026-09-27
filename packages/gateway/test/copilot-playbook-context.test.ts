@@ -151,18 +151,15 @@ it('project autonomy switch gates copilot-origin platform writes at the intent l
     const globalResult = globalMessages.find(message => message.kind === 'tool_result')!.content;
     assert.equal(globalResult, 'Denied by security policy: COPILOT_GLOBAL_ACTION_REQUIRES_WEB: 请在 Web 控制台手动执行');
 
-    // Switch ON: the intent is auto-approved, then exact one-shot approval executes it to a confirmed receipt.
+    // Switch ON: a direct user's scoped memory write runs under the low-risk policy.
     projects.setCopilotAutonomy(f.project.id, true);
     assert.equal(projects.getCopilotAutonomy(f.project.id), true);
     f.emit([{ name: 'write_memory', input: { kind: 'fact', scope: 'project', projectId: f.project.id, text: 'Switch is on' } }]);
     const conversation = f.ledger.log.createConversation();
     const runId = await f.orchestrator.runTurn({ userId: f.user.id, conversationId: conversation.id, userText: 'Write the project memory now' });
-    assert.equal(f.ledger.get(runId)?.status, 'awaiting_approval');
-    const pending = f.ledger.log.listPendingActions(runId);
-    assert.equal(pending.length, 1);
-    assert.equal(pending[0]!.tool, 'write_memory');
-    assert.equal((await f.orchestrator.resumeAfterApproval({ userId: f.user.id, runId, actionId: pending[0]!.id, approved: true })).resumed, true);
     assert.equal(f.ledger.get(runId)?.status, 'completed');
+    const pending = f.ledger.log.listPendingActions(runId);
+    assert.equal(pending.length, 0);
     const writeStep = f.ledger.steps(runId).find(step => step.tool_name === 'write_memory')!;
     const intents = new PlatformActionRepository(f.db, f.user.id);
     const intent = intents.byKey(writeStep.id)!;

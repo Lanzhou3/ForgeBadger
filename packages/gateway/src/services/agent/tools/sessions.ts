@@ -6,6 +6,7 @@
  * platform-access service.
  */
 import { z } from "zod";
+import { createSessionStopTarget, sessionRuntimeRevision } from "../../session-stop-target.js";
 import {
   getSessionDetail,
   listSessionSummaries
@@ -46,9 +47,11 @@ export function createSessionTools(): AgentTool[] {
       async execute(input, context) {
         const { projectId, limit } = listSessionsInput.parse(input);
         const { db, userId } = toolDb(context);
+        const allowedProjectIds = Array.isArray(context.allowedProjectIds) ? context.allowedProjectIds as string[] : undefined;
         const sessions = listSessionSummaries(db, userId, {
           ...(projectId !== undefined ? { projectId } : {}),
-          ...(limit !== undefined ? { limit } : {})
+          ...(limit !== undefined ? { limit } : {}),
+          ...(allowedProjectIds ? { allowedProjectIds } : {})
         });
         return { sessions, count: sessions.length };
       }
@@ -70,7 +73,7 @@ export function createSessionTools(): AgentTool[] {
     {
       name: "get_session_output",
       description:
-        "Read the current Session Server terminal screen without requiring a browser attachment. Inspect native trust/permission prompts and progress. A cached fallback is marked live:false; missing output is not completion.",
+        "Read a session screen and its server-bound target (sessionId, taskTitle, observationId). Keep every target attached to its own output. For stop_session copy target.observationId and target.taskTitle exactly; never infer IDs by list position. Cached output cannot authorize stop.",
       risk: "read",
       requiresApproval: false,
       inputSchema: getSessionOutputInput,
@@ -78,24 +81,33 @@ export function createSessionTools(): AgentTool[] {
         const { sessionId, maxLines } = getSessionOutputInput.parse(input);
         const { db, userId } = toolDb(context);
         const session = new SessionRepository(db, userId).getById(sessionId);
-        if (!session) return { found: false, output: "" };
+        if (!session) return { sessionId, found: false, output: "" };
         const authorizeRead = () => assertManagedSessionAccess(db, userId, sessionId, session.workingDir);
         authorizeRead();
         const sessionManager = context.sessionManager as InMemorySessionManager | undefined;
         try {
           if (sessionManager?.captureScreen) {
+            const before = sessionRuntimeRevision(session, sessionManager);
             const snapshot = await sessionManager.captureScreen(userId, sessionId);
             authorizeRead();
             const ring = new SessionOutputRing();
             ring.append(snapshot.output.trimEnd());
-            return { found: true, live: snapshot.live, source: 'session_server', ...ring.getTail(maxLines ?? 80) };
+            const fresh = new SessionRepository(db, userId).getById(sessionId);
+            const stable = fresh && before === sessionRuntimeRevision(fresh, sessionManager);
+            const tail = ring.getTail(maxLines ?? 80);
+            const target = snapshot.live && stable
+              ? createSessionStopTarget(db, fresh, sessionManager, context.stepId, snapshot.output) : undefined;
+            // Keep identity intact under the tool registry's 48 KiB wire limit.
+            const output = tail.output.slice(-5000);
+            return { sessionId, found: true, live: snapshot.live && !!stable, source: 'session_server',
+              ...tail, output, truncated: tail.truncated || output.length < tail.output.length, ...(target ? { target } : {}) };
           }
         } catch {
           // The daemon may be reconnecting; cached output cannot assert liveness.
         }
         authorizeRead();
         const tail = sessionManager?.getSessionOutput(sessionId)?.getTail(maxLines ?? 80);
-        return { found: true, live: false, source: tail ? 'cached' : 'unavailable',
+        return { sessionId, found: true, live: false, source: tail ? 'cached' : 'unavailable',
           ...(tail ?? { output: '', truncated: false, lineCount: 0 }) };
       }
     }

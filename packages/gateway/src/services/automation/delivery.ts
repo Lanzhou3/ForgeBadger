@@ -7,7 +7,7 @@
  * summary and points at the automation.
  */
 import type { Database } from "../../db/types.js";
-import { NotificationRepository } from "../../db/repositories/notification-repository.js";
+import { NotificationService } from '../notification-service.js';
 
 export interface DeliveryPlan {
   notify: boolean;
@@ -39,7 +39,7 @@ export function deliverAutomationResult(db: Database, userId: string, input: {
     ? `${input.content.slice(0, SUMMARY_MAX_CHARS)}…`
     : input.content;
   try {
-    new NotificationRepository(db, userId).create({
+    new NotificationService(db, userId).create({
       type: "copilot_automation",
       titleKey: "notifications.copilotAutomationCompleted",
       message: summary,

@@ -15,6 +15,7 @@ import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { configureCliAutonomyAdapters } from '../src/services/adapter-autonomy.js';
 import { attachNotificationPersistence } from '../src/services/notification-events.js';
 import { attachDispatchSupervisor } from '../src/services/agent/dispatch-supervisor.js';
+import { publishTaskReviews } from '../src/services/agent/task-review.js';
 import { publishTaskReports } from '../src/services/agent/task-reports.js';
 import { createCopilotOrchestrator } from '../src/services/agent/orchestrator.js';
 import { createAgentToolRegistry } from '../src/services/agent/tool-registry.js';
@@ -25,7 +26,7 @@ import { readTaskDispatchAttempt } from '../src/services/project-manager/task-ex
 const cleanups: Array<() => void> = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); configureCliAutonomyAdapters([]); });
 
-function fixture(options: { autonomy?: boolean; cancelAfterDispatch?: boolean; maxSteps?: number } = {}) {
+function fixture(options: { autonomy?: boolean; cancelAfterDispatch?: boolean; maxSteps?: number; reviewTaskResults?: boolean; modelId?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'fb-task-report-'));
   const db = new Database(':memory:');
   migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
@@ -51,7 +52,8 @@ function fixture(options: { autonomy?: boolean; cancelAfterDispatch?: boolean; m
   const conversation = ledger.log.createConversation();
   let calls = 0;
   const orchestrator = createCopilotOrchestrator({ ...deps, ...(options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }), toolRegistry: createAgentToolRegistry(createPlatformTools()), llm: {
-    async stream({ onEvent }) {
+    async stream({ onEvent, modelId }) {
+      if (options.modelId) assert.equal(modelId, options.modelId);
       if (calls++ === 0) onEvent({ type: 'tool_call', toolCall: { id: 'create', name: 'pm_create_work_item', arguments: JSON.stringify({ projectId: project.id, title: 'Report origin task', acceptanceCriteria: ['Tests must be independently reviewed.'] }) } });
       else if (calls === 2) {
         const item = pm.listWorkItems(project.id)[0];
@@ -73,7 +75,7 @@ function fixture(options: { autonomy?: boolean; cancelAfterDispatch?: boolean; m
     }
   };
   const run = async () => {
-    const runId = await orchestrator.runTurn({ userId: user.id, conversationId: conversation.id, projectId: project.id, userText: 'Create and dispatch this task, then report completion here.' });
+    const runId = await orchestrator.runTurn({ userId: user.id, conversationId: conversation.id, projectId: project.id, userText: 'Create and dispatch this task, then report completion here.', reviewTaskResults: options.reviewTaskResults, modelId: options.modelId });
     await approveAll(runId);
     return runId;
   };
@@ -86,7 +88,7 @@ function fixture(options: { autonomy?: boolean; cancelAfterDispatch?: boolean; m
   };
   const reports = () => db.prepare("SELECT * FROM copilot_messages WHERE user_id = ? AND tool_name = 'pm_task_report'").all(user.id) as Array<{ conversation_id: string; tool_call_id: string; content: string }>;
   cleanups.push(() => { supervisor.stop(); db.close(); rmSync(root, { recursive: true, force: true }); });
-  return { db, user, project, pm, deps, ledger, conversation, eventBus, supervisor, run, notify, reports, enterCount: () => enters };
+  return { db, user, project, pm, deps, ledger, orchestrator, conversation, eventBus, supervisor, run, notify, reports, enterCount: () => enters };
 }
 
 describe('Copilot durable task reports', () => {
@@ -226,4 +228,41 @@ describe('Copilot durable task reports', () => {
       assert.equal(f.reports().length, 0);
     });
   }
+});
+
+
+it('admits one opt-in read-only review and publishes once; revoked notification blocks recovery', async () => {
+  const f = fixture({ reviewTaskResults: true, modelId: 'owner-model' });
+  const origin = await f.run(); f.notify();
+  publishTaskReports(f.deps, f.user.id); publishTaskReports(f.deps, f.user.id);
+  const jobs = f.db.prepare('SELECT child_run_id FROM copilot_research_jobs WHERE origin_run_id=?').all(origin) as Array<{ child_run_id: string }>;
+  assert.equal(jobs.length, 1);
+  const child = jobs[0]!.child_run_id;
+  const input = JSON.parse(f.ledger.get(child)!.input_json);
+  assert.equal(input.modelId, 'owner-model'); assert.equal(input.executionMode, 'review'); assert.equal(input.parentRunId, origin);
+  f.ledger.validateScope(input);
+  f.db.prepare('UPDATE copilot_runs SET started_at=1 WHERE id=?').run(origin);
+  await f.orchestrator.executeRun(f.user.id, child);
+  assert.equal(f.ledger.get(child)?.status, 'completed');
+  publishTaskReviews(f.deps, f.user.id); publishTaskReviews(f.deps, f.user.id);
+  assert.equal(f.ledger.log.listMessages(f.conversation.id).filter(m => m.toolName === 'pm_task_review').length, 1);
+  assert.equal(f.enterCount(), 1);
+  f.db.prepare('DELETE FROM notifications').run();
+  assert.throws(() => f.ledger.validateScope(input), /evidence changed/);
+});
+
+it('does not admit model reviews without explicit opt-in', async () => {
+  const f = fixture(); await f.run(); f.notify(); publishTaskReports(f.deps, f.user.id);
+  assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_research_jobs').get() as { n: number }).n, 0);
+});
+
+
+it('does not lose the deterministic report when optional review conflicts with selected project context', async () => {
+  const f = fixture({ reviewTaskResults: true }); const run = await f.run(); f.notify();
+  const selected = new ProjectRepository(f.db, f.user.id).create({ name: 'Other selected context', path: '/tmp', aiTool: 'codex' });
+  const input = JSON.parse(f.ledger.get(run)!.input_json); input.projectId = selected.id;
+  f.db.prepare('UPDATE copilot_runs SET input_json=? WHERE id=?').run(JSON.stringify(input), run);
+  publishTaskReports(f.deps, f.user.id);
+  assert.equal(f.reports().length, 1);
+  assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_research_jobs').get() as { n: number }).n, 0);
 });

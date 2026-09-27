@@ -10,6 +10,11 @@ function transport(status = 200) {
   const requestImpl = ((url: URL, options: RequestOptions) => {
     calls.push({ url, options });
     const req = new EventEmitter() as ClientRequest;
+    queueMicrotask(() => {
+      const socket = Object.assign(new EventEmitter(), { connecting: true });
+      req.emit('socket', socket);
+      socket.emit('connect'); socket.emit('secureConnect');
+    });
     req.end = (() => {
       queueMicrotask(() => {
         const res = Readable.from([Buffer.from("data: [DONE]\n\n")]) as IncomingMessage;

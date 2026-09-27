@@ -45,7 +45,7 @@ describe('Copilot playbook boundary',()=>{
    repo.update(row.id,{version:'1.0.0',content:'custom old text'});
    assert.equal(loadCopilotPlaybook(db,user.id,row.id,options),undefined);
    const stale=listCopilotPlaybooks(db,user.id,options).find(s=>s.id===row.id)!;
-   assert.equal(stale.reviewRequired,true);assert.equal(stale.currentVersion,'4.0.0');assert.equal(stale.content,'custom old text');
+   assert.equal(stale.reviewRequired,true);assert.equal(stale.currentVersion,'4.0.1');assert.equal(stale.content,'custom old text');
    assert.equal(stale.version,'1.0.0');
    await assert.rejects(()=>load.execute({name:row.name},context));
   }finally{db.close();}
@@ -72,7 +72,7 @@ describe('Copilot playbook boundary',()=>{
    assert.ok(row.requiredTools.every(name=>availableToolNames.includes(name)));
   }
   const pm=BUILTIN_COPILOT_SKILLS.find(s=>s.name==='autonomous-work-item-loop')!;
-  assert.match(pm.body,/pm_execute_task_packet/);assert.match(pm.body,/Grant/);
+  assert.match(pm.body,/pm_execute_task_packet/);assert.match(pm.body,/Project autonomy, tenant scope and exact action receipts/);assert.doesNotMatch(pm.body,/Grant/);
   const dispatch=BUILTIN_COPILOT_SKILLS.find(s=>s.name==='session-dispatch')!;
   assert.match(dispatch.body,/dispatch_task_to_session/);assert.match(dispatch.body,/ADAPTER_AUTONOMY_UNVERIFIED/);
  });

@@ -19,8 +19,28 @@ import { createCopilotOrchestrator } from '../src/services/agent/orchestrator.js
 import { createAgentLlmClient } from '../src/services/agent/llm-client.js';
 import { createAgentToolRegistry } from '../src/services/agent/tool-registry.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
+import { ProjectRepository } from '../src/db/repositories/project-repository.js';
+import { SessionRepository } from '../src/db/repositories/session-repository.js';
+import { NotificationRepository } from '../src/db/repositories/notification-repository.js';
 
 const key = 'a'.repeat(32);
+
+it('includes relevant persisted CLI notifications in actual subsequent model requests', async t => {
+  const f = setup(t, 'openai');
+  const root = mkdtempSync(join(tmpdir(), 'fb-notification-context-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const project = new ProjectRepository(f.db, f.user.id).create({ name: 'Review', path: root, aiTool: 'codex' });
+  const session = new SessionRepository(f.db, f.user.id).create({ projectId: project.id, name: 'Review', aiTool: 'codex', workingDir: root });
+  const notice = new NotificationRepository(f.db, f.user.id).create({ type: 'claude_notification', titleKey: 'notifications.taskCompleted',
+    message: 'Codex task completed', href: '', sessionId: session.id,
+    payload: { project_id: project.id, notification_type: 'task_completed', last_prompt: 'review 飞书通知' } });
+  await f.orchestrator().runTurn({ userId: f.user.id, conversationId: f.conversation.id, projectId: project.id, userText: '进展如何' });
+  assert.ok(f.requests.length >= 1);
+  for (const request of f.requests) {
+    assert.match(JSON.stringify(request), /review 飞书通知/);
+    assert.ok(JSON.stringify(request).includes(notice.id));
+  }
+});
 const reasoning = 'synthetic private replay marker';
 const content = '<think>synthetic inline state</think>Inspecting the current state.';
 const openaiCall = { id: 'call_1', type: 'function', function: { name: 'inspect_state', arguments: '{ "scope": "current" }' } };
@@ -243,4 +263,84 @@ it('normal text-only stop ends the conversation turn without choosing a tool or 
   assert.equal(f.ledger.get(run)?.status, 'completed');
   assert.equal(f.ledger.get(run)?.steps, 1);
   assert.equal(f.executions(), 0);
+});
+
+it('persists safe connection diagnostics in the run and visible conversation without crossing tenants', async t => {
+  const f = setup(t, 'openai');
+  const llm = createAgentLlmClient({ modelProviderRepository: f.repo, resolveHost: async () => {
+    throw Object.assign(new Error('private-host Bearer do-not-store-this'), { code: 'EAI_AGAIN' });
+  } });
+  const orchestrator = createCopilotOrchestrator({ db: f.db, masterKey: key, llm,
+    toolRegistry: createAgentToolRegistry([]), eventBus: new ForgeBadgerEventBus() });
+  await assert.rejects(orchestrator.runTurn({ userId: f.user.id, conversationId: f.conversation.id, userText: 'Inspect state.' }),
+    { code: 'AGENT_LLM_DNS_ERROR' });
+  const run = f.ledger.log.listRuns(f.conversation.id)[0]!;
+  const step = f.ledger.steps(run.id)[0]!;
+  const receipt = JSON.parse(publicModelResponse(step.result_json)!);
+  assert.equal(receipt.type, 'model_connection_error');
+  assert.equal(receipt.code, 'AGENT_LLM_DNS_ERROR');
+  assert.equal(receipt.diagnostic.attempts, 3);
+  assert.deepEqual(receipt.diagnostic.nativeCodes, ['EAI_AGAIN']);
+  const messages = f.ledger.log.listMessages(f.conversation.id);
+  const visible = messages.find(m => m.kind === 'error')!;
+  assert.match(visible.content, /域名解析失败/);
+  assert.match(visible.content, /EAI_AGAIN/);
+  assert.equal(visible.runId, run.id);
+  assert.equal(visible.stepId, step.id);
+  assert.doesNotMatch(JSON.stringify([receipt, messages]), /private-host|do-not-store-this/);
+  const other = new UserRepository(f.db).create('other-errors@test.dev', 'hash');
+  assert.deepEqual(new CopilotRunLedger(f.db, other.id).steps(run.id), []);
+  assert.deepEqual(new CopilotConversationLog(f.db, other.id).listMessages(f.conversation.id), []);
+});
+
+it('distinguishes the model deadline from caller cancellation without retrying either', async t => {
+  const f = setup(t, 'openai');
+  for (const cancel of [false, true]) {
+    let lookups = 0;
+    const controller = new AbortController();
+    const client = createAgentLlmClient({ modelProviderRepository: f.repo, timeoutMs: cancel ? 2000 : 15,
+      resolveHost: async () => { lookups++; if (cancel) setTimeout(() => controller.abort(), 5); return new Promise(() => {}); } });
+    await assert.rejects(client.stream({ messages: [], tools: [], signal: controller.signal, onEvent() {} }),
+      error => {
+        const failure = error as Error & { code: string; diagnostic: { stage: string; delivery: string; elapsedMs: number } };
+        assert.equal(failure.code, cancel ? 'AGENT_LLM_CANCELLED' : 'AGENT_LLM_TIMEOUT');
+        assert.equal(failure.diagnostic.stage, 'dns');
+        assert.equal(failure.diagnostic.delivery, 'not_sent');
+        assert.ok(failure.diagnostic.elapsedMs > 0);
+        return true;
+      });
+    assert.equal(lookups, 1);
+  }
+});
+
+it('retains real TLS-handshake and response timeout phases through the full LLM client', async t => {
+  const { createServer: tcpServer } = await import('node:net');
+  const { createServer: httpServer } = await import('node:http');
+  const f = setup(t, 'openai');
+  for (const phase of ['tls', 'response'] as const) {
+    const sockets = new Set<import('node:net').Socket>();
+    const server = phase === 'tls' ? tcpServer() : httpServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' }); res.write('{"choices":[');
+    });
+    server.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = server.address(); assert.ok(address && typeof address !== 'string');
+      f.repo.updateProviderProfile(f.provider.id, { baseUrl: `${phase === 'tls' ? 'https' : 'http'}://127.0.0.1:${address.port}`,
+        allowPlaintextHttp: true, allowPrivateNetworks: true });
+      const client = createAgentLlmClient({ modelProviderRepository: f.repo, timeoutMs: 100 });
+      await assert.rejects(client.stream({ messages: [], tools: [], onEvent() {} }), error => {
+        const failure = error as Error & { code: string; diagnostic: { stage: string; delivery: string; elapsedMs: number; attempts: number } };
+        assert.equal(failure.code, 'AGENT_LLM_TIMEOUT');
+        assert.equal(failure.diagnostic.stage, phase);
+        assert.equal(failure.diagnostic.delivery, phase === 'tls' ? 'not_sent' : 'possibly_sent');
+        assert.equal(failure.diagnostic.attempts, 1);
+        assert.ok(failure.diagnostic.elapsedMs >= 90);
+        return true;
+      });
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
+  }
 });

@@ -26,6 +26,7 @@ import { validateTerminalRuntimeAuthorization } from '../src/websocket/terminal-
 
 import {InMemorySessionManager} from '../src/services/session-manager.js';
 import type {TerminalBackendClient} from '../src/services/terminal-backend.js';
+import {confirmedStopHostAvailable} from './fixtures/confirmed-stop-host.js';
 
 interface RunDto {id:string;sessionId:string|null;state:string;baseCommit:string;error:string|null}
 interface ReceiptDto {id:string;commit:string;status:string;current:boolean}
@@ -173,7 +174,7 @@ test('post-merge database failure retains unknown intent and reconciliation does
  }finally{await f.close();}
 });
 
-test('real source PTY blocks integration until stopped; revocation closes actual managed WebSocket and process', {timeout:30000,skip:process.platform==='win32'},async()=>{
+test('real source PTY blocks integration until stopped; revocation closes actual managed WebSocket and process', {timeout:30000,skip:process.platform==='win32'||!confirmedStopHostAvailable},async()=>{
  const {startAndConnectSessionServer}=await import('../src/services/session-server-integration.js');
  const {InMemorySessionManager}=await import('../src/services/session-manager.js');
  const {RuntimeAuthorizationInvalidator}=await import('../src/services/runtime-authorization-invalidation.js');

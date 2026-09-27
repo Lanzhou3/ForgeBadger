@@ -6,6 +6,7 @@ export interface CommandContext {
     actionIntentId?: string;
     actionOrigin?: import('../../db/repositories/platform-action-repository.js').ActionOrigin;
     authorize?: (() => void) | undefined;
+    externalAuthorize?: ((resources?: CommandResources) => void) | undefined;
     /** Trusted command only: checkpoint its own synchronous resource mutation. */
     checkpointResources?: (() => void) | undefined;
     userId: string;
@@ -15,6 +16,7 @@ export interface CommandContext {
     eventBus?: import('../event-bus.js').ForgeBadgerEventBus | undefined;
 }
 export interface CommandResources {
+    stopTarget?: import("../session-stop-target.js").SessionStopTarget;
     projectIds: string[];
     rootPaths?: string[];
     revision: string;

@@ -1,0 +1,144 @@
+{
+  "createdAt": "2026-09-26T10:45:08.844Z",
+  "kind": "offline-discovery",
+  "fixtureVersion": 1,
+  "fixtureHash": "243e25de21f458e8ad0023684bf5dd686f864d3ae6e10cbb088d956c5f23a4bc",
+  "catalogHash": "057dcf03bb64877ae81067b74e689abc3f7b206ad93f6b8b0fd70b6b39f5965e",
+  "modelCalls": 0,
+  "tokens": null,
+  "costUsd": null,
+  "cases": [
+    {
+      "split": "development",
+      "query": "write_memory",
+      "expected": "write_memory",
+      "found": [
+        "write_memory"
+      ],
+      "passed": true,
+      "rank": 1,
+      "elapsedMs": 0.2323329999999828
+    },
+    {
+      "split": "development",
+      "query": "保存长期偏好",
+      "expected": "write_memory",
+      "found": [],
+      "passed": false,
+      "rank": null,
+      "elapsedMs": 0.050292000000013104
+    },
+    {
+      "split": "development",
+      "query": "回忆之前的约定",
+      "expected": "search_memory",
+      "found": [],
+      "passed": false,
+      "rank": null,
+      "elapsedMs": 0.02208399999994981
+    },
+    {
+      "split": "development",
+      "query": "调查原因",
+      "expected": "research_project",
+      "found": [],
+      "passed": false,
+      "rank": null,
+      "elapsedMs": 0.01854099999997061
+    },
+    {
+      "split": "development",
+      "query": "search source text",
+      "expected": "search_project_files",
+      "found": [
+        "search_project_files",
+        "research_project",
+        "project_graph_search"
+      ],
+      "passed": true,
+      "rank": 1,
+      "elapsedMs": 0.4355839999999489
+    },
+    {
+      "split": "development",
+      "query": "read_project_file",
+      "expected": "read_project_file",
+      "found": [
+        "read_project_file"
+      ],
+      "passed": true,
+      "rank": 1,
+      "elapsedMs": 0.03049999999996089
+    },
+    {
+      "split": "holdout",
+      "query": "持久记录我的使用习惯",
+      "expected": "write_memory",
+      "found": [],
+      "passed": false,
+      "rank": null,
+      "elapsedMs": 0.023958999999990738
+    },
+    {
+      "split": "holdout",
+      "query": "找回过去保存的决定",
+      "expected": "search_memory",
+      "found": [],
+      "passed": false,
+      "rank": null,
+      "elapsedMs": 0.014084000000025299
+    },
+    {
+      "split": "holdout",
+      "query": "分析故障的原因",
+      "expected": "research_project",
+      "found": [],
+      "passed": false,
+      "rank": null,
+      "elapsedMs": 0.014625000000023647
+    },
+    {
+      "split": "holdout",
+      "query": "find source files containing text",
+      "expected": "search_project_files",
+      "found": [
+        "search_project_files",
+        "list_project_files",
+        "read_skill_resource"
+      ],
+      "passed": true,
+      "rank": 1,
+      "elapsedMs": 0.06304099999999835
+    },
+    {
+      "split": "holdout",
+      "query": "ＳＥＡＲＣＨ＿ＭＥＭＯＲＹ",
+      "expected": "search_memory",
+      "found": [],
+      "passed": false,
+      "rank": null,
+      "elapsedMs": 0.03079200000001947
+    },
+    {
+      "split": "holdout",
+      "query": "zzunrelatedcapabilityzz",
+      "expected": null,
+      "found": [],
+      "passed": true,
+      "rank": null,
+      "elapsedMs": 0.02008299999999963
+    }
+  ],
+  "summary": [
+    {
+      "split": "development",
+      "total": 6,
+      "passed": 3
+    },
+    {
+      "split": "holdout",
+      "total": 6,
+      "passed": 2
+    }
+  ]
+}

@@ -73,12 +73,12 @@ for (const approvedBeforeUpgrade of [false,true]) it(`fails closed for an old ta
     const step = ledger.addStep(runId,{kind:'tool',toolCallId:'legacy',toolName:'pm_start_task_packet',inputJson:JSON.stringify(input),effect:'write'});
     ledger.append(runId,{role:'assistant',kind:'tool_call',content:'pm_start_task_packet',toolName:'pm_start_task_packet',toolInputJson:JSON.stringify(input),toolCallId:'legacy'},step.id);
     const actions = new PlatformActions({db,userId:user.id},createPlatformCommands());
-    const intent = actions.preview({commandId:'pm.task.prepare',input,authority:'owner_action',idempotencyKey:step.id});
+    const intent = actions.preview({commandId:'pm.task.prepare',input,idempotencyKey:step.id});
+    if (!approvedBeforeUpgrade) actions.intents.transition(intent.id,'approved','pending');
     ledger.waitApproval(claim,step);
     const pending = ledger.log.listPendingActions(runId)[0]!;
     if (approvedBeforeUpgrade) {
       ledger.decide(runId,pending.id,true);
-      actions.decide(intent.id,intent.digest,true);
       await orchestrator.executeRun(user.id,runId);
       assert.match(ledger.log.listMessages(conversation.id).find(m=>m.kind==='tool_result')?.content??'',/Unknown tool/);
     } else {

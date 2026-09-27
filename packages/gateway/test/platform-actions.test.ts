@@ -205,17 +205,27 @@ it('never retries uncertain external effects and preserves a durable unknown rec
         db.close();
     }
 });
-it('rechecks current tool switches for an owner intent before preview and execution', async () => {
+it('rechecks current tool switches for a Copilot intent before preview and execution', async () => {
     const { CopilotToolPreferenceRepository } = await import('../src/db/repositories/copilot-tool-preference-repository.js');
     const { createPlatformCommands } = await import('../src/services/platform-commands/catalog.js');
     const { db, user } = fixture();
     try {
-        const actions = new PlatformActions({ db, userId: user.id }, createPlatformCommands());
+        const { ProjectRepository } = await import('../src/db/repositories/project-repository.js');
+        const { CopilotRunLedger } = await import('../src/services/agent/run-ledger.js');
+        const projects = new ProjectRepository(db, user.id);
+        const project = projects.create({ name: 'Tool switches', path: '/tmp/copilot-tool-switch-test', aiTool: 'kimi' });
+        projects.setCopilotAutonomy(project.id, true);
+        const ledger = new CopilotRunLedger(db, user.id);
+        const conversation = ledger.log.createConversation();
+        const runId = ledger.admit({ userId: user.id, conversationId: conversation.id, userText: 'Remember' }, 2);
+        const step = ledger.addStep(runId, { kind: 'tool', toolName: 'write_memory', effect: 'write' });
+        const actions = new PlatformActions({ db, userId: user.id, actionOrigin: { kind: 'copilot', runId, stepId: step.id } }, createPlatformCommands());
+        const request = { commandId: 'memory.write', input: { scope: 'project', projectId: project.id, kind: 'fact', text: 'Exact approval' }, idempotencyKey: step.id };
         const prefs = new CopilotToolPreferenceRepository(db, user.id);
         prefs.setEnabled('write_memory', false);
-        assert.throws(() => actions.preview({ commandId: 'memory.write', input: { scope: 'global', kind: 'fact', text: 'Exact approval' }, idempotencyKey: 'memory' }), /disabled/);
+        assert.throws(() => actions.preview(request), /disabled/);
         prefs.setEnabled('write_memory', true);
-        const intent = actions.preview({ commandId: 'memory.write', input: { scope: 'global', kind: 'fact', text: 'Exact approval' }, idempotencyKey: 'memory' });
+        const intent = actions.preview(request);
         assert.equal(intent.status, 'approved');
         prefs.setEnabled('write_memory', false);
         await assert.rejects(actions.execute(intent.id), /disabled/);

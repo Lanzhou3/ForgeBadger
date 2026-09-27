@@ -1,3 +1,9 @@
+import type { TaskReviewOrigin } from './task-review.js';
+import { repairIdentity, type RepairOrigin } from './development-repair.js';
+import { validateRepairJob } from '../development/repair-scope.js';
+import { ProjectManagerRepository } from '../../db/repositories/project-manager-repository.js';
+import { readTaskDispatchAttempt } from '../project-manager/task-execution.js';
+import { verifiedDispatchEvidence } from '../project-manager/task-progress.js';
 import { assertChannelConversationAuthority } from "../channels/channel-run-authority.js";
 import { projectActionReceipt } from "../platform-commands/receipt-projection.js";
 import { PlatformActionRepository } from "../../db/repositories/platform-action-repository.js";
@@ -7,6 +13,12 @@ import { CopilotConversationLog } from "./conversation-log.js";
 import { AgentError, type AgentRunStatus } from "./types.js";
 import { redactAgentText } from "./redaction.js";
 export interface TurnInput {
+    executionMode?: 'research' | 'review' | 'repair';
+    repairOrigin?: RepairOrigin;
+    repairFailedChecks?: boolean;
+    reviewOrigin?: TaskReviewOrigin;
+    parentRunId?: string;
+    reviewTaskResults?: boolean;
     userId: string;
     conversationId: string;
     userText: string;
@@ -15,6 +27,7 @@ export interface TurnInput {
     source?: "user" | "reactive" | "scheduled";
     skipUserMessage?: boolean;
     clientRequestId?: string;
+    editMessageId?: string;
     toolDiscovery?: boolean;
 }
 export interface RunRecord {
@@ -61,7 +74,12 @@ function requestDigest(input: TurnInput): string {
     return inputDigest(JSON.stringify({ content: input.userText, modelId: input.modelId ?? null,
         projectId: input.projectId ?? null,
         source: input.source ?? 'user', skipUserMessage: input.skipUserMessage ?? false,
-        ...(input.toolDiscovery === true ? { toolDiscovery: true } : {}) }));
+        ...(input.toolDiscovery === true ? { toolDiscovery: true } : {}),
+        ...(input.executionMode ? { executionMode: input.executionMode, parentRunId: input.parentRunId, reviewOrigin: input.reviewOrigin ?? null } : {}),
+        ...(input.reviewTaskResults ? { reviewTaskResults: true } : {}),
+        ...(input.repairFailedChecks ? { repairFailedChecks: true } : {}),
+        ...(input.repairOrigin ? { repairOrigin: input.repairOrigin } : {}),
+        ...(input.editMessageId ? { editMessageId: input.editMessageId } : {}) }));
 }
 /** All writes are tenant scoped; no transaction spans asynchronous work. */
 export class CopilotRunLedger {
@@ -74,6 +92,32 @@ export class CopilotRunLedger {
         return this.db.prepare("SELECT * FROM copilot_run_steps WHERE user_id=? AND run_id=? ORDER BY ordinal").all(this.userId, id) as RunStep[];
     }
     validateScope(input: TurnInput): void {
+        if (input.executionMode) {
+            const parent = input.parentRunId ? this.get(input.parentRunId) : undefined;
+            if (!input.projectId || !['research', 'review', 'repair'].includes(input.executionMode) || !parent
+                || ['cancelled', 'failed', 'indeterminate'].includes(parent.status))
+                throw new AgentError('COPILOT_RESTRICTED_ORIGIN', 'Read-only task origin is no longer valid');
+            const origin = JSON.parse(parent.input_json) as TurnInput;
+            if (origin.executionMode || (origin.projectId && origin.projectId !== input.projectId))
+                throw new AgentError('COPILOT_RESTRICTED_ORIGIN', 'Nested or cross-project research is not allowed');
+            this.validateScope(origin);
+            if(input.executionMode==='repair') {
+                const {root}=validateRepairJob(this.db,this.userId,repairIdentity(this.userId,input));
+                if(root.project_id!==input.projectId)throw new AgentError('COPILOT_REPAIR_SCOPE','Repair project mismatch');
+            }
+            if (input.executionMode === 'review') {
+                const evidence = input.reviewOrigin;
+                const item = evidence && new ProjectManagerRepository(this.db, this.userId).getWorkItem(evidence.projectId, evidence.workItemId);
+                const attempt = item && readTaskDispatchAttempt(item);
+                if (!evidence || evidence.projectId !== input.projectId || !attempt || attempt.id !== evidence.attemptId
+                    || attempt.originIntentId !== evidence.intentId || attempt.consumedNotificationId !== evidence.notificationId
+                    || !verifiedDispatchEvidence({ db: this.db, userId: this.userId }, evidence.projectId, evidence.workItemId, evidence.notificationId)?.notifications.some(row => row.id === evidence.notificationId))
+                    throw new AgentError('COPILOT_REVIEW_ORIGIN', 'Task review evidence changed or was revoked');
+                const action = new PlatformActionRepository(this.db, this.userId).get(evidence.intentId);
+                if (action?.origin_run_id !== parent.id || !origin.reviewTaskResults)
+                    throw new AgentError('COPILOT_REVIEW_ORIGIN', 'Task review is not authorized by this origin');
+            }
+        }
         if (input.toolDiscovery !== undefined && typeof input.toolDiscovery !== 'boolean')
             throw new AgentError('COPILOT_TOOL_DISCOVERY_INVALID', 'Tool discovery must be a boolean');
         if (input.userId !== this.userId || !this.log.getConversation(input.conversationId))
@@ -87,21 +131,23 @@ export class CopilotRunLedger {
         if (input.projectId && !this.db.prepare("SELECT id FROM projects WHERE user_id=? AND id=?").get(this.userId, input.projectId))
             throw new AgentError("COPILOT_PROJECT_NOT_FOUND", "Project not found");
     }
+    findRequest(input: TurnInput): string | undefined {
+        this.validateScope(input);
+        if (input.clientRequestId === undefined) return;
+        if (!input.clientRequestId.trim() || input.clientRequestId.length > 128)
+            throw new AgentError('COPILOT_REQUEST_KEY_INVALID', 'Invalid client request key');
+        const existing = this.db.prepare('SELECT id,request_digest FROM copilot_runs WHERE user_id=? AND conversation_id=? AND client_request_id=?')
+            .get(this.userId, input.conversationId, input.clientRequestId) as { id: string; request_digest: string } | undefined;
+        if (!existing) return;
+        if (existing.request_digest !== requestDigest(input))
+            throw new AgentError('COPILOT_REQUEST_CONFLICT', 'Client request key was used for a different payload');
+        return existing.id;
+    }
     admit(input: TurnInput, maxSteps: number): string {
         return this.db.transaction(() => {
-            this.validateScope(input);
+            const existing = this.findRequest(input);
+            if (existing) return existing;
             const digest = requestDigest(input);
-            if (input.clientRequestId !== undefined) {
-                if (!input.clientRequestId.trim() || input.clientRequestId.length > 128)
-                    throw new AgentError('COPILOT_REQUEST_KEY_INVALID', 'Invalid client request key');
-                const existing = this.db.prepare('SELECT id,request_digest FROM copilot_runs WHERE user_id=? AND conversation_id=? AND client_request_id=?')
-                    .get(this.userId, input.conversationId, input.clientRequestId) as { id: string; request_digest: string } | undefined;
-                if (existing) {
-                    if (existing.request_digest !== digest)
-                        throw new AgentError('COPILOT_REQUEST_CONFLICT', 'Client request key was used for a different payload');
-                    return existing.id;
-                }
-            }
             if (this.log.listRuns(input.conversationId).some(r => ACTIVE_RUN_STATES.includes(r.status)))
                 throw new AgentError("COPILOT_CONVERSATION_BUSY", "Conversation already has an active run");
             const run = this.log.createRun(input.conversationId, input.modelId ? { model: input.modelId } : {});
@@ -110,6 +156,7 @@ export class CopilotRunLedger {
                     input.clientRequestId ?? null, input.clientRequestId ? digest : null, this.userId, run.id);
             if (!input.skipUserMessage)
                 this.append(run.id, { role: "user", kind: "text", content: input.userText });
+            if (input.executionMode) this.db.prepare('UPDATE copilot_runs SET token_budget=120000,max_duration_ms=300000 WHERE user_id=? AND id=?').run(this.userId, run.id);
             return run.id;
         }).immediate();
     }
@@ -181,6 +228,19 @@ export class CopilotRunLedger {
             this.db.prepare("UPDATE copilot_run_steps SET status='running',attempt=attempt+1,fence=?,started_at=? WHERE user_id=? AND id=? AND status='pending'").run(c.fence, Date.now(), this.userId, step.id);
         });
     }
+    /** Any crash retry consumes this allowance too. Occupy before summarization
+     * or inference; an interrupted recovery is stopped, not replayed on restart. */
+    claimContextRecovery(c: Claim, stepId: string, modelId: string | undefined, budget: number): boolean {
+        let claimed = false;
+        this.commit(c, () => {
+            const result = this.db.prepare(`UPDATE copilot_run_steps SET attempt=attempt+1,result_json=?
+                WHERE user_id=? AND run_id=? AND id=? AND kind='model' AND status='running'
+                AND fence=? AND attempt=1 AND result_json IS NULL`)
+                .run(JSON.stringify({contextRecovery:true,modelId:modelId??null,budget}),this.userId,c.runId,stepId,c.fence);
+            claimed = result.changes === 1;
+        });
+        return claimed;
+    }
     modelStep(c: Claim): RunStep | undefined {
         let step: RunStep | undefined;
         this.commit(c, () => {
@@ -202,7 +262,7 @@ export class CopilotRunLedger {
         this.db.prepare("UPDATE copilot_run_steps SET status='completed',result_json=?,completed_at=? WHERE user_id=? AND id=?")
             .run(redactAgentText(content), Date.now(), this.userId, stepId);
     }
-    receipt(c: Claim, step: RunStep, content: string, unknownEffect = false): void {
+    receipt(c: Claim, step: RunStep, content: string, unknownEffect = false, publish?: (content: string) => string): void {
         if (!this.db.open)
             return;
         this.db.transaction(() => {
@@ -211,6 +271,7 @@ export class CopilotRunLedger {
             if (!current || current.fence !== c.fence || !["running", "indeterminate"].includes(current.status))
                 return;
             const owned = this.owns(c);
+            if (owned && publish) content = publish(content);
             this.completeStep(step.id, content);
             if (unknownEffect)
                 this.db.prepare("UPDATE copilot_run_steps SET status='indeterminate' WHERE user_id=? AND id=?").run(this.userId, step.id);
@@ -228,7 +289,7 @@ export class CopilotRunLedger {
             const action = this.log.createPendingAction({ runId: c.runId, tool: step.tool_name!, inputJson: step.input_json!, inputDigest: step.input_digest! });
             this.db.prepare("UPDATE copilot_pending_actions SET step_id=?,tool_call_id=? WHERE user_id=? AND id=?").run(step.id, step.tool_call_id, this.userId, action.id);
             this.db.prepare("UPDATE copilot_run_steps SET status='awaiting_approval' WHERE user_id=? AND id=?").run(this.userId, step.id);
-            this.db.prepare("UPDATE copilot_runs SET status='awaiting_approval',lease_owner=NULL,lease_expires_at=NULL WHERE user_id=? AND id=?").run(this.userId, c.runId);
+            this.db.prepare("UPDATE copilot_runs SET status='awaiting_approval',execution_phase='awaiting_approval',phase_started_at=updated_at,lease_owner=NULL,lease_expires_at=NULL WHERE user_id=? AND id=?").run(this.userId, c.runId);
         });
     }
     decide(runId: string, actionId: string, approved: boolean): boolean {
@@ -252,15 +313,15 @@ export class CopilotRunLedger {
     }
     finish(c: Claim, status: AgentRunStatus, reason?: string): boolean { return this.commit(c, () => this.finishUnowned(c.runId, status, reason)); }
     private finishUnowned(runId: string, status: AgentRunStatus, reason?: string): void {
-        this.db.prepare("UPDATE copilot_runs SET status=?,stop_reason=?,error=?,completed_at=?,lease_owner=NULL,lease_expires_at=NULL,fence=fence+1,revision=revision+1,updated_at=? WHERE user_id=? AND id=?")
+        this.db.prepare("UPDATE copilot_runs SET execution_phase='finished',status=?,stop_reason=?,error=?,completed_at=?,lease_owner=NULL,lease_expires_at=NULL,fence=fence+1,revision=revision+1,updated_at=? WHERE user_id=? AND id=?")
             .run(status, reason ?? null, status === "failed" ? reason ?? null : null, Date.now(), Date.now(), this.userId, runId);
     }
-    cancel(runId: string): boolean {
+    cancel(runId: string, reason = "cancelled_by_owner"): boolean {
         return this.db.transaction(() => {
             const r = this.get(runId);
             if (!r || !ACTIVE_RUN_STATES.includes(r.status))
                 return false;
-            this.finishUnowned(runId, "cancelled", "cancelled_by_owner");
+            this.finishUnowned(runId, "cancelled", reason);
             new PlatformActionRepository(this.db,this.userId).rejectRun(runId);
             this.db.prepare("UPDATE copilot_run_steps SET status='indeterminate' WHERE user_id=? AND run_id=? AND effect='write' AND status='running'").run(this.userId, runId);
             this.db.prepare("UPDATE copilot_pending_actions SET status='expired',updated_at=? WHERE user_id=? AND run_id=? AND status='pending'").run(Date.now(), this.userId, runId);

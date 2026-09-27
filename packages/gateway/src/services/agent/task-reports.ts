@@ -1,3 +1,4 @@
+import { admitTaskReview } from "./task-review.js";
 import { TaskReportRepository, type TaskReportCursor } from '../../db/repositories/task-report-repository.js';
 import { ProjectManagerRepository } from '../../db/repositories/project-manager-repository.js';
 import { PlatformActionRepository } from '../../db/repositories/platform-action-repository.js';
@@ -10,7 +11,7 @@ import { redactAgentText } from './redaction.js';
 
 const scanCursors = new WeakMap<Database, Map<string, TaskReportCursor>>();
 
-/** Deterministic status report only: no provider request, new grant, or external message. */
+/** Deterministic report and optional durable read-only review admission; no model call inside this transaction. */
 export function publishTaskReports(deps: AgentStackDeps, userId: string): void {
   const reports = new TaskReportRepository(deps.db, userId);
   let cursors = scanCursors.get(deps.db);
@@ -49,6 +50,8 @@ export function publishTaskReports(deps: AgentStackDeps, userId: string): void {
           '此报告确认派发与 CLI 生命周期结果，不代表测试通过、代码合入或部署完成。',
           ...(attempt.report ? [attempt.report] : []),
         ].join('\n'));
+        admitTaskReview(ledger, run.id, { projectId: candidate.projectId, workItemId: candidate.workItemId,
+          attemptId: attempt.id, notificationId: evidence.id, intentId: attempt.originIntentId }, content);
         ledger.log.appendMessage(candidate.conversationId, {
           role: 'assistant', kind: 'text', content, toolName: 'pm_task_report', toolCallId: attempt.id,
         });

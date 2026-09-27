@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "createdAt": "2026-09-26T11:01:37.081Z",
+  "kind": "deterministic-harness-contracts",
+  "suiteHash": "76e62d8b798c11386b01a4af6862eb70cd51fcb0f3f8b1b2a5d3f04823c976f0",
+  "methodology": "Real SQLite, real built-in tools and isolated source files; external model responses are synthetic. No production database, live provider, live CLI or monetary benchmark.",
+  "liveModelCalls": 0,
+  "tokens": null,
+  "costUsd": null,
+  "results": [
+    {
+      "id": "tool-discovery",
+      "files": [
+        "copilot-discovery-quality.test.ts",
+        "agent-tool-discovery.test.ts"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "tests": 16,
+      "pass": 16,
+      "fail": 0,
+      "skipped": 0,
+      "elapsedMs": 3257.302875,
+      "failures": []
+    },
+    {
+      "id": "chinese-memory-and-provenance",
+      "files": [
+        "copilot-memory-search-quality.test.ts",
+        "copilot-memory-search-http.test.ts"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "tests": 14,
+      "pass": 14,
+      "fail": 0,
+      "skipped": 0,
+      "elapsedMs": 4345.375,
+      "failures": []
+    },
+    {
+      "id": "long-context-and-cache-contract",
+      "files": [
+        "agent-context-compression.test.ts",
+        "copilot-context-efficiency.test.ts"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "tests": 18,
+      "pass": 18,
+      "fail": 0,
+      "skipped": 0,
+      "elapsedMs": 4477.557958000001,
+      "failures": []
+    },
+    {
+      "id": "multi-file-recovery-and-progress",
+      "files": [
+        "copilot-runtime-efficiency.test.ts",
+        "copilot-no-progress.test.ts",
+        "copilot-provider-overflow.test.ts"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "tests": 24,
+      "pass": 24,
+      "fail": 0,
+      "skipped": 0,
+      "elapsedMs": 3835.1297079999986,
+      "failures": []
+    },
+    {
+      "id": "approval-cancel-and-lease",
+      "files": [
+        "copilot-read-concurrency.test.ts",
+        "copilot-risk-approval.test.ts",
+        "copilot-run-governance.test.ts"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "tests": 13,
+      "pass": 13,
+      "fail": 0,
+      "skipped": 0,
+      "elapsedMs": 3962.778709,
+      "failures": []
+    }
+  ]
+}

@@ -8,7 +8,7 @@ import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
 import { createCopilotOrchestrator } from '../src/services/agent/orchestrator.js';
 import { createAgentToolRegistry } from '../src/services/agent/tool-registry.js';
-import { containsSensitiveAgentValue } from '../src/services/agent/redaction.js';
+import { containsSensitiveAgentValue, redactAgentErrorMessage, redactAgentValue } from '../src/services/agent/redaction.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 
 it('rejects secret-shaped model tool input before any durable tool plan or execution', async () => {
@@ -106,6 +106,66 @@ it('rejects ordinary credential values in nested tool argument fields and JSON s
 
 it('allows code text with a token variable and no embedded credential', () => {
   assert.equal(containsSensitiveAgentValue({ content: 'const token = signJwt(user)' }), false);
+});
+
+it('redacts full quoted credential values without treating code assignments as secrets', () => {
+  const source = 'PASSWORD="plain demo secret" AWS_SECRET_ACCESS_KEY="plain demo aws" {"access_token":"plain demo token"}';
+  const redacted = redactAgentErrorMessage(source);
+  assert.equal(redacted.includes('plain demo'), false);
+  assert.equal(redacted.includes('demo secret'), false);
+  assert.equal(redacted.includes('demo token'), false);
+  assert.equal(redacted.includes('demo aws'), false);
+  assert.match(redacted, /"access_token":"\[REDACTED\]"/);
+  assert.equal(containsSensitiveAgentValue({ content: 'const token = signJwt(user)' }), false);
+});
+
+it('preserves JSON syntax while redacting spaced access tokens in errors', () => {
+  const redacted = redactAgentErrorMessage('{"access_token":"plain demo token"}');
+  assert.deepEqual(JSON.parse(redacted), { access_token: '[REDACTED]' });
+});
+
+it('redacts unquoted provider environment credentials with spaces around equals', () => {
+  const source = 'FORGEBADGER_MASTER_KEY = plain-master-value OPENAI_API_KEY = plain-openai-value FORGEBADGER_ATTACH_TOKEN = plain-attach-value';
+  const redacted = redactAgentErrorMessage(source);
+  assert.equal(redacted.includes('plain-'), false);
+  assert.equal(containsSensitiveAgentValue({ content: source }), true);
+  assert.equal(containsSensitiveAgentValue({ content: 'const token = signJwt(user)' }), false);
+});
+
+it('allows ordinary code references in object credential-like fields', () => {
+  assert.equal(containsSensitiveAgentValue({ content: 'const config = { token: process.env.TOKEN }' }), false);
+  assert.equal(containsSensitiveAgentValue({ content: 'const config = { password: passwordInput }' }), false);
+  assert.equal(containsSensitiveAgentValue({ content: 'const config = { apiKey: process.env.OPENAI_API_KEY }' }), false);
+  assert.equal(containsSensitiveAgentValue({ content: 'const config = { token: jwt, password: pw, apiKey: key }' }), false);
+});
+
+it('redacts unquoted password and token literals in terminal output', () => {
+  assert.deepEqual(redactAgentValue({ pane: 'password: plain-demo-secret token: plain-demo-token\npassword: secret123 token: abc123' }), {
+    pane: 'password: [REDACTED]\npassword: [REDACTED]'
+  });
+});
+
+it('redacts terminal output that stops inside a quoted credential', () => {
+  const output = redactAgentValue({ pane: 'OPENAI_API_KEY="plain-secret\n{"password":"plain-secret' });
+  assert.deepEqual(output, { pane: 'OPENAI_API_KEY="[REDACTED]' });
+});
+
+it('redacts earlier credentials before truncating an open quoted value', () => {
+  const output = redactAgentValue({ pane: 'OPENAI_API_KEY=plain-first-secret\nBearer plainBearerToken123\npassword="unfinished-secret' });
+  assert.deepEqual(output, { pane: 'OPENAI_API_KEY=[REDACTED]\nBearer [REDACTED]\npassword="[REDACTED]' });
+});
+
+it('redacts the complete line of an unquoted multiword credential', () => {
+  const output = redactAgentValue({ pane: 'password: plain demo secret\ntoken: plain demo token\nOPENAI_API_KEY=plain demo secret' });
+  assert.deepEqual(output, { pane: 'password: [REDACTED]\ntoken: [REDACTED]\nOPENAI_API_KEY=[REDACTED]' });
+  assert.equal(containsSensitiveAgentValue({ content: 'password: plain demo secret' }), true);
+});
+
+it('redacts JSON credentials embedded in tool error messages', () => {
+  const message = 'upstream failed: {"password":"plain-demo-password","api_key":"plain-demo-key"}';
+  const redacted = redactAgentErrorMessage(message);
+  assert.equal(redacted.includes('plain-demo-'), false);
+  assert.match(redacted, /\[REDACTED\]/);
 });
 
 it('does not broadcast a secret split across model text deltas', async () => {

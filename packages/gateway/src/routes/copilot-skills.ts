@@ -13,6 +13,7 @@ const fileImport = z.object({ source: z.object({kind:z.enum(['paste','upload']),
 const urlImport = z.object({ source:z.object({kind:z.literal('url'),url:z.string().url().max(2048)}).strict() }).strict();
 const importSchema = z.union([fileImport,urlImport]);
 const updateSchema = z.object({expectedRevisionId:revisionId,files:skillFilesSchema,reviewedVersion:z.string().min(1).max(128).optional()}).strict();
+const adoptSchema = z.object({expectedRevisionId:revisionId,version:z.string().min(1).max(128)}).strict();
 const toggleSchema = z.object({expectedRevisionId:revisionId,enabled:z.boolean()}).strict();
 const rollbackSchema = z.object({expectedRevisionId:revisionId,revisionId}).strict();
 
@@ -53,6 +54,13 @@ export function createCopilotSkillRoutes(db: Database, options: CopilotSkillRout
     const userId = (req as unknown as AuthenticatedRequest).userId;
     try { revisionId.parse(req.params.id); const input=updateSchema.parse(req.body);
       const skill = new CopilotSkillService(db,userId).update(req.params.id,input,copilotSkillQueryOptions(userId,options));
+      res.json({code:0,data:{skill},message:''});
+    } catch(error) { respondSkillError(res,error); }
+  });
+  router.post('/skills/:id/adopt-builtin', (req,res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    try { revisionId.parse(req.params.id); const input=adoptSchema.parse(req.body);
+      const skill = new CopilotSkillService(db,userId).adoptBuiltin(req.params.id,input.expectedRevisionId,input.version,copilotSkillQueryOptions(userId,options));
       res.json({code:0,data:{skill},message:''});
     } catch(error) { respondSkillError(res,error); }
   });

@@ -20,9 +20,8 @@ import { MAX_CONTEXT_CHARS } from '../src/services/agent/context.js';
  *  - autonomy-off: the model calls an operate tool while the project switch
  *    is off; preview rejects with COPILOT_PROJECT_AUTONOMY_OFF before any
  *    intent is persisted and no effect happens.
- *  - autonomy-on: the switch is on; the copilot-origin intent is created
- *    approved with a 15-minute expiry, the owner still approves the one-shot
- *    pending action over HTTP, and the effect is confirmed exactly once.
+ *  - autonomy-on: the switch is on; the direct user's routine write creates
+ *    an approved intent and confirms the effect exactly once.
  */
 type Variant='read'|'autonomy-off'|'autonomy-on';
 async function fixture(variant:Variant){
@@ -51,8 +50,7 @@ async function fixture(variant:Variant){
   await new Promise<void>(r=>app.server.listen(0,'127.0.0.1',r));const address=app.server.address();assert.ok(address&&typeof address!=='string');
   const base=`http://127.0.0.1:${address.port}/api/v1/copilot`;
   const post=(body:unknown,u=user)=>fetch(`${base}/conversations/${c.id}/messages`,{method:'POST',headers:headers(u),body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});
-  const approve=(runId:string,actionId:string)=>fetch(`${base}/runs/${runId}/pending-actions/${actionId}/decide`,{method:'POST',headers:headers(),body:JSON.stringify({approved:true}),signal:AbortSignal.timeout(4000)});
-  return {db,user,outsider,ledger,c,project,requests,release,app,post,approve};
+  return {db,user,outsider,ledger,c,project,requests,release,app,post};
 }
 async function waitFor(check:()=>boolean){for(let i=0;i<150;i++){if(check())return;await new Promise(r=>setTimeout(r,10));}assert.fail('condition did not become true');}
 for(const variant of ['read','autonomy-off','autonomy-on'] as const) it(`HTTP deduplicates running/completed request and protects authority (${variant})`,async()=>{
@@ -66,19 +64,16 @@ for(const variant of ['read','autonomy-off','autonomy-on'] as const) it(`HTTP de
     assert.equal((await f.post(payload,f.outsider)).status,404);
     assert.equal(f.requests.length,1);assert.equal(f.ledger.log.listMessages(f.c.id).filter(m=>m.role==='user').length,1);
     f.release();
-    if(variant==='autonomy-on'){
-      await waitFor(()=>f.ledger.log.listPendingActions(runId).length===1);
-      const pending=f.ledger.log.listPendingActions(runId)[0]!;
-      const intent=f.db.prepare('SELECT status,origin_kind,expires_at FROM platform_action_intents WHERE user_id=? AND idempotency_key=?').get(f.user.id,pending.stepId??'') as {status:string;origin_kind:string;expires_at:number}|undefined;
-      assert.ok(intent,'copilot-origin intent must be persisted');
-      assert.equal(intent!.status,'approved');
-      assert.equal(intent!.origin_kind,'copilot');
-      assert.ok(intent!.expires_at>Date.now()&&intent!.expires_at<Date.now()+15*60000+1000,'intent expires in 15 minutes');
-      const decision=await f.approve(runId,pending.id);
-      assert.equal(decision.status,200);
-      assert.equal((await decision.json() as {data:{resumed:boolean;runId:string}}).data.resumed,true);
-    }
     await waitFor(()=>f.ledger.get(runId)?.status==='completed');
+    if(variant==='autonomy-on'){
+      assert.equal(f.ledger.log.listPendingActions(runId).length,0);
+      const step=f.ledger.steps(runId).find(s=>s.kind==='tool')!;
+      const intent=f.db.prepare('SELECT status,origin_kind,expires_at FROM platform_action_intents WHERE user_id=? AND idempotency_key=?').get(f.user.id,step.id) as {status:string;origin_kind:string;expires_at:number}|undefined;
+      assert.ok(intent,'copilot-origin intent must be persisted');
+      assert.equal(intent.status,'completed');
+      assert.equal(intent.origin_kind,'copilot');
+      assert.ok(intent.expires_at>Date.now()&&intent.expires_at<Date.now()+15*60000+1000,'intent expires in 15 minutes');
+    }
     if(variant==='autonomy-off'){
       const tool=f.ledger.steps(runId).find(s=>s.kind==='tool')!;
       assert.ok(tool.result_json?.includes('COPILOT_PROJECT_AUTONOMY_OFF'),tool.result_json);

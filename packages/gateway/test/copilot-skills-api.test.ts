@@ -43,6 +43,17 @@ it('supports authenticated import/detail/update/toggle/history/rollback and lega
   const legacy=await call(`/playbooks/${builtin.id}`,'PUT',{content:'Legacy client custom body',version:builtin.currentVersion});assert.equal(legacy.status,200);
   const modern=await readSkill(await call(`/skills/${builtin.id}`));assert.equal(modern.content,'Legacy client custom body');assert.notEqual(modern.revisionId,builtin.revisionId);
   const builtHistory=await (await call(`/skills/${builtin.id}/revisions`)).json() as {data:{revisions:unknown[]}};assert.equal(builtHistory.data.revisions.length,2);
+  const adopt = { expectedRevisionId: modern.revisionId, version: modern.currentVersion };
+  assert.equal((await call(`/skills/${builtin.id}/adopt-builtin`, 'POST', adopt, foreignToken)).status, 404);
+  assert.equal((await call(`/skills/${builtin.id}/adopt-builtin`, 'POST', { ...adopt, version: '0.0.0' })).status, 409);
+  assert.equal((await call(`/skills/${builtin.id}/adopt-builtin`, 'POST', { ...adopt, expectedRevisionId: builtin.revisionId })).status, 409);
+  assert.equal((await call(`/skills/${builtin.id}/adopt-builtin`, 'POST', { ...adopt, content: 'injected' })).status, 400);
+  const adopted = await readSkill(await call(`/skills/${builtin.id}/adopt-builtin`, 'POST', adopt));
+  assert.equal(adopted.customized, false);
+  assert.equal(adopted.available, true);
+  assert.equal(adopted.files.length, 1);
+  assert.notEqual(adopted.content, modern.content);
+  assert.equal((await call(`/skills/${builtin.id}/adopt-builtin`, 'POST', adopt)).status, 409);
   db.prepare('UPDATE users SET status=? WHERE id=?').run('disabled',owner.id);
   assert.equal((await call('/skills/imports','POST',{source:{kind:'paste'},files})).status,401);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));db.close();}

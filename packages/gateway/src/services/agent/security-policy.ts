@@ -109,6 +109,7 @@ const SUPERVISED_CLI_TOOLS = new Set([
 // keys, unknown/nested fields and every path/command subject to normal checks.
 const DESCRIPTIVE_FIELDS: Record<string, readonly string[]> = {
   write_memory: ['text'],
+  stop_session: ['expectedTitle'],
   create_project: ['description'],
   update_project: ['description'],
   pm_create_work_item: ['title', 'description', 'acceptanceCriteria'],

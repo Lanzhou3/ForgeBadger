@@ -12,9 +12,10 @@ import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { DevelopmentTaskRepository } from '../src/db/repositories/development-task-repository.js';
 import { hashText } from '../src/services/development/workspace.js';
+import { sandboxCapability } from '../src/services/development/sandbox.js';
 import type { DevelopmentTaskRow, DevelopmentEvidence } from '../src/services/development/contracts.js';
 
-const unsupported = process.platform !== 'darwin';
+const unavailable = !sandboxCapability().available;
 const originalSource = 'module.exports=(a,b)=>a-b;';
 const passingCheck = "require('node:test').test('sum',()=>require('node:assert/strict').equal(require('./sum.cjs')(2,3),5));";
 const worker = fileURLToPath(new URL('./fixtures/development-process-worker.ts', import.meta.url));
@@ -94,7 +95,7 @@ function scratchPid(dir: string): number | undefined {
   return undefined;
 }
 
-it('a queued task crosses real process exits and executes its approved check exactly once', { skip: unsupported }, async t => {
+it('a queued task crosses real process exits and executes its approved check exactly once', { skip: unavailable }, async t => {
   const f = fixture(t);
   const admitted = await run(t, f.config, 'submit');
   const queued = observe(f.database, f.userId, admitted.taskId!);
@@ -117,7 +118,7 @@ it('a queued task crosses real process exits and executes its approved check exa
   assert.deepEqual(restarted.events, []);
 });
 
-it('SIGKILL of a running Gateway kills its sandbox; expired lease recovery retains the host slot without replay', { skip: unsupported }, async t => {
+it('SIGKILL of a running Gateway kills its sandbox; expired lease recovery retains the host slot without replay', { skip: unavailable }, async t => {
   const check = "require('node:fs').writeFileSync(process.env.TMPDIR+'/child.pid',String(process.pid));require('node:test').test('wait',async()=>{await new Promise(r=>setTimeout(r,50000))});";
   const f = fixture(t, check);
   const admitted = await run(t, f.config, 'submit');

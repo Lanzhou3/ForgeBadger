@@ -43,7 +43,7 @@ export function createMemoryTools(): AgentTool[] {
   return [
     {
       name: "search_memory",
-      description: "Search Copilot's scoped memory (global, project, or session) by keyword.",
+      description: "Search Copilot's scoped memory (global, project, or session) by keyword. 搜索记忆，回忆之前保存的事实、偏好和约定。",
       risk: "read",
       requiresApproval: false,
       inputSchema: searchMemoryInput,
@@ -62,7 +62,7 @@ export function createMemoryTools(): AgentTool[] {
     },
     {
       name: "list_memory",
-      description: "List Copilot's memory entries in a scope.",
+      description: "List Copilot's memory entries in a scope. 列出指定范围的记忆条目。",
       risk: "read",
       requiresApproval: false,
       inputSchema: listMemoryInput,
@@ -80,7 +80,7 @@ export function createMemoryTools(): AgentTool[] {
     },
     {
       name: "write_memory",
-      description: "Record a durable memory entry (fact, preference, decision, or project note).",
+      description: "Record a durable memory entry (fact, preference, decision, or project note). 保存长期记忆、用户偏好、事实和决定。",
       risk: "operate",
       requiresApproval: true,
       inputSchema: writeMemoryInput,

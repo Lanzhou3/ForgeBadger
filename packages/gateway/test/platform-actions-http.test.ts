@@ -42,12 +42,12 @@ it('composes preview execution receipt and owner autonomy scope over real HTTP',
     try {
         const prefs = new CopilotToolPreferenceRepository(db, user.id);
         prefs.setEnabled('write_memory', false);
-        assert.equal((await post('/copilot/memory/entries', { kind: 'fact', scope: 'global', text: 'blocked' })).status, 400);
-        assert.equal(count('platform_action_receipts'), 0);
+        assert.equal((await post('/copilot/memory/entries', { kind: 'fact', scope: 'global', text: 'Owner write while Copilot tool is disabled' })).status, 201);
+        assert.equal(count('platform_action_receipts'), 1);
         prefs.setEnabled('write_memory', true);
         assert.equal((await post('/copilot/memory/entries', { kind: 'fact', scope: 'global', text: 'persisted' })).status, 201);
-        assert.equal(count('platform_action_receipts'), 1);
-        assert.equal(count('copilot_memory'), 1);
+        assert.equal(count('platform_action_receipts'), 2);
+        assert.equal(count('copilot_memory'), 2);
         // Grant management is gone: the removed CRUD routes no longer exist.
         assert.equal((await fetch(base + '/copilot/grants', { headers })).status, 404);
         // Preview takes no grantId; owner-API intents are approved at creation.

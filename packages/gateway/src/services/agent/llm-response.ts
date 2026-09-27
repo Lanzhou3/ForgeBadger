@@ -6,7 +6,7 @@ export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 export const MAX_TOOL_ARGUMENT_BYTES = 256 * 1024;
 export const MAX_TOOL_CALLS = 64;
 export interface LlmToolCall { id: string; name: string; arguments: string }
-export interface LlmUsage { inputTokens?: number; outputTokens?: number; totalTokens?: number }
+export interface LlmUsage { inputTokens?: number; outputTokens?: number; totalTokens?: number; cachedInputTokens?: number; cacheWriteInputTokens?: number; reasoningTokens?: number }
 export interface LlmResult { message: string; finishReason?: string; usage?: LlmUsage; assistant?: AssistantMessage }
 export interface LlmCompletion extends LlmResult { toolCalls: LlmToolCall[]; thinking: string; replay?: ProviderReplay }
 export type LlmEmit = (event: AgentLlmStreamEvent) => void;
@@ -88,6 +88,25 @@ export function usage(value: unknown, format: "openai" | "anthropic"): LlmUsage 
     if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) invalidResponse("invalid usage");
     result[target] = count;
   }
+  const readCount = (value: unknown): number | undefined => {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) invalidResponse('invalid usage');
+    return value;
+  };
+  if (format === 'openai') {
+    const prompt = data.prompt_tokens_details == null ? {} : record(data.prompt_tokens_details);
+    const completion = data.completion_tokens_details == null ? {} : record(data.completion_tokens_details);
+    const cached = readCount(prompt.cached_tokens), reasoning = readCount(completion.reasoning_tokens);
+    if (cached !== undefined) result.cachedInputTokens = cached;
+    if (reasoning !== undefined) result.reasoningTokens = reasoning;
+  } else {
+    const cached = readCount(data.cache_read_input_tokens), written = readCount(data.cache_creation_input_tokens);
+    if (cached !== undefined) result.cachedInputTokens = cached;
+    if (written !== undefined) result.cacheWriteInputTokens = written;
+    if (result.inputTokens !== undefined) result.inputTokens += (cached ?? 0) + (written ?? 0);
+  }
+  if ((result.inputTokens !== undefined && (result.cachedInputTokens ?? 0) + (result.cacheWriteInputTokens ?? 0) > result.inputTokens)
+    || (result.outputTokens !== undefined && (result.reasoningTokens ?? 0) > result.outputTokens)) invalidResponse('inconsistent usage');
   return result;
 }
 
