@@ -19,7 +19,7 @@ test('0086 database upgrades and reopens without opting private projects into sh
   db.prepare("INSERT INTO projects(id,user_id,name,path,ai_tool) VALUES('private','owner','private',?,'codex')").run(root);
   db.prepare("INSERT INTO sessions(id,user_id,project_id,name,ai_tool,working_dir,attach_token) VALUES('session','owner','private','Session','codex',?,'private-token')").run(root);
   const before=db.prepare('SELECT * FROM projects').all();migrate(drizzle(db),{migrationsFolder:migrations});db.close();db=new Database(file);db.pragma('foreign_keys=ON');
-  assert.deepEqual(db.prepare('SELECT * FROM projects').all(),before);assert.equal((db.prepare("SELECT attach_token AS token FROM sessions WHERE id='session'").get() as {token:string}).token,'private-token');
+  assert.deepEqual(db.prepare('SELECT * FROM projects').all(),before.map(project=>({...project as object,copilot_autonomy:0})));assert.equal((db.prepare("SELECT attach_token AS token FROM sessions WHERE id='session'").get() as {token:string}).token,'private-token');
   for(const table of ['collaboration_projects','collaboration_members','delivery_runs','delivery_operations']) assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as {n:number}).n,0);
   assert.deepEqual(db.pragma('foreign_key_check'),[]);assert.equal((db.pragma('integrity_check') as Array<{integrity_check:string}>)[0]?.integrity_check,'ok');
   migrate(drizzle(db),{migrationsFolder:migrations});assert.equal((db.prepare('SELECT COUNT(*) AS n FROM __drizzle_migrations').get() as {n:number}).n,(JSON.parse(readFileSync(path.join(migrations,'meta/_journal.json'),'utf8')) as {entries:unknown[]}).entries.length);

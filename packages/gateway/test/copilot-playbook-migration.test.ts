@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -8,7 +9,6 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { SkillRepository } from '../src/db/repositories/skill-repository.js';
-import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { ProjectSkillRepository } from '../src/db/repositories/project-skill-repository.js';
 import { LEGACY_COPILOT_SKILLS } from '../src/services/agent/skills/legacy-copilot-skills.js';
 import { listCopilotPlaybooks } from '../src/services/agent/skills/skill-queries.js';
@@ -26,7 +26,9 @@ it('upgrades populated 0081 preserving identities, overrides, disable state, cus
   const dbPath=path.join(dir,'database.db');db=new Database(dbPath);migrate(drizzle(db),{migrationsFolder:old});
   const user=new UserRepository(db).create('upgrade@test.dev','hash');
   const other=new UserRepository(db).create('shared@test.dev','hash');
-  const project=new ProjectRepository(db,user.id).create({name:'retained',path:dir,aiTool:'codex'});
+  // Seed with the 0081 schema; the current repository selects later columns.
+  const project={id:randomUUID()};
+  db.prepare('INSERT INTO projects(id,user_id,name,path,ai_tool) VALUES(?,?,?,?,?)').run(project.id,user.id,'retained',dir,'codex');
   const insert=db.prepare('INSERT INTO skills(id,user_id,name,description,source,content,version,visibility,is_enabled) VALUES (?,?,?,?,?,?,?,?,?)');
   for(const [i,bundled] of LEGACY_COPILOT_SKILLS.entries()) {
    insert.run('legacy-'+i,user.id,bundled.name,bundled.description,'builtin',i===1?bundled.body+'\nUser edited':bundled.body,'1.0.0','private',i===0?0:1);
@@ -50,7 +52,7 @@ it('upgrades populated 0081 preserving identities, overrides, disable state, cus
   assert.equal((db.prepare('SELECT count(*) n FROM project_skills').get() as {n:number}).n,2);
   const catalog=listCopilotPlaybooks(db,user.id,{availableToolNames:[]});
   assert.equal(catalog.find(s=>s.id==='legacy-0')?.isEnabled,false);
-  assert.equal(catalog.find(s=>s.id==='legacy-0')?.version,'4.0.0');
+  assert.equal(catalog.find(s=>s.id==='legacy-0')?.version,'4.0.1');
   const custom=catalog.find(s=>s.id==='legacy-1')!;assert.equal(custom.reviewRequired,true);
   assert.equal(custom.content,LEGACY_COPILOT_SKILLS[1]!.body+'\nUser edited');
   for(const name of ['list_playbooks','load_playbook','pm_prepare_task_packet'])assert.equal((db.prepare('SELECT enabled FROM copilot_tool_preferences WHERE user_id=? AND tool_name=?').get(user.id,name) as {enabled:number}).enabled,0);

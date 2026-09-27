@@ -41,6 +41,12 @@ export class TelegramChannelRepository {
   upsertAccount(input: { botToken?: string; botUsername?: string; enabled: boolean }): TelegramAccountSummary {
     const existing = this.getAccountRow();
     if (!existing && !input.botToken) throw new Error("TELEGRAM_BOT_TOKEN_REQUIRED");
+    const sameSecret = existing && (!input.botToken || input.botToken === decryptSecret(
+      JSON.parse(existing.bot_token_encrypted) as EncryptedSecret, { key: this.masterKey }));
+    if (existing && sameSecret && existing.enabled === Number(input.enabled)) {
+      if (input.botUsername && input.botUsername !== existing.bot_username) this.setBotUsername(existing.id, input.botUsername);
+      return this.getAccount(existing.id) as TelegramAccountSummary;
+    }
     const encrypted = input.botToken
       ? JSON.stringify(encryptSecret(input.botToken, { key: this.masterKey }))
       : existing!.bot_token_encrypted;

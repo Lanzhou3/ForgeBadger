@@ -6,7 +6,9 @@
 -- channel_deliveries / channel_message_events → channel_messages → channel_routes），
 -- 否则重建后的空 channel_routes 会让存量 channel_messages 成为悬挂外键，
 -- 启动时的 PRAGMA foreign_key_check 将拒绝启动。
-PRAGMA foreign_keys=OFF;
+-- Drizzle executes migrations in a transaction. foreign_keys=OFF has no effect
+-- once that transaction has begun; defer the child references while rebuilding.
+PRAGMA defer_foreign_keys=ON;
 --> statement-breakpoint
 DELETE FROM channel_deliveries;
 --> statement-breakpoint
@@ -35,6 +37,10 @@ CREATE UNIQUE INDEX idx_channel_route_tenant ON channel_routes(user_id,id);
 CREATE UNIQUE INDEX idx_channel_route_active ON channel_routes(user_id,identity_id) WHERE status='active';
 --> statement-breakpoint
 CREATE UNIQUE INDEX idx_channel_route_conversation ON channel_routes(user_id,conversation_id);
+--> statement-breakpoint
+-- DROP TABLE applies ON DELETE CASCADE to receipts even with deferred foreign
+-- keys. Preserve them explicitly until the replacement intent table exists.
+CREATE TEMP TABLE platform_action_receipts_saved AS SELECT * FROM platform_action_receipts;
 --> statement-breakpoint
 CREATE TABLE platform_action_intents_next (
   id TEXT PRIMARY KEY,
@@ -69,10 +75,17 @@ ALTER TABLE platform_action_intents_next RENAME TO platform_action_intents;
 --> statement-breakpoint
 CREATE INDEX idx_platform_action_execution_lease ON platform_action_intents(user_id,status,execution_lease_expires_at);
 --> statement-breakpoint
+INSERT INTO platform_action_receipts (intent_id,user_id,outcome,result_json,created_at)
+SELECT saved.intent_id,saved.user_id,saved.outcome,saved.result_json,saved.created_at
+FROM platform_action_receipts_saved AS saved
+WHERE NOT EXISTS (SELECT 1 FROM platform_action_receipts AS current WHERE current.intent_id=saved.intent_id);
+--> statement-breakpoint
+DROP TABLE platform_action_receipts_saved;
+--> statement-breakpoint
 -- 最后删 grant 两表：旧 platform_action_intents（含 grant_id FK）已在上方重建移除，
 -- 避免 DROP 父表时被子表外键阻断。
 DROP TABLE copilot_conversation_grants;
 --> statement-breakpoint
 DROP TABLE copilot_grants;
 --> statement-breakpoint
-PRAGMA foreign_keys=ON;
+PRAGMA defer_foreign_keys=OFF;

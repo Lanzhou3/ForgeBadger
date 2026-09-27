@@ -1,7 +1,7 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 
-import { notifications } from "../schema.js";
+import { notifications, sessions } from "../schema.js";
 import { sqliteTimestampSeconds } from "../sqlite-time.js";
 import type { Database } from "../types.js";
 
@@ -69,6 +69,33 @@ export class NotificationRepository {
       .orderBy(desc(notifications.createdAt))
       .limit(limit)
       .all() as Notification[];
+  }
+
+  get(id: string): Notification | undefined {
+    return this.drizzle.select().from(notifications)
+      .where(and(eq(notifications.userId, this.userId), eq(notifications.id, id))).get() as Notification | undefined;
+  }
+
+  /** Filter before limiting. Payload IDs are display data, never authorization. */
+  recentSessionEvents(projectIds: string[], since: Date): Notification[] {
+    if (!projectIds.length) return [];
+    return this.drizzle.select({ notification: notifications }).from(notifications)
+      .innerJoin(sessions, and(eq(sessions.id, notifications.sessionId), eq(sessions.userId, notifications.userId)))
+      .where(and(eq(notifications.userId, this.userId), eq(notifications.type, 'claude_notification'),
+        inArray(sessions.projectId, projectIds), gte(notifications.createdAt, since),
+        sql`json_extract(CASE WHEN json_valid(${notifications.payload}) THEN ${notifications.payload} ELSE '{}' END,'$.project_id') = ${sessions.projectId}`,
+        sql`${notifications}.rowid IN (SELECT MAX(n.rowid) FROM notifications n WHERE n.user_id=${this.userId} AND n.type='claude_notification' GROUP BY n.session_id)`))
+      .orderBy(desc(notifications.createdAt), sql`${notifications}.rowid DESC`).limit(8).all()
+      .map(row => row.notification as Notification);
+  }
+
+  conversationProjectIds(conversationId: string): string[] {
+    const rows = this.db.prepare(`SELECT DISTINCT json_extract(CASE WHEN json_valid(s.input_json) THEN s.input_json ELSE '{}' END,'$.projectId') AS projectId
+      FROM copilot_run_steps s JOIN copilot_runs r ON r.id=s.run_id AND r.user_id=s.user_id
+      WHERE s.user_id=? AND r.conversation_id=? AND s.kind='tool'
+      AND json_type(CASE WHEN json_valid(s.input_json) THEN s.input_json ELSE '{}' END,'$.projectId')='text' LIMIT 20`)
+      .all(this.userId, conversationId) as { projectId: string }[];
+    return rows.map(row => row.projectId);
   }
 
   unreadCount(): number {

@@ -10,6 +10,10 @@ export interface ChannelIdentity {
   id: string; channel: string; accountId: string; accountRevision: number;
   externalUserId: string; chatId: string; status: string; revision: number; createdAt: number;
 }
+export interface ChannelSession {
+  routeId: string; chatType: 'p2p' | 'group'; chatId: string; threadId: string; conversationId: string;
+  modelProfileId: string | null;
+}
 export interface ChannelRoute {
   id: string; identityId: string; projectId: string;
   conversationId: string; status: string; revision: number; createdAt: number;
@@ -86,10 +90,36 @@ export class ChannelIdentityRepository {
     return row ? {...row,enabled:row.enabled===1} : undefined;
   }
   conversationRoute(conversationId: string): ChannelRoute | undefined {
-    return this.db.prepare(`SELECT ${routeColumns} FROM channel_routes WHERE user_id=? AND conversation_id=?`).get(this.userId,conversationId) as ChannelRoute|undefined;
+    const session = this.sessionByConversation(conversationId);
+    return session ? this.route(session.routeId) : undefined;
+  }
+  sessionByConversation(conversationId: string): ChannelSession | undefined {
+    return this.db.prepare('SELECT route_id AS routeId,chat_type AS chatType,chat_id AS chatId,thread_id AS threadId,conversation_id AS conversationId,model_profile_id AS modelProfileId FROM channel_route_sessions WHERE user_id=? AND conversation_id=?')
+      .get(this.userId,conversationId) as ChannelSession | undefined;
+  }
+  session(routeId: string, peer: {chatType: string; chatId: string; threadId?: string | undefined}): ChannelSession | undefined {
+    return this.db.prepare('SELECT route_id AS routeId,chat_type AS chatType,chat_id AS chatId,thread_id AS threadId,conversation_id AS conversationId,model_profile_id AS modelProfileId FROM channel_route_sessions WHERE user_id=? AND route_id=? AND chat_type=? AND chat_id=? AND thread_id=?')
+      .get(this.userId,routeId,peer.chatType,peer.chatId,peer.threadId ?? '') as ChannelSession | undefined;
+  }
+  createSession(routeId: string, peer: {chatType: string; chatId: string; threadId?: string | undefined}, conversationId: string): void {
+    this.db.prepare('UPDATE copilot_conversations SET channel_owned=1 WHERE user_id=? AND id=?').run(this.userId,conversationId);
+    this.db.prepare('INSERT INTO channel_route_sessions(user_id,route_id,chat_type,chat_id,thread_id,conversation_id) VALUES (?,?,?,?,?,?)')
+      .run(this.userId,routeId,peer.chatType,peer.chatId,peer.threadId ?? '',conversationId);
   }
   conversationIsChannelOwned(conversationId: string): boolean {
     return (this.db.prepare('SELECT channel_owned FROM copilot_conversations WHERE user_id=? AND id=?').get(this.userId,conversationId) as {channel_owned:number}|undefined)?.channel_owned===1;
+  }
+  replaceSession(routeId: string, peer: {chatType:string;chatId:string;threadId?:string|undefined}, previous: string, next: string): void {
+    this.db.prepare('UPDATE copilot_conversations SET channel_owned=1 WHERE user_id=? AND id=?').run(this.userId,next);
+    const changed=this.db.prepare(`UPDATE channel_route_sessions SET conversation_id=?
+      WHERE user_id=? AND route_id=? AND chat_type=? AND chat_id=? AND thread_id=? AND conversation_id=?`)
+      .run(next,this.userId,routeId,peer.chatType,peer.chatId,peer.threadId??'',previous);
+    if(changed.changes!==1)throw new Error('CHANNEL_SESSION_CHANGED');
+  }
+  setSessionModel(conversationId: string, modelProfileId: string|null): void {
+    const changed=this.db.prepare('UPDATE channel_route_sessions SET model_profile_id=? WHERE user_id=? AND conversation_id=?')
+      .run(modelProfileId,this.userId,conversationId);
+    if(changed.changes!==1)throw new Error('CHANNEL_SESSION_CHANGED');
   }
   peerRoute(peer: {channel:string;accountId:string;accountRevision:number;externalUserId:string;chatId:string;chatType?:string}): ChannelRoute | undefined {
     // Group peers deliver to the group chatId but bind to the pairing user's private-chat identity.
@@ -106,6 +136,7 @@ export class ChannelIdentityRepository {
     this.db.prepare('UPDATE copilot_conversations SET channel_owned=1 WHERE user_id=? AND id=?').run(this.userId,input.conversationId);
     this.db.prepare('INSERT INTO channel_routes(id,user_id,identity_id,project_id,conversation_id,created_at) VALUES (?,?,?,?,?,?)')
       .run(id, this.userId, input.identityId, input.projectId, input.conversationId, Date.now());
+    this.createSession(id, {chatType:'p2p',chatId:this.identity(input.identityId)!.chatId}, input.conversationId);
     return this.route(id)!;
   }
   revokeRoute(id: string): void {

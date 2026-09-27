@@ -2,6 +2,45 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { check, foreignKey, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+export const sessionNotificationPrompts = sqliteTable('session_notification_prompts', {
+  userId: text('user_id').notNull(), sessionId: text('session_id').notNull(),
+  nativeSessionId: text('native_session_id').notNull(), nativeTurnId: text('native_turn_id').notNull().default(''),
+  prompt: text('prompt').notNull(), createdAt: integer('created_at').notNull(),
+}, t => ({
+  pk: primaryKey({ columns: [t.userId, t.sessionId, t.nativeSessionId, t.nativeTurnId] }),
+  owner: foreignKey({ columns: [t.userId, t.sessionId], foreignColumns: [sessions.userId, sessions.id] }).onDelete('cascade'),
+}));
+
+export const feishuNotificationSettings = sqliteTable('feishu_notification_settings', {
+  targetId:text('target_id'),
+  userId:text('user_id').primaryKey().notNull().references(()=>users.id,{onDelete:'cascade'}),
+  enabled:integer('enabled',{mode:'boolean'}).notNull().default(false),identityId:text('identity_id'),
+  typesJson:text('types_json').notNull().default('["attention","failure","completion"]'),webBaseUrl:text('web_base_url').notNull().default(''),
+  revision:integer('revision').notNull().default(1),updatedAt:integer('updated_at').notNull()
+});
+export const feishuNotificationDeliveries = sqliteTable('feishu_notification_deliveries', {
+  targetId:text('target_id'),targetRevision:integer('target_revision').notNull().default(0),
+  id:text('id').primaryKey().notNull(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),
+  notificationId:text('notification_id'),testKey:text('test_key'),eventType:text('event_type').notNull(),
+  subscriptionRevision:integer('subscription_revision').notNull(),identityRevision:integer('identity_revision').notNull(),
+  status:text('status').notNull().default('pending'),errorCode:text('error_code'),providerMessageId:text('provider_message_id'),
+  claimToken:text('claim_token'),leaseUntil:integer('lease_until'),attemptCount:integer('attempt_count').notNull().default(0),
+  nextAttemptAt:integer('next_attempt_at').notNull().default(0),expiresAt:integer('expires_at').notNull(),createdAt:integer('created_at').notNull()
+},table=>({
+  due:index('idx_feishu_notification_due').on(table.userId,table.status,table.nextAttemptAt),
+  notification:uniqueIndex('feishu_notification_notification_unique').on(table.userId,table.notificationId),
+  test:uniqueIndex('feishu_notification_test_unique').on(table.userId,table.testKey),
+  statusValid:check('feishu_notification_status',sql`${table.status} IN ('pending','sending','delivered','failed','unknown','cancelled')`),
+  sourceValid:check('feishu_notification_source',sql`(${table.notificationId} IS NOT NULL AND ${table.testKey} IS NULL) OR (${table.notificationId} IS NULL AND ${table.testKey} IS NOT NULL)`)
+}));
+
+export const feishuNotificationGroups = sqliteTable('feishu_notification_groups', {
+  id:text('id').primaryKey().notNull(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),
+  accountId:text('account_id').notNull(),accountRevision:integer('account_revision').notNull(),
+  chatId:text('chat_id').notNull(),name:text('name').notNull(),available:integer('available',{mode:'boolean'}).notNull().default(true),
+  revision:integer('revision').notNull().default(1),checkedAt:integer('checked_at').notNull(),
+},table=>({chat:uniqueIndex('feishu_notification_group_unique').on(table.userId,table.accountId,table.accountRevision,table.chatId)}));
+
 export const users = sqliteTable("users", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   username: text("username").notNull().unique(),
@@ -364,6 +403,21 @@ export const skills = sqliteTable("skills", {
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 }, (table) => ({ idx_skills_user_target_name: uniqueIndex("idx_skills_user_target_name").on(table.userId, table.runtimeTarget, table.name), idx_skills_id_user: uniqueIndex("idx_skills_id_user").on(table.id, table.userId) }));
+
+// CLI package snapshots remain separate from Copilot's revision/authority model.
+export const cliSkillRevisions = sqliteTable("cli_skill_revisions", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, {onDelete:"cascade"}),
+  skillId: text("skill_id").notNull(),
+  action: text("action").notNull(),
+  snapshotJson: text("snapshot_json").notNull(),
+  packageHash: text("package_hash").notNull(),
+  createdAt: integer("created_at").notNull().$defaultFn(() => Date.now())
+}, table => ({
+  owner: index("idx_cli_skill_revisions_owner").on(table.userId,table.skillId,table.createdAt),
+  skillOwner: foreignKey({columns:[table.skillId,table.userId],foreignColumns:[skills.id,skills.userId]}).onDelete("cascade"),
+  validAction: check("cli_skill_revision_action", sql`${table.action} IN ('install','update','rollback','legacy')`)
+}));
 
 export const projectSkills = sqliteTable(
   "project_skills",
@@ -1453,6 +1507,10 @@ export const copilotRuns = sqliteTable("copilot_runs", {
   conversationId: text("conversation_id").notNull().references(() => copilotConversations.id, { onDelete: "cascade" }),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("pending"), // pending | running | awaiting_approval | completed | cancelled | failed
+  repairRevokedAt:integer("repair_revoked_at"), executionPhase: text('execution_phase').notNull().default('queued'),
+  phaseStartedAt: integer('phase_started_at'),
+  tokenBudget: integer('token_budget').notNull().default(500000),
+  maxDurationMs: integer('max_duration_ms').notNull().default(1800000),
   runtimeVersion: integer("runtime_version").notNull().default(0),
   source: text("source").notNull().default("user"),
   clientRequestId: text('client_request_id'),
@@ -1500,7 +1558,7 @@ export const copilotMemory = sqliteTable("copilot_memory", {
   metadataJson: text("metadata_json").notNull().default("{}"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-}, (table) => ({ userScope: index("idx_copilot_memory_user_scope").on(table.userId, table.scope, table.createdAt), userProject: index("idx_copilot_memory_user_project").on(table.userId, table.projectId, table.createdAt) }));
+}, (table) => ({ tenantId: uniqueIndex("idx_copilot_memory_tenant_id").on(table.userId, table.id), userScope: index("idx_copilot_memory_user_scope").on(table.userId, table.scope, table.createdAt), userProject: index("idx_copilot_memory_user_project").on(table.userId, table.projectId, table.createdAt) }));
 
 export const copilotOperationLog = sqliteTable("copilot_operation_log", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -1641,10 +1699,8 @@ export const authSessions = sqliteTable("auth_sessions", {
   idx_auth_sessions_expires: index("idx_auth_sessions_expires").on(table.expiresAt)
 }));
 
-// Long-lived access tokens for the external MCP endpoint (/mcp). Unlike
-// browser auth sessions these never expire on a schedule; revocation is
-// explicit via revokedAt. Only the SHA-256 hash of the token is stored — the
-// plaintext is returned once at creation time.
+// External MCP tokens. CLI-dispatch tokens have a required expiry and root;
+// legacy read/operate tokens remain revocable without scheduled expiry.
 export const mcpAccessTokens = sqliteTable("mcp_access_tokens", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   userId: text("user_id")
@@ -1653,6 +1709,9 @@ export const mcpAccessTokens = sqliteTable("mcp_access_tokens", {
   name: text("name").notNull(),
   tokenHash: text("token_hash").notNull().unique(),
   scopes: text("scopes").notNull().default('["read"]'),
+  allowedRoot: text("allowed_root"),
+  allowedProjects: text("allowed_projects"),
+  expiresAt: integer("expires_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
   revokedAt: integer("revoked_at", { mode: "timestamp" })
@@ -1684,6 +1743,7 @@ export const copilotRunSteps = sqliteTable("copilot_run_steps", {
  startedAt: integer("started_at"), completedAt: integer("completed_at")
 }, table => ({
  owner: foreignKey({columns:[table.userId,table.runId],foreignColumns:[copilotRuns.userId,copilotRuns.id]}).onDelete("cascade"),
+ identity: uniqueIndex("idx_copilot_step_identity").on(table.userId,table.runId,table.id),
  ordinal: uniqueIndex("idx_copilot_step_ordinal").on(table.userId,table.runId,table.ordinal),
  call: uniqueIndex("idx_copilot_step_call").on(table.userId,table.runId,table.toolCallId)
 }));
@@ -1735,17 +1795,19 @@ export const channelRoutes = sqliteTable('channel_routes', {
 
 export const channelMessages = sqliteTable('channel_messages', {
   id: text('id').primaryKey(), userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  routeId: text('route_id').notNull(), accountId: text('account_id').notNull(), eventId: text('event_id').notNull(), messageId: text('message_id').notNull(),
+  routeId: text('route_id').notNull(), accountId: text('account_id').notNull(), eventId: text('event_id').notNull(), messageId: text('message_id').notNull(), chatId: text('chat_id'),
   payloadEncrypted: text('payload_encrypted').notNull(), payloadDigest: text('payload_digest').notNull(),
-  status: text('status').notNull().default('pending'), runId: text('run_id'), createdAt: integer('created_at').notNull()
+  status: text('status').notNull().default('pending'), runId: text('run_id'), createdAt: integer('created_at').notNull(),
+  conversationId: text('conversation_id').references(() => copilotConversations.id)
 }, t => ({
   route: foreignKey({ columns: [t.userId,t.routeId], foreignColumns: [channelRoutes.userId,channelRoutes.id] }),
   run: foreignKey({ columns: [t.userId,t.runId], foreignColumns: [copilotRuns.userId,copilotRuns.id] }),
   tenant: uniqueIndex('idx_channel_message_tenant').on(t.userId,t.id),
   event: uniqueIndex('idx_channel_message_event').on(t.userId,t.accountId,t.eventId),
-  message: uniqueIndex('idx_channel_message_provider').on(t.userId,t.accountId,t.messageId),
+  message: uniqueIndex('idx_channel_message_provider').on(t.userId,t.accountId,t.chatId,t.messageId),
   runKey: uniqueIndex('idx_channel_message_run').on(t.userId,t.runId),
-  pending: index('idx_channel_message_pending').on(t.userId,t.status,t.createdAt)
+  pending: index('idx_channel_message_pending').on(t.userId,t.status,t.createdAt),
+  conversation: index('idx_channel_message_conversation').on(t.userId,t.conversationId,t.status)
 }));
 
 export const channelMessageEvents=sqliteTable('channel_message_events',{
@@ -1757,6 +1819,7 @@ export const channelDeliveries = sqliteTable('channel_deliveries', {
   id: text('id').primaryKey(), userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   inboxId: text('inbox_id').notNull(), phase: text('phase').notNull(), payloadEncrypted: text('payload_encrypted').notNull(),
   status: text('status').notNull().default('pending'), claimToken: text('claim_token'), leaseUntil: integer('lease_until'),
+  nextAttemptAt: integer('next_attempt_at').notNull().default(0), attemptCount: integer('attempt_count').notNull().default(0), nextPart: integer('next_part').notNull().default(0),
   providerMessageId: text('provider_message_id'), createdAt: integer('created_at').notNull()
 }, t => ({
   inbox: foreignKey({ columns: [t.userId,t.inboxId], foreignColumns: [channelMessages.userId,channelMessages.id] }),
@@ -2011,3 +2074,98 @@ export const runtimeSettings=sqliteTable('runtime_settings',{
  /** Snapshot of the admin user id that last wrote the setting (no FK: admin deletion must not block). */
  updatedBy:text('updated_by')
 });
+
+export const copilotModelCalls = sqliteTable('copilot_model_calls', {
+  id: text('id').primaryKey(), userId: text('user_id').notNull(), runId: text('run_id').notNull(),
+  kind: text('kind').notNull(), status: text('status').notNull().default('running'),
+  chargedTokens: integer('charged_tokens').notNull(), usageJson: text('usage_json'),
+  modelJson: text('model_json'), pricingJson: text('pricing_json'), costNanousd: integer('cost_nanousd'),
+  createdAt: integer('created_at').notNull(), completedAt: integer('completed_at'),
+}, table => ({ run: index('idx_copilot_model_calls_run').on(table.userId, table.runId),
+  tenant: foreignKey({ columns: [table.userId, table.runId], foreignColumns: [copilotRuns.userId, copilotRuns.id] }).onDelete('cascade') }));
+
+export const copilotFollowups = sqliteTable('copilot_followups', {
+  id: text('id').primaryKey(), userId: text('user_id').notNull(), conversationId: text('conversation_id').notNull(),
+  requestKey: text('request_key').notNull(), requestDigest: text('request_digest').notNull(), inputJson: text('input_json').notNull(),
+  status: text('status').notNull().default('queued'), runId: text('run_id'), error: text('error'), createdAt: integer('created_at').notNull(),
+}, table => ({ identity: uniqueIndex('idx_copilot_followup_identity').on(table.userId, table.conversationId, table.requestKey),
+  pending: index('idx_copilot_followup_pending').on(table.userId, table.status, table.createdAt),
+  conversation: foreignKey({ columns: [table.userId, table.conversationId], foreignColumns: [copilotConversations.userId, copilotConversations.id] }).onDelete('cascade'),
+  run: foreignKey({ columns: [table.userId, table.runId], foreignColumns: [copilotRuns.userId, copilotRuns.id] }).onDelete('cascade') }));
+
+export const copilotResearchJobs = sqliteTable('copilot_research_jobs', {
+  id: text('id').primaryKey(), userId: text('user_id').notNull(), originRunId: text('origin_run_id').notNull(),
+  sourceKey: text('source_key').notNull(), conversationId: text('conversation_id').notNull(), childRunId: text('child_run_id').notNull(),
+  reportMessageId: text('report_message_id'), createdAt: integer('created_at').notNull(),
+}, table => ({ source: uniqueIndex('idx_copilot_research_source').on(table.userId, table.sourceKey),
+  originIndex: index('idx_copilot_research_origin').on(table.userId, table.originRunId),
+  childIndex: uniqueIndex('idx_copilot_research_child').on(table.userId, table.childRunId),
+  origin: foreignKey({ columns: [table.userId, table.originRunId], foreignColumns: [copilotRuns.userId, copilotRuns.id] }).onDelete('cascade'),
+  child: foreignKey({ columns: [table.userId, table.childRunId], foreignColumns: [copilotRuns.userId, copilotRuns.id] }).onDelete('cascade'),
+  conversation: foreignKey({ columns: [table.userId, table.conversationId], foreignColumns: [copilotConversations.userId, copilotConversations.id] }).onDelete('cascade') }));
+
+export const copilotToolArtifacts = sqliteTable('copilot_tool_artifacts', {
+ stepId: text('step_id').primaryKey(), userId: text('user_id').notNull(), runId: text('run_id').notNull(), conversationId: text('conversation_id').notNull(),
+ payloadJson: text('payload_json').notNull(), contentBytes: integer('content_bytes').notNull(), contentSha256: text('content_sha256').notNull(),
+ createdAt: integer('created_at').notNull(), expiresAt: integer('expires_at').notNull(),
+}, t => ({
+ bytes: check('copilot_tool_artifact_bytes', sql`${t.contentBytes} >= 0 AND ${t.contentBytes} <= 2097152`),
+ step: foreignKey({ columns:[t.userId,t.runId,t.stepId], foreignColumns:[copilotRunSteps.userId,copilotRunSteps.runId,copilotRunSteps.id] }).onDelete('cascade'),
+ conversation: foreignKey({ columns:[t.userId,t.conversationId], foreignColumns:[copilotConversations.userId,copilotConversations.id] }).onDelete('cascade'),
+ run: index('idx_copilot_artifact_run').on(t.userId,t.runId), expiry: index('idx_copilot_artifact_expiry').on(t.userId,t.expiresAt),
+}));
+
+export const copilotTokenRates = sqliteTable('copilot_token_rates', {
+  userId: text('user_id').notNull().references(() => users.id, {onDelete:'cascade'}),
+  modelProfileId: text('model_profile_id').notNull().references(() => modelProfiles.id, {onDelete:'cascade'}),
+  ratesJson: text('rates_json').notNull(), updatedAt: integer('updated_at').notNull(),
+}, table => ({identity:primaryKey({columns:[table.userId,table.modelProfileId]})}));
+
+export const copilotRepairJobs = sqliteTable('copilot_repair_jobs', {
+ id:text('id').primaryKey(),userId:text('user_id').notNull(),rootTaskId:text('root_task_id').notNull(),failedTaskId:text('failed_task_id').notNull(),
+ originRunId:text('origin_run_id').notNull(),childRunId:text('child_run_id').notNull(),attempt:integer('attempt').notNull(),evidenceDigest:text('evidence_digest').notNull(),
+ submissionStepId:text('submission_step_id'),submittedTaskId:text('submitted_task_id'),reportMessageId:text('report_message_id'),createdAt:integer('created_at').notNull(),
+},t=>({attempt:uniqueIndex('idx_copilot_repair_attempt').on(t.userId,t.rootTaskId,t.attempt),failed:uniqueIndex('idx_copilot_repair_failed').on(t.userId,t.failedTaskId),
+ child:uniqueIndex('idx_copilot_repair_child').on(t.userId,t.childRunId),limit:check('repair_attempt_limit',sql`${t.attempt} BETWEEN 1 AND 2`),
+ root:foreignKey({columns:[t.userId,t.rootTaskId],foreignColumns:[copilotDevelopmentTasks.userId,copilotDevelopmentTasks.id]}).onDelete('cascade'),
+ source:foreignKey({columns:[t.userId,t.failedTaskId],foreignColumns:[copilotDevelopmentTasks.userId,copilotDevelopmentTasks.id]}).onDelete('cascade'),
+ origin:foreignKey({columns:[t.userId,t.originRunId],foreignColumns:[copilotRuns.userId,copilotRuns.id]}).onDelete('cascade'),
+ run:foreignKey({columns:[t.userId,t.childRunId],foreignColumns:[copilotRuns.userId,copilotRuns.id]}).onDelete('cascade'),
+ task:foreignKey({columns:[t.userId,t.submittedTaskId],foreignColumns:[copilotDevelopmentTasks.userId,copilotDevelopmentTasks.id]})}));
+
+export const copilotMemorySearchIndex = sqliteTable('copilot_memory_search_index', {
+  userId: text('user_id').notNull(), memoryId: text('memory_id').notNull(), version: text('version').notNull(),
+}, table => ({
+  pk: primaryKey({columns: [table.userId, table.memoryId]}),
+  memory: foreignKey({columns: [table.userId, table.memoryId], foreignColumns: [copilotMemory.userId, copilotMemory.id]}).onDelete('cascade'),
+}));
+
+export const channelRouteSessions = sqliteTable('channel_route_sessions', {
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  routeId: text('route_id').notNull(), chatType: text('chat_type').notNull(), chatId: text('chat_id').notNull(),
+  threadId: text('thread_id').notNull().default(''), conversationId: text('conversation_id').notNull(),
+  modelProfileId: text('model_profile_id')
+}, t => ({
+  key: primaryKey({ columns: [t.userId,t.routeId,t.chatType,t.chatId,t.threadId] }),
+  route: foreignKey({ columns: [t.userId,t.routeId], foreignColumns: [channelRoutes.userId,channelRoutes.id] }).onDelete('cascade'),
+  conversation: foreignKey({ columns: [t.userId,t.conversationId], foreignColumns: [copilotConversations.userId,copilotConversations.id] }).onDelete('cascade'),
+  history: uniqueIndex('idx_channel_session_conversation').on(t.userId,t.conversationId)
+}));
+export const telegramPollingCursors = sqliteTable('telegram_polling_cursors', {
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  accountId: text('account_id').notNull(), accountRevision: integer('account_revision').notNull(), nextOffset: integer('next_offset').notNull()
+}, t => ({ key: primaryKey({ columns: [t.userId,t.accountId,t.accountRevision] }) }));
+
+// Separate from route/inbox lifecycle so revocation cannot discard cleanup receipts.
+export const feishuTypingReactions = sqliteTable('feishu_typing_reactions', {
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  inboxId: text('inbox_id').notNull(), accountId: text('account_id').notNull(), appId: text('app_id').notNull(),
+  messageId: text('message_id').notNull(), state: text('state').notNull().default('pending'), reactionId: text('reaction_id'),
+  claimToken: text('claim_token'), leaseUntil: integer('lease_until'), attemptCount: integer('attempt_count').notNull().default(0),
+  nextAttemptAt: integer('next_attempt_at').notNull().default(0), reconcileUntil: integer('reconcile_until').notNull().default(0),
+  createdAt: integer('created_at').notNull()
+}, t => ({
+  key: primaryKey({ columns: [t.userId, t.inboxId] }),
+  due: index('idx_feishu_typing_due').on(t.userId, t.state, t.nextAttemptAt),
+  validState: check('feishu_typing_state', sql`${t.state} IN ('pending','adding','active','uncertain','done')`)
+}));

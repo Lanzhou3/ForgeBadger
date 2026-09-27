@@ -50,16 +50,16 @@ describe('TelegramChannelRepository', () => {
     assert.doesNotMatch(stored.bot_token_encrypted, /AAHdqTcv/);
   });
 
-  it('requires a bot token for the initial upsert and bumps config revision on every save', () => {
+  it('requires a bot token for the initial upsert and preserves identical saves and fences credential changes', () => {
     assert.throws(() => repo.upsertAccount({ enabled: true }), /TELEGRAM_BOT_TOKEN_REQUIRED/);
     const first = repo.upsertAccount({ botToken: 'token-one', enabled: true });
     assert.equal(first.configRevision, 1);
     const second = repo.upsertAccount({ enabled: true });
-    assert.equal(second.configRevision, 2);
+    assert.equal(second.configRevision, 1);
     assert.equal(second.secretConfigured, true);
     assert.deepEqual(repo.decryptAccountCredentials(second.id), { botToken: 'token-one' });
     const third = repo.upsertAccount({ botToken: 'token-two', enabled: false });
-    assert.equal(third.configRevision, 3);
+    assert.equal(third.configRevision, 2);
     assert.equal(third.enabled, false);
     assert.equal(third.connectionState, 'disabled');
     assert.deepEqual(repo.decryptAccountCredentials(third.id), { botToken: 'token-two' });

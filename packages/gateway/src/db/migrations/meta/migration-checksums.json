@@ -103,5 +103,21 @@
   "0102_copilot_preferences.sql": "e13567345bc8ff0d32b3bac1bdfec1d5cae5d9532583a072b89b59bcd05ca3cd",
   "0103_model_thinking_efforts.sql": "e91787913d53b4aba31bbcda796033eb57c76cda8d0e4c1312f862f8d8c7a624",
   "0104_copilot_project_autonomy.sql": "b123326b25c7b04991acbbec377d1fb0af36bcf8b78b1e9abfab6f3b1caad9cf",
-  "0105_remove_copilot_grants.sql": "d56e00d8383c2f49541238974f3d420cadb02f6e59ff67010f7095cc7ce43a76"
+  "0105_remove_copilot_grants.sql": "0d406dbcac790863e9f266a236f4d32bb56f3c1fcbe8d3e3ec1cd1c38d10d4ae",
+  "0106_mcp_cli_dispatch_scope.sql": "bbbf14e881b86259a4c97d1d4ce72a1ba22040255394cca20fdec7caffb42f83",
+  "0107_cli_skill_revisions.sql": "92e5fa75e9041258cf835f94fb5eaec108fa48ff20c13509b0e3a8a7d809943d",
+  "0108_copilot_run_governance.sql": "09f384d6872aab921ca101016c8397a039d313c0b2b334dd3bd59f22f0a9d7c5",
+  "0109_copilot_research_jobs.sql": "6b6dc8dd06c8c5e30fb74cfede605a24863bc57529db0a412ab358bf866fbf48",
+  "0110_copilot_tool_artifacts.sql": "2cea5b89a1ce5f9e14cc85de95600799446050d87ffc44e990694c215b5b7801",
+  "0111_copilot_model_metering.sql": "99dd28321988081b7e38631455394a40bf7f7c85b8f29c32a3f3900af4a9ced4",
+  "0112_copilot_repair_jobs.sql": "5be3fc2696d87c6248b4a868c9ae99f8a209ed8f85276227d675b08ad6ad0647",
+  "0113_copilot_memory_search_index.sql": "9c5c7243ae6932953714b151e7de1fa80fd3058805733c2cb2398fafc0510b0c",
+  "0114_channel_reliability.sql": "3a13688261fd27ef300c5e5809c9849f25f036bf6196b1f30f1b94bcc89742ed",
+  "0115_feishu_typing_reactions.sql": "4d1210b37b0a3899f4f70f4e1282fbeffaa8ad4e665d542d134a7932395ed31a",
+  "0116_channel_control_commands.sql": "4fab6fdf22d5bb0d50bcf6a865c226a9c7610b9bc78f3a7179fc82921a4922f4",
+  "0117_channel_session_model.sql": "4c667bf84ce21ac202326df26a8f48a29a79d4cd00a94d0025d7e8cf41d98e16",
+  "0118_mcp_project_grants.sql": "358d84150a671b37712d329ab29ae55d8bb9fad7b97652ad3c2423633cce8272",
+  "0119_feishu_notifications.sql": "38daad1681887fef7b9c108b09932f64eb27327d5b323378720a896ab068c529",
+  "0120_feishu_notification_targets.sql": "eaf111593aa941cba43ca0c27224555c1e5cbde30b5cbcdedb188344a58c9942",
+  "0121_session_notification_prompts.sql": "d8e88d64b8d36fc91dc2041af9acc929c0e44411cd56aa83c9b95bb3c2f066b2"
 }

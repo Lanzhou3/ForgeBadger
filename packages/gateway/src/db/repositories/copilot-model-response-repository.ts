@@ -1,3 +1,4 @@
+import type { LlmConnectionError } from '../../services/agent/llm-connection-error.js';
 import { z } from 'zod';
 import type { Database } from '../types.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secret-box.js';
@@ -16,6 +17,7 @@ const assistantSchema = z.object({
 const payloadSchema = z.object({ version: z.literal(1), userId: z.string(), conversationId: z.string(),
   runId: z.string(), stepId: z.string(), assistant: assistantSchema }).strict();
 const envelopeSchema = z.object({ type: z.literal('model_response'), version: z.literal(1),
+  usage: z.object({ inputTokens: z.number().int().nonnegative().optional(), outputTokens: z.number().int().nonnegative().optional(), totalTokens: z.number().int().nonnegative().optional() }).optional(),
   finishReason: z.string().nullable(), toolCallCount: z.number().int().nonnegative(),
   replay: z.object({ algorithm: z.literal('aes-256-gcm'), iv: z.string(), ciphertext: z.string(), authTag: z.string() }).strict(),
 }).strict();
@@ -31,7 +33,7 @@ export class CopilotModelResponseRepository {
     if (!response.assistant) return response.message; // Legacy/custom clients have no native replay state.
     const assistant = assistantSchema.parse(response.assistant);
     return JSON.stringify({ type: 'model_response', version: 1, finishReason: response.finishReason ?? null,
-      toolCallCount: assistant.toolCalls?.length ?? 0,
+      toolCallCount: assistant.toolCalls?.length ?? 0, ...(response.usage ? { usage: response.usage } : {}),
       replay: encryptSecret(JSON.stringify({ version: 1, userId: this.userId, conversationId, runId, stepId, assistant }), { key: this.masterKey }) });
   }
 
@@ -50,6 +52,13 @@ export class CopilotModelResponseRepository {
     this.db.prepare(`UPDATE copilot_run_steps SET result_json=? WHERE user_id=? AND run_id=?
       AND kind='model' AND status='running'`).run(JSON.stringify({ type: 'model_response_error', version: 1,
       code: 'AGENT_LLM_INVALID_RESPONSE', reason: redactAgentText(message) }), this.userId, runId);
+  }
+
+  /** Called only inside the orchestrator's lease-fenced transaction. No raw network errors. */
+  recordConnectionError(runId: string, stepId: string, error: LlmConnectionError): void {
+    this.db.prepare(`UPDATE copilot_run_steps SET result_json=? WHERE user_id=? AND run_id=? AND id=?
+      AND kind='model' AND status='running'`).run(JSON.stringify({ type: 'model_connection_error', version: 1,
+      code: error.code, reason: error.message, diagnostic: error.diagnostic }), this.userId, runId, stepId);
   }
 
   list(conversationId: string): Map<string, AssistantMessage> {

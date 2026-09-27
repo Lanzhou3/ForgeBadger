@@ -33,7 +33,7 @@ it('upgrades populated 0085 without changing legacy evidence; backups and keyed 
     await db.backup(path.join(dir,'before.db'));
     migrate(drizzle(db),{migrationsFolder:root});
     const upgraded=db.prepare('SELECT * FROM copilot_runs WHERE id=?').get(oldRun.id) as Record<string,unknown>;
-    assert.deepEqual(upgraded,{...oldRunRow,client_request_id:null,request_digest:null});
+    assert.deepEqual(upgraded,{...oldRunRow,client_request_id:null,request_digest:null,execution_phase:'finished',phase_started_at:null,token_budget:500000,max_duration_ms:1800000,repair_revoked_at:null});
     assert.deepEqual(db.prepare('SELECT * FROM copilot_messages').all(),oldMessages);
     assert.deepEqual(db.prepare('SELECT * FROM copilot_run_steps').all(),oldSteps);
     migrate(drizzle(db),{migrationsFolder:root});
