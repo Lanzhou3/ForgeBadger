@@ -18,6 +18,7 @@ async function mockSurfaceApis(page: Page) {
   else if(p.endsWith('/notifications/feishu/deliveries'))data={deliveries:[]};
   else if(p==='/api/v1/projects')data={projects};
   else if(p.endsWith('/project-manager/overview'))data={projects,observedAt:Date.now()};
+  else if(p.endsWith('/project-manager/context'))data={project:{id:'p',name:'项目界面验证',description:null,status:null},access:{role:'owner',capabilities:[],teamId:null,logicalOwnerId:user.id},managedExecution:{supported:false,reason:null},shared:false,privateDetailAllowed:true,revisionRequired:false};
   else if(p.endsWith('/model-providers'))data={providers:[],credentials:[],models};
   else if(p.endsWith('/copilot/preferences'))data={modelId:'selected',thinkingEffort:'medium'};
   else if(p.endsWith('/copilot/conversations'))data={conversations};
@@ -112,11 +113,36 @@ test("connection forms and quick chat fit a short desktop viewport", async ({ pa
   await page.locator("[data-floating-copilot]").getByRole("button", { name: "Copilot", exact: true }).click();
   const panel = page.getByTestId("robot-chat-panel");
   await expect(panel.getByRole("textbox")).toBeFocused();
+  // Parity chrome: model/thinking pickers, project context, and run options
+  // all live inside the floating panel as well.
+  await expect(panel.getByRole("combobox", { name: "当前模型", exact: true })).toBeVisible();
+  await expect(panel.getByRole("combobox", { name: "思考强度", exact: true })).toBeVisible();
+  await expect(panel.getByRole("combobox", { name: "项目上下文", exact: true })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "执行选项", exact: true })).toBeVisible();
   const box = await panel.boundingBox();
   expect(box!.y).toBeGreaterThanOrEqual(0);
   expect(box!.y + box!.height).toBeLessThanOrEqual(500);
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
+});
+
+test("mobile quick chat keeps the panel clear of the corner robot", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockSurfaceApis(page);
+  await page.goto("/notifications");
+  const robot = page.locator("[data-floating-copilot]").getByRole("button", { name: "Copilot", exact: true });
+  await robot.click();
+  const panel = page.getByTestId("robot-chat-panel");
+  await expect(panel).toBeVisible();
+  // The near-fullscreen sheet hides the robot on small screens instead of
+  // half-covering it; desktop keeps both visible.
+  await expect(robot).toBeHidden();
+  const box = await panel.boundingBox();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(robot).toBeVisible();
 });
 
 test("mobile approval displays exact input and reconciles a rejected action", async ({ page }) => {

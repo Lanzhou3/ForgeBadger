@@ -402,7 +402,10 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
   // when the robot lives in a top corner), horizontally centered on the robot
   // and clamped to the viewport so it never spills off-screen near edges.
   const viewportWidth = window.innerWidth;
-  const bubbleWidth = Math.min(288, Math.max(viewportWidth - 48, 160));
+  // Width clamp: cap at 288px, prefer viewport minus margins, but shrink the
+  // 160px floor itself on ultra-narrow screens so the bubble never exceeds
+  // the viewport (12px margin on each side).
+  const bubbleWidth = Math.min(288, Math.max(viewportWidth - 48, Math.min(160, viewportWidth - 24)));
   const minRelLeft = 12 - pos.x;
   const maxRelLeft = viewportWidth - bubbleWidth - 12 - pos.x;
   const bubbleRelLeft = clamp(
@@ -419,6 +422,9 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
     <div
       className={cn(
         "fixed z-40",
+        // Mobile: the chat panel is a near-fullscreen sheet, so a corner
+        // robot would be half-hidden behind it — keep it out of view.
+        panelOpen && "max-md:hidden",
         !dragging && "transition-[left,top] duration-300 ease-out motion-reduce:transition-none"
       )}
       style={{ left: pos.x, top: pos.y, width: ROBOT_SIZE_PX, height: ROBOT_SIZE_PX }}
@@ -470,7 +476,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
       {bubble && ToneIcon && (
         <div
           className={cn(
-            "forgebadger-bubble-pop absolute rounded-lg border-[1.5px] border-zinc-900 bg-zinc-50 p-3 text-zinc-900 shadow-lg shadow-black/40",
+            "forgebadger-bubble-pop absolute rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-lg shadow-black/40",
             placement.vertical === "above" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"
           )}
           style={{ left: bubbleRelLeft, width: bubbleWidth }}
@@ -491,11 +497,11 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
               placement.vertical === "below" && "rotate-180"
             )}
           >
-            <path d="M0 0 H18 L6 12 Z" fill="#fafafa" />
+            <path d="M0 0 H18 L6 12 Z" className="fill-popover" />
             <path
               d="M18 0 L6 12 L0 0"
               fill="none"
-              stroke="#18181b"
+              className="stroke-border"
               strokeWidth="1.5"
               strokeLinejoin="miter"
             />
@@ -508,21 +514,21 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
             <button
               type="button"
               aria-label={t("common.close")}
-              className="-mr-1 -mt-0.5 shrink-0 rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-900/10 hover:text-zinc-700"
+              className="-mr-1 -mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               onClick={dismissHeadBubble}
             >
               <XIcon className="size-3.5" aria-hidden="true" />
             </button>
           </div>
           {bubble.description && (
-            <p className="mt-1 line-clamp-2 pl-[22px] text-xs leading-relaxed text-zinc-500">
+            <p className="mt-1 line-clamp-2 pl-[22px] text-xs leading-relaxed text-muted-foreground">
               {bubble.description}
             </p>
           )}
           <div className="mt-2.5 flex items-center gap-1.5 pl-[22px]">
             <button
               type="button"
-              className="h-7 rounded-md bg-zinc-900 px-3 text-xs font-medium text-zinc-50 transition-colors hover:bg-zinc-700"
+              className="h-7 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
               onClick={openBubble}
             >
               {t("notifications.openSession")}
