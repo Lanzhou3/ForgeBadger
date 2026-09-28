@@ -344,6 +344,36 @@ describe("RobotChatPanel", () => {
     await waitFor(() => expect(renameConversationMock).toHaveBeenCalledWith("conv-new", "帮我看看进度"));
   });
 
+  it("drops a duplicate submit while lazy conversation creation is in flight", async () => {
+    const blockedCreate = deferred<{ conversation: typeof newConversation }>();
+    const blockedSend = deferred<{ runId: string }>();
+    createConversationMock.mockReturnValue(blockedCreate.promise);
+    sendMessageMock.mockReturnValue(blockedSend.promise);
+    renderPanel();
+
+    const input = screen.getByPlaceholderText("输入消息……");
+    fireEvent.change(input, { target: { value: "双击发送" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    // Second Enter lands while createConversation is still in flight and the
+    // controller's sending guard is not armed yet — it must be dropped.
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await act(async () => {
+      blockedCreate.resolve({ conversation: newConversation });
+    });
+
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+    expect(createConversationMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "双击发送", undefined, { clientRequestId: expect.any(String) });
+    // A single optimistic bubble, not two. (The send POST stays in flight so
+    // the post-send refresh cannot replace the transcript before we assert.)
+    expect(screen.getAllByText("双击发送")).toHaveLength(1);
+
+    await act(async () => {
+      blockedSend.resolve({ runId: "run-1" });
+    });
+  });
+
   it("shows the thinking pulse while the lazy conversation is created and the send is in flight", async () => {
     const blockedCreate = deferred<{ conversation: typeof newConversation }>();
     const blockedSend = deferred<{ runId: string }>();

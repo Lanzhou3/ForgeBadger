@@ -260,6 +260,10 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
       await controller.send(undefined, true);
       return;
     }
+    // Lazy creation in flight: the controller's sending guard is not armed
+    // yet, so a double Enter here would double-submit (duplicate message +
+    // run). Drop the duplicate; the first submit owns the in-flight creation.
+    if (creatingRef.current) return;
     const text = (textOverride ?? controller.input).trim();
     if (!text) return;
     const id = await ensureConversation();
