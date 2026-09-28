@@ -12,6 +12,7 @@ import { GatewayApiError } from "@/lib/api";
 
 const {
   pushMock,
+  toastErrorMock,
   listConversationsMock,
   listMessagesMock,
   createConversationMock,
@@ -29,6 +30,7 @@ const {
   updateCopilotPreferencesMock,
 } = vi.hoisted(() => ({
   pushMock: vi.fn(),
+  toastErrorMock: vi.fn(),
   listConversationsMock: vi.fn(),
   listMessagesMock: vi.fn(),
   createConversationMock: vi.fn(),
@@ -49,6 +51,10 @@ const {
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(window.location.search),
   useRouter: () => ({ push: pushMock }),
+}));
+
+vi.mock("@/lib/toast", () => ({
+  toast: { success: vi.fn(), info: vi.fn(), error: toastErrorMock },
 }));
 
 vi.mock("@/lib/copilot-api", async (importOriginal) => {
@@ -175,6 +181,26 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+// jsdom implements neither Pointer Capture nor scrollIntoView; Radix Select
+// calls both while opening/rendering its content.
+function stubRadixSelectEnvironment() {
+  Element.prototype.hasPointerCapture = vi.fn(() => false);
+  Element.prototype.releasePointerCapture = vi.fn();
+  Element.prototype.scrollIntoView = vi.fn();
+}
+
+function openSelect(name: string) {
+  const trigger = screen.getByRole("combobox", { name });
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  return trigger;
+}
+
+async function pickOption(name: string, option: string) {
+  openSelect(name);
+  const item = await screen.findByRole("option", { name: option });
+  fireEvent.click(item);
+}
+
 describe("CopilotChat console layout", () => {
   it("restores the last selected conversation when returning from settings", async () => {
     listConversationsMock.mockResolvedValue({ conversations: [baseConversation, { ...baseConversation, id: "conv-2", title: "上次阅读" }] });
@@ -184,13 +210,13 @@ describe("CopilotChat console layout", () => {
     expect(listMessagesMock).not.toHaveBeenCalledWith("conv-1");
   });
 
-  it("shows loading instead of an empty conversation and can retry a failed history read", async () => {
+  it("shows a loading skeleton instead of an empty conversation and can retry a failed history read", async () => {
     const loading = deferred<{ messages: typeof baseUserMessage[] }>();
     listMessagesMock.mockReturnValueOnce(loading.promise);
     renderChat();
     await waitFor(() => expect(listMessagesMock).toHaveBeenCalled());
     expect(screen.queryByText("你好")).toBeNull();
-    expect(screen.getByRole("status").textContent).toContain("加载");
+    expect(screen.getByTestId("copilot-loading-skeleton")).toBeTruthy();
     await act(async () => loading.reject(new Error("offline")));
     await screen.findByRole("alert");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
@@ -224,14 +250,13 @@ describe("CopilotChat console layout", () => {
     sendMessageMock.mockRejectedValueOnce(new Error("network lost"));
     renderChat();
     await waitForConversationLoaded();
-    await waitFor(() => expect(screen.getByRole("option", { name: "Selected project" })).toBeTruthy());
-    fireEvent.change(screen.getByLabelText("项目上下文"), { target: { value: "project-1" } });
+    await pickOption("项目上下文", "Selected project");
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "inspect" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "重试" })).toBeTruthy());
     const options = sendMessageMock.mock.calls[0]![3];
     expect(options).toEqual({ projectId: "project-1", clientRequestId: expect.any(String) });
-    fireEvent.change(screen.getByLabelText("项目上下文"), { target: { value: "" } });
+    await pickOption("项目上下文", "未指定项目");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(2));
     expect(sendMessageMock.mock.calls[1]).toEqual(["conv-1", "inspect", undefined, options]);
@@ -240,6 +265,7 @@ describe("CopilotChat console layout", () => {
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
+    stubRadixSelectEnvironment();
     preferencesState = { modelId: null, thinkingEffort: "medium" };
     getCopilotPreferencesMock.mockImplementation(async () => preferencesState);
     updateCopilotPreferencesMock.mockImplementation(
@@ -283,7 +309,7 @@ describe("CopilotChat console layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "删除对话" }));
     fireEvent.click(screen.getByRole("button", { name: "删除对话" }));
 
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("停止"));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("会话仍有任务在运行或等待审批，请先停止任务再删除。"));
     expect(screen.getByText("你好")).toBeTruthy();
     expect(window.localStorage.getItem(LAST_COPILOT_CONVERSATION_KEY)).toBe("conv-1");
   });
@@ -310,7 +336,7 @@ describe("CopilotChat console layout", () => {
     const editor = screen.getByDisplayValue("测试对话");
     fireEvent.change(editor, { target: { value: "新标题" } });
     fireEvent.keyDown(editor, { key: "Enter" });
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("重命名失败"));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("重命名失败，请重试。"));
     expect(screen.getByText("你好")).toBeTruthy();
   });
 
@@ -348,7 +374,9 @@ describe("CopilotChat console layout", () => {
     });
 
     await waitFor(() => expect(screen.queryAllByText("Copilot 正在思考…").length).toBe(0));
-    await waitFor(() => expect(screen.getByText("发送失败，请检查 Gateway 服务。")).toBeTruthy());
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("发送失败，请检查 Gateway 服务。"));
+    // The inline retry action stays available next to the transcript.
+    expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
   });
 
   it("renders the two-zone console: conversation sidebar and centered chat stream", async () => {
@@ -420,17 +448,15 @@ describe("CopilotChat console layout", () => {
     renderChat();
 
     await waitForConversationLoaded();
-    const picker = await screen.findByLabelText("当前模型");
-    fireEvent.change(picker, { target: { value: "model-2" } });
-    await waitFor(() => expect((picker as HTMLSelectElement).value).toBe("model-2"));
+    await pickOption("当前模型", "Anthropic / claude-opus");
+    await waitFor(() => expect(updateCopilotPreferencesMock).toHaveBeenCalledWith({ modelId: "model-2" }, expect.anything()));
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "换个模型" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
     expect(sendMessageMock.mock.calls[0]![2]).toBe("model-2");
-    await waitFor(() => expect(updateCopilotPreferencesMock).toHaveBeenCalledWith({ modelId: "model-2" }, expect.anything()));
     // The invalidation refetch lands and the picker keeps the persisted choice.
-    await waitFor(() => expect((picker as HTMLSelectElement).value).toBe("model-2"));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "当前模型" }).textContent).toContain("Anthropic / claude-opus"));
   });
 
   it("degrades the preference pickers while loading, then persists the thinking effort", async () => {
@@ -438,25 +464,27 @@ describe("CopilotChat console layout", () => {
     getCopilotPreferencesMock.mockReturnValueOnce(blocked.promise);
     renderChat();
 
-    const modelPicker = screen.getByLabelText("当前模型") as HTMLSelectElement;
-    const effortPicker = (await screen.findByLabelText("思考强度")) as HTMLSelectElement;
+    const modelPicker = screen.getByRole("combobox", { name: "当前模型" });
+    const effortPicker = await screen.findByRole("combobox", { name: "思考强度" });
     // Both pickers are disabled while the preference is still in flight.
-    expect(modelPicker.disabled).toBe(true);
-    expect(effortPicker.disabled).toBe(true);
+    expect(modelPicker.hasAttribute("disabled")).toBe(true);
+    expect(effortPicker.hasAttribute("disabled")).toBe(true);
 
     await act(async () => {
       blocked.resolve({ modelId: null, thinkingEffort: "high" });
     });
 
-    await waitFor(() => expect(effortPicker.disabled).toBe(false));
-    expect(modelPicker.disabled).toBe(false);
-    expect(effortPicker.value).toBe("high");
-    expect(Array.from(effortPicker.options).map((option) => option.value)).toEqual(["off", "low", "medium", "high"]);
+    await waitFor(() => expect(effortPicker.hasAttribute("disabled")).toBe(false));
+    expect(modelPicker.hasAttribute("disabled")).toBe(false);
+    await waitFor(() => expect(effortPicker.textContent).toContain("高"));
 
-    fireEvent.change(effortPicker, { target: { value: "low" } });
+    openSelect("思考强度");
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual(["关闭", "低", "中", "高"]);
+    fireEvent.click(screen.getByRole("option", { name: "低" }));
     await waitFor(() => expect(updateCopilotPreferencesMock).toHaveBeenCalledWith({ thinkingEffort: "low" }, expect.anything()));
     // The invalidation refetch lands and the picker follows the server value.
-    await waitFor(() => expect(effortPicker.value).toBe("low"));
+    await waitFor(() => expect(effortPicker.textContent).toContain("低"));
   });
 
   it("keeps the displayed and submitted model aligned when saving a preference fails", async () => {
@@ -464,10 +492,10 @@ describe("CopilotChat console layout", () => {
     updateCopilotPreferencesMock.mockRejectedValueOnce(new Error("offline"));
     renderChat();
     await waitForConversationLoaded();
-    const picker = screen.getByLabelText("当前模型") as HTMLSelectElement;
-    fireEvent.change(picker, { target: { value: "model-2" } });
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("偏好保存失败"));
-    expect(picker.value).toBe("");
+    await pickOption("当前模型", "OpenAI / Other model");
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("偏好保存失败，仍使用上次保存的设置。"));
+    // The picker falls back to the effective default option.
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "当前模型" }).textContent).toContain("跟随系统默认"));
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "继续" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
@@ -479,11 +507,10 @@ describe("CopilotChat console layout", () => {
     renderChat();
 
     await waitForConversationLoaded();
-    const picker = await screen.findByLabelText("当前模型");
-    // The picker falls back to the default option and the stale id is cleared
-    // on the server.
-    await waitFor(() => expect((picker as HTMLSelectElement).value).toBe(""));
+    // The stale id is cleared on the server, then the picker falls back to
+    // the default option.
     await waitFor(() => expect(updateCopilotPreferencesMock).toHaveBeenCalledWith({ modelId: null }, expect.anything()));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "当前模型" }).textContent).toContain("跟随系统默认"));
     expect(preferencesState.modelId).toBeNull();
   });
 
@@ -629,11 +656,10 @@ describe("CopilotChat console layout", () => {
     editMessageMock.mockRejectedValueOnce(new Error("response lost"));
     renderChat();
     await waitForConversationLoaded();
-    await screen.findByRole("option", { name: "Selected project" });
-    fireEvent.change(screen.getByLabelText("项目上下文"), { target: { value: "project-1" } });
+    await pickOption("项目上下文", "Selected project");
     fireEvent.click(screen.getByRole("button", { name: /编辑消息/ }));
     fireEvent.click(screen.getByRole("button", { name: "保存并重新运行" }));
-    await screen.findByText("编辑失败，请重试。");
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("编辑失败，请重试。"));
     const first = editMessageMock.mock.calls[0]!;
     expect(first[3]).toEqual({ projectId: "project-1", clientRequestId: expect.any(String) });
     fireEvent.click(screen.getByRole("button", { name: "保存并重新运行" }));
@@ -723,14 +749,14 @@ describe("CopilotChat console layout", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "保存并重新运行" }));
 
-    await waitFor(() => expect(screen.getByText("编辑失败，请重试。")).toBeTruthy());
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("编辑失败，请重试。"));
   });
   it("does not submit Enter while a restored legacy approval state is pending", async () => {
     const run = { id: "run-1", conversationId: "conv-1", status: "awaiting_approval", revision: 3 };
     listRunsMock.mockResolvedValue({ runs: [run], activeRun: run });
     getRunMock.mockResolvedValue({ run, pendingActions: [{ id: "action", runId: "run-1", tool: "create_project", status: "pending", inputJson: "{}", inputDigest: "digest" }] });
     renderChat();
-    await waitFor(() => expect((screen.getByLabelText("项目上下文") as HTMLSelectElement).disabled).toBe(true));
+    await waitFor(() => expect((screen.getByRole("combobox", { name: "项目上下文" })).hasAttribute("disabled")).toBe(true));
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "继续" } });
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
     await act(async () => {});

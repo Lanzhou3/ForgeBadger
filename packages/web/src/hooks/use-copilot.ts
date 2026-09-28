@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CopilotTextStream } from '@/lib/copilot-text-stream';
 import { FORGEBADGER_GATEWAY_EVENT, FORGEBADGER_GATEWAY_CONNECTED } from "@/lib/gateway-events";
+import { useLanguage } from "@/hooks/use-language";
+import type { TranslationKey } from "@/lib/i18n";
 import { editMessage, getRun, listConversationRuns, sendMessage,
   type CopilotPendingAction, type CopilotRunStatus } from "@/lib/copilot-api";
 
@@ -30,18 +32,20 @@ export const RUN_STALE_TIMEOUT_MS = 5 * 60 * 1000;
 const emptyRun = (conversationId: string, runId = ""): ActiveCopilotRun => ({
   conversationId, runId, status: "pending", text: "", thinking: "", pendingAction: null,
 });
-function terminalReason(status: CopilotRunStatus, reason?: string) {
-  if (status === "indeterminate") return "操作结果尚未确认，请核实实际结果后再继续，避免重复操作。";
-  if (status === "stopped" && reason === "COPILOT_TOKEN_BUDGET") return "本次执行已达到模型用量预算；执行记录已保留。";
-  if (status === "stopped" && reason === "COPILOT_TIME_BUDGET") return "本次执行已达到时间预算；执行记录已保留。";
-  if (status === "stopped") return reason === "step_budget_exhausted" ? "已达到本次执行步数上限。" : "执行已停止。";
-  if (status === "cancelled") return "执行已取消；已发生的操作不会自动撤销。";
-  if (status === "failed") return reason || "执行失败，请查看会话记录。";
+type Translate = (key: TranslationKey) => string;
+function terminalReason(status: CopilotRunStatus, reason: string | undefined, t: Translate) {
+  if (status === "indeterminate") return t("copilot.terminal.indeterminate");
+  if (status === "stopped" && reason === "COPILOT_TOKEN_BUDGET") return t("copilot.terminal.tokenBudget");
+  if (status === "stopped" && reason === "COPILOT_TIME_BUDGET") return t("copilot.terminal.timeBudget");
+  if (status === "stopped") return reason === "step_budget_exhausted" ? t("copilot.terminal.stepBudget") : t("copilot.terminal.stopped");
+  if (status === "cancelled") return t("copilot.terminal.cancelled");
+  if (status === "failed") return reason || t("copilot.terminal.failedDefault");
   return undefined;
 }
 
 /** REST owns execution state. WebSocket frames only stream text and request reconciliation. */
 export function useCopilotRun(options?: UseCopilotRunOptions) {
+  const { t } = useLanguage();
   const [active, setActive] = useState<ActiveCopilotRun | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const activeRef = useRef<ActiveCopilotRun | null>(null);
@@ -95,7 +99,7 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
         runId: run.id, conversationId: run.conversationId, status: run.status,
         revision: run.revision, syncError: undefined, phase: run.phase, phaseStartedAt: run.phaseStartedAt,
         pendingAction: pendingActions.find((action) => action.status === "pending") ?? null,
-        error: terminalReason(run.status, run.error ?? run.stopReason),
+        error: terminalReason(run.status, run.error ?? run.stopReason, t),
       };
       if (TERMINAL.has(run.status)) {
         // Keep the streaming bubble until durable messages have replaced it.
@@ -109,11 +113,11 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       } else update(next);
     } catch {
       if (!valid()) return;
-      const message = "状态同步失败，已保留执行记录；正在重试。";
+      const message = t("copilot.syncFailedRetrying");
       setSyncError(message);
       if (activeRef.current) update({ ...activeRef.current, syncError: message });
     }
-  }, [update]);
+  }, [update, t]);
 
   useEffect(() => {
     const id = options?.conversationId ?? null;
@@ -142,7 +146,7 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
         && (settled.current.has(p.run_id) || (current?.runId && current.runId !== p.run_id))) {
         const epoch = generation.current;
         void Promise.resolve(optionsRef.current?.onSettled?.(conversationId)).catch(() => {
-          if (epoch === generation.current) setSyncError("消息同步失败，请稍后重试。");
+          if (epoch === generation.current) setSyncError(t("copilot.syncFailedRetry"));
         });
       }
       if (current?.runId && current.runId !== p.run_id) {
@@ -176,7 +180,7 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       window.removeEventListener("online", refresh);
       window.removeEventListener("focus", refresh);
     };
-  }, [reconcile, update]);
+  }, [reconcile, update, t]);
 
   const markPending = useCallback((conversationId: string) => {
     submitting.current = true;
