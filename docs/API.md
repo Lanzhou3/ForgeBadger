@@ -1067,6 +1067,19 @@ Codex does not permit those keys to be overridden by project configuration.
 The retired `/api/v1/codex/subscription/**` route is not mounted and returns the
 normal 404 behavior.
 
+Before writing a chat-wire plan, preview and apply validate the planned
+`config.toml` against the installed Codex binary: the Gateway runs `codex exec`
+in a throwaway `CODEX_HOME` with every provider endpoint pointed at a dead
+loopback URL, so only the config-load phase is exercised (no real gateway is
+called and no credential leaves the module). When the installed Codex rejects
+the chat-wire plan (Codex 0.157.x and later removed `wire_api = "chat"`), the
+preview adds a `CODEX_WIRE_API_UNSUPPORTED` warning marker plus a
+human-readable message, and apply refuses with typed `409
+CLI_CONFIG_APPLY_CODEX_WIRE_API_UNSUPPORTED` without writing any file or
+recording a backup. `responses`-wire plans skip the probe, and probe
+infrastructure failures (missing CLI, timeout, unparseable plan) never block
+an apply.
+
 ### Models
 
 The legacy `/api/v1/models` endpoint and its flat `models` table were removed

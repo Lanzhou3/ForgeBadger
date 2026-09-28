@@ -88,7 +88,13 @@ export class SessionRepository {
       })
       .returning(sessionColumns)
       .get();
-    return result as Session;
+    // create/update only return the bare session row (no project JOIN),
+    // but every read path (list/getById) enriches it with `projectName` for
+    // tab grouping. Re-fetch through getById so callers (POST /sessions,
+    // session.start) return the same shape the board does — otherwise the
+    // web client's sessionToTab loses the project group and the new tab lands
+    // in an anonymous bucket instead of under its project.
+    return this.getById(result.id)!;
   }
 
   list(): Session[] {
@@ -175,12 +181,18 @@ export class SessionRepository {
     if (input.lastActive !== undefined) updateData.lastActive = input.lastActive;
     if (input.errorMessage !== undefined) updateData.errorMessage = input.errorMessage;
 
-    return this.drizzle
+    this.drizzle
       .update(sessions)
       .set(updateData)
       .where(and(eq(sessions.id, id), eq(sessions.userId, this.userId)))
-      .returning(sessionColumns)
-      .get() as Session | undefined;
+      .run();
+    // create/update only return the bare session row (no project JOIN),
+    // but every read path (list/getById) enriches it with `projectName` for
+    // tab grouping. Re-fetch through getById so callers (POST /sessions,
+    // session.start) return the same shape the board does — otherwise the
+    // web client's sessionToTab loses the project group and the new tab lands
+    // in an anonymous bucket instead of under its project.
+    return this.getById(id);
   }
 
   delete(id: string): void {

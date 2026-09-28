@@ -80,10 +80,18 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
   const { t } = useLanguage();
   const [input, setInputState] = useState("");
   const [sending, setSending] = useState(false);
+  // Synchronous mirror of `sending` for the send guard. React state updates
+  // are batched asynchronously, so two rapid Enter presses can both observe
+  // `sending === false` before the first setSending(true) commits. The ref
+  // flips synchronously inside send() to close that window.
+  const sendingRef = useRef(false);
   const [sendFailed, setSendFailed] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
+  // Synchronous mirror of `editSubmitting` for the edit guard (same rationale
+  // as sendingRef).
+  const editSubmittingRef = useRef(false);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -102,6 +110,8 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
   const setInput = useCallback((value: string) => setInputState(value), []);
 
   const resetInteractionState = useCallback(() => {
+    sendingRef.current = false;
+    editSubmittingRef.current = false;
     setSending(false);
     setSendFailed(false);
     setEditingMessageId(null);
@@ -118,7 +128,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     const prior = retry ? lastSentRef.current : null;
     const text = (prior?.text ?? textOverride ?? inputRef.current).trim();
     const id = opts.conversationId;
-    if (!text || !id || sending || opts.savingPreferences || (opts.active && ["pending", "running", "awaiting_approval"].includes(opts.active.status))) return;
+    if (!text || !id || sendingRef.current || opts.savingPreferences || (opts.active && ["pending", "running", "awaiting_approval"].includes(opts.active.status))) return;
     if (retry && (!prior || prior.conversationId !== id)) return;
     const epoch = selectionEpochRef.current;
     messageSerialRef.current++;
@@ -126,6 +136,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     lastSentRef.current = request;
     if (!retry) opts.appendUserMessage(text);
     if (!textOverride) setInputState("");
+    sendingRef.current = true;
     setSending(true);
     setSendFailed(false);
     opts.clearActive();
@@ -147,9 +158,12 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
         toast.error(t("copilot.sendError"));
       }
     } finally {
-      if (selectionEpochRef.current === epoch) setSending(false);
+      if (selectionEpochRef.current === epoch) {
+        sendingRef.current = false;
+        setSending(false);
+      }
     }
-  }, [sending, t]);
+  }, [t]);
 
   const stopRun = useCallback(async () => {
     const opts = optionsRef.current;
@@ -179,12 +193,13 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     const id = opts.conversationId;
     const targetId = editingMessageId;
     const content = editDraft.trim();
-    if (!id || !targetId || !content || editSubmitting || opts.savingPreferences || sending) return;
+    if (!id || !targetId || !content || editSubmittingRef.current || opts.savingPreferences || sendingRef.current) return;
     const epoch = selectionEpochRef.current;
     messageSerialRef.current++;
     const signature = JSON.stringify([id, targetId, content, opts.projectId, opts.modelId]);
     const request = lastEditRef.current?.signature === signature ? lastEditRef.current : { signature, clientRequestId: crypto.randomUUID(), reviewTaskResults: opts.reviewTaskResults, repairFailedChecks: opts.repairFailedChecks };
     lastEditRef.current = request;
+    editSubmittingRef.current = true;
     setEditSubmitting(true);
     opts.clearActive();
     try {
@@ -199,9 +214,12 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     } catch {
       if (epoch === selectionEpochRef.current) toast.error(t("copilot.editFailed"));
     } finally {
-      if (epoch === selectionEpochRef.current) setEditSubmitting(false);
+      if (epoch === selectionEpochRef.current) {
+        editSubmittingRef.current = false;
+        setEditSubmitting(false);
+      }
     }
-  }, [editingMessageId, editDraft, editSubmitting, sending, t]);
+  }, [editingMessageId, editDraft, t]);
 
   const onScroll = useCallback(() => {
     const node = scrollRef.current;

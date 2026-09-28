@@ -254,10 +254,15 @@ export function composerContainsStagedTask(
   // composer element like `[Pasted Content 2032 chars]`, while retaining the
   // full payload internally for expansion on submit. Rust's `chars().count()`
   // counts Unicode scalar values, which matches Array.from rather than JS's
-  // UTF-16 string length for astral characters.
+  // UTF-16 string length for astral characters. The exact placeholder wording
+  // has varied across Codex versions (`Pasted Content` vs `Pasted` vs
+  // `characters` vs `chars`), so match by an extracted count instead of a
+  // hard-coded literal — normalizeComparable already strips whitespace, so the
+  // regex runs against the compacted form.
   const charCount = Array.from(message).length;
-  const expectedPlaceholder = `[PastedContent${charCount}chars]`;
-  return composer.includes(expectedPlaceholder);
+  const pasteCountPattern = /\[Pasted(?:Content)?(\d+)(?:chars|characters)?\]/i;
+  const match = pasteCountPattern.exec(composer);
+  return match !== null && Number(match[1]) === charCount;
 }
 
 export function isProgrammaticTaskConsumed(

@@ -25,6 +25,7 @@ import {
   safeUnlink
 } from "./cli-config-fs.js";
 import { cliConfigTargetPath, globalConfigRoot } from "./cli-config-target.js";
+import { probeCodexPlannedConfig, type CodexConfigProbeFn, type CodexConfigProbeOutcome } from "./codex-config-probe.js";
 import { gatewayLoopbackUrl } from "./claude-route/gateway-url.js";
 import { projectedKimiCapabilities } from "./model-capability-projection.js";
 import {
@@ -91,6 +92,13 @@ export interface CliConfigApplyInput {
    */
   codexWireApi?: CodexWireApi | undefined;
   resolveHost?: OutboundHostResolver | undefined;
+  /**
+   * Test seam: replaces the Codex config validation probe (which spawns the
+   * installed `codex` binary). Tests that don't exercise the probe inject a
+   * fixed outcome so behavior stays hermetic on machines with any Codex
+   * version installed.
+   */
+  codexConfigProbe?: CodexConfigProbeFn | undefined;
 }
 
 export interface CliConfigApplyFilePreview {
@@ -180,7 +188,8 @@ interface ApplyDocumentPlan {
 export async function previewCliConfigApply(input: CliConfigApplyInput): Promise<CliConfigApplyPreview> {
   const context = await resolveApplyContext(input);
   const warnings: string[] = [];
-  const files = planApplyDocuments(context, null).map((plan) => {
+  const planned = planApplyDocuments(context, null);
+  const files = planned.map((plan) => {
     const observed = readObservedConfig(plan.target.targetPath);
     const current = observed.existed
       ? maskSecrets(plan.target.fileType, serializeDocument(plan.target.fileType, parseDocument(plan.target.fileType, observed.content, plan.target.targetPath)))
@@ -197,6 +206,13 @@ export async function previewCliConfigApply(input: CliConfigApplyInput): Promise
   });
   if (files.some((file) => file.fileType === "toml" && file.operation !== "none")) {
     warnings.push("Applying this change may normalize TOML comments and formatting in the config file.");
+  }
+  const codexProbe = await probeCodexWireApi(context, planned, input);
+  if (codexProbe) {
+    // Machine-readable marker; the web dialog renders a localized banner and
+    // filters this code out of the generic warning list.
+    warnings.push("CODEX_WIRE_API_UNSUPPORTED");
+    warnings.push(codexWireApiUnsupportedMessage(codexProbe));
   }
   if (context.routeMode === "route_required") {
     // Machine-readable marker; the web dialog renders a localized banner and
@@ -249,6 +265,16 @@ export async function applyCliConfigToAdapter(input: CliConfigApplyInput): Promi
       const observed = readObservedConfig(plan.target.targetPath);
       return { ...plan, observed, operation: planOperation(observed, plan.serialized) };
     });
+    const codexProbe = await probeCodexWireApi(context, planned, input);
+    if (codexProbe) {
+      // Writing this config would make the installed Codex hard-fail at
+      // startup (every new session exits before the TUI renders). Refuse
+      // instead of persisting a crash-on-boot config.
+      throw new CliConfigApplyError(
+        "CLI_CONFIG_APPLY_CODEX_WIRE_API_UNSUPPORTED",
+        codexWireApiUnsupportedMessage(codexProbe)
+      );
+    }
     const backupFiles = planned.map(({ target, observed }) => ({
       targetPath: target.targetPath,
       existed: observed.existed,
@@ -522,6 +548,43 @@ function resolveCodexWireApi(
     return "responses";
   }
   return "chat";
+}
+
+/**
+ * Validates a planned Codex config against the installed Codex binary before
+ * it is written. Only chat-wire plans are at risk (the "responses" value is
+ * accepted by every known Codex version), so responses plans skip the probe.
+ * Returns the unsupported outcome when the installed Codex provably rejects
+ * the plan; null means "write it" (skipped or supported). Probe infrastructure
+ * failures never block the apply.
+ */
+async function probeCodexWireApi(
+  context: ApplyContext,
+  planned: Array<{ target: ApplyTarget; serialized: string | null }>,
+  input: Pick<CliConfigApplyInput, "codexConfigProbe">
+): Promise<CodexConfigProbeOutcome | null> {
+  if (context.adapter !== "codex" || context.codexWireApi !== "chat") return null;
+  const config = planned.find((plan) => plan.target.role === "config");
+  if (!config || config.serialized === null) return null;
+  const probe: CodexConfigProbeFn = input.codexConfigProbe
+    ?? ((toml) => probeCodexPlannedConfig({ plannedConfigToml: toml }));
+  try {
+    const outcome = await probe(config.serialized);
+    return outcome.status === "unsupported" ? outcome : null;
+  } catch {
+    return null;
+  }
+}
+
+function codexWireApiUnsupportedMessage(outcome: CodexConfigProbeOutcome): string {
+  const version = outcome.codexVersion ? ` (installed: ${outcome.codexVersion})` : "";
+  const detail = outcome.detail ? ` Codex reported: ${outcome.detail}` : "";
+  return (
+    `Codex${version} no longer supports wire_api = "chat"; writing this config would make ` +
+    `every new Codex session exit immediately. Use a provider endpoint that implements the ` +
+    `OpenAI /responses API, or install a Codex version that still supports chat completions.` +
+    detail
+  );
 }
 
 function planApplyDocuments(context: ApplyContext, plaintextSecret: string | null): ApplyDocumentPlan[] {

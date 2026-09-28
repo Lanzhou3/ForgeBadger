@@ -538,7 +538,8 @@ function readClaudeRouteState(db: Database, masterKey: string, userId: string): 
 function applyErrorStatus(error: CliConfigApplyError): number {
   if (error.code.endsWith("_NOT_FOUND")) return 404;
   if (error.code === "CLI_CONFIG_APPLY_ROUTE_REQUIRED"
-    || error.code === "CLI_CONFIG_APPLY_ROUTE_DISABLED") return 409;
+    || error.code === "CLI_CONFIG_APPLY_ROUTE_DISABLED"
+    || error.code === "CLI_CONFIG_APPLY_CODEX_WIRE_API_UNSUPPORTED") return 409;
   if (error.code === "CLI_CONFIG_APPLY_FAILED"
     || error.code === "CLI_CONFIG_APPLY_VERIFY_FAILED"
     || error.code === "CLI_CONFIG_ROLLBACK_FAILED") return 500;

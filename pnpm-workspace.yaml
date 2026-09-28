@@ -1,8 +1,18 @@
 packages:
   - "packages/*"
 
+# Build-script approvals. `allowBuilds` is the pnpm 12 form;
+# `onlyBuiltDependencies` below is kept for pnpm 10 compatibility.
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  node-pty: true
+  protobufjs: true
+  sharp: true
+
 onlyBuiltDependencies:
   - better-sqlite3
   - esbuild
   - node-pty
+  - protobufjs
   - sharp

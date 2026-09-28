@@ -671,7 +671,15 @@ export class InMemorySessionManager {
     const generation = this.writerGenerations.get(id) ?? 0;
     let effectsStarted = false;
     return this.runExclusive(id, async () => {
-      const session = this.requireSession(id);
+      const session = this.sessions.get(id);
+      if (!session) {
+        // The in-memory session is gone — most commonly because the Session
+        // Server daemon restarted and the correction scan marked it `lost`, or
+        // the session was never started in this process. Surface a semantic
+        // error so Copilot can distinguish "session is gone, restart it" from
+        // a generic runtime fault.
+        throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
+      }
       if ((this.writerGenerations.get(id) ?? 0) !== generation) throw new Error("SESSION_WRITER_FENCE_STALE");
       const launchAdapter = adapterFromLaunchCommand(session.launchPlan.command);
       if (launchAdapter !== input.adapter) {
@@ -697,7 +705,14 @@ export class InMemorySessionManager {
           if (isProgrammaticNativeApprovalRequired(input.adapter, before.content))
             throw new Error(PROGRAMMATIC_SUBMIT_NATIVE_APPROVAL_REQUIRED);
           if (isProgrammaticComposerReady(input.adapter, before.content)) break;
-          if (poll >= maxPolls || Date.now() >= deadline) throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
+          if (poll >= maxPolls || Date.now() >= deadline) {
+            // The composer never reached a recognized ready state. The ready
+            // classifiers match adapter-specific UI text that can drift across
+            // CLI versions; surface the adapter and a short pane tail so the
+            // failure is diagnosable instead of a bare NOT_READY.
+            const tail = before.content.slice(-200).replace(/\s+/g, " ").trim();
+            throw new Error(`${PROGRAMMATIC_SUBMIT_NOT_READY}: ${input.adapter} composer did not become ready; pane tail: ${tail}`);
+          }
           await this.sleep(250);
         }
 
@@ -732,6 +747,17 @@ export class InMemorySessionManager {
           this.assertRuntimeInputAuthorized(session);
           this.writerLeases.assertCurrent(lease);
           input.authorize?.();
+          // The bracketed-paste end marker (\x1b[201~) and the Enter key (\r)
+          // are two separate pty.write calls on the daemon side. node-pty's
+          // write is async (queued onto the stdin pipe), and inspectPane's
+          // whenIdle() only proves the *screen* has rendered the staged input —
+          // it does not prove the pty's write buffer has fully flushed the
+          // paste-end marker. If Enter arrives in the same pipe flush as the
+          // trailing paste bytes, some CLI editors (notably Codex's Rust TUI)
+          // may swallow the \r as part of the paste payload instead of
+          // treating it as a submit keystroke. A short settle here lets the
+          // paste-end marker drain through the pty before Enter is written.
+          await this.sleep(this.programmaticSubmitSettleMs[input.adapter]);
           await this.backend.pressEnter(session.runtimeSessionName);
           return { adapter: input.adapter, needle, stagedPane: staged.content };
         } catch {

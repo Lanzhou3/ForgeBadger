@@ -9,7 +9,7 @@ cloud service or generic project-management suite.
 
 - Read `README.md`, `docs/TECH-ARCHITECTURE.md`, `docs/API.md`, and
   `docs/OPEN-SOURCE-READINESS.md`.
-- Use Node.js 20.12 through 24, pnpm 10, tmux, and at least one local AI CLI when
+- Use Node.js 20.12 through 24, pnpm 12, tmux, and at least one local AI CLI when
   testing terminal/session behavior.
 - Keep Gateway behavior in `packages/gateway`; do not add Next.js API routes
   for Gateway responsibilities.

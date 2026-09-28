@@ -14,16 +14,24 @@
  * counting; subagent turn usage is collected from that agent's own wire file.
  *
  * Session id and project cwd come from the session directory's `state.json`
- * (`{"id","cwd",...}`); the wire file itself carries neither.
+ * (`{"id","cwd",...}`; older sessions store the working directory as
+ * `workDir`); the wire file itself carries neither. Kimi writes the directory
+ * with forward slashes even on Windows, so it is canonicalized with
+ * `realpathSync` into the exact form the ownership roots use (native
+ * separators, on-disk casing) — otherwise the syncer's exact-match root
+ * filter drops every Kimi record from the stats.
  *
- * Watermark: JSON map `{ [fileKey]: { bytes, mtimeMs } }`. Files whose size
- * and mtime are unchanged are skipped; any change triggers a full re-parse.
+ * Watermark: `{ "v": 2, "files": { [fileKey]: { bytes, mtimeMs } } }`. Files
+ * whose size and mtime are unchanged are skipped; any change triggers a full
+ * re-parse. Legacy v1 watermarks (the flat file map written before path
+ * canonicalization) are rejected, so the first scan after an upgrade re-runs
+ * in full and the idempotent upsert repairs the misattributed rows.
  * Dedupe key: `<relative-path>@<byteOffset>` — wire files are append-only, so
  * a line's byte offset is stable and the repository's
  * `(user, adapter, requestId)` unique constraint makes re-parses idempotent.
  */
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -42,6 +50,9 @@ interface SessionMeta {
   sessionId: string;
   projectPath: string;
 }
+
+/** Bump when stored rows need a full idempotent rescan to repair them. */
+const WATERMARK_VERSION = 2;
 
 export class KimiSource implements UsageSource {
   readonly adapter = "kimi" as const;
@@ -67,7 +78,7 @@ export class KimiSource implements UsageSource {
       records.push(...parseWireFile(absolutePath, root, meta));
     }
 
-    return { records, nextWatermark: JSON.stringify(next) };
+    return { records, nextWatermark: JSON.stringify({ v: WATERMARK_VERSION, files: next }) };
   }
 }
 
@@ -117,13 +128,33 @@ function sessionMetaFor(wirePath: string, cache: Map<string, SessionMeta>): Sess
     const parsed = JSON.parse(raw) as unknown;
     if (isRecord(parsed)) {
       if (typeof parsed.id === "string" && parsed.id) meta.sessionId = parsed.id;
-      if (typeof parsed.cwd === "string") meta.projectPath = parsed.cwd;
+      // Older sessions store the working directory as `workDir`.
+      const rawDir = typeof parsed.cwd === "string" && parsed.cwd
+        ? parsed.cwd
+        : typeof parsed.workDir === "string" && parsed.workDir
+          ? parsed.workDir
+          : null;
+      if (rawDir) meta.projectPath = canonicalizeProjectPath(rawDir);
     }
   } catch {
     // Missing/unreadable state.json: fall back to the directory name + unknown cwd.
   }
   cache.set(sessionDir, meta);
   return meta;
+}
+
+/**
+ * Canonicalize the session working directory into the form the ownership
+ * roots use: `realpathSync` output (native separators + real on-disk casing).
+ * A directory that no longer exists (project renamed or deleted) falls back
+ * to a separator-only normalize — best effort.
+ */
+function canonicalizeProjectPath(rawDir: string): string {
+  try {
+    return realpathSync(rawDir);
+  } catch {
+    return path.normalize(rawDir);
+  }
 }
 
 function parseWireFile(
@@ -206,13 +237,14 @@ function cursorKeyForPath(absolutePath: string): string {
   return absolutePath.replace(/[/\\:]/g, "_");
 }
 
+/** Legacy v1 watermarks (flat file map) are rejected to force a repair rescan. */
 function parseWatermark(watermark: string | null): Record<string, WatermarkEntry> {
   if (!watermark) return {};
   try {
     const parsed = JSON.parse(watermark) as unknown;
-    if (!isRecord(parsed)) return {};
+    if (!isRecord(parsed) || parsed.v !== WATERMARK_VERSION || !isRecord(parsed.files)) return {};
     const result: Record<string, WatermarkEntry> = {};
-    for (const [key, value] of Object.entries(parsed)) {
+    for (const [key, value] of Object.entries(parsed.files)) {
       if (isRecord(value)) {
         const bytes = numeric(value.bytes);
         const mtimeMs = numeric(value.mtimeMs);

@@ -105,3 +105,43 @@ describe("PI apply model selection semantics", () => {
     await waitFor(() => expect(applyCliConfigToAdapter).toHaveBeenCalledWith("pi", expect.objectContaining({ modelProfileId: "model-2" })));
   });
 });
+
+describe("Codex wire API blocker", () => {
+  it("renders the localized blocker banner and filters the raw marker code", async () => {
+    vi.mocked(previewCliConfigApply).mockResolvedValueOnce({
+      files: [],
+      warnings: [
+        "CODEX_WIRE_API_UNSUPPORTED",
+        "Codex (installed: codex-cli 0.157.1) no longer supports wire_api = \"chat\"."
+      ]
+    } as never);
+    setup({ supportedAdapters: ["codex"] }, [makeModel()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "models.applyChangeSummary" }));
+    await waitFor(() => expect(screen.getByText("models.codexWireApiBlocked")).toBeTruthy());
+    // The machine-readable marker never renders verbatim; the human message does.
+    expect(screen.queryByText("CODEX_WIRE_API_UNSUPPORTED")).toBeNull();
+    expect(
+      screen.getByText((content) => content.includes("no longer supports wire_api"))
+    ).toBeTruthy();
+    // The apply action is hard-blocked while the marker is present.
+    const applyButton = screen.getByRole("button", { name: "models.applyConfig" }) as HTMLButtonElement;
+    expect(applyButton.disabled).toBe(true);
+  });
+
+  it("does not render the blocker banner for other warning sets", async () => {
+    vi.mocked(previewCliConfigApply).mockResolvedValueOnce({
+      files: [],
+      warnings: ["Applying this change may normalize TOML comments and formatting in the config file."]
+    } as never);
+    setup({ supportedAdapters: ["codex"] }, [makeModel()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "models.applyChangeSummary" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText((content) => content.includes("normalize TOML"))
+      ).toBeTruthy()
+    );
+    expect(screen.queryByText("models.codexWireApiBlocked")).toBeNull();
+  });
+});

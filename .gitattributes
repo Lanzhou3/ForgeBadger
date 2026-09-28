@@ -1,3 +1,8 @@
+# Normalize line endings: LF is the canonical form in the repo; worktrees use
+# the platform default. Prevents whole-file EOL churn from CRLF editors
+# (`git diff --check` treats CR at end of added lines as trailing whitespace).
+* text=auto
+
 # Migration SQL files are covered by a sha256 checksum manifest
 # (meta/migration-checksums.json). Keep their on-disk bytes stable on every
 # platform: always store and check them out with LF line endings so the

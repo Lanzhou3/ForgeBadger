@@ -23,9 +23,16 @@ const MAX_INACTIVE_TABS = 8;
 export const MAX_VISIBLE_TABS = 12;
 
 export function sessionToTab(session: Session, now = Date.now()): SessionTab {
+  // Prefer the human-readable session name; fall back to the runtime session
+  // name, then to a short "Session <short-id>" label. Never surface a raw
+  // UUID — it is unreadable in a tab strip and makes every unnamed session
+  // look identical.
+  const fallbackLabel = session.name
+    || session.runtimeSessionName
+    || `Session ${session.id.slice(0, 8)}`;
   return {
     id: session.id,
-    label: session.name || session.runtimeSessionName || session.id,
+    label: fallbackLabel,
     ...(session.projectId ? { projectId: session.projectId } : {}),
     ...(session.projectName ? { projectName: session.projectName } : {}),
     ...(session.aiTool ? { aiTool: session.aiTool } : {}),

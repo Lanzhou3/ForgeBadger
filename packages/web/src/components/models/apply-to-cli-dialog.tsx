@@ -198,8 +198,13 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
 
   const preview = previewQuery.data;
   const previewFiles = preview?.files ?? [];
-  // Machine-readable route marker; the localized banner above carries the UX.
-  const warnings = (preview?.warnings ?? []).filter((warning) => warning !== "OPENAI_PROTOCOL_REQUIRES_ROUTE");
+  // Machine-readable markers; the localized banners carry the UX and these
+  // codes are filtered out of the generic warning list.
+  const previewWarnings = preview?.warnings ?? [];
+  const codexWireApiBlocked = previewWarnings.includes("CODEX_WIRE_API_UNSUPPORTED");
+  const warnings = previewWarnings.filter(
+    (warning) => warning !== "OPENAI_PROTOCOL_REQUIRES_ROUTE" && warning !== "CODEX_WIRE_API_UNSUPPORTED"
+  );
   // PI apply writes every active model of the provider into models.json; the
   // single selection only pins the startup default (settings.json), so the
   // label must not read as "the only model that will be applied".
@@ -373,6 +378,11 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
                 <p className="text-destructive">{previewQuery.error instanceof Error ? previewQuery.error.message : t("models.applyPreviewFailed")}</p>
               ) : preview ? (
                 <>
+                  {codexWireApiBlocked && (
+                    <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                      {t("models.codexWireApiBlocked")}
+                    </p>
+                  )}
                   {previewFiles.map((file) => (
                     <div key={file.targetPath} className="space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -405,6 +415,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
             disabled={
               applyMutation.isPending ||
               routeUnsupported ||
+              codexWireApiBlocked ||
               (needsRoute && routeQuery.isLoading)
             }
             onClick={() => applyMutation.mutate()}

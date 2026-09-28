@@ -1185,4 +1185,122 @@ describe("cli-config apply service", () => {
       assert.equal(malformed.code, "CLI_CONFIG_BACKUP_NOT_FOUND");
     });
   });
+
+  describe("codex wire API probe guard", () => {
+    it("refuses a chat-wire apply the installed Codex would reject, without writing", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-codex-chat-refuse@example.com", "hash");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-apply-codex-refuse-");
+      const fixture = createFixture(db, user.id, "codex");
+      let probeCalls = 0;
+
+      const error = await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "codex",
+        providerProfileId: fixture.providerId,
+        modelProfileId: fixture.modelId,
+        credentialId: fixture.credentialId,
+        codexWireApi: "chat",
+        resolveHost: publicResolver,
+        codexConfigProbe: async (toml) => {
+          probeCalls += 1;
+          assert.match(toml, /experimental_bearer_token = "sk-codex-secret"/u);
+          return {
+            status: "unsupported",
+            codexVersion: "codex-cli 0.157.1",
+            detail: "`wire_api = \"chat\"` is no longer supported.\nin `model_providers.codex-provider.wire_api`"
+          };
+        }
+      }).catch((caught: unknown) => caught);
+
+      assert.ok(error instanceof CliConfigApplyError);
+      assert.equal(error.code, "CLI_CONFIG_APPLY_CODEX_WIRE_API_UNSUPPORTED");
+      assert.match(error.message, /no longer supports wire_api = "chat"/u);
+      assert.match(error.message, /codex-cli 0\.157\.1/u);
+      assert.match(error.message, /model_providers\.codex-provider\.wire_api/u);
+      assert.equal(probeCalls, 1);
+      // Nothing was written and no backup was recorded for a refused apply.
+      assert.equal(existsSync(path.join(root, "config.toml")), false);
+    });
+
+    it("flags the plan in preview without blocking other warnings", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("preview-codex-chat@example.com", "hash");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-preview-codex-chat-");
+      const fixture = createFixture(db, user.id, "codex");
+
+      const preview = await previewCliConfigApply({
+        db, userId: user.id, masterKey, adapter: "codex",
+        providerProfileId: fixture.providerId,
+        modelProfileId: fixture.modelId,
+        credentialId: fixture.credentialId,
+        codexWireApi: "chat",
+        resolveHost: publicResolver,
+        codexConfigProbe: async () => ({
+          status: "unsupported",
+          codexVersion: "codex-cli 0.157.1",
+          detail: "`wire_api = \"chat\"` is no longer supported."
+        })
+      });
+
+      assert.ok(preview.warnings.includes("CODEX_WIRE_API_UNSUPPORTED"));
+      assert.ok(
+        preview.warnings.some((warning) => warning.includes("no longer supports wire_api = \"chat\""))
+      );
+      // The generic TOML-normalization warning still rides along.
+      assert.ok(
+        preview.warnings.some((warning) => warning.includes("normalize TOML"))
+      );
+      // Preview never writes.
+      assert.equal(existsSync(path.join(root, "config.toml")), false);
+    });
+
+    it("skips the probe for responses-wire plans", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-codex-responses-skip@example.com", "hash");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-apply-codex-skip-");
+      const fixture = createFixture(db, user.id, "codex");
+      let probeCalls = 0;
+
+      const result = await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "codex",
+        providerProfileId: fixture.providerId,
+        modelProfileId: fixture.modelId,
+        credentialId: fixture.credentialId,
+        codexWireApi: "responses",
+        resolveHost: publicResolver,
+        codexConfigProbe: async () => {
+          probeCalls += 1;
+          return { status: "unsupported" };
+        }
+      });
+
+      assert.equal(result.changed, true);
+      assert.equal(probeCalls, 0);
+      const configToml = await readFile(path.join(root, "config.toml"), "utf8");
+      assert.match(configToml, /wire_api = "responses"/u);
+    });
+
+    it("proceeds when the probe is skipped or reports supported", async () => {
+      for (const status of ["skipped", "supported"] as const) {
+        const db = createTestDb();
+        const user = new UserRepository(db).create(`apply-codex-${status}@example.com`, "hash");
+        const root = await useConfigRoot("CODEX_HOME", `forgebadger-apply-codex-${status}-`);
+        const fixture = createFixture(db, user.id, "codex");
+
+        const result = await applyCliConfigToAdapter({
+          db, userId: user.id, masterKey, adapter: "codex",
+          providerProfileId: fixture.providerId,
+          modelProfileId: fixture.modelId,
+          credentialId: fixture.credentialId,
+          codexWireApi: "chat",
+          resolveHost: publicResolver,
+          codexConfigProbe: async () => ({ status })
+        });
+
+        assert.equal(result.changed, true);
+        const configToml = await readFile(path.join(root, "config.toml"), "utf8");
+        assert.match(configToml, /wire_api = "chat"/u);
+      }
+    });
+  });
 });

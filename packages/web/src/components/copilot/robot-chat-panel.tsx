@@ -35,6 +35,7 @@ import {
   type CopilotMessage,
 } from "@/lib/copilot-api";
 import { cn } from "@/lib/utils";
+import { toast } from "@/lib/toast";
 import { LAST_COPILOT_CONVERSATION_KEY, readLastCopilotConversation, writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
 
 const AUTO_TITLE_MAX_CHARS = 24;
@@ -262,8 +263,13 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
     }
     // Lazy creation in flight: the controller's sending guard is not armed
     // yet, so a double Enter here would double-submit (duplicate message +
-    // run). Drop the duplicate; the first submit owns the in-flight creation.
-    if (creatingRef.current) return;
+    // run). Drop the duplicate and let the user know their input was not
+    // lost — the first submit owns the in-flight creation and will deliver
+    // the message.
+    if (creatingRef.current) {
+      toast.info(t("copilot.creatingConversation"));
+      return;
+    }
     const text = (textOverride ?? controller.input).trim();
     if (!text) return;
     const id = await ensureConversation();

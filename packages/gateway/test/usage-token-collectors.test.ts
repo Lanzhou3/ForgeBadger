@@ -460,13 +460,25 @@ function writeKimiFixture(root: string, agent: string, lines: string[]): string 
   return file;
 }
 
-function writeKimiStateJson(root: string): void {
+/**
+ * The fixture project is a real directory so the source's `realpathSync`
+ * canonicalization is verifiable; the cwd is written with forward slashes the
+ * way Kimi Code writes it (including on Windows, where the canonical form is
+ * backslashes). `workDirOnly` exercises the legacy state file shape.
+ */
+function writeKimiStateJson(root: string, options: { workDirOnly?: boolean } = {}): string {
   const sessionDir = path.join(root, "sessions", "wd_forgebadger_abc123", "session_kimi-1");
   mkdirSync(sessionDir, { recursive: true });
+  const projectPath = path.join(root, "project");
+  mkdirSync(projectPath);
+  const forwardSlashPath = projectPath.split(path.sep).join("/");
   writeFileSync(
     path.join(sessionDir, "state.json"),
-    JSON.stringify({ id: "session_kimi-1", cwd: "/Users/lanzhou/Project/ForgeBadger" })
+    JSON.stringify(options.workDirOnly
+      ? { id: "session_kimi-1", workDir: forwardSlashPath }
+      : { id: "session_kimi-1", cwd: forwardSlashPath })
   );
+  return realpathSync(projectPath);
 }
 
 const kimiUsageRecord = (
@@ -487,7 +499,7 @@ const kimiUsageRecord = (
 describe("KimiSource", () => {
   it("extracts turn-scope usage records with state.json cwd", () => {
     const root = tempDir();
-    writeKimiStateJson(root);
+    const canonical = writeKimiStateJson(root);
     writeKimiFixture(root, "main", [
       kimiUsageRecord(1788105370568, { inputOther: 15723, output: 226, inputCacheRead: 11520, inputCacheCreation: 0 }),
       kimiUsageRecord(1788105374421, { inputOther: 978, output: 97, inputCacheRead: 27179, inputCacheCreation: 40 }),
@@ -508,7 +520,7 @@ describe("KimiSource", () => {
       const [first, second] = result.records;
       assert.equal(first.adapter, "kimi");
       assert.equal(first.sessionId, "session_kimi-1");
-      assert.equal(first.projectPath, "/Users/lanzhou/Project/ForgeBadger");
+      assert.equal(first.projectPath, canonical);
       assert.equal(first.modelId, "kimi-code/k3");
       assert.equal(first.inputTokens, 15723);
       assert.equal(first.outputTokens, 226);
@@ -595,6 +607,54 @@ describe("KimiSource", () => {
       const source = new KimiSource();
       const result = source.scan(null);
       assert.deepEqual(result.records, []);
+    } finally {
+      if (original === undefined) delete process.env.KIMI_CODE_HOME;
+      else process.env.KIMI_CODE_HOME = original;
+    }
+  });
+
+  it("resolves legacy workDir state files to the canonical project path", () => {
+    const root = tempDir();
+    const canonical = writeKimiStateJson(root, { workDirOnly: true });
+    writeKimiFixture(root, "main", [
+      kimiUsageRecord(1788105370568, { inputOther: 100, output: 10, inputCacheRead: 0, inputCacheCreation: 0 })
+    ]);
+
+    const original = process.env.KIMI_CODE_HOME;
+    process.env.KIMI_CODE_HOME = root;
+    try {
+      const result = new KimiSource().scan(null);
+      assert.equal(result.records.length, 1);
+      assert.equal(result.records[0]?.projectPath, canonical);
+    } finally {
+      if (original === undefined) delete process.env.KIMI_CODE_HOME;
+      else process.env.KIMI_CODE_HOME = original;
+    }
+  });
+
+  it("treats a legacy v1 watermark as stale and re-scans in full", () => {
+    const root = tempDir();
+    writeKimiStateJson(root);
+    writeKimiFixture(root, "main", [
+      kimiUsageRecord(1788105370568, { inputOther: 100, output: 10, inputCacheRead: 0, inputCacheCreation: 0 })
+    ]);
+
+    const original = process.env.KIMI_CODE_HOME;
+    process.env.KIMI_CODE_HOME = root;
+    try {
+      const source = new KimiSource();
+      const first = source.scan(null);
+      assert.equal(first.records.length, 1);
+      const current = JSON.parse(first.nextWatermark) as { v: number; files: Record<string, unknown> };
+      assert.equal(current.v, 2);
+      // Pre-canonicalization watermarks were the flat file map itself; they
+      // must be rejected so the repair scan re-parses every file with stable
+      // request ids (the upsert then rewrites the misattributed rows).
+      const again = source.scan(JSON.stringify(current.files));
+      assert.equal(again.records.length, 1);
+      assert.equal(again.records[0]?.requestId, first.records[0]?.requestId);
+      // A current-version watermark still skips unchanged files.
+      assert.equal(source.scan(first.nextWatermark).records.length, 0);
     } finally {
       if (original === undefined) delete process.env.KIMI_CODE_HOME;
       else process.env.KIMI_CODE_HOME = original;

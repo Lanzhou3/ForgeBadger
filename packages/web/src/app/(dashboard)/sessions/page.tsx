@@ -137,19 +137,25 @@ export default function SessionsPage() {
   // isFetching back to false — in either case pruning to that snapshot would
   // permanently drop tabs for sessions created since.
   //
-  // The board's allowlist is additionally widened with locally-running tabs: a
-  // session that was started while a fetch was in flight is not in that
-  // fetch's snapshot, and a running tab must never be dropped by a settle. A
-  // running session is always in the next settled board (creation is committed
-  // before its tab is written), so this cannot mask a genuinely dead session.
+  // The board's allowlist is additionally widened with locally-tracked tabs
+  // that are either still running or were created very recently: a session
+  // started while a fetch was in flight is not in that fetch's snapshot, and
+  // its tab may have already flipped to `exited`/`error` via a gateway event
+  // before the next board settle observes it. A short grace window keeps
+  // such tabs alive until a settled board that actually contains the row can
+  // authoritatively keep or drop them. A running or just-created session is
+  // always in the next settled board (creation is committed before its tab
+  // is written), so this cannot mask a genuinely dead session indefinitely.
   useEffect(() => {
     if (!board || isFetching || isError) {
       return;
     }
-    const runningTabIds = readSessionTabs()
-      .filter((tab) => tab.status === "running")
+    const now = Date.now();
+    const RECENT_TAB_GRACE_MS = 30_000;
+    const protectedTabIds = readSessionTabs()
+      .filter((tab) => tab.status === "running" || now - tab.updatedAt < RECENT_TAB_GRACE_MS)
       .map((tab) => tab.id);
-    pruneSessionTabs(new Set([...sessions.map((session) => session.id), ...runningTabIds]));
+    pruneSessionTabs(new Set([...sessions.map((session) => session.id), ...protectedTabIds]));
     notifySessionTabsChanged();
   }, [board, sessions, isFetching, isError]);
 
