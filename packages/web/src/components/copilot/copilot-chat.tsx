@@ -5,12 +5,19 @@ import { CopilotFollowupQueue } from "./CopilotFollowupQueue";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, Bot, ListTodo, MessageSquare, PanelLeft, Square } from "lucide-react";
+import { ArrowDown, ArrowUp, ListTodo, MessageSquare, PanelLeft, Square } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { CopilotStatusBar } from "@/components/copilot/copilot-runtime-panel";
 import {
@@ -19,6 +26,7 @@ import {
   ThinkingSection,
   indexToolResults,
 } from "@/components/copilot/copilot-message-primitives";
+import { CopilotWelcomeState } from "@/components/copilot/copilot-empty-state";
 import { CopilotSettings } from "@/components/copilot/copilot-settings";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
 import { CopilotApproval } from "@/components/copilot/CopilotApproval";
@@ -26,8 +34,10 @@ import { GatewayApiError, listProjects, type Project } from "@/lib/api";
 import { readLastCopilotConversation, writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
+import { useCopilotChatController } from "@/hooks/use-copilot-chat-controller";
+import { toast } from "@/lib/toast";
+import type { TranslationKey } from "@/lib/i18n";
 import {
-  cancelRun,
   createConversation,
   deleteConversation,
   listConversations,
@@ -37,7 +47,17 @@ import {
   type CopilotMessage,
 } from "@/lib/copilot-api";
 
-const AUTO_TITLE_MAX_CHARS = 24;
+const PHASE_KEYS: Record<string, TranslationKey> = {
+  context: "copilot.phase.context",
+  summarizing: "copilot.phase.summarizing",
+  model: "copilot.phase.model",
+  tool: "copilot.phase.tool",
+  queued: "copilot.phase.queued",
+};
+
+// Radix Select items cannot use an empty value; this sentinel maps back to
+// "no project context" in onValueChange.
+const NO_PROJECT_VALUE = "__no_project__";
 
 /**
  * Copilot console — the primary conversational surface, laid out as a
@@ -45,12 +65,13 @@ const AUTO_TITLE_MAX_CHARS = 24;
  * on the left (new / search / rename / delete, collapsible on desktop and a
  * Sheet on mobile), and a centered, width-capped message stream in the middle
  * with a runtime status bar, markdown rendering, collapsible tool steps,
- * approval cards, streaming tolerance, and a floating composer card. All
- * Copilot tool preferences live behind the top-right gear button on the
- * dedicated /copilot/settings page.
+ * approval cards, streaming tolerance, and a floating composer card. Send /
+ * stop / edit / scroll-follow behavior lives in the shared
+ * useCopilotChatController hook. All Copilot tool preferences live behind the
+ * top-right gear button on the dedicated /copilot/settings page.
  */
 export function CopilotChat() {
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const searchParams = useSearchParams();
   // Deep link: /copilot?c=<conversationId> (e.g. "expand to full console" from
   // the robot chat panel) selects that conversation.
@@ -61,22 +82,12 @@ export function CopilotChat() {
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
-  const [projectError, setProjectError] = useState(false);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
   const [reviewTaskResults, setReviewTaskResults] = useState(false);
   const [repairFailedChecks, setRepairFailedChecks] = useState(false);
   const [creating, setCreating] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [sendError, setSendError] = useState(false);
-  const [pinnedToBottom, setPinnedToBottom] = useState(true);
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState("");
-  const [editSubmitting, setEditSubmitting] = useState(false);
-  const [editError, setEditError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarSheetOpen, setSidebarSheetOpen] = useState(false);
   // null = follow the server-side preference / platform default; the status
@@ -87,29 +98,22 @@ export function CopilotChat() {
     setModelId(next);
   }, []);
 
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const lastSentRef = useRef<{ conversationId: string; text: string; projectId?: string; modelId?: string; clientRequestId: string; reviewTaskResults?: boolean; repairFailedChecks?: boolean } | null>(null);
-  const lastEditRef = useRef<{ signature: string; clientRequestId: string; reviewTaskResults?: boolean; repairFailedChecks?: boolean } | null>(null);
-  const conversationIdRef = useRef<string | null>(null);
-  conversationIdRef.current = conversationId;
   const requestedConversationRef = useRef<string | null>(null);
   requestedConversationRef.current = requestedConversationId;
   const previousRequestedRef = useRef(requestedConversationId);
-  // Out-of-order guard: a slow listMessages for one conversation must never
-  // overwrite the stream the user has since switched to.
-  const messageSerialRef = useRef(0);
-  const listSerialRef = useRef(0);
-  const selectionEpochRef = useRef(0);
   // The ?c= deep link is consumed once: after it has been applied — or the
   // user has picked a conversation manually — it must stop fighting the
   // sidebar for the selection.
   const deepLinkPendingRef = useRef(Boolean(requestedConversationId));
 
+  // Conversation creation may race the project list; surface a single toast.
+  const projectErrorToastRef = useRef(false);
+
   const readMessages = useCallback(async (id: string) => {
-    if (conversationIdRef.current !== id) return false;
-    const serial = ++messageSerialRef.current;
-    const epoch = selectionEpochRef.current;
-    const current = () => serial === messageSerialRef.current && epoch === selectionEpochRef.current && conversationIdRef.current === id;
+    if (controllerConversationIdRef.current !== id) return false;
+    const serial = ++controllerMessageSerialRef.current;
+    const epoch = controllerEpochRef.current;
+    const current = () => serial === controllerMessageSerialRef.current && epoch === controllerEpochRef.current && controllerConversationIdRef.current === id;
     try {
       const { messages: next } = await listMessages(id);
       if (!current()) return false;
@@ -119,39 +123,10 @@ export function CopilotChat() {
       if (current()) throw error;
       return false;
     }
+    // The controller refs are stable for the component lifetime; the eslint
+    //-disable keeps this identity stable like the former inline refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const selectConversation = useCallback(async (id: string) => {
-    const epoch = ++selectionEpochRef.current;
-    conversationIdRef.current = id;
-    setConversationId(id);
-    // Shared with the floating robot panel so the next panel open resumes
-    // the conversation the user was last working in here.
-    writeLastCopilotConversation(id);
-    setLoadError(null);
-    setActionError(null);
-    setSendError(false);
-    setSending(false);
-    setEditingMessageId(null);
-    setEditDraft("");
-    setEditError(null);
-    setEditSubmitting(false);
-    setProjectId("");
-    lastSentRef.current = null;
-    lastEditRef.current = null;
-    // A user-initiated switch retires any pending deep link, so the URL can
-    // no longer pull the selection back.
-    deepLinkPendingRef.current = false;
-    setMessages([]);
-    setLoadingMessages(true);
-    try {
-      if (await readMessages(id)) setPinnedToBottom(true);
-    } catch {
-      if (conversationIdRef.current === id) setLoadError(t("copilot.loadError"));
-    } finally {
-      if (selectionEpochRef.current === epoch) setLoadingMessages(false);
-    }
-  }, [readMessages, t]);
 
   const refreshConversations = useCallback(async () => {
     const serial = ++listSerialRef.current;
@@ -159,7 +134,7 @@ export function CopilotChat() {
       const { conversations: next } = await listConversations();
       if (serial !== listSerialRef.current) return;
       setConversations(next);
-      if (!conversationIdRef.current || deepLinkPendingRef.current) {
+      if (!controllerConversationIdRef.current || deepLinkPendingRef.current) {
         const requested = deepLinkPendingRef.current ? requestedConversationRef.current : readLastCopilotConversation();
         const target = (requested ? next.find((item) => item.id === requested) : undefined) ?? next[0];
         if (target) void selectConversation(target.id);
@@ -170,7 +145,8 @@ export function CopilotChat() {
     } finally {
       if (serial === listSerialRef.current) setLoadingConversations(false);
     }
-  }, [selectConversation, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t]);
 
   useEffect(() => {
     void refreshConversations();
@@ -178,14 +154,20 @@ export function CopilotChat() {
 
   useEffect(() => {
     let cancelled = false;
-    setProjectError(false);
     void listProjects()
       .then((result) => {
         if (cancelled) return;
         setProjects(result.projects);
-      }).catch(() => { if (!cancelled) { setProjects([]); setProjectError(true); } });
+      }).catch(() => {
+        if (cancelled) return;
+        setProjects([]);
+        if (!projectErrorToastRef.current) {
+          projectErrorToastRef.current = true;
+          toast.error(t("copilot.projectLoadError"));
+        }
+      });
     return () => { cancelled = true; };
-  }, []);
+  }, [t]);
 
   // Deep-link follow-up: same-page client navigation (robot panel "expand"
   // while already on /copilot) does not remount this component, so react to
@@ -218,6 +200,81 @@ export function CopilotChat() {
     },
   });
 
+  const listSerialRef = useRef(0);
+
+  const appendUserMessage = useCallback((text: string) => {
+    setMessages((current) => [
+      ...current,
+      {
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        conversationId: conversationId ?? "",
+        userId: "",
+        role: "user",
+        kind: "text",
+        content: text,
+        sequence: current.length + 1,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  }, [conversationId]);
+
+  const autoTitleIfUntitled = useCallback(async (id: string, text: string) => {
+    await renameConversation(id, text).catch(() => undefined);
+  }, []);
+
+  const reloadActiveConversation = useCallback(async (id: string) => {
+    await Promise.all([readMessages(id), refreshConversations()]);
+  }, [readMessages, refreshConversations]);
+
+  const controller = useCopilotChatController({
+    conversationId,
+    projectId,
+    modelId,
+    reviewTaskResults,
+    repairFailedChecks,
+    savingPreferences,
+    conversations,
+    messages,
+    active,
+    startRun,
+    startEditedRun,
+    clearActive,
+    markPending,
+    reconcile,
+    readMessages,
+    refreshConversations,
+    reloadActiveConversation,
+    autoTitleIfUntitled,
+    appendUserMessage,
+  });
+  const controllerEpochRef = controller.selectionEpochRef;
+  const controllerMessageSerialRef = controller.messageSerialRef;
+  const controllerConversationIdRef = controller.conversationIdRef;
+
+  const selectConversation = useCallback(async (id: string) => {
+    const epoch = controller.advanceSelectionEpoch();
+    controller.conversationIdRef.current = id;
+    setConversationId(id);
+    // Shared with the floating robot panel so the next panel open resumes
+    // the conversation the user was last working in here.
+    writeLastCopilotConversation(id);
+    setLoadError(null);
+    controller.resetInteractionState();
+    setProjectId("");
+    // A user-initiated switch retires any pending deep link, so the URL can
+    // no longer pull the selection back.
+    deepLinkPendingRef.current = false;
+    setMessages([]);
+    setLoadingMessages(true);
+    try {
+      if (await readMessages(id)) controller.pinToBottom();
+    } catch {
+      if (controller.conversationIdRef.current === id) setLoadError(t("copilot.loadError"));
+    } finally {
+      if (controller.selectionEpochRef.current === epoch) setLoadingMessages(false);
+    }
+  }, [controller, readMessages, t]);
+
   const newConversation = useCallback(async () => {
     setCreating(true);
     try {
@@ -231,182 +288,39 @@ export function CopilotChat() {
     }
   }, [refreshConversations, selectConversation, t]);
 
-  const reloadActiveConversation = useCallback(async (id: string) => {
-    await Promise.all([readMessages(id), refreshConversations()]);
-  }, [readMessages, refreshConversations]);
-
-  const send = useCallback(async (textOverride?: string, retry = false) => {
-    const prior = retry ? lastSentRef.current : null;
-    const text = (prior?.text ?? textOverride ?? input).trim();
-    const id = conversationId;
-    if (!text || !id || sending || savingPreferences || (active && ["pending", "running", "awaiting_approval"].includes(active.status))) return;
-    if (retry && (!prior || prior.conversationId !== id)) return;
-    const epoch = selectionEpochRef.current;
-    messageSerialRef.current++;
-    const request = prior ?? { conversationId: id, text, ...(projectId ? { projectId } : {}), ...(modelId ? { modelId } : {}), clientRequestId: crypto.randomUUID(), reviewTaskResults, repairFailedChecks };
-    lastSentRef.current = request;
-    if (!retry) setMessages((current) => [
-      ...current,
-      {
-        id: `local-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        conversationId: id,
-        userId: "",
-        role: "user",
-        kind: "text",
-        content: text,
-        sequence: current.length + 1,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-    if (!textOverride) setInput("");
-    setSending(true);
-    setSendError(false);
-    clearActive();
-    // Show the "thinking" pulse immediately; the first run event can lag the
-    // POST while the Gateway starts the model turn.
-    markPending(id);
-    try {
-      await startRun(id, text, request.modelId, { ...(request.projectId ? { projectId: request.projectId } : {}), clientRequestId: request.clientRequestId, ...(request.repairFailedChecks ? {repairFailedChecks:true}:{}), ...(request.reviewTaskResults ? { reviewTaskResults: true } : {}) });
-      if (epoch !== selectionEpochRef.current) return;
-      const wasUntitled = !conversations.find((item) => item.id === id)?.title;
-      if (wasUntitled) {
-        await renameConversation(id, text.slice(0, AUTO_TITLE_MAX_CHARS)).catch(() => undefined);
-      }
-      await reloadActiveConversation(id).catch(() => {
-        if (selectionEpochRef.current === epoch) setLoadError(t("copilot.loadError"));
-      });
-    } catch {
-      if (selectionEpochRef.current === epoch) {
-        clearActive();
-        setSendError(true);
-      }
-    } finally {
-      if (selectionEpochRef.current === epoch) setSending(false);
-    }
-  }, [input, projectId, modelId, conversationId, reviewTaskResults, repairFailedChecks, sending, savingPreferences, active, conversations, startRun, clearActive, markPending, reloadActiveConversation, t]);
-
   const onRename = useCallback(async (id: string, title: string) => {
-    setActionError(null);
     try {
       await renameConversation(id, title);
       await refreshConversations();
-    } catch { setActionError(t("copilot.renameFailed")); }
+    } catch {
+      toast.error(t("copilot.renameFailed"));
+    }
   }, [refreshConversations, t]);
 
   const onDelete = useCallback(async (id: string) => {
-    setActionError(null);
     try {
       await deleteConversation(id);
     } catch (error) {
       if (!(error instanceof GatewayApiError && error.status === 404)) {
-        setActionError(t(error instanceof GatewayApiError && error.details?.code === "COPILOT_CONVERSATION_BUSY"
+        toast.error(t(error instanceof GatewayApiError && error.details?.code === "COPILOT_CONVERSATION_BUSY"
           ? "copilot.deleteBusy" : "copilot.deleteFailed"));
         return;
       }
     }
     listSerialRef.current++;
     setConversations(current => current.filter(item => item.id !== id));
-    if (conversationIdRef.current === id) {
-      selectionEpochRef.current++;
-      messageSerialRef.current++;
-      conversationIdRef.current = null;
+    if (controller.conversationIdRef.current === id) {
+      controller.advanceSelectionEpoch();
+      controller.messageSerialRef.current++;
+      controller.conversationIdRef.current = null;
       clearActive();
       setConversationId(null);
       setMessages([]);
-      setSending(false);
-      setSendError(false);
-      setEditingMessageId(null);
-      setEditSubmitting(false);
-      lastSentRef.current = null;
+      controller.resetInteractionState();
       writeLastCopilotConversation(null);
     }
     await refreshConversations();
-  }, [clearActive, refreshConversations, t]);
-
-  const stopRun = useCallback(async () => {
-    if (!active?.runId) return;
-    const epoch = selectionEpochRef.current;
-    try {
-      await cancelRun(active.runId);
-      await reconcile();
-      if (active.conversationId) await reloadActiveConversation(active.conversationId);
-    } catch {
-      if (epoch === selectionEpochRef.current) setActionError(t("copilot.cancelFailed"));
-    }
-  }, [active, reconcile, reloadActiveConversation, t]);
-
-  const beginEditMessage = useCallback((message: CopilotMessage) => {
-    setEditingMessageId(message.id);
-    setEditDraft(message.content);
-    setEditError(null);
-  }, []);
-
-  const cancelEditMessage = useCallback(() => {
-    setEditingMessageId(null);
-    setEditDraft("");
-    setEditError(null);
-  }, []);
-
-  const submitEditMessage = useCallback(async () => {
-    const id = conversationId;
-    const targetId = editingMessageId;
-    const content = editDraft.trim();
-    if (!id || !targetId || !content || editSubmitting || savingPreferences || sending) return;
-    const epoch = selectionEpochRef.current;
-    messageSerialRef.current++;
-    const signature = JSON.stringify([id, targetId, content, projectId, modelId]);
-    const request = lastEditRef.current?.signature === signature ? lastEditRef.current : { signature, clientRequestId: crypto.randomUUID(), reviewTaskResults, repairFailedChecks };
-    lastEditRef.current = request;
-    setEditSubmitting(true);
-    setEditError(null);
-    clearActive();
-    try {
-      await startEditedRun(id, targetId, content, { clientRequestId: request.clientRequestId, ...(projectId ? { projectId } : {}), ...(modelId ? { modelId } : {}), ...(request.repairFailedChecks ? {repairFailedChecks:true}:{}), ...(request.reviewTaskResults ? { reviewTaskResults: true } : {}) });
-      if (epoch !== selectionEpochRef.current) return;
-      setEditingMessageId(null);
-      setEditDraft("");
-      lastEditRef.current = null;
-      await reloadActiveConversation(id).catch(() => {
-        if (epoch === selectionEpochRef.current) setLoadError(t("copilot.loadError"));
-      });
-    } catch {
-      if (epoch === selectionEpochRef.current) setEditError(t("copilot.editFailed"));
-    } finally {
-      if (epoch === selectionEpochRef.current) setEditSubmitting(false);
-    }
-  }, [
-    conversationId,
-    editingMessageId,
-    editDraft,
-    editSubmitting,
-    reviewTaskResults, repairFailedChecks,
-    savingPreferences,
-    sending,
-    projectId,
-    modelId,
-    clearActive,
-    startEditedRun,
-    reloadActiveConversation,
-    t
-  ]);
-
-  const onScroll = useCallback(() => {
-    const node = scrollRef.current;
-    if (!node) return;
-    const distanceFromBottom = node.scrollHeight - node.scrollTop - node.clientHeight;
-    setPinnedToBottom(distanceFromBottom < 80);
-  }, []);
-
-  useEffect(() => {
-    if (pinnedToBottom) {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-    }
-  }, [messages, active?.text, pinnedToBottom]);
-
-  const scrollToBottom = useCallback(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-    setPinnedToBottom(true);
-  }, []);
+  }, [clearActive, controller, refreshConversations, t]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarOpen((prev) => !prev);
@@ -415,6 +329,7 @@ export function CopilotChat() {
   const activeConversation = conversations.find((item) => item.id === conversationId);
   const isRunning = active && (active.status === "running" || active.status === "pending");
   const isBusy = Boolean(isRunning || active?.status === "awaiting_approval");
+  const phaseLabel = isRunning ? t(PHASE_KEYS[active?.phase ?? "queued"] ?? "copilot.phase.default") : null;
 
   // Index tool_result rows by their provider toolCallId so MessageRow can pair
   // them with the corresponding tool_call row and render a single status
@@ -466,31 +381,42 @@ export function CopilotChat() {
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {isRunning ? (
-              <Badge variant="outline" className="gap-1 border-brand/40 text-xs">
-                <span className="size-1.5 animate-pulse rounded-full bg-brand" />
+              <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-xs text-emerald-600 dark:text-emerald-400">
+                <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
                 <span className="sr-only sm:not-sr-only">{t("copilot.running")}</span>
               </Badge>
             ) : null}
-            <Link href="/copilot/tasks" aria-label={language === "zh-CN" ? "开发任务" : "Development tasks"} title={language === "zh-CN" ? "开发任务" : "Development tasks"} className="shrink-0 whitespace-nowrap rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+            <Link href="/copilot/tasks" aria-label={t("copilot.devTasks")} title={t("copilot.devTasks")} className="shrink-0 whitespace-nowrap rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
               <ListTodo className="size-4 sm:hidden" />
-              <span className="hidden sm:inline">{language === "zh-CN" ? "开发任务" : "Development tasks"}</span>
+              <span className="hidden sm:inline">{t("copilot.devTasks")}</span>
             </Link>
             <CopilotSettings />
           </div>
         </div>
 
-        <CopilotStatusBar onModelChange={onModelChange} onSavingChange={setSavingPreferences} controlsDisabled={isBusy || sending} />
+        <CopilotStatusBar onModelChange={onModelChange} onSavingChange={setSavingPreferences} controlsDisabled={isBusy || controller.sending} />
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <div ref={scrollRef} onScroll={onScroll} role="region" aria-label={t("copilot.conversations")} data-testid="copilot-message-history" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4">
+          <div ref={controller.scrollRef} onScroll={controller.onScroll} role="region" aria-label={t("copilot.conversations")} data-testid="copilot-message-history" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-              {actionError && <p role="alert" className="text-sm text-destructive">{actionError}</p>}
               {loadError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
                 <p>{loadError}</p>
                 <Button size="sm" variant="outline" onClick={() => void (conversationId ? selectConversation(conversationId) : refreshConversations())}>{t("copilot.retry")}</Button>
               </div>}
-              {(loadingConversations || loadingMessages) && <p role="status" className="text-sm text-muted-foreground">{t("common.loading")}</p>}
+              {(loadingConversations || loadingMessages) && (
+                <div role="status" data-testid="copilot-loading-skeleton" aria-label={t("common.loading")} className="space-y-3">
+                  {[0, 1, 2].map((row) => (
+                    <div key={row} className={row % 2 === 1 ? "flex flex-row-reverse gap-2.5" : "flex gap-2.5"}>
+                      <div className="size-6 shrink-0 animate-pulse rounded-md bg-muted" />
+                      <div className={row % 2 === 1 ? "flex w-4/5 flex-col items-end gap-1.5" : "flex-1 space-y-1.5"}>
+                        <div className={`h-3 animate-pulse rounded bg-muted ${row === 0 ? "w-full" : row === 1 ? "w-3/5" : "w-4/5"}`} />
+                        <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               {!loadError && !loadingConversations && !loadingMessages && messages.length === 0 && !active && (
-                <EmptyState onSuggestion={(text) => void send(text)} />
+                <CopilotWelcomeState onSuggestion={(text) => void controller.send(text)} />
               )}
               {messages.map((message) => {
                 const pairedResultId = message.toolCallId && toolResultById.has(message.toolCallId)
@@ -502,15 +428,14 @@ export function CopilotChat() {
                     message={message}
                     pairedResult={pairedResultId === null ? null : (toolResultById.get(message.toolCallId!) ?? null)}
                     suppressRender={pairedResultId === message.id}
-                    isEditing={editingMessageId === message.id}
-                    editDraft={editDraft}
-                    editError={editError}
-                    editSubmitting={editSubmitting || savingPreferences}
-                    canEdit={!isBusy && !savingPreferences && !sending && editingMessageId === null}
-                    onBeginEdit={beginEditMessage}
-                    onChangeDraft={setEditDraft}
-                    onSubmitEdit={submitEditMessage}
-                    onCancelEdit={cancelEditMessage}
+                    isEditing={controller.editingMessageId === message.id}
+                    editDraft={controller.editDraft}
+                    editSubmitting={controller.editSubmitting || savingPreferences}
+                    canEdit={!isBusy && !savingPreferences && !controller.sending && controller.editingMessageId === null}
+                    onBeginEdit={controller.beginEditMessage}
+                    onChangeDraft={controller.setEditDraft}
+                    onSubmitEdit={() => void controller.submitEditMessage()}
+                    onCancelEdit={controller.cancelEditMessage}
                   />
                 );
               })}
@@ -520,9 +445,12 @@ export function CopilotChat() {
                 : <p role="status" className="text-sm text-muted-foreground">{t("copilot.awaitingApproval")}</p>)}
               {conversationId && <CopilotFollowupQueue active={isBusy} key={conversationId} conversationId={conversationId}
                 {...(projectId ? { projectId } : {})} {...(modelId ? { modelId } : {})} />}
-              {isRunning && <p role="status" className="text-xs text-muted-foreground">
-                {({ context: '正在整理上下文', summarizing: '正在压缩历史记录', model: '正在请求模型', tool: '正在执行工具', queued: '等待执行' } as Record<string, string>)[active?.phase ?? 'queued'] ?? '正在执行'}
-              </p>}
+              {isRunning && phaseLabel ? (
+                <Badge variant="secondary" className="w-fit gap-1.5 text-xs">
+                  <span className="size-1.5 animate-pulse rounded-full bg-brand" />
+                  {phaseLabel}
+                </Badge>
+              ) : null}
               {active?.thinking ? (
                 <ThinkingSection text={active.thinking} />
               ) : null}
@@ -534,22 +462,21 @@ export function CopilotChat() {
                   {t("copilot.running")}
                 </p>
               ) : null}
-              {sendError && (
+              {controller.sendFailed && (
                 <div className="flex items-center gap-2">
-                  <p className="text-sm text-destructive">{t("copilot.sendError")}</p>
-                  <Button variant="outline" size="sm" onClick={() => void send(undefined, true)}>
+                  <Button variant="outline" size="sm" onClick={() => void controller.send(undefined, true)}>
                     {t("copilot.retry")}
                   </Button>
                 </div>
               )}
             </div>
           </div>
-          {!pinnedToBottom && (
+          {!controller.pinnedToBottom && (
             <Button
               variant="outline"
               size="icon"
               className="absolute bottom-3 right-3 z-10 size-8 rounded-full shadow"
-              onClick={scrollToBottom}
+              onClick={controller.scrollToBottom}
               aria-label={t("copilot.scrollDown")}
             >
               <ArrowDown className="size-4" />
@@ -563,17 +490,27 @@ export function CopilotChat() {
         <div className="relative shrink-0 px-3 pb-3 pt-1">
           <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
             <label htmlFor="copilot-project-context" className="shrink-0">{t("copilot.projectContext")}</label>
-            <select id="copilot-project-context" value={projectId}
-              disabled={isBusy || sending}
-              onChange={event => setProjectId(event.target.value)}
-              className="min-w-0 max-w-60 flex-1 rounded-md border border-border bg-background px-2 py-1 text-foreground">
-              <option value="">{t("copilot.noProject")}</option>
-              {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
-            </select>
-            {projectError ? <span role="status">{t("copilot.projectLoadError")}</span> : null}
+            <Select
+              value={projectId || NO_PROJECT_VALUE}
+              disabled={isBusy || controller.sending}
+              onValueChange={(next) => setProjectId(next === NO_PROJECT_VALUE ? "" : next)}
+            >
+              <SelectTrigger
+                id="copilot-project-context"
+                aria-label={t("copilot.projectContext")}
+                size="sm"
+                className="min-w-0 max-w-60 flex-1 text-xs"
+              >
+                <SelectValue placeholder={t("copilot.noProject")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_PROJECT_VALUE}>{t("copilot.noProject")}</SelectItem>
+                {projects.map(project => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
             <CopilotRunOptions
               conversationId={conversationId} modelId={modelId}
-              disabled={isBusy || sending}
+              disabled={isBusy || controller.sending}
               reviewTaskResults={reviewTaskResults} onReviewChange={setReviewTaskResults}
               repairFailedChecks={repairFailedChecks} onRepairChange={setRepairFailedChecks}
             />
@@ -587,12 +524,12 @@ export function CopilotChat() {
             className="flex items-end gap-2 rounded-xl border border-border/70 bg-card/90 px-2.5 py-2 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
           >
             <Textarea
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
+              value={controller.input}
+              onChange={(event) => controller.setInput(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
-                  void send();
+                  void controller.send();
                 }
               }}
               placeholder={t("copilot.placeholder")}
@@ -605,7 +542,7 @@ export function CopilotChat() {
                 variant="outline"
                 size="icon"
                 className="size-9 shrink-0 rounded-full"
-                onClick={() => void stopRun()}
+                onClick={() => void controller.stopRun()}
                 disabled={!active?.runId}
                 aria-label={t("copilot.stop")}
                 title={t("copilot.stop")}
@@ -616,8 +553,8 @@ export function CopilotChat() {
               <Button
                 size="icon"
                 className="size-9 shrink-0 rounded-full"
-                onClick={() => void send()}
-                disabled={sending || savingPreferences || isBusy || !input.trim() || !conversationId}
+                onClick={() => void controller.send()}
+                disabled={controller.sending || savingPreferences || isBusy || !controller.input.trim() || !conversationId}
                 aria-label={t("copilot.send")}
                 title={t("copilot.send")}
               >
@@ -652,34 +589,6 @@ export function CopilotChat() {
           />
         </SheetContent>
       </Sheet>
-    </div>
-  );
-}
-function EmptyState({ onSuggestion }: { onSuggestion: (text: string) => void }) {
-  const { t } = useLanguage();
-  const suggestions = [t("copilot.suggestion1"), t("copilot.suggestion2"), t("copilot.suggestion3")];
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-5 py-10 text-center">
-      <span className="flex size-12 items-center justify-center rounded-xl border border-border/60 bg-muted/60 shadow-inner">
-        <Bot className="size-6 text-muted-foreground" />
-      </span>
-      <div>
-        <p className="text-base font-semibold">{t("copilot.welcomeTitle")}</p>
-        <p className="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-muted-foreground">
-          {t("copilot.welcomeSubtitle")}
-        </p>
-      </div>
-      <div className="flex flex-wrap justify-center gap-2">
-        {suggestions.map((suggestion) => (
-          <button
-            key={suggestion}
-            onClick={() => onSuggestion(suggestion)}
-            className="rounded-full border border-border/70 bg-card px-3.5 py-1.5 text-sm text-muted-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand/60 hover:text-foreground hover:shadow-md"
-          >
-            {suggestion}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

@@ -3,10 +3,21 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { LanguageProvider } from '@/hooks/use-language';
 import { CopilotFollowupQueue } from './CopilotFollowupQueue';
 const api = vi.hoisted(() => ({ listFollowups: vi.fn(), queueFollowup: vi.fn(), cancelFollowup: vi.fn() }));
+const { toastErrorMock } = vi.hoisted(() => ({ toastErrorMock: vi.fn() }));
 vi.mock('@/lib/copilot-api', () => api);
-function wrapper({ children }: { children: ReactNode }) { return <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>; }
+vi.mock('@/lib/toast', () => ({ toast: { success: vi.fn(), info: vi.fn(), error: toastErrorMock } }));
+function wrapper({ children }: { children: ReactNode }) {
+  return (
+    <LanguageProvider>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        {children}
+      </QueryClientProvider>
+    </LanguageProvider>
+  );
+}
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 it('retries with the same key after an ambiguous response and cancels a queued item', async () => {
@@ -18,7 +29,8 @@ it('retries with the same key after an ambiguous response and cancels a queued i
   render(<CopilotFollowupQueue conversationId="c1" projectId="p1" modelId="m1" />, { wrapper });
   fireEvent.change(screen.getByLabelText('后续消息'), { target: { value: 'Next task' } });
   fireEvent.click(screen.getByText('加入队列'));
-  await screen.findByRole('alert');
+  // The uncertain result is reported as a toast; retrying reuses the request.
+  await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('未能确认排队结果，可以重试同一条消息。'));
   fireEvent.click(screen.getByText('加入队列'));
   await screen.findByText('等待：Next task');
   expect(api.queueFollowup.mock.calls[0]).toEqual(api.queueFollowup.mock.calls[1]);

@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
+import type { ReactNode } from "react";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FORGEBADGER_GATEWAY_EVENT, FORGEBADGER_GATEWAY_CONNECTED } from "@/lib/gateway-events";
+import { LanguageProvider } from "@/hooks/use-language";
 import { RUN_STALE_TIMEOUT_MS, useCopilotRun } from "@/hooks/use-copilot";
 import type { CopilotPendingAction } from "@/lib/copilot-api";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+function wrapper({ children }: { children: ReactNode }) {
+  return <LanguageProvider>{children}</LanguageProvider>;
+}
 
 const { sendMessageMock, editMessageMock, getRunMock, listRunsMock } = vi.hoisted(() => ({
   sendMessageMock: vi.fn(),
@@ -83,7 +89,7 @@ describe("useCopilotRun streaming reliability", () => {
   it("keeps deltas that streamed in while the POST was still in flight", async () => {
     const blocked = deferred<{ runId: string }>();
     sendMessageMock.mockReturnValue(blocked.promise);
-    const { result } = renderHook(() => useCopilotRun());
+    const { result } = renderHook(() => useCopilotRun(), { wrapper });
 
     let startPromise!: Promise<string>;
     act(() => {
@@ -106,7 +112,7 @@ describe("useCopilotRun streaming reliability", () => {
   it("does not resurrect a finished run when the terminal event landed before the POST returned", async () => {
     const blocked = deferred<{ runId: string }>();
     sendMessageMock.mockReturnValue(blocked.promise);
-    const { result } = renderHook(() => useCopilotRun());
+    const { result } = renderHook(() => useCopilotRun(), { wrapper });
 
     let startPromise!: Promise<string>;
     act(() => {
@@ -132,7 +138,7 @@ describe("useCopilotRun streaming reliability", () => {
       run: { ...runningRun, status: "completed" },
       pendingActions: [],
     });
-    const { result } = renderHook(() => useCopilotRun());
+    const { result } = renderHook(() => useCopilotRun(), { wrapper });
 
     await act(async () => {
       await result.current.startRun("conv-1", "hi");
@@ -147,7 +153,7 @@ describe("useCopilotRun streaming reliability", () => {
       run: { ...runningRun, status: "awaiting_approval" },
       pendingActions: [pendingAction],
     });
-    const { result } = renderHook(() => useCopilotRun());
+    const { result } = renderHook(() => useCopilotRun(), { wrapper });
 
     await act(async () => {
       await result.current.startRun("conv-1", "run the build");
@@ -160,7 +166,7 @@ describe("useCopilotRun streaming reliability", () => {
 
   it("retains facts and marks an unreachable run as awaiting synchronization", async () => {
     vi.useFakeTimers();
-    const { result } = renderHook(() => useCopilotRun());
+    const { result } = renderHook(() => useCopilotRun(), { wrapper });
 
     await act(async () => {
       await result.current.startRun("conv-1", "hi");
@@ -179,7 +185,7 @@ describe("useCopilotRun streaming reliability", () => {
       run: { ...runningRun, status: "awaiting_approval" },
       pendingActions: [pendingAction],
     });
-    const { result } = renderHook(() => useCopilotRun());
+    const { result } = renderHook(() => useCopilotRun(), { wrapper });
 
     await act(async () => {
       await result.current.startRun("conv-1", "run the build");
@@ -204,7 +210,7 @@ describe("useCopilotRun optimistic pending state", () => {
   it("shows the pending state the instant startRun is called, before the POST answers", async () => {
     const blocked = deferred<{ runId: string }>();
     sendMessageMock.mockReturnValue(blocked.promise);
-    const { result } = renderHook(() => useCopilotRun());
+    const { result } = renderHook(() => useCopilotRun(), { wrapper });
 
     let startPromise!: Promise<string>;
     act(() => {
@@ -227,7 +233,7 @@ describe("useCopilotRun optimistic pending state", () => {
   it("drops the pending state immediately when the POST fails", async () => {
     const blocked = deferred<{ runId: string }>();
     sendMessageMock.mockReturnValue(blocked.promise);
-    const { result } = renderHook(() => useCopilotRun());
+    const { result } = renderHook(() => useCopilotRun(), { wrapper });
 
     let startPromise!: Promise<string>;
     act(() => {
@@ -246,7 +252,7 @@ describe("useCopilotRun optimistic pending state", () => {
   it("keeps deltas that arrive while the placeholder is still pending", async () => {
     const blocked = deferred<{ runId: string }>();
     sendMessageMock.mockReturnValue(blocked.promise);
-    const { result } = renderHook(() => useCopilotRun());
+    const { result } = renderHook(() => useCopilotRun(), { wrapper });
 
     let startPromise!: Promise<string>;
     act(() => {
@@ -277,7 +283,7 @@ describe("durable conversation restoration", () => {
     getRunMock.mockResolvedValue({ run: { ...runningRun, status: "awaiting_approval", revision: 3 }, pendingActions: [pendingAction] });
   });
   it("restores a persisted pending action on mount", async () => {
-    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1" }));
+    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1" }), { wrapper });
     await act(async () => {});
     expect(result.current.active?.pendingAction?.inputDigest).toBe("digest");
     getRunMock.mockResolvedValue({ run: { ...runningRun, status: "pending", revision: 4 }, pendingActions: [] });
@@ -286,7 +292,7 @@ describe("durable conversation restoration", () => {
     expect(result.current.active?.pendingAction).toBeNull();
   });
   it("rejects foreign conversation and older revision events", async () => {
-    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1" }));
+    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1" }), { wrapper });
     await act(async () => {});
     dispatchRunUpdated({ run_id: "run-1", conversation_id: "conv-2", revision: 5, text_delta: "foreign" });
     dispatchRunUpdated({ run_id: "run-1", conversation_id: "conv-1", revision: 2, text_delta: "old" });
@@ -294,7 +300,7 @@ describe("durable conversation restoration", () => {
   });
   it("refreshes persisted messages at terminal status and removes streamed duplication", async () => {
     const onSettled = vi.fn().mockResolvedValue(undefined);
-    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1", onSettled }));
+    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1", onSettled }), { wrapper });
     await act(async () => {});
     getRunMock.mockResolvedValue({ run: { ...runningRun, status: "indeterminate", revision: 4, stopReason: "unknown_effect" }, pendingActions: [] });
     await act(async () => { await result.current.reconcile(); });
@@ -303,7 +309,7 @@ describe("durable conversation restoration", () => {
     expect(result.current.active?.error).toContain("确认");
   });
   it("reconciles full approval details when the shared socket reconnects", async () => {
-    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1" }));
+    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1" }), { wrapper });
     await act(async () => {});
     getRunMock.mockResolvedValue({ run: { ...runningRun, status: "awaiting_approval", revision: 4 }, pendingActions: [{ ...pendingAction, inputJson: '{"project":"P"}', inputDigest: "updated" }] });
     await act(async () => { window.dispatchEvent(new Event(FORGEBADGER_GATEWAY_CONNECTED)); });
@@ -313,7 +319,7 @@ describe("durable conversation restoration", () => {
   it("ignores an old conversation response after switching conversations", async () => {
     const old = deferred<{ run: typeof runningRun; pendingActions: CopilotPendingAction[] }>();
     getRunMock.mockReturnValueOnce(old.promise);
-    const { result, rerender } = renderHook(({ id }) => useCopilotRun({ conversationId: id }), { initialProps: { id: "conv-1" } });
+    const { result, rerender } = renderHook(({ id }) => useCopilotRun({ conversationId: id }), { initialProps: { id: "conv-1" }, wrapper });
     await act(async () => {});
     const second = { ...runningRun, id: "run-2", conversationId: "conv-2", revision: 2 };
     listRunsMock.mockResolvedValue({ runs: [second], activeRun: second });
@@ -327,7 +333,7 @@ describe("durable conversation restoration", () => {
 
   it("discovers another client's run after a retained terminal outcome, comparing revisions per run", async () => {
     getRunMock.mockResolvedValue({ run: { ...runningRun, status: "failed", revision: 90 }, pendingActions: [] });
-    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1" }));
+    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1" }), { wrapper });
     await act(async () => {});
     expect(result.current.active?.status).toBe("failed");
     const newer = { ...runningRun, id: "run-2", status: "awaiting_approval", revision: 2 };
@@ -346,7 +352,7 @@ describe("durable conversation restoration", () => {
     listRunsMock.mockResolvedValue({ runs: [old], activeRun: null });
     getRunMock.mockResolvedValue({ run: old, pendingActions: [] });
     sendMessageMock.mockReturnValueOnce(blocked.promise);
-    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1" }));
+    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1" }), { wrapper });
     await act(async () => {});
     let request!: Promise<string>;
     act(() => { request = result.current.startRun("conv-1", "new question"); });
@@ -361,7 +367,7 @@ describe("durable conversation restoration", () => {
   it("refreshes durable messages for a late task report without reviving a settled run", async () => {
     const onSettled = vi.fn().mockResolvedValue(undefined);
     getRunMock.mockResolvedValue({ run: { ...runningRun, status: "completed", revision: 3 }, pendingActions: [] });
-    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1", onSettled }));
+    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1", onSettled }), { wrapper });
     await act(async () => {});
     expect(result.current.active).toBeNull();
     const previousCalls = onSettled.mock.calls.length;
@@ -374,7 +380,7 @@ describe("durable conversation restoration", () => {
   it("refreshes messages during reconciliation even if a late report event was lost", async () => {
     const onSettled = vi.fn().mockResolvedValue(undefined);
     getRunMock.mockResolvedValue({ run: { ...runningRun, status: "completed" }, pendingActions: [] });
-    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1", onSettled }));
+    const { result } = renderHook(() => useCopilotRun({ conversationId: "conv-1", onSettled }), { wrapper });
     await act(async () => {});
     const previousCalls = onSettled.mock.calls.length;
     await act(async () => { await result.current.reconcile(); });
@@ -382,7 +388,7 @@ describe("durable conversation restoration", () => {
   });
 
   it("deduplicates ordered stream frames across reconnects and ignores superseded fences", async () => {
-    const { result,unmount }=renderHook(()=>useCopilotRun());
+    const { result,unmount }=renderHook(()=>useCopilotRun(), { wrapper });
     await act(async()=>{await result.current.startRun('conv-1','hello');});
     const frame=(fence:number,sequence:number,text:string)=>({run_id:'run-1',conversation_id:'conv-1',text_step_id:'model-step',text_fence:fence,text_sequence:sequence,text_delta:text});
     dispatchRunUpdated(frame(1,1,'first '));dispatchRunUpdated(frame(1,3,'third'));dispatchRunUpdated(frame(1,2,'second '));

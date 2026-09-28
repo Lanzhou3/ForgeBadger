@@ -7,7 +7,15 @@ import { Search, Wrench } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useLanguage } from "@/hooks/use-language";
+import { toast } from "@/lib/toast";
 import { listModelProviders } from "@/lib/api";
 import {
   getCopilotCapabilities,
@@ -25,6 +33,10 @@ export const copilotCapabilitiesQueryKey = ["copilot", "capabilities"] as const;
 export const copilotPreferencesQueryKey = ["copilot", "preferences"] as const;
 
 const THINKING_EFFORT_OPTIONS: CopilotThinkingEffort[] = ["off", "low", "medium", "high"];
+
+// Radix Select items cannot use an empty value; this sentinel maps back to
+// "follow the system default model" in onValueChange.
+const DEFAULT_MODEL_VALUE = "__default_model__";
 
 /**
  * Thin status strip for the self-owned Gateway runtime and its model
@@ -72,7 +84,19 @@ export function CopilotStatusBar({
       onModelChange?.(saved.modelId);
       void queryClient.invalidateQueries({ queryKey: copilotPreferencesQueryKey });
     },
+    onError: () => toast.error(t("copilot.preferencesFailed")),
   });
+
+  // Surface a failed preference load once per error episode instead of an
+  // inline red line inside the status strip.
+  const preferencesErrorToastRef = useRef(false);
+  useEffect(() => {
+    if (preferences.isError && !preferencesErrorToastRef.current) {
+      preferencesErrorToastRef.current = true;
+      toast.error(t("copilot.loadError"));
+    }
+    if (!preferences.isError) preferencesErrorToastRef.current = false;
+  }, [preferences.isError, t]);
 
   useEffect(() => {
     if (preferencesReady) onModelChange?.(storedModelId);
@@ -105,47 +129,54 @@ export function CopilotStatusBar({
     >
       <span className="sr-only shrink-0 sm:not-sr-only">{t("copilot.currentModel")}</span>
       {onModelChange ? (
-        <select
-          aria-label={t("copilot.currentModel")}
-          className="min-w-0 max-w-64 flex-1 truncate rounded border border-border bg-background px-1 py-0.5 text-xs text-foreground sm:flex-none"
-          value={storedModelId ?? ""}
+        <Select
+          value={storedModelId ?? DEFAULT_MODEL_VALUE}
           disabled={!preferencesReady || preferencesMutation.isPending || controlsDisabled}
-          onChange={(event) => {
-            const next = event.target.value || null;
-            void preferencesMutation.mutate({ modelId: next });
+          onValueChange={(next) => {
+            void preferencesMutation.mutate({ modelId: next === DEFAULT_MODEL_VALUE ? null : next });
           }}
         >
-          <option value="">
-            {t("copilot.followSystemDefault")}
-            {defaultLabel ? `（${defaultLabel}）` : ""}
-          </option>
-          {models.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.providerName} / {model.name}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            aria-label={t("copilot.currentModel")}
+            size="sm"
+            className="min-w-0 max-w-64 flex-1 text-xs sm:flex-none"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={DEFAULT_MODEL_VALUE}>
+              {t("copilot.followSystemDefault")}
+              {defaultLabel ? `（${defaultLabel}）` : ""}
+            </SelectItem>
+            {models.map((model) => (
+              <SelectItem key={model.id} value={model.id}>
+                {model.providerName} / {model.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       ) : (
         <span className="truncate">{modelLabel}</span>
       )}
       <span className="sr-only shrink-0 sm:not-sr-only">{t("copilot.thinkingEffort")}</span>
-      <select
-        aria-label={t("copilot.thinkingEffort")}
-        className="rounded border border-border bg-background px-1 py-0.5 text-xs text-foreground"
+      <Select
         value={preferences.data?.thinkingEffort ?? "off"}
         disabled={!preferencesReady || preferencesMutation.isPending || controlsDisabled}
-        onChange={(event) => {
-          void preferencesMutation.mutate({ thinkingEffort: event.target.value as CopilotThinkingEffort });
+        onValueChange={(next) => {
+          void preferencesMutation.mutate({ thinkingEffort: next as CopilotThinkingEffort });
         }}
       >
-        {THINKING_EFFORT_OPTIONS.map((effort) => (
-          <option key={effort} value={effort}>
-            {t(`copilot.thinking${effort.charAt(0).toUpperCase()}${effort.slice(1)}` as TranslationKey)}
-          </option>
-        ))}
-      </select>
-      {preferencesMutation.isError && <p role="alert" className="text-destructive">{t("copilot.preferencesFailed")}</p>}
-      {preferences.isError && <p role="alert" className="text-destructive">{t("copilot.loadError")}</p>}
+        <SelectTrigger aria-label={t("copilot.thinkingEffort")} size="sm" className="text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {THINKING_EFFORT_OPTIONS.map((effort) => (
+            <SelectItem key={effort} value={effort}>
+              {t(`copilot.thinking${effort.charAt(0).toUpperCase()}${effort.slice(1)}` as TranslationKey)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <Badge variant="secondary" className="ml-auto hidden gap-1.5 whitespace-nowrap sm:inline-flex">
         <span className="size-1.5 rounded-full bg-emerald-500" />
         {t("copilot.nativeRuntime")}
@@ -158,7 +189,6 @@ export function CopilotStatusBar({
 export function CapabilitiesSection({ active }: { active: boolean }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
   const capabilities = useQuery({
@@ -172,12 +202,21 @@ export function CapabilitiesSection({ active }: { active: boolean }) {
     mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
       setCopilotToolEnabled(name, enabled),
     onSuccess: () => {
-      setError(null);
       void queryClient.invalidateQueries({ queryKey: copilotCapabilitiesQueryKey });
       void queryClient.invalidateQueries({ queryKey: copilotSkillsKey });
     },
-    onError: () => setError(t("copilot.capabilitiesToggleError")),
+    onError: () => toast.error(t("copilot.capabilitiesToggleError")),
   });
+
+  // Toast once per load-error episode instead of a persistent inline red line.
+  const capabilitiesErrorToastRef = useRef(false);
+  useEffect(() => {
+    if (capabilities.isError && !capabilitiesErrorToastRef.current) {
+      capabilitiesErrorToastRef.current = true;
+      toast.error(t("copilot.capabilitiesLoadError"));
+    }
+    if (!capabilities.isError) capabilitiesErrorToastRef.current = false;
+  }, [capabilities.isError, t]);
 
   const tools = capabilities.data?.tools ?? [];
   const normalized = query.trim().toLowerCase();
@@ -205,9 +244,7 @@ export function CapabilitiesSection({ active }: { active: boolean }) {
       </div>
       {capabilities.isPending ? (
         <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
-      ) : capabilities.isError ? (
-        <p className="text-xs text-destructive">{t("copilot.capabilitiesLoadError")}</p>
-      ) : tools.length === 0 ? (
+      ) : capabilities.isError ? null : tools.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t("copilot.capabilitiesEmpty")}</p>
       ) : filtered.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t("copilot.toolsSearchEmpty")}</p>
@@ -231,7 +268,6 @@ export function CapabilitiesSection({ active }: { active: boolean }) {
           ) : null}
         </div>
       )}
-      {error && <p className="text-xs text-destructive">{error}</p>}
     </section>
   );
 }
