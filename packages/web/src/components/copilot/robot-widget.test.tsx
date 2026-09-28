@@ -178,6 +178,72 @@ describe("RobotWidget bubble queue", () => {
 });
 
 
+describe("RobotWidget bubble presentation", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("renders the notification bubble with theme tokens instead of hardcoded light colors", async () => {
+    renderWidget();
+
+    dispatchCliNotification();
+    await waitFor(() => expect(screen.getByRole("button", { name: "打开会话" })).toBeTruthy());
+
+    const bubble = document.querySelector(".forgebadger-bubble-pop") as HTMLElement;
+    expect(bubble).toBeTruthy();
+    // Dark-theme friendly: follows the popover/border tokens, no fixed zinc.
+    expect(bubble.className).toContain("bg-popover");
+    expect(bubble.className).toContain("text-popover-foreground");
+    expect(bubble.className).toContain("border-border");
+    expect(bubble.className).not.toContain("bg-zinc-50");
+    // The comic speech tail follows the same tokens.
+    const tailFill = bubble.querySelector("svg path.fill-popover");
+    const tailStroke = bubble.querySelector("svg path.stroke-border");
+    expect(tailFill).toBeTruthy();
+    expect(tailStroke).toBeTruthy();
+    // Call-to-action uses the primary button tokens.
+    const cta = screen.getByRole("button", { name: "打开会话" });
+    expect(cta.className).toContain("bg-primary");
+    expect(cta.className).toContain("text-primary-foreground");
+  });
+
+  it("keeps the bubble within the viewport on ultra-narrow screens", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { value: 180, configurable: true });
+    try {
+      renderWidget();
+
+      dispatchCliNotification();
+      await waitFor(() => expect(screen.getByRole("button", { name: "打开会话" })).toBeTruthy());
+
+      const bubble = document.querySelector(".forgebadger-bubble-pop") as HTMLElement;
+      // 180px viewport: the bubble shrinks below the 160px floor instead of
+      // overflowing (12px margin on each side). Its `left` style is relative
+      // to the robot container, so add the robot's own offset.
+      const robotLeft = Number.parseFloat(((document.querySelector("[data-robot-frame]") as HTMLElement).closest(".fixed") as HTMLElement).style.left);
+      const width = Number.parseFloat(bubble.style.width);
+      const absoluteLeft = robotLeft + Number.parseFloat(bubble.style.left);
+      expect(width).toBeLessThanOrEqual(156);
+      expect(absoluteLeft).toBeGreaterThanOrEqual(12);
+      expect(absoluteLeft + width).toBeLessThanOrEqual(168);
+    } finally {
+      Object.defineProperty(window, "innerWidth", { value: originalWidth, configurable: true });
+    }
+  });
+
+  it("hides the robot on small screens while the chat panel is open", async () => {
+    renderWidget({ panelOpen: true });
+
+    const robot = await robotButton();
+    // The host passes max-md:hidden so the near-fullscreen mobile panel does
+    // not half-cover a corner robot.
+    expect(robot.parentElement!.className).toContain("max-md:hidden");
+  });
+});
+
+
 describe("RobotWidget motion budget", () => {
   const originalMatchMedia = window.matchMedia;
   let preference: EventTarget & { matches: boolean };
