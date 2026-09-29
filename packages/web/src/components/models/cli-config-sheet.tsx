@@ -31,9 +31,10 @@ import {
   writeCliConfigFile,
   type CliConfigFieldSpec,
   type RuntimeAdapterId,
+  runtimeAdapterIds,
 } from "@/lib/api";
 
-const cliAdapters: RuntimeAdapterId[] = ["claude", "opencode", "codex", "kimi", "pi"];
+const cliAdapters: RuntimeAdapterId[] = [...runtimeAdapterIds];
 
 interface CliConfigSheetProps {
   open: boolean;

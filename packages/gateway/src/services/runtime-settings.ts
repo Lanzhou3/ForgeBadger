@@ -1,3 +1,4 @@
+import { adapterIds } from "../lib/adapter-ids.js";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 
@@ -156,7 +157,7 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
       if (value.success) merged.sessionPrefix = value.data;
     }
     if (overrides.has("cli_autonomy_adapters")) {
-      const value = z.array(z.enum(["claude", "opencode", "codex", "kimi", "pi"])).safeParse(overrides.get("cli_autonomy_adapters"));
+      const value = z.array(z.enum(adapterIds)).safeParse(overrides.get("cli_autonomy_adapters"));
       if (value.success) merged.cliAutonomyAdapters = value.data;
     }
     if (overrides.has("pm_auto_dispatch")) {

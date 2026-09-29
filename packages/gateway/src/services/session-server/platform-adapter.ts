@@ -113,6 +113,16 @@ interface ResolvedShim {
  * `.exe`, or node + a `.js` entry. Returns undefined when no shim resolution
  * applies (mac/Linux, a real .exe on PATH, or an unparseable shim) so callers
  * keep the POSIX behavior of resolving through the shell/execvp unchanged.
+ *
+ * Some vendors ship a two-level launcher: a stable PATH shim that only
+ * `CALL`s a versioned inner launcher, e.g. minimax Code's
+ *   `mcode.cmd` -> `CALL "%~dp0releases\%MCODE_RELEASE%\.mcode-launcher.cmd" %*`
+ * whose inner file is the actual `node "...\cli.js"` payload. Such a shim has
+ * no node_modules reference of its own, so the direct parse below cannot see
+ * it and the caller would reject the `.cmd` with an opaque error. One level of
+ * that indirection is therefore followed; anything deeper (or cyclic) is left
+ * unresolved so the caller keeps surfacing the existing explicit error rather
+ * than guessing.
  */
 export function resolveWindowsShimCommand(
   command: string,
@@ -120,16 +130,32 @@ export function resolveWindowsShimCommand(
   platform: NodeJS.Platform = process.platform
 ): ResolvedShim | undefined {
   if (platform !== "win32") return undefined;
+  return resolveShimLayer(command, env, 0, new Set());
+}
 
-  const shimPath = isAbsolute(command)
-    ? command
-    : findWindowsExecutable(command, env);
+/** A vendor launcher indirection is followed at most this many times. */
+const MAX_SHIM_INDIRECTION_DEPTH = 1;
+
+function resolveShimLayer(
+  command: string,
+  env: NodeJS.ProcessEnv,
+  depth: number,
+  visited: ReadonlySet<string>
+): ResolvedShim | undefined {
+  const shimPath = isAbsolute(command) ? command : findWindowsExecutable(command, env);
   if (!shimPath || !/\.(?:cmd|bat)$/iu.test(shimPath)) return undefined;
 
   // npm.cmd selects the Node executable and global prefix at runtime. Run the
   // official shim through cmd.exe so an embedded Gateway Node cannot redirect
   // global installs to a different prefix.
   if (/(?:^|[\\/])npm\.cmd$/iu.test(shimPath)) return undefined;
+
+  // Windows paths are case-insensitive; normalize before the cycle check so
+  // differently-cased references to one file cannot recurse into each other.
+  const key = win32.resolve(shimPath).toLowerCase();
+  if (visited.has(key)) return undefined;
+  const seen = new Set(visited);
+  seen.add(key);
 
   let content: string;
   try {
@@ -138,27 +164,166 @@ export function resolveWindowsShimCommand(
     return undefined;
   }
 
-  const dp0 = dirname(shimPath);
+  const direct = parseDirectShimPayload(content, shimPath, env);
+  if (direct) return direct;
+
+  if (depth >= MAX_SHIM_INDIRECTION_DEPTH) return undefined;
+  return resolveIndirectShimPayload(content, shimPath, env, depth, seen);
+}
+
+/**
+ * Targets an npm/cargo shim declares inline: a `.js` entry run by node, or an
+ * executable path. Only payloads that reference node_modules are trusted, so
+ * an unrelated quoted string in the batch file cannot redirect the launch.
+ *
+ * `%~dp0` — the batch idiom every real shim uses for its own directory — is
+ * expanded here; previously only the `dp0\` and `%dp0%` spellings were, so such
+ * a shim resolved to a literal, non-existent path that was still handed to the
+ * pty. Every candidate must therefore exist on disk before it is returned.
+ *
+ * When the shim names its own Node runtime, that interpreter wins over the
+ * Gateway's `process.execPath`. Some CLIs pin a narrow `engines` range and
+ * bundle a matching Node precisely so they cannot be run on an arbitrary host
+ * version; launching them on whatever Node the Gateway happens to run would
+ * either be rejected or hit a real incompatibility.
+ */
+function parseDirectShimPayload(
+  content: string,
+  shimPath: string,
+  env: NodeJS.ProcessEnv
+): ResolvedShim | undefined {
+  const shimDir = dirname(shimPath);
   const quoted = [...content.matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
 
+  let script: string | undefined;
+  let executable: string | undefined;
+  let declaredNode: string | undefined;
+
   for (const raw of quoted.reverse()) {
-    const expanded = raw.replace(/%dp0%/giu, dp0).replace(/^dp0\\/iu, `${dp0}\\`);
-    if (!expanded.includes("node_modules")) continue;
-    const target = expanded.startsWith(`"`) ? expanded.slice(1, -1) : expanded;
-    if (/\.js$/iu.test(target)) {
-      return { command: process.execPath, args: [target] };
+    const expanded = expandBatchPath(raw, shimDir, env);
+    if (expanded === "") continue;
+    const target = isAbsolute(expanded) ? expanded : win32.join(shimDir, expanded);
+    if (expanded.includes("node_modules")) {
+      if (script === undefined && /\.js$/iu.test(target) && existsSync(target)) {
+        script = target;
+        continue;
+      }
+      if (executable === undefined && (existsSync(target) || /\.exe$/iu.test(target))) {
+        executable = target;
+        continue;
+      }
+      continue;
     }
-    if (existsSync(target) || /\.exe$/iu.test(target)) {
-      return { command: target, args: [] };
+    // A shim that ships its own runtime names the interpreter explicitly. This
+    // is not optional politeness: MiniMax Code declares
+    // `engines: >=22.19 <23 || >=24 <27` and carries a matching private Node,
+    // while the Gateway may run an older 22.x that the CLI would refuse to
+    // start under. Honoring the declared interpreter keeps the launch inside
+    // the range the shim's author asked for.
+    if (declaredNode === undefined
+      && /(?:^|[\\/])node(?:\.exe)?$/iu.test(target)
+      && existsSync(target)) {
+      declaredNode = target;
     }
   }
 
-  const script = /node\s+"([^"]+\.js)"/iu.exec(content)?.[1];
-  if (script) {
-    const target = script.replace(/%dp0%/giu, dp0);
-    return { command: process.execPath, args: [target] };
+  if (script !== undefined) {
+    return { command: declaredNode ?? process.execPath, args: [script] };
   }
 
+  const regexScript = /node\s+"([^"]+\.js)"/iu.exec(content)?.[1];
+  if (regexScript) {
+    const expanded = expandBatchPath(regexScript, shimDir, env);
+    const absolute = expanded === "" ? "" : isAbsolute(expanded) ? expanded : win32.join(shimDir, expanded);
+    if (absolute !== "" && existsSync(absolute)) {
+      return { command: declaredNode ?? process.execPath, args: [absolute] };
+    }
+  }
+
+  // A shim with no script entry still resolves if it points straight at an
+  // executable (native install, or a .js-less launcher).
+  return executable === undefined ? undefined : { command: executable, args: [] };
+}
+
+/**
+ * Follows `CALL "<inner shim>" %*` one level. The inner shim inherits the
+ * caller's arguments via `%*`, so the resolved payload args are returned as a
+ * prefix and the launch plan's own args are appended after them by the caller
+ * (see `nodePty.spawn(resolved.command, [...resolved.args, ...launchPlan.args])`).
+ */
+function resolveIndirectShimPayload(
+  content: string,
+  shimPath: string,
+  env: NodeJS.ProcessEnv,
+  depth: number,
+  seen: ReadonlySet<string>
+): ResolvedShim | undefined {
+  const shimDir = dirname(shimPath);
+  // `SET /P NAME=<file>` reads a pointer file (minimax Code reads its active
+  // release id from `current`), and the CALL target interpolates it as %NAME%.
+  const scope: NodeJS.ProcessEnv = { ...env, ...readBatchSetPValues(content, shimDir, env) };
+
+  for (const match of content.matchAll(/\bCALL\s+"([^"]+)"/giu)) {
+    const expanded = expandBatchPath(match[1]!, shimDir, scope);
+    if (!expanded) continue;
+    const target = isAbsolute(expanded) ? expanded : win32.join(shimDir, expanded);
+    if (!/\.(?:cmd|bat)$/iu.test(target) || !existsSync(target)) continue;
+    const resolved = resolveShimLayer(target, scope, depth + 1, seen);
+    if (resolved) return resolved;
+  }
+
+  return undefined;
+}
+
+/** Reads `SET /P NAME=<file>` pointer values declared by a batch shim. */
+function readBatchSetPValues(
+  content: string,
+  shimDir: string,
+  env: NodeJS.ProcessEnv
+): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const match of content.matchAll(
+    /^\s*SET\s+\/P\s+([A-Za-z_][A-Za-z0-9_]*)\s*=<"?([^">\r\n]+)"?/gimu
+  )) {
+    const name = match[1]!;
+    const file = expandBatchPath(match[2]!, shimDir, { ...env, ...values });
+    if (!file) continue;
+    try {
+      const value = readFileSync(file, "utf8").trim();
+      if (value) values[name] = value;
+    } catch {
+      // A missing or unreadable pointer file just leaves the variable
+      // unexpanded; the CALL target then fails its existsSync check.
+    }
+  }
+  return values;
+}
+
+/** Expands `%~dp0`, bare `dp0\` and `%VAR%` in a batch-quoted path reference.
+ *
+ * npm's standard shim writes `SET dp0=%~dp0` then references `%dp0%\node_modules\...`,
+ * so `dp0` is an implicit alias for the shim's own directory even though it is
+ * never exported to the process environment. Without this alias every
+ * globally-installed npm CLI (pi, opencode, …) resolves to a literal
+ * `%dp0%\...` path that fails existsSync and is rejected as unresolvable. */
+function expandBatchPath(
+  raw: string,
+  shimDir: string,
+  scope: NodeJS.ProcessEnv
+): string {
+  let value = raw.trim().replace(/^"|"$/gu, "").trim();
+  value = value.replace(/%~dp0\\?/giu, `${shimDir}\\`).replace(/^dp0\\/iu, `${shimDir}\\`);
+  value = value.replace(/%([A-Za-z_][A-Za-z0-9_]*)%/gu, (whole, name: string) => {
+    if (name.toLowerCase() === "dp0") return shimDir;
+    return lookupBatchVar(scope, name) ?? whole;
+  });
+  return value.length > 0 ? value : "";
+}
+
+function lookupBatchVar(scope: NodeJS.ProcessEnv, name: string): string | undefined {
+  for (const [key, value] of Object.entries(scope)) {
+    if (value !== undefined && key.toUpperCase() === name.toUpperCase()) return value;
+  }
   return undefined;
 }
 

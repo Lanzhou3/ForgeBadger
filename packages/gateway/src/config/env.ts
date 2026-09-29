@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { z } from "zod";
 
+import { adapterIds } from "../lib/adapter-ids.js";
 import { expandUserPath } from "../lib/user-path.js";
 
 const strictEnvBoolean = z
@@ -10,7 +11,7 @@ const strictEnvBoolean = z
   .default(false)
   .transform((value) => value === true || value === "true");
 
-const cliAdapterId = z.enum(["claude", "opencode", "codex", "kimi", "pi"]);
+const cliAdapterId = z.enum(adapterIds);
 
 // Shared with the runtime-settings service so the settings page validates
 // against exactly the same shapes the process env accepts.

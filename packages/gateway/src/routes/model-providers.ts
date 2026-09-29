@@ -1,3 +1,4 @@
+import { adapterIds } from "../lib/adapter-ids.js";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -33,8 +34,8 @@ import type { CliConfigSnapshot } from "../services/cli-config.js";
 import { THINKING_EFFORT_LEVELS } from "../services/model-capability-projection.js";
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 
-const adapterSchema = z.enum(["claude", "opencode", "codex", "kimi", "pi"]);
-const providerAdapterSchema = z.enum(["claude", "opencode", "codex", "kimi", "pi"]);
+const adapterSchema = z.enum(adapterIds);
+const providerAdapterSchema = z.enum(adapterIds);
 const productTypeSchema = z.enum(["payg_api", "coding_plan", "token_plan", "subscription", "local"]);
 const createProviderSchema = z.object({
   name: z.string().min(1).optional(),

@@ -31,6 +31,15 @@ export type IngestTerminalNotificationResult =
   | { handled: true }
   | { handled: false; reason: "unknown_session" | "deduped" | "unsupported" };
 
+/**
+ * MiniMax Code notifier bodies, verbatim from the `H7` map in the shipped
+ * launcher bundle (@minimax-ai/code 0.5.8). Matched exactly — a paraphrase by
+ * a CLI update must degrade to "no notification", never to a wrong event type.
+ */
+const MCODE_PERMISSION_BODY = "Permission needs your input";
+const MCODE_TURN_COMPLETE_BODY = "Response complete";
+const MCODE_TURN_FAILED_BODY = "Response stopped with an error";
+
 export interface IngestTerminalNotificationOptions {
   db: Database;
   eventBus: ForgeBadgerEventBus;
@@ -136,6 +145,23 @@ function mapTerminalNotification(
   if (aiTool === "opencode" && notification.code === 777
     && /^(Permission needs input|Question needs input)$/.test(notification.body.trim())) {
     return { type: "permission_prompt", message: text };
+  }
+  // MiniMax Code's notifier emits a fixed "MCode: <body>" OSC 9 (see `H7` in
+  // the shipped launcher). The bodies are enumerated, so the mapping is exact
+  // rather than a prose heuristic. `question-required` is deliberately not
+  // promoted: it carries no ForgeBadger notification type today, and
+  // mis-labelling it as a permission prompt would be wrong.
+  if (aiTool === "mcode" && notification.code === 9) {
+    const body = text.replace(/^MCode:\s*/u, "").trim();
+    if (body === MCODE_PERMISSION_BODY) {
+      return { type: "permission_prompt", message: text };
+    }
+    if (body === MCODE_TURN_COMPLETE_BODY) {
+      return { type: "task_completed", message: text };
+    }
+    if (body === MCODE_TURN_FAILED_BODY) {
+      return { type: "task_failed", message: text };
+    }
   }
   return undefined;
 }

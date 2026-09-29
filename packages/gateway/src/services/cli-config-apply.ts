@@ -25,6 +25,7 @@ import {
   safeUnlink
 } from "./cli-config-fs.js";
 import { cliConfigTargetPath, globalConfigRoot } from "./cli-config-target.js";
+import { loadYamlConfig, serializeYamlPreservingComments as replayYamlOntoOriginal } from "./cli-config-yaml.js";
 import { probeCodexPlannedConfig, type CodexConfigProbeFn, type CodexConfigProbeOutcome } from "./codex-config-probe.js";
 import { gatewayLoopbackUrl } from "./claude-route/gateway-url.js";
 import { projectedKimiCapabilities } from "./model-capability-projection.js";
@@ -103,7 +104,7 @@ export interface CliConfigApplyInput {
 
 export interface CliConfigApplyFilePreview {
   targetPath: string;
-  fileType: "json" | "toml";
+  fileType: "json" | "toml" | "yaml";
   operation: "create" | "update" | "delete" | "none";
   /** Observed content with credential values masked; null when the file does not exist. */
   current: string | null;
@@ -174,7 +175,7 @@ export type CodexWireApi = "chat" | "responses";
 
 interface ApplyTarget {
   targetPath: string;
-  fileType: "json" | "toml";
+  fileType: "json" | "toml" | "yaml";
   role: "config" | "auth" | "settings";
 }
 
@@ -598,7 +599,7 @@ function planApplyDocuments(context: ApplyContext, plaintextSecret: string | nul
     // when the file is missing.
     const serialized = target.role === "auth" && Object.keys(doc).length === 0
       ? null
-      : serializeDocument(target.fileType, doc);
+      : serializeDocument(target.fileType, doc, observed.content);
     return { target, serialized };
   });
 }
@@ -619,6 +620,11 @@ function applyTargets(adapter: AdapterId): ApplyTarget[] {
       { targetPath: main, fileType: "toml", role: "config" },
       { targetPath: path.join(globalConfigRoot("codex"), "auth.json"), fileType: "json", role: "auth" }
     ];
+  }
+  if (adapter === "mcode") {
+    // Single YAML file. The auth tree under the same data directory is owned by
+    // the CLI's own OAuth flow (`mcode login`) and is never written here.
+    return [{ targetPath: main, fileType: "yaml", role: "config" }];
   }
   if (adapter === "pi") {
     // PI reads file-based providers from models.json; the startup model
@@ -810,6 +816,56 @@ function buildApplyDocument(
     doc.providers = providers;
     return;
   }
+  if (context.adapter === "mcode") {
+    if (!context.baseUrl) {
+      throw new CliConfigApplyError("CLI_CONFIG_APPLY_ENDPOINT_UNSAFE", "MiniMax Code providers require a base URL");
+    }
+    // MiniMax Code keeps third-party endpoints under `custom_provider`;
+    // `provider` is its bundled inference registry and `minimax_api` /
+    // `minimax_oauth` are reserved for the official service. Both are left
+    // untouched. Writing to the wrong key is not an error upstream — the entry
+    // is silently skipped, so the config would look applied while the CLI kept
+    // talking to the previous provider.
+    const all = record(doc.custom_provider);
+    const existing = record(all[context.providerKey]);
+    const options: Record<string, unknown> = { ...record(existing.options) };
+    options.apiKey = secret;
+    options.baseURL = context.baseUrl;
+    options.authMode = "api-key";
+    const models = record(existing.models);
+    for (const activeModel of context.activeModels) {
+      const current = record(models[activeModel.modelId]);
+      // `limit` is only written by the CLI when --context-limit/--output-limit
+      // are passed, and an absent limit silently falls back to 200000/16384.
+      // ForgeBadger knows the real window, so always write it.
+      models[activeModel.modelId] = {
+        ...current,
+        name: activeModel.name,
+        limit: {
+          context: activeModel.contextWindow && activeModel.contextWindow > 0
+            ? activeModel.contextWindow
+            : mcodeDefaultContextWindow,
+          output: mcodeDefaultOutputTokens
+        },
+        reasoning: activeModel.capabilities.includes("reasoning")
+      };
+    }
+    all[context.providerKey] = {
+      ...existing,
+      name: context.provider.name,
+      kind: "custom",
+      enabled: true,
+      api: mcodeApiName(context.provider.apiFormat),
+      options,
+      models
+    };
+    doc.custom_provider = all;
+    // Custom providers are referenced with an explicit `custom_provider:`
+    // prefix; the bare `<provider>/<model>` form only resolves inside the
+    // bundled registry.
+    doc.defaultModel = `custom_provider:${context.providerKey}/${context.model.modelId}`;
+    return;
+  }
   const providers = record(doc.providers);
   const definition: Record<string, unknown> = {
     type: kimiProviderType(context.provider.apiFormat, context.baseUrl),
@@ -935,7 +991,7 @@ function claudeContextWindowTarget(baseUrl: string | null, model: ModelProfile |
   if (model && model.modelId.toLowerCase().startsWith("claude-")) return null;
   if (model?.contextWindow && model.contextWindow > 0) return model.contextWindow;
   if (isKimiCodingEndpoint(baseUrl)) return Number(kimiCodingContextTokens);
-  if (isMinimaxAnthropicEndpoint(baseUrl)) return minimaxAnthropicContextTokens;
+  if (isMiniMaxAnthropicEndpoint(baseUrl)) return minimaxAnthropicContextTokens;
   return null;
 }
 
@@ -949,7 +1005,7 @@ function isKimiCodingEndpoint(baseUrl: string | null): boolean {
   }
 }
 
-function isMinimaxAnthropicEndpoint(baseUrl: string | null): boolean {
+function isMiniMaxAnthropicEndpoint(baseUrl: string | null): boolean {
   if (!baseUrl) return false;
   try {
     const url = new URL(baseUrl);
@@ -961,9 +1017,13 @@ function isMinimaxAnthropicEndpoint(baseUrl: string | null): boolean {
   }
 }
 
-function parseDocument(fileType: "json" | "toml", content: string, targetPath: string): Record<string, unknown> {
+function parseDocument(fileType: "json" | "toml" | "yaml", content: string, targetPath: string): Record<string, unknown> {
   if (!content.trim()) return {};
   try {
+    if (fileType === "yaml") {
+      // Comment-preserving handle; the plain root is what callers mutate.
+      return loadYamlConfig(content).root;
+    }
     const value = fileType === "json" ? JSON.parse(content) as unknown : parseToml(content);
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid root");
     return value as Record<string, unknown>;
@@ -972,17 +1032,33 @@ function parseDocument(fileType: "json" | "toml", content: string, targetPath: s
   }
 }
 
-function serializeDocument(fileType: "json" | "toml", doc: Record<string, unknown>): string {
+function serializeDocument(
+  fileType: "json" | "toml" | "yaml",
+  doc: Record<string, unknown>,
+  originalContent?: string
+): string {
+  if (fileType === "yaml") {
+    return serializeYamlPreservingComments(originalContent ?? "", doc);
+  }
   return fileType === "json"
     ? `${JSON.stringify(doc, null, 2)}\n`
     : `${stringifyToml(doc as never).trimEnd()}\n`;
 }
 
+/**
+ * MiniMax Code preserves comments and unknown top-level keys in its
+ * config.yaml, so a full re-serialize would drop whatever it deliberately
+ * kept. See cli-config-yaml for the replay strategy.
+ */
+function serializeYamlPreservingComments(originalContent: string, doc: Record<string, unknown>): string {
+  return replayYamlOntoOriginal(originalContent, doc);
+}
+
 /** Masks credential values so previews never surface plaintext secrets. */
-export function maskSecrets(fileType: "json" | "toml", content: string): string {
+export function maskSecrets(fileType: "json" | "toml" | "yaml", content: string): string {
   const doc = parseDocument(fileType, content, "");
   maskSecretsDeep(doc);
-  return serializeDocument(fileType, doc);
+  return serializeDocument(fileType, doc, content);
 }
 
 function maskSecretsDeep(value: Record<string, unknown>): void {
@@ -1002,7 +1078,7 @@ function maskSecretsDeep(value: Record<string, unknown>): void {
   }
 }
 
-function diffDocuments(fileType: "json" | "toml", currentContent: string, proposedContent: string): string[] {
+function diffDocuments(fileType: "json" | "toml" | "yaml", currentContent: string, proposedContent: string): string[] {
   const current = flattenDocument(parseDocument(fileType, currentContent, ""));
   const proposed = flattenDocument(parseDocument(fileType, proposedContent, ""));
   const changed = new Set<string>();
@@ -1082,6 +1158,23 @@ async function withInProcessLock<T>(key: string, action: () => Promise<T>): Prom
   }
 }
 
+/**
+ * MiniMax Code API format names (verified against @minimax-ai/code 0.4.12:
+ * the provider registry `api` field, and the URL/header construction it drives).
+ * `google` and `bedrock` have no counterpart and are rejected by the
+ * capability matrix, so they fall back to the Anthropic Messages shape rather
+ * than writing a value the CLI cannot use.
+ */
+function mcodeApiName(apiFormat: ProviderApiFormat): "anthropic-messages" | "openai-responses" | "openai-completions" {
+  if (apiFormat === "openai") return "openai-responses";
+  if (apiFormat === "openai-compatible" || apiFormat === "local") return "openai-completions";
+  return "anthropic-messages";
+}
+
+/** MiniMax Code's own fallback for a custom model with no declared limit. */
+const mcodeDefaultContextWindow = 200_000;
+const mcodeDefaultOutputTokens = 16_384;
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -1095,7 +1188,8 @@ export function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId
     return provider.anthropicBaseUrl
       ?? (provider.apiFormat === "anthropic" ? provider.baseUrl : provider.openaiBaseUrl ?? provider.baseUrl);
   }
-  if ((adapter === "opencode" || adapter === "kimi" || adapter === "pi") && provider.apiFormat === "anthropic") {
+  if ((adapter === "opencode" || adapter === "kimi" || adapter === "pi" || adapter === "mcode")
+    && provider.apiFormat === "anthropic") {
     return provider.anthropicBaseUrl ?? provider.baseUrl;
   }
   return provider.openaiBaseUrl ?? provider.baseUrl;

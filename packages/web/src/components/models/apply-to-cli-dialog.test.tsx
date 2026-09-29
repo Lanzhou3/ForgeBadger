@@ -10,6 +10,7 @@ vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) 
 vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 vi.mock("@/lib/api", () => ({
   discoverAdapters: vi.fn(async () => ({ adapters: [] })),
+  getAdapterOrder: vi.fn(async () => ({ order: [] })),
   getClaudeRoute: vi.fn(async () => ({ enabled: false })),
   setClaudeRoute: vi.fn(async () => ({ enabled: true })),
   previewCliConfigApply: vi.fn(async () => ({ files: [], warnings: [] })),

@@ -24,6 +24,9 @@ vi.mock("@/lib/api", () => ({
   getClaudeRoute: vi.fn(async () => ({ enabled: false })),
   getCliAccounts: vi.fn(),
   refreshCliAccountQuota: vi.fn(),
+  // The component enumerates adapters from this list rather than a local copy,
+  // so the mock has to provide it or the module fails to load.
+  runtimeAdapterIds: ["claude", "opencode", "codex", "kimi", "pi", "mcode"] as const,
 }));
 
 const provider: ProviderProfile = {

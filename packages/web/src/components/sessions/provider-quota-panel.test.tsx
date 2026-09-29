@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderQuotaPanel } from "./provider-quota-panel";
@@ -7,6 +7,7 @@ import {
   checkProviderBalance,
   getCliAccount,
   getAppliedProviderForAdapter,
+  refreshCliAccountQuota,
   type AppliedProviderInfo,
   type CliAccountOverview,
   type ProviderBalanceResult,
@@ -19,6 +20,9 @@ vi.mock("@/lib/api", () => ({
   checkProviderBalance: vi.fn(),
   getCliAccount: vi.fn(),
   refreshCliAccountQuota: vi.fn(),
+  runtimeAdapterIds: ["claude", "opencode", "codex", "kimi", "pi", "mcode"] as const,
+  // Adapters with a native login/quota surface; opencode and pi are excluded.
+  CLI_ACCOUNT_ADAPTERS: ["claude", "codex", "kimi", "mcode"] as const,
 }));
 
 const FETCHED_AT = "2026-09-22T12:00:00Z";
@@ -74,13 +78,47 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getAppliedProviderForAdapter).mockResolvedValue({ appliedProvider: null });
 });
+
+/**
+ * Regression guard for the session terminal's top-right quota block: mcode was
+ * missing from the native-adapter list, so a signed-in MiniMax account showed
+ * nothing there. The list must be derived, not re-spelled per adapter.
+ */
+describe("native account adapter selection", () => {
+  it("probes the native account endpoint for every adapter that has one", async () => {
+    for (const adapter of ["claude", "codex", "kimi", "mcode"] as const) {
+      vi.mocked(getAppliedProviderForAdapter).mockResolvedValue({ appliedProvider: null });
+      vi.mocked(getCliAccount).mockResolvedValue({
+        overview: { login: { adapter, state: "ready", method: "oauth" } }
+      });
+
+      renderPanel(adapter);
+
+      await waitFor(() => {
+        expect(getCliAccount).toHaveBeenCalledWith(adapter);
+      });
+    }
+  });
+
+  it("does not probe adapters with no native account surface", async () => {
+    for (const adapter of ["opencode", "pi"]) {
+      renderPanel(adapter);
+    }
+
+    await waitFor(() => {
+      expect(getAppliedProviderForAdapter).toHaveBeenCalled();
+    });
+    expect(getCliAccount).not.toHaveBeenCalled();
+  });
+});
 afterEach(cleanup);
 
 describe("provider-quota-panel dual display (applied provider + native login)", () => {
-  it("shows both the provider balance and the labeled native quota with independent refresh buttons", async () => {
+  it("shows both the provider balance and the labeled native quota behind one combined refresh button", async () => {
     vi.mocked(getAppliedProviderForAdapter).mockResolvedValue({ appliedProvider: applied });
     vi.mocked(checkProviderBalance).mockResolvedValue(balance);
     vi.mocked(getCliAccount).mockResolvedValue({ overview: readyWithQuota() });
+    vi.mocked(refreshCliAccountQuota).mockResolvedValue({ overview: readyWithQuota() });
     renderPanel("claude");
 
     // Provider block: balance rows under the provider name label.
@@ -96,10 +134,15 @@ describe("provider-quota-panel dual display (applied provider + native login)", 
     expect(panelText().split("sessions.providerQuotaNative · claude.ai").length - 1).toBe(2);
     expect(getCliAccount).toHaveBeenCalled();
 
-    // One refresh button per source, with per-source labels.
-    expect(screen.getAllByRole("button")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "sessions.providerQuotaRefreshProvider" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "sessions.providerQuotaRefreshNative" })).toBeTruthy();
+    // Both sources share one combined refresh button with the neutral label;
+    // clicking it refreshes the provider balance and the native quota together.
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    const providerCallsBefore = vi.mocked(checkProviderBalance).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "sessions.providerQuotaRefresh" }));
+    await waitFor(() => expect(refreshCliAccountQuota).toHaveBeenCalledWith("claude"));
+    await waitFor(() =>
+      expect(vi.mocked(checkProviderBalance).mock.calls.length).toBeGreaterThan(providerCallsBefore)
+    );
   });
 
   it("shows only the provider block when the native CLI is not logged in", async () => {
@@ -115,10 +158,15 @@ describe("provider-quota-panel dual display (applied provider + native login)", 
     expect(screen.queryByRole("progressbar", { name: /5h window/ })).toBeNull();
     expect(panelText()).not.toContain("sessions.providerQuotaNative");
 
-    // Single source: one neutral refresh button, no native one.
+    // Single source: the one refresh button refreshes the provider balance
+    // only (the native CLI is not logged in).
     expect(screen.getAllByRole("button")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "sessions.providerQuotaRefresh" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "sessions.providerQuotaRefreshNative" })).toBeNull();
+    const providerCallsBefore = vi.mocked(checkProviderBalance).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "sessions.providerQuotaRefresh" }));
+    await waitFor(() =>
+      expect(vi.mocked(checkProviderBalance).mock.calls.length).toBeGreaterThan(providerCallsBefore)
+    );
+    expect(refreshCliAccountQuota).not.toHaveBeenCalled();
   });
 });
 

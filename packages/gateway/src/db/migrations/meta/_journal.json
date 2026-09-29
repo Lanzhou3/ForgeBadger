@@ -848,6 +848,27 @@
       "when": 1790473866019,
       "tag": "0121_session_notification_prompts",
       "breakpoints": true
+    },
+    {
+      "idx": 121.0,
+      "version": "7",
+      "when": 1790473867019,
+      "tag": "0122_mcode_adapter",
+      "breakpoints": true
+    },
+    {
+      "idx": 122.0,
+      "version": "7",
+      "when": 1790473868019,
+      "tag": "0123_mcode_supported_adapters_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 123.0,
+      "version": "7",
+      "when": 1790667599356,
+      "tag": "0124_user_adapter_order",
+      "breakpoints": true
     }
   ]
 }

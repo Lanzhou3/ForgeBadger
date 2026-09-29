@@ -54,6 +54,21 @@ describe("TerminalScreen serialize (spike conclusions)", () => {
     }
   });
 
+  it("serializeSnapshot is bounded to 1000 lines by default and can be raised", async () => {
+    const screen = new TerminalScreen({ cols: 80, rows: 10, scrollback: 5000 });
+    try {
+      let data = "";
+      for (let i = 0; i < 3000; i += 1) data += `line-${i}\r\n`;
+      await writeAndDrain(screen, data);
+      const bounded = screen.serializeSnapshot();
+      assert.ok(!bounded.includes("line-0"), "default 1000-line bound must drop line-0");
+      assert.ok(bounded.includes("line-2999"));
+      assert.ok(screen.serializeSnapshot(5000).includes("line-0"), "explicit 5000 must keep line-0");
+    } finally {
+      screen.dispose();
+    }
+  });
+
   it("serialized snapshot round-trips into an identical screen", async () => {
     const screen = new TerminalScreen({ cols: 80, rows: 10, scrollback: 100 });
     try {

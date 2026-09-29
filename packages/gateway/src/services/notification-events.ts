@@ -10,6 +10,28 @@ import type {
 import { redactAgentText } from './agent/redaction.js';
 import { nativePromptIdentity, SessionNotificationPromptRepository } from '../db/repositories/session-notification-prompt-repository.js';
 
+/**
+ * Local shape of the web translation keys this service emits. The web owns the
+ * catalogue; the gateway only builds the key string, so it is declared here
+ * rather than imported to keep the dependency direction one-way.
+ */
+type TranslationKey = `notifications.${string}`;
+
+/**
+ * Adapters that have their own `notifications.<adapter>Permission*` titles in
+ * the web catalogue. An adapter missing from this set falls back to the Claude
+ * wording — which used to be silent, because the previous if-chain and the key
+ * catalogue were maintained separately and drifted.
+ */
+const NOTIFICATION_TITLE_ADAPTERS: ReadonlySet<string> = new Set([
+  "claude",
+  "opencode",
+  "codex",
+  "kimi",
+  "pi",
+  "mcode"
+]);
+
 type PersistableNotificationEvent = ClaudeNotificationEvent | AppActionNotificationEvent;
 
 /** Only these CLI hook notification types become in-app notifications. */
@@ -120,18 +142,10 @@ export function notificationInputFromEvent(event: ForgeBadgerEvent): CreateNotif
 
 function notificationTitleKey(notificationType: string, adapter: string): string {
   if (notificationType === "permission_prompt") {
-    if (adapter === "opencode") return "notifications.opencodePermissionRequest";
-    if (adapter === "codex") return "notifications.codexPermissionRequest";
-    if (adapter === "kimi") return "notifications.kimiPermissionRequest";
-    if (adapter === "pi") return "notifications.piPermissionRequest";
-    return "notifications.claudePermissionRequest";
+    return `notifications.${NOTIFICATION_TITLE_ADAPTERS.has(adapter) ? adapter : "claude"}PermissionRequest` as TranslationKey;
   }
   if (notificationType === "permission_denied") {
-    if (adapter === "opencode") return "notifications.opencodePermissionDenied";
-    if (adapter === "codex") return "notifications.codexPermissionDenied";
-    if (adapter === "kimi") return "notifications.kimiPermissionDenied";
-    if (adapter === "pi") return "notifications.piPermissionDenied";
-    return "notifications.claudePermissionDenied";
+    return `notifications.${NOTIFICATION_TITLE_ADAPTERS.has(adapter) ? adapter : "claude"}PermissionDenied` as TranslationKey;
   }
   if (notificationType === "task_completed") return "notifications.taskCompleted";
   if (notificationType === "task_failed") return "notifications.taskFailed";

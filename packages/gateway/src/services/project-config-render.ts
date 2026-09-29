@@ -1,3 +1,4 @@
+import { adapterIds } from "../lib/adapter-ids.js";
 import { safeResolve } from "../lib/safe-resolve.js";
 import { BUILTIN_COPILOT_SKILLS } from "./agent/skills/copilot-skills.js";
 import { assertNoObsoleteSkillResources } from "./skill-resources.js";
@@ -15,7 +16,7 @@ import type { Database } from "../db/types.js";
 import { adapterConfigRoot, buildProjectConfigFiles } from "./project-config-files.js";
 import { syncLocalSkills } from "./local-skills.js";
 
-const aiToolSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
+const aiToolSchema = z.enum(adapterIds);
 
 // Config rendering derives the adapter from the bound template, never from the
 // project's ai_tool hint, so CLI-agnostic projects render correctly. The

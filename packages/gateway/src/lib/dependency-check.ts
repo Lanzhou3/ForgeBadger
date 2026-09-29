@@ -88,6 +88,17 @@ const ADAPTER_DEPENDENCY_CHECKS: DependencyCheck[] = [
     args: ["--version"],
     required: false,
     timeoutMs: 5_000
+  },
+  {
+    // MiniMax Code is a bundled Node CLI behind a two-level Windows
+    // launcher (mcode.cmd -> releases/<version>/.mcode-launcher.cmd ->
+    // node cli.js), so the probe pays two extra batch hops. resolveWindowsShimCommand
+    // unwraps that indirection; the timeout keeps a cold first run from being
+    // reported as missing.
+    command: "mcode",
+    args: ["--version"],
+    required: false,
+    timeoutMs: 10_000
   }
 ];
 

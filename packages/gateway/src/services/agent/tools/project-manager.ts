@@ -1,3 +1,4 @@
+import { adapterIds } from "../../../lib/adapter-ids.js";
 import { getTaskProgress, taskCloseInput, taskProgressInput } from '../../project-manager/task-progress.js';
 import { executeAgentAction } from "../../platform-commands/agent-actions.js";
 /** Project Manager reads and governed task preparation. Preparation never launches a CLI. */
@@ -31,7 +32,7 @@ const getPacketInput = z.object({
 }).strict();
 
 const startPacketInput = getPacketInput.extend({
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional()
+  aiTool: z.enum(adapterIds).optional()
 }).strict();
 
 /** Load project + work item, or a recoverable not-found marker. */

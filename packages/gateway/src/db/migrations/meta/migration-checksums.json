@@ -119,5 +119,8 @@
   "0118_mcp_project_grants.sql": "358d84150a671b37712d329ab29ae55d8bb9fad7b97652ad3c2423633cce8272",
   "0119_feishu_notifications.sql": "38daad1681887fef7b9c108b09932f64eb27327d5b323378720a896ab068c529",
   "0120_feishu_notification_targets.sql": "eaf111593aa941cba43ca0c27224555c1e5cbde30b5cbcdedb188344a58c9942",
-  "0121_session_notification_prompts.sql": "d8e88d64b8d36fc91dc2041af9acc929c0e44411cd56aa83c9b95bb3c2f066b2"
+  "0121_session_notification_prompts.sql": "d8e88d64b8d36fc91dc2041af9acc929c0e44411cd56aa83c9b95bb3c2f066b2",
+  "0122_mcode_adapter.sql": "f8e20b2e045e799a7160e9a56d7c62aa4c6254819c787089b3864b9b4a256d8c",
+  "0123_mcode_supported_adapters_backfill.sql": "1babcca7ffa7a66e0e4c349f5d197b45ce06f1070743ee18bb450da5b48bab4c",
+  "0124_user_adapter_order.sql": "5d26140fa6b0e0c11154d2821de88454e4af16c1dea76a9d757ee7f0ff5feda0"
 }

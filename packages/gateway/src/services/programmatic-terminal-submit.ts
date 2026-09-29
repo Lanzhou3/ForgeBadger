@@ -195,6 +195,11 @@ export function currentProgrammaticComposer(adapter: AdapterId, pane: string): s
       return kimiComposer(lines);
     case "pi":
       return piComposer(lines);
+    default:
+      // No composer frame parser for this adapter. Returning "" makes
+      // isProgrammaticComposerReady report false, so the programmatic submit
+      // path declines instead of typing into an unidentified prompt.
+      return "";
   }
 }
 
@@ -214,6 +219,8 @@ export function isProgrammaticComposerReady(adapter: AdapterId, pane: string): b
       return /^\s*│\s*>\s*.*│\s*$/m.test(plain) && normalizeComparable(composer) === "" && /context:\s*\d+%/i.test(plain);
     case "pi":
       return isPiComposerReady(plain.split("\n"));
+    default:
+      return false;
   }
 }
 

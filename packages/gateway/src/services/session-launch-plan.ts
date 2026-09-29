@@ -9,6 +9,7 @@ import {
   ensurePiNotificationSettings
 } from "./cli-notification-settings.js";
 import { ensureForgeBadgerOpenCodePlugin } from "./opencode-notification-settings.js";
+import { ensureMcodeNotificationPreference } from "./mcode-notification-preference.js";
 import {
   ensureClaudeTerminalNotificationSettings,
   ensureKimiTerminalNotificationSettings,
@@ -80,6 +81,14 @@ export async function prepareAdapterLaunchExtras(
     // Global extension in <PI_CODING_AGENT_DIR | ~/.pi/agent>/extensions/;
     // session identity comes from the FORGEBADGER_* session env at runtime.
     await ensurePiNotificationSettings();
+    return [];
+  }
+  if (adapter === "mcode") {
+    // MiniMax Code has no hook surface at all, so the PTY OSC stream is the
+    // only channel. Under `auto` its notifier degrades to a bare BEL here (no
+    // TERM_PROGRAM allowlist hit, no KITTY_WINDOW_ID, no WT_SESSION) and the
+    // event kind is lost, so pin the payload-carrying method in config.yaml.
+    ensureMcodeNotificationPreference();
     return [];
   }
   await ensureClaudeTerminalNotificationSettings();

@@ -3,7 +3,7 @@
  * state (OAuth / subscription) and subscription quota. opencode and pi are
  * reserved for a later phase — they have no native account/quota surface yet.
  */
-export type CliAccountAdapter = "claude" | "codex" | "kimi";
+export type CliAccountAdapter = "claude" | "codex" | "kimi" | "mcode";
 
 /**
  * `custom_endpoint` (claude): the effective global config points

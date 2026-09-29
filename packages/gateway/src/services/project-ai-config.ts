@@ -131,6 +131,12 @@ export function candidateFilesForAdapter(adapter: AdapterId): string[] {
     // PI loads all three context files regardless of project trust.
     return ["AGENTS.md", "AGENTS.override.md", "CLAUDE.md"];
   }
+  if (adapter === "mcode") {
+    // MiniMax Code reads AGENTS.md (mcode init . generates it). Its own
+    // .mcode/ directory holds project commands/agents, not provider config, so
+    // it is not a managed candidate here.
+    return ["AGENTS.md"];
+  }
   return [
     "AGENTS.md",
     "AGENTS.override.md"

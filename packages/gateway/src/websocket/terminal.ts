@@ -466,11 +466,16 @@ async function handleTerminalSocket(
     return;
   }
 
-  // Replay the rendered snapshot before going live. Output produced during
-  // the attach window is buffered inside SessionServerPty and emitted right
-  // after the onData listener registers below.
+  // Replay the rendered snapshot before going live: history chunks are
+  // followed by an explicit terminal_history_end marker (enqueued right after
+  // the snapshot, so the ACK gate delivers it after every history chunk and
+  // before any live output), which the client uses to swap in the replayed
+  // screen in one frame. Output produced during the attach window is buffered
+  // inside SessionServerPty and emitted right after the onData listener
+  // registers below.
   if (snapshot && ws.readyState === WebSocket.OPEN) {
     outputFlow.enqueue("terminal_history", snapshot);
+    outputFlow.enqueue("terminal_history_end", "");
   }
 
   const activePty = pty;

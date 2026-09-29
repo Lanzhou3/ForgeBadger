@@ -65,6 +65,7 @@ async function openMouseReportingTerminal(page: Page, platform: string) {
           data: `\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[H${TEXT}\r\nSecond line for mouse drag`,
         },
       }));
+      socket.send(JSON.stringify({ type: "terminal_history_end", payload: { sequence: 2, data: "" } }));
     });
   });
   await page.goto(`/sessions/${SESSION_ID}?attachToken=ui-attach-test`);

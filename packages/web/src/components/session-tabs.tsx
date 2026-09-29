@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } fr
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MoreHorizontal, Plus, X } from "lucide-react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,9 +17,11 @@ import {
 import { CliBrandIcon } from "@/components/cli-brand-icon";
 import { SessionLaunchDialog } from "@/components/sessions/session-launch-dialog";
 import { useLanguage } from "@/hooks/use-language";
+import { getSession } from "@/lib/api";
 import { getCliBrand } from "@/lib/cli-brand";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
 import type { GatewayEvent } from "@/lib/notifications";
+import { getSessionWriter } from "@/lib/platform-actions-api";
 import { toast } from "@/lib/toast";
 import {
   groupSessionTabs,
@@ -33,6 +36,25 @@ import {
 } from "@/lib/session-tabs";
 
 export { notifySessionTabsChanged };
+
+/**
+ * Warm the session page's queries on tab hover so a click navigates to an
+ * already-populated screen instead of a cold fetch. Query keys mirror
+ * sessions/[id]/page.tsx and use-terminal-writer.ts; the page's own fetches
+ * then resolve from the cache.
+ */
+function prefetchSessionData(queryClient: QueryClient, sessionId: string) {
+  void queryClient.prefetchQuery({
+    queryKey: ["session", sessionId],
+    queryFn: () => getSession(sessionId),
+    retry: false,
+  });
+  void queryClient.prefetchQuery({
+    queryKey: ["session-writer", sessionId],
+    queryFn: () => getSessionWriter(sessionId),
+    retry: false,
+  });
+}
 
 interface Props {
   activeSessionId: string;
@@ -234,6 +256,7 @@ function SessionTabItem({
   const brand = getCliBrand(tab.aiTool);
   const running = tab.status === "running";
   const text = tab.lastPrompt ?? tab.label;
+  const queryClient = useQueryClient();
 
   return (
     <div
@@ -270,6 +293,7 @@ function SessionTabItem({
         href={`/sessions/${tab.id}`}
         aria-current={active ? "page" : undefined}
         className="min-w-0 flex-1 truncate"
+        onMouseEnter={() => prefetchSessionData(queryClient, tab.id)}
       >
         {text}
       </Link>
@@ -302,6 +326,7 @@ function OverflowTabsMenu({
   overflowLabel: string;
   onNavigate: (id: string) => void;
 }) {
+  const queryClient = useQueryClient();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -320,7 +345,11 @@ function OverflowTabsMenu({
         {hiddenTabs.map((tab) => {
           const brand = getCliBrand(tab.aiTool);
           return (
-            <DropdownMenuItem key={tab.id} onSelect={() => onNavigate(tab.id)}>
+            <DropdownMenuItem
+              key={tab.id}
+              onSelect={() => onNavigate(tab.id)}
+              onMouseEnter={() => prefetchSessionData(queryClient, tab.id)}
+            >
               <span className="flex min-w-0 items-center gap-2">
                 <span
                   className={

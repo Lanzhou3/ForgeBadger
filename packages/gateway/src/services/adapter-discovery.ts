@@ -1,3 +1,4 @@
+import { adapterIds, isCanonicalAdapterId, type CanonicalAdapterId } from "../lib/adapter-ids.js";
 import {
   checkAdapterCommand,
   checkForgeBadgerRuntimeDependencies,
@@ -7,7 +8,7 @@ import {
   type TerminalBackendHealth
 } from "../lib/dependency-check.js";
 
-export type AdapterId = "claude" | "opencode" | "codex" | "kimi" | "pi";
+export type AdapterId = CanonicalAdapterId;
 export type AdapterRuntimeMode = "terminal";
 export interface AdapterDefinition {
   id: AdapterId;
@@ -77,6 +78,19 @@ const adapterDefinitions: AdapterDefinition[] = [
     launchEnabled: true,
     configDir: ".pi",
     runtimeModes: ["terminal"]
+  },
+  {
+    // MiniMax Code. Note the install directory (~/.minimax-code, which owns
+    // the PATH launcher) is deliberately NOT this configDir: user data lives in
+    // ~/.minimax. See docs/minimax-cli-integration-plan.md.
+    id: "mcode",
+    label: "MiniMax Code",
+    command: "mcode",
+    versionArgs: ["--version"],
+    supportLevel: "supported",
+    launchEnabled: true,
+    configDir: ".minimax",
+    runtimeModes: ["terminal"]
   }
 ];
 
@@ -88,7 +102,7 @@ export function listAdapterDefinitions(): AdapterDefinition[] {
 }
 
 export function isAdapterId(value: string): value is AdapterId {
-  return adapterDefinitions.some((definition) => definition.id === value);
+  return isCanonicalAdapterId(value);
 }
 
 export function getAdapterDefinition(adapterId: AdapterId): AdapterDefinition {

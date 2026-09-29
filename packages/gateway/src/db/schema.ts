@@ -569,7 +569,7 @@ export const modelProviderBindings = sqliteTable(
     idxBindingActiveRealpath: uniqueIndex("idx_model_provider_bindings_active_realpath")
       .on(table.targetRealpathHash)
       .where(sql`${table.status} = 'active' AND ${table.targetRealpathHash} IS NOT NULL`),
-    adapterCheck: check("model_provider_bindings_adapter_check", sql`${table.adapter} IN ('claude','opencode','codex','kimi','pi')`),
+    adapterCheck: check("model_provider_bindings_adapter_check", sql`${table.adapter} IN ('claude','opencode','codex','kimi','pi','mcode')`),
     authModeCheck: check("model_provider_bindings_auth_mode_check", sql`${table.authMode} IN ('managed_credential','native_cli_login','host_environment','none')`),
     statusCheck: check("model_provider_bindings_status_check", sql`${table.status} IN ('active','revoked')`),
     revisionCheck: check("model_provider_bindings_revision_check", sql`${table.desiredRevision} >= 1`),
@@ -963,6 +963,9 @@ export const userSettings = sqliteTable("user_settings", {
   // Copilot agent thinking strength preference (off|low|medium|high); null
   // means "off". modelId above is the user's preferred Copilot model.
   copilotThinkingEffort: text("copilot_thinking_effort"),
+  // JSON array of canonical adapter ids in the user's preferred display order
+  // (settings drag-sort); null means "no preference, use discovery order".
+  adapterOrder: text("adapter_order"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 });

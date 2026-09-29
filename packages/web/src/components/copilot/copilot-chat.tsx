@@ -1,6 +1,6 @@
 "use client";
 import { CopilotRunOptions } from "./CopilotRunOptions";
-import { CopilotFollowupQueue } from "./CopilotFollowupQueue";
+import { CopilotFollowupChips } from "./CopilotFollowupChips";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -35,6 +35,8 @@ import { readLastCopilotConversation, writeLastCopilotConversation } from "@/lib
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
 import { useCopilotChatController } from "@/hooks/use-copilot-chat-controller";
+import { useCopilotFollowups } from "@/hooks/use-copilot-followups";
+import { copilotPhaseLabel } from "@/lib/copilot-phase";
 import { toast } from "@/lib/toast";
 import type { TranslationKey } from "@/lib/i18n";
 import {
@@ -46,14 +48,6 @@ import {
   type CopilotConversation,
   type CopilotMessage,
 } from "@/lib/copilot-api";
-
-const PHASE_KEYS: Record<string, TranslationKey> = {
-  context: "copilot.phase.context",
-  summarizing: "copilot.phase.summarizing",
-  model: "copilot.phase.model",
-  tool: "copilot.phase.tool",
-  queued: "copilot.phase.queued",
-};
 
 // Radix Select items cannot use an empty value; this sentinel maps back to
 // "no project context" in onValueChange.
@@ -329,7 +323,36 @@ export function CopilotChat() {
   const activeConversation = conversations.find((item) => item.id === conversationId);
   const isRunning = active && (active.status === "running" || active.status === "pending");
   const isBusy = Boolean(isRunning || active?.status === "awaiting_approval");
-  const phaseLabel = isRunning ? t(PHASE_KEYS[active?.phase ?? "queued"] ?? "copilot.phase.default") : null;
+  const phaseLabel = isRunning ? t(copilotPhaseLabel(active?.phase)) : null;
+
+  // Follow-ups typed while a run is in flight queue behind it instead of
+  // racing a competing turn; the chips render above the composer.
+  const followups = useCopilotFollowups({
+    conversationId,
+    ...(projectId ? { projectId } : {}),
+    ...(modelId ? { modelId } : {}),
+    active: isBusy,
+  });
+  const enqueueRef = useRef(followups.enqueue);
+  enqueueRef.current = followups.enqueue;
+  // Only a run that is actually executing accepts queued follow-ups; while an
+  // approval is pending the composer stays inert, as it did before.
+  const runningRef = useRef(Boolean(isRunning));
+  runningRef.current = Boolean(isRunning);
+
+  const submit = useCallback(async () => {
+    if (runningRef.current) {
+      const text = inputRef.current.trim();
+      if (!text || !conversationId) return;
+      if (await enqueueRef.current(text)) setInputRef.current("");
+      return;
+    }
+    await controller.send();
+  }, [controller, conversationId]);
+  const inputRef = useRef(controller.input);
+  inputRef.current = controller.input;
+  const setInputRef = useRef(controller.setInput);
+  setInputRef.current = controller.setInput;
 
   // Index tool_result rows by their provider toolCallId so MessageRow can pair
   // them with the corresponding tool_call row and render a single status
@@ -443,8 +466,6 @@ export function CopilotChat() {
               {active?.status === "awaiting_approval" && (active.pendingAction
                 ? <CopilotApproval key={active.pendingAction.id} action={active.pendingAction} onDecided={reconcile} />
                 : <p role="status" className="text-sm text-muted-foreground">{t("copilot.awaitingApproval")}</p>)}
-              {conversationId && <CopilotFollowupQueue active={isBusy} key={conversationId} conversationId={conversationId}
-                {...(projectId ? { projectId } : {})} {...(modelId ? { modelId } : {})} />}
               {isRunning && phaseLabel ? (
                 <Badge variant="secondary" className="w-fit gap-1.5 text-xs">
                   <span className="size-1.5 animate-pulse rounded-full bg-brand" />
@@ -519,6 +540,11 @@ export function CopilotChat() {
             aria-hidden="true"
             className="pointer-events-none absolute inset-x-0 bottom-full h-10 bg-gradient-to-t from-card via-card/80 to-transparent"
           />
+          {conversationId && (
+            <div className="mx-auto w-full max-w-3xl">
+              <CopilotFollowupChips items={followups.items} onCancel={(id) => void followups.cancel(id)} />
+            </div>
+          )}
           <div
             data-testid="copilot-composer"
             className="flex items-end gap-2 rounded-xl border border-border/70 bg-card/90 px-2.5 py-2 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
@@ -529,10 +555,10 @@ export function CopilotChat() {
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
-                  void controller.send();
+                  void submit();
                 }
               }}
-              placeholder={t("copilot.placeholder")}
+              placeholder={isRunning ? t("copilot.followups.placeholder") : t("copilot.placeholder")}
               aria-label={t("copilot.placeholder")}
               className="min-h-[44px] max-h-40 flex-1 resize-none rounded-none border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0"
               rows={2}
@@ -549,18 +575,17 @@ export function CopilotChat() {
               >
                 <Square className="size-4" />
               </Button>
-            ) : (
-              <Button
-                size="icon"
-                className="size-9 shrink-0 rounded-full"
-                onClick={() => void controller.send()}
-                disabled={controller.sending || savingPreferences || isBusy || !controller.input.trim() || !conversationId}
-                aria-label={t("copilot.send")}
-                title={t("copilot.send")}
-              >
-                <ArrowUp className="size-4" />
-              </Button>
-            )}
+            ) : null}
+            <Button
+              size="icon"
+              className="size-9 shrink-0 rounded-full"
+              onClick={() => void submit()}
+              disabled={controller.sending || savingPreferences || followups.enqueuing || !controller.input.trim() || !conversationId}
+              aria-label={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
+              title={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
+            >
+              <ArrowUp className="size-4" />
+            </Button>
           </div>
         </div>
       </Card>

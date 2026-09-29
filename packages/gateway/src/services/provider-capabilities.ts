@@ -38,6 +38,17 @@ const capabilities: readonly ProviderAdapterCapability[] = Object.freeze([
     adapter: "pi", apiFormats: ["anthropic", "openai", "openai-compatible", "google", "local"],
     authModes: ["managed_credential", "host_environment", "none"], scopes: ["global"],
     projectionScope: "user-global", modelSelection: "native-config", remoteModelList: false
+  },
+  {
+    // MiniMax Code's `api` field accepts only three shapes (verified
+    // against @minimax-ai/code 0.4.12): anthropic-messages, openai-responses,
+    // openai-completions. Google/Bedrock have no counterpart. The CLI also
+    // needs an explicit baseURL for a custom provider, which is enforced at
+    // apply time. No project-level config.yaml exists — .mcode/ holds commands
+    // and agents only.
+    adapter: "mcode", apiFormats: ["anthropic", "openai", "openai-compatible"],
+    authModes: ["managed_credential", "host_environment", "none"], scopes: ["global"],
+    projectionScope: "user-global", modelSelection: "native-config", remoteModelList: false
   }
 ]);
 

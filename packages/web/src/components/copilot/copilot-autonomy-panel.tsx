@@ -16,12 +16,13 @@ import {
   runtimeSettingsMeta,
   runtimeSettingsValue,
   updateRuntimeSettings,
+  runtimeAdapterIds,
 } from "@/lib/api";
 import { runtimeSettingsQueryKey } from "@/components/settings/InstanceRuntimeSettings";
 import { toast } from "@/lib/toast";
 import { useSettingsCopy } from "./settings-copy";
 
-const AUTONOMY_ADAPTER_IDS = ["claude", "opencode", "codex", "kimi", "pi"] as const;
+const AUTONOMY_ADAPTER_IDS = runtimeAdapterIds;
 
 /**
  * Dispatch autonomy card (Copilot settings → general): operator opt-in for

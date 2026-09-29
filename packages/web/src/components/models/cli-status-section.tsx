@@ -21,6 +21,7 @@ import {
   type CliLoginStatus,
   type ProviderProfile,
   type RuntimeAdapterId,
+  runtimeAdapterIds,
 } from "@/lib/api";
 import { getCliBrand } from "@/lib/cli-brand";
 import { toast } from "@/lib/toast";
@@ -34,7 +35,7 @@ import {
 } from "./cli-quota";
 import { appliedStatusForAdapter, isProviderActiveOnAdapter } from "./shared";
 
-const CLI_ADAPTERS: RuntimeAdapterId[] = ["claude", "opencode", "codex", "kimi", "pi"];
+const CLI_ADAPTERS: RuntimeAdapterId[] = [...runtimeAdapterIds];
 
 interface CliStatusSectionProps {
   provider: ProviderProfile;

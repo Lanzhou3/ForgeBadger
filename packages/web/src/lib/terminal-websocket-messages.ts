@@ -10,6 +10,11 @@ export type TerminalWebSocketMessage =
       payload: { data: string; sequence?: number };
     }
   | {
+      /** Marks the end of the scrollback replay; every live frame follows. */
+      type: "terminal_history_end";
+      payload: { data: string; sequence?: number };
+    }
+  | {
       type: "terminal_error";
       payload: { message: string };
     };
@@ -36,6 +41,17 @@ export function parseTerminalWebSocketMessage(raw: unknown): TerminalWebSocketMe
     return {
       type: value.type,
       payload: { data: value.payload.data, ...(sequence === undefined ? {} : { sequence }) },
+    };
+  }
+  // The replay-end marker carries no terminal data; it must stay parseable
+  // even if a gateway build omits the empty data field, or the client would
+  // never flush a buffered replay.
+  if (value.type === "terminal_history_end") {
+    const sequence = value.payload.sequence;
+    if (sequence !== undefined && (typeof sequence !== "number" || !Number.isSafeInteger(sequence) || sequence <= 0)) return null;
+    return {
+      type: "terminal_history_end",
+      payload: { data: "", ...(sequence === undefined ? {} : { sequence }) },
     };
   }
   if (value.type === "terminal_exit" && typeof value.payload.exitCode === "number" && Number.isInteger(value.payload.exitCode)) {

@@ -21,12 +21,14 @@ import {
 } from "@/components/copilot/copilot-message-primitives";
 import { CopilotWelcomeState } from "@/components/copilot/copilot-empty-state";
 import { CopilotRunOptions } from "@/components/copilot/CopilotRunOptions";
-import { CopilotFollowupQueue } from "@/components/copilot/CopilotFollowupQueue";
+import { CopilotFollowupChips } from "@/components/copilot/CopilotFollowupChips";
 import { CopilotStatusBar } from "@/components/copilot/copilot-runtime-panel";
 import { CopilotApproval } from "@/components/copilot/CopilotApproval";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
 import { useCopilotChatController } from "@/hooks/use-copilot-chat-controller";
+import { useCopilotFollowups } from "@/hooks/use-copilot-followups";
+import { copilotPhaseLabel } from "@/lib/copilot-phase";
 import { GatewayApiError, listProjects, type Project } from "@/lib/api";
 import {
   createConversation,
@@ -272,10 +274,19 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
     }
     const text = (textOverride ?? controller.input).trim();
     if (!text) return;
+    // A run already owns this conversation. Rather than dropping the input or
+    // racing a second turn, queue it behind the current run; the chip list
+    // above the composer shows what is waiting.
+    if (runningRef.current) {
+      if (!conversationId) { toast.info(t("copilot.creatingConversation")); return; }
+      const queued = await enqueueRef.current(text);
+      if (queued) controller.setInput("");
+      return;
+    }
     const id = await ensureConversation();
     if (!id) return;
     await controller.send(textOverride, false);
-  }, [controller, ensureConversation]);
+  }, [controller, ensureConversation, conversationId, t]);
 
   const newChat = useCallback(() => {
     controller.advanceSelectionEpoch();
@@ -294,6 +305,19 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
 
   const isRunning = active && (active.status === "running" || active.status === "pending");
   const isBusy = Boolean(isRunning || active?.status === "awaiting_approval");
+
+  const followups = useCopilotFollowups({
+    conversationId,
+    ...(projectId ? { projectId } : {}),
+    ...(modelId ? { modelId } : {}),
+    active: isBusy,
+  });
+  const enqueueRef = useRef(followups.enqueue);
+  enqueueRef.current = followups.enqueue;
+  // Only a run that is actually executing accepts queued follow-ups; while an
+  // approval is pending the composer stays inert, as it did before.
+  const runningRef = useRef(Boolean(isRunning));
+  runningRef.current = Boolean(isRunning);
   const toolResultById = useMemo(() => indexToolResults(messages), [messages]);
   const showEmpty = !loadError && !restoring && messages.length === 0 && !active;
 
@@ -396,8 +420,12 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
           {active?.status === "awaiting_approval" && (active.pendingAction
             ? <CopilotApproval key={active.pendingAction.id} action={active.pendingAction} onDecided={reconcile} />
             : <p role="status" className="text-sm text-muted-foreground">{t("copilot.awaitingApproval")}</p>)}
-          {conversationId && <CopilotFollowupQueue active={isBusy} key={conversationId} conversationId={conversationId}
-            {...(projectId ? { projectId } : {})} {...(modelId ? { modelId } : {})} />}
+          {isRunning && (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="size-1.5 animate-pulse rounded-full bg-brand" />
+              {t(copilotPhaseLabel(active?.phase))}
+            </p>
+          )}
           {active?.thinking ? <ThinkingSection text={active.thinking} live={isRunning === true} /> : null}
           {active?.text ? (
             <StreamingMessage text={active.text} />
@@ -463,6 +491,9 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 bottom-full h-10 bg-gradient-to-t from-card via-card/80 to-transparent"
         />
+        {conversationId && (
+          <CopilotFollowupChips items={followups.items} onCancel={(id) => void followups.cancel(id)} />
+        )}
         <div
           data-testid="robot-chat-composer"
           className="flex items-end gap-1.5 rounded-xl border border-border/70 bg-card/90 px-2 py-1.5 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
@@ -477,7 +508,7 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
                 void send();
               }
             }}
-            placeholder={t("copilot.placeholder")}
+            placeholder={isRunning ? t("copilot.followups.placeholder") : t("copilot.placeholder")}
             aria-label={t("copilot.placeholder")}
             className="min-h-[32px] max-h-32 flex-1 resize-none rounded-none border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0"
             rows={1}
@@ -494,18 +525,17 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
             >
               <Square className="size-3.5" />
             </Button>
-          ) : (
-            <Button
-              size="icon"
-              className="size-7 shrink-0 rounded-full"
-              onClick={() => void send()}
-              disabled={controller.sending || savingPreferences || isBusy || !controller.input.trim()}
-              aria-label={t("copilot.send")}
-              title={t("copilot.send")}
-            >
-              <ArrowUp className="size-4" />
-            </Button>
-          )}
+          ) : null}
+          <Button
+            size="icon"
+            className="size-7 shrink-0 rounded-full"
+            onClick={() => void send()}
+            disabled={controller.sending || savingPreferences || followups.enqueuing || !controller.input.trim()}
+            aria-label={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
+            title={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
+          >
+            <ArrowUp className="size-4" />
+          </Button>
         </div>
       </div>
     </div>

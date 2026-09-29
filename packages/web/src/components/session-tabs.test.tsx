@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { LanguageProvider } from "@/hooks/use-language";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
@@ -39,10 +40,13 @@ function dispatchStatusChanged(sessionId: string, newStatus: string) {
 }
 
 function renderTabs(activeSessionId = "s1") {
+  const queryClient = new QueryClient();
   return render(
-    <LanguageProvider>
-      <SessionTabs activeSessionId={activeSessionId} />
-    </LanguageProvider>
+    <QueryClientProvider client={queryClient}>
+      <LanguageProvider>
+        <SessionTabs activeSessionId={activeSessionId} />
+      </LanguageProvider>
+    </QueryClientProvider>
   );
 }
 

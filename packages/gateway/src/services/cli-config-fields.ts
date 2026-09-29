@@ -82,12 +82,42 @@ const kimiFields: CliConfigFieldSpec[] = [
 // card is omitted; the provider + model views cover the real content.
 const piFields: CliConfigFieldSpec[] = [];
 
+/**
+ * MiniMax Code scalar knobs that are safe to surface. The provider/model
+ * entries under `custom_provider` are managed by the apply engine, so they are
+ * deliberately not exposed as field patches here.
+ */
+const mcodeFields: CliConfigFieldSpec[] = [
+  {
+    key: "defaultModel",
+    path: "defaultModel",
+    type: "string",
+    label: "Default model",
+    description: "Model id used when a session does not pick one."
+  },
+  {
+    key: "defaultModelContextWindow",
+    path: "defaultModelContextWindow",
+    type: "number",
+    label: "Context window",
+    description: "Context window in tokens."
+  },
+  {
+    key: "logLevel",
+    path: "logLevel",
+    type: "enum",
+    values: ["trace", "debug", "info", "warn", "error"],
+    label: "Log level"
+  }
+];
+
 export const cliConfigFieldCatalog: Record<AdapterId, CliConfigFieldSpec[]> = {
   claude: claudeFields,
   opencode: opencodeFields,
   codex: codexFields,
   kimi: kimiFields,
-  pi: piFields
+  pi: piFields,
+  mcode: mcodeFields
 };
 
 const maxFieldValueChars = 512;

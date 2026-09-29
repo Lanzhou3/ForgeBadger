@@ -126,6 +126,12 @@ export function TerminalView({
   const resizeHandlerRef = useRef<(() => void) | null>(null);
   const promptCaptureRef = useRef(createTerminalPromptCapture());
   const lastSentSizeRef = useRef<{ cols: number; rows: number } | null>(null);
+  /** Staged scrollback replay: history frames are buffered until the
+   *  terminal_history_end marker arrives, then applied with one reset+write
+   *  so a tab switch swaps screens in a single frame instead of filling the
+   *  old screen chunk by chunk. Live output received while buffering is
+   *  queued and written right after the replay. */
+  const replayRef = useRef<{ history: string[]; live: Array<{ data: string; sequence?: number }> } | null>(null);
   const mountedRef = useRef(true);
   const lastWheelUpAtRef = useRef(0);
   const atBottomRef = useRef(true);
@@ -218,11 +224,11 @@ export function TerminalView({
   /**
    * Fit xterm to the host and push the size to the gateway when it changed.
    * Fitting still happens with a closed socket so the canvas always matches
-   * the pane; `force` resends even when the dimensions look unchanged (used
-   * right after connect, when an earlier fit may have run before layout/CSS
-   * had fully settled and its resize message was dropped).
+   * the pane. The socket-open handler resets `lastSentSizeRef`, so the first
+   * fit after a (re)connect always sends a real size; unchanged-size
+   * ResizeObserver fires stay no-ops.
    */
-  const fitAndSendResize = useCallback((force = false) => {
+  const fitAndSendResize = useCallback(() => {
     const terminal = terminalRef.current;
     const fitAddon = fitAddonRef.current;
     if (!terminal || !fitAddon) return;
@@ -232,8 +238,7 @@ export function TerminalView({
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
 
     const last = lastSentSizeRef.current;
-    const changed = !last || last.cols !== terminal.cols || last.rows !== terminal.rows;
-    if (!force && !changed) return;
+    if (last !== null && last.cols === terminal.cols && last.rows === terminal.rows) return;
 
     const resizeMessage = createTerminalResizeMessage({
       cols: terminal.cols,
@@ -252,6 +257,9 @@ export function TerminalView({
       setStatus("disconnected");
       return;
     }
+    // A fresh attach re-sends the whole scrollback; discard any replay that
+    // was still buffered from a previous (re)connect of this instance.
+    replayRef.current = null;
 
     const socket = new WebSocket(
       terminalWebSocketUrl(sessionId),
@@ -266,7 +274,7 @@ export function TerminalView({
       setStatus("connected");
 
       lastSentSizeRef.current = null;
-      fitAndSendResize(true);
+      fitAndSendResize();
       // Layout can settle right after open (fonts, dev-mode CSS); re-fit once
       // and push any correction so the terminal window converges to the real pane.
       window.setTimeout(() => {
@@ -281,27 +289,69 @@ export function TerminalView({
       const message = parseTerminalWebSocketMessage(String(event.data));
       if (!message) return;
 
+      const ackSequence = (sequence?: number) => {
+        if (sequence === undefined) return;
+        if (!mountedRef.current || socketRef.current !== socket || socket.readyState !== WebSocket.OPEN) return;
+        socket.send(JSON.stringify({ type: "terminal_ack", payload: { sequence } }));
+      };
+
       if (message.type === "terminal_history") {
-        // Scrollback replay, always sent before the live attach stream. Reset
-        // first: on a socket reconnect the same xterm instance is reused, and
-        // replaying on top of the old buffer would duplicate every line (and,
-        // if a full-screen TUI had switched xterm to the alternate buffer,
-        // corrupt the live frame). The reset leaves a clean normal buffer for
-        // the history; the live repaint that follows paints the current UI.
-        terminal.reset();
+        // Staged scrollback replay: buffer until the terminal_history_end
+        // marker, then apply with one reset+write so the old screen is never
+        // repainted chunk by chunk. On a reconnect the same xterm instance is
+        // reused; the reset leaves a clean normal buffer for the history (a
+        // full-screen TUI may have switched xterm to the alternate buffer).
+        const replay = replayRef.current ?? (replayRef.current = { history: [], live: [] });
+        replay.history.push(message.payload.data);
+        return;
       }
 
-      if (message.type === "terminal_history" || message.type === "terminal_output") {
+      if (message.type === "terminal_history_end") {
+        const replay = replayRef.current;
+        replayRef.current = null;
+        if (replay) {
+          terminal.reset();
+          stickToBottomUnlessUserScrolled();
+          const historyData = replay.history.join("");
+          const finishHistory = () => {
+            syncAtBottom();
+            ackSequence(message.payload.sequence);
+          };
+          if (historyData) {
+            terminal.write(historyData, finishHistory);
+          } else {
+            finishHistory();
+          }
+          for (const frame of replay.live) {
+            stickToBottomUnlessUserScrolled();
+            terminal.write(frame.data, () => {
+              syncAtBottom();
+              ackSequence(frame.sequence);
+            });
+          }
+        } else {
+          ackSequence(message.payload.sequence);
+        }
+        return;
+      }
+
+      if (message.type === "terminal_output") {
+        // While the replay is staged, queue live frames — this also catches
+        // history continuation chunks, which the gateway retags as
+        // terminal_output — so nothing writes before the marker's reset.
+        if (replayRef.current !== null) {
+          replayRef.current.live.push(message.payload);
+          return;
+        }
         stickToBottomUnlessUserScrolled();
         terminal.write(message.payload.data, () => {
           syncAtBottom();
-          if (message.payload.sequence !== undefined && mountedRef.current && socketRef.current === socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: "terminal_ack", payload: { sequence: message.payload.sequence } }));
-          }
+          ackSequence(message.payload.sequence);
         });
       }
 
       if (message.type === "terminal_exit") {
+        replayRef.current = null;
         clearReconnectTimer();
         replaceTerminalInputListener(inputDisposableRef, null);
         socketRef.current = null;
@@ -629,9 +679,10 @@ export function TerminalView({
 
   const showReconnectingOverlay = status === "reconnecting";
   const showFailedOverlay = status === "failed";
-  // The status strip only earns its vertical space when something is wrong or
-  // in flux; a healthy connection stays invisible (VS Code-style chrome).
+  // The status strip floats over the terminal instead of taking flow space,
+  // so a connecting → connected flip never re-layouts the pane.
   const showStatusBar = status !== "connected";
+  const missingCredentials = !authToken || !attachToken;
   const statusTone =
     status === "connected"
       ? "bg-emerald-500"
@@ -647,54 +698,60 @@ export function TerminalView({
       data-testid="terminal-frame"
       className={cn(
         "grid h-full min-h-0 overflow-hidden bg-[#05070a]",
-        showStatusBar ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]"
+        missingCredentials ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]"
       )}
     >
-      {/* The status strip only appears while the connection is in flux or
-          broken; the output-history trigger lives in the tab strip above. */}
-      {showStatusBar && (
-        <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          <span className={cn("size-2 rounded-full", statusTone)} aria-hidden="true" />
-          <span aria-live="polite">{status}</span>
-          {attemptCount > 0 && (
-            <span className="text-amber-300">
-              {attemptCount}/{MAX_RECONNECT_ATTEMPTS}
-            </span>
-          )}
-          <span className="min-w-0 truncate font-mono">session {sessionId}</span>
-        </div>
-      )}
-      {/* Screen readers still get the connecting → connected transition even
-          though the healthy state has no visible strip. */}
-      {!showStatusBar && (
-        <span aria-live="polite" className="sr-only">
-          {status}
-        </span>
-      )}
-      {!authToken || !attachToken ? (
+      {missingCredentials && (
         <div className="p-4 text-sm text-destructive">
           {t("terminal.missingCredentials")}
         </div>
-      ) : null}
+      )}
       {/* Padding lives on the wrapper, NOT on the xterm host: FitAddon reads
           the host's computed width/height (border-box under Tailwind preflight)
           without subtracting host padding, so padding here would overshoot
           cols/rows and clip the rightmost character column. */}
       <div className="relative flex h-full min-h-0 flex-col overflow-hidden p-2">
-        {writer.readOnly && (
-          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 p-2 text-xs text-amber-300" role="status">
-            <span>
-              {writer.loading
-                ? "正在检查终端写入权限…"
-                : writer.error
-                  ? "写入状态同步失败，终端保持只读。"
-                  : "Copilot 正在操作此工作区，终端只读。"}
-            </span>
-            <Button size="sm" variant="outline" disabled={writer.loading || writer.takingOver} onClick={writer.takeover}>
-              接管终端
-            </Button>
-            <Button size="sm" variant="ghost" onClick={writer.refresh}>刷新状态</Button>
-            {writer.error && <span role="alert">{writer.error.message}</span>}
+        {/* Screen readers still get the connecting → connected transition even
+            though the healthy state has no visible strip. */}
+        {!showStatusBar && (
+          <span aria-live="polite" className="sr-only">
+            {status}
+          </span>
+        )}
+        {/* Status strip and read-only banner float as a semi-transparent
+            overlay instead of in-flow rows: a status flip must not re-layout
+            the terminal. pointer-events-none keeps the terminal interactive
+            through the gaps; the panels themselves stay clickable. */}
+        {(showStatusBar || writer.readOnly) && (
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col items-stretch gap-2 p-2">
+            {showStatusBar && (
+              <div className="pointer-events-auto flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-border bg-[#05070a]/85 px-3 py-2 text-xs text-muted-foreground">
+                <span className={cn("size-2 rounded-full", statusTone)} aria-hidden="true" />
+                <span aria-live="polite">{status}</span>
+                {attemptCount > 0 && (
+                  <span className="text-amber-300">
+                    {attemptCount}/{MAX_RECONNECT_ATTEMPTS}
+                  </span>
+                )}
+                <span className="min-w-0 truncate font-mono">session {sessionId}</span>
+              </div>
+            )}
+            {writer.readOnly && (
+              <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-[#05070a]/85 p-2 text-xs text-amber-300" role="status">
+                <span>
+                  {writer.loading
+                    ? "正在检查终端写入权限…"
+                    : writer.error
+                      ? "写入状态同步失败，终端保持只读。"
+                      : "Copilot 正在操作此工作区，终端只读。"}
+                </span>
+                <Button size="sm" variant="outline" disabled={writer.loading || writer.takingOver} onClick={writer.takeover}>
+                  接管终端
+                </Button>
+                <Button size="sm" variant="ghost" onClick={writer.refresh}>刷新状态</Button>
+                {writer.error && <span role="alert">{writer.error.message}</span>}
+              </div>
+            )}
           </div>
         )}
         <div

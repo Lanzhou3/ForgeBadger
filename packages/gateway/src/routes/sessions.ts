@@ -1,3 +1,4 @@
+import { adapterIds } from "../lib/adapter-ids.js";
 import { hasDeliveryHistory } from '../db/repositories/managed-project-access.js';
 import { PlatformActions } from "../services/platform-commands/actions.js";
 import { createPlatformCommands } from "../services/platform-commands/catalog.js";
@@ -38,7 +39,7 @@ export type { LaunchPlanInput } from "../services/session-launch-plan.js";
 
 const createSessionSchema = z.object({
   projectId: z.string().min(1),
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional()
+  aiTool: z.enum(adapterIds).optional()
 }).strict();
 
 const listSessionsQuerySchema = z.object({

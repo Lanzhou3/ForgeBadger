@@ -96,17 +96,25 @@ function skillConfigPath(name: string, adapter: AdapterId): string {
   return `${adapterConfigRoot(adapter)}/skills/${slug}/SKILL.md`;
 }
 
-export function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" | ".kimi-code" | ".pi" {
+export function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" | ".kimi-code" | ".pi" | ".mcode" {
   if (adapter === "opencode") return ".opencode";
   if (adapter === "codex") return ".codex";
   if (adapter === "kimi") return ".kimi-code";
   if (adapter === "pi") return ".pi";
+  // MiniMax Code has no project-level config.yaml; .mcode/ holds project
+  // commands and agents. ForgeBadger writes neither, so this root is only
+  // used by the skill path helper, which stays consistent with .claude/.
+  if (adapter === "mcode") return ".mcode";
   return ".claude";
 }
 
 function adaptInstructionContent(content: string, adapter: AdapterId): string {
   const adapterLabel =
-    adapter === "opencode" ? "OpenCode" : adapter === "kimi" ? "Kimi Code" : "Codex";
+    adapter === "opencode" ? "OpenCode"
+      : adapter === "kimi" ? "Kimi Code"
+      : adapter === "pi" ? "PI"
+      : adapter === "mcode" ? "MiniMax Code"
+      : "Codex";
   return content
     .replaceAll("CLAUDE.md", "AGENTS.md")
     .replaceAll("Claude Code", adapterLabel)

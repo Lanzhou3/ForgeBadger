@@ -15,6 +15,7 @@ import {
   type RuntimeAdapterId,
   type Session,
 } from "@/lib/api";
+import { useOrderedAdapters } from "@/lib/adapter-order";
 
 interface SessionLaunchDialogProps {
   projectId: string;
@@ -33,14 +34,15 @@ export function SessionLaunchDialog({ projectId, open, onOpenChange, onCreated, 
     () => (discoveryQuery.data?.adapters ?? []).filter((entry) => entry.available && entry.launchEnabled && entry.runtimeModes.includes("terminal")),
     [discoveryQuery.data?.adapters]
   );
+  const orderedLaunchableAdapters = useOrderedAdapters(launchableAdapters);
 
   useEffect(() => {
     if (!open) return;
-    const next = initialAdapter && launchableAdapters.some((entry) => entry.id === initialAdapter)
+    const next = initialAdapter && orderedLaunchableAdapters.some((entry) => entry.id === initialAdapter)
       ? initialAdapter
-      : launchableAdapters[0]?.id as RuntimeAdapterId | undefined;
+      : orderedLaunchableAdapters[0]?.id as RuntimeAdapterId | undefined;
     if (next) setAdapter(next);
-  }, [initialAdapter, launchableAdapters, open]);
+  }, [initialAdapter, orderedLaunchableAdapters, open]);
 
   const createMutation = useMutation({
     mutationFn: () => createSession({ projectId, aiTool: adapter }),

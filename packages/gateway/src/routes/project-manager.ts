@@ -1,3 +1,4 @@
+import { adapterIds } from "../lib/adapter-ids.js";
 import {mutateAssignedTask} from '../services/project-manager/tasks.js';
 import {projectManagerAccess,assertProjectManagerWrite,assertLegacyTaskExecution} from '../services/project-manager/access.js';
 import {CollaborationRepository} from '../db/repositories/collaboration-repository.js';
@@ -141,7 +142,7 @@ const taskPacketSessionLinkBodySchema = z.object({
 }).strict();
 
 const taskPacketStartBodySchema = z.object({
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional()
+  aiTool: z.enum(adapterIds).optional()
 }).strict();
 
 const workItemsQuerySchema = z.object({

@@ -26,6 +26,7 @@ const {
   updateCopilotPreferencesMock,
   listProjectsMock,
   listModelProvidersMock,
+  queueFollowupMock,
   toastErrorMock,
 } = vi.hoisted(() => ({
   createConversationMock: vi.fn(),
@@ -40,6 +41,7 @@ const {
   updateCopilotPreferencesMock: vi.fn(),
   listProjectsMock: vi.fn(),
   listModelProvidersMock: vi.fn(),
+  queueFollowupMock: vi.fn().mockResolvedValue({ followup: { id: 'q1', status: 'queued', runId: null } }),
   toastErrorMock: vi.fn(),
 }));
 
@@ -58,6 +60,8 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     getCopilotPreferences: getCopilotPreferencesMock,
     updateCopilotPreferences: updateCopilotPreferencesMock,
     listFollowups: vi.fn().mockResolvedValue({ followups: [] }),
+    queueFollowup: queueFollowupMock,
+    cancelFollowup: vi.fn().mockResolvedValue({ cancelled: true }),
   };
 });
 
@@ -613,17 +617,18 @@ describe("RobotChatPanel", () => {
     );
   });
 
-  it("shows the follow-up queue once a conversation exists", async () => {
+  it("queues a message typed while a run is in flight instead of dropping it", async () => {
     renderPanel();
 
-    // No conversation yet: the queue is not mounted.
-    expect(screen.queryByRole("textbox", { name: "后续消息" })).toBeNull();
+    // No conversation yet: nothing to queue behind.
+    expect(screen.queryByTestId("copilot-followup-chips")).toBeNull();
 
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "hi" } });
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
 
-    // Parity with the console: queued follow-ups can be enqueued in the panel.
-    expect(await screen.findByRole("textbox", { name: "后续消息" })).toBeTruthy();
+    // The run owns the conversation; the composer switches to queue mode and
+    // the placeholder tells the user their next message will wait.
+    await waitFor(() => expect(screen.getByPlaceholderText("执行中，发送将加入队列…")).toBeTruthy());
   });
 });

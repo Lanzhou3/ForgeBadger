@@ -21,6 +21,7 @@ export const LOGIN_HINT_KEYS: Record<CliAccountAdapter, TranslationKey> = {
   claude: "models.cliAccountLoginHintClaude",
   codex: "models.cliAccountLoginHintCodex",
   kimi: "models.cliAccountLoginHintKimi",
+  mcode: "models.cliAccountLoginHintMcode",
 };
 
 export const QUOTA_REASON_KEYS: Record<CliQuotaUnsupportedReason, TranslationKey> = {

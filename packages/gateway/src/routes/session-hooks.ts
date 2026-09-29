@@ -1,3 +1,4 @@
+import { adapterIds } from "../lib/adapter-ids.js";
 import { Router } from "express";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -22,7 +23,7 @@ const claudeHookEventSchema = z.object({
   body: z.string().optional(),
   title: z.string().optional(),
   tool_name: z.string().optional(),
-  adapter: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional(),
+  adapter: z.enum(adapterIds).optional(),
   reason: z.string().optional(),
   error: z.string().optional(),
   prompt: z.string().optional(),
@@ -331,6 +332,7 @@ function adapterLabel(adapter: string): string {
   if (adapter === "codex") return "Codex";
   if (adapter === "kimi") return "Kimi Code";
   if (adapter === "pi") return "PI";
+  if (adapter === "mcode") return "MiniMax Code";
   return "Claude Code";
 }
 

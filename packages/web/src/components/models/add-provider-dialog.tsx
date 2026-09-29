@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { runtimeAdapterIds } from "@/lib/api";
 import type { ProviderApiFormat, ProviderAuthType, ProviderProfile, ProviderSupportedAdapter } from "@/lib/api";
 import {
   filterProviderPresets,
@@ -47,7 +48,7 @@ const API_FORMATS: ProviderApiFormat[] = [
 
 const AUTH_TYPES: ProviderAuthType[] = ["api_key", "bearer_token", "oauth", "none"];
 
-const SUPPORTED_ADAPTERS: ProviderSupportedAdapter[] = ["claude", "opencode", "codex", "kimi", "pi"];
+const SUPPORTED_ADAPTERS: ProviderSupportedAdapter[] = [...runtimeAdapterIds];
 
 interface AddProviderDialogProps {
   open: boolean;

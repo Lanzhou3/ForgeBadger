@@ -1,7 +1,9 @@
 import { Router } from "express";
+import { z } from "zod";
 
 import { authenticate } from "../auth/middleware.js";
 import { extractBearerToken, userIsInstanceAdmin, type AuthenticatedRequest } from "../auth/middleware.js";
+import { AdapterOrderRepository } from "../db/repositories/adapter-order-repository.js";
 import type { Database } from "../db/types.js";
 import { discoverAdapters, isAdapterId } from "../services/adapter-discovery.js";
 import {
@@ -45,6 +47,8 @@ export function createAdapterRoutes(
     inFlight = undefined;
   }
 
+  const adapterOrderSchema = z.object({ order: z.array(z.string()).max(32) });
+
   router.get("/discovery", async (_req, res) => {
     const adapters = await discoverAdapters(undefined, sessionManager?.terminalBackendHealth());
     res.json({
@@ -60,6 +64,33 @@ export function createAdapterRoutes(
     const canUpdate = !!db && userIsInstanceAdmin(db, userId);
     const updates = await readUpdates(canUpdate && req.query.refresh === "true");
     res.json({ code: 0, data: { updates, canUpdate, canInstall: canUpdate }, message: "" });
+  });
+
+  router.get("/order", (req, res) => {
+    const db = req.app.locals.db as Database | undefined;
+    if (!db) {
+      res.status(503).json({ code: 1, message: "Database unavailable" });
+      return;
+    }
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const order = new AdapterOrderRepository(db, userId).get();
+    res.json({ code: 0, data: { order }, message: "" });
+  });
+
+  router.put("/order", (req, res) => {
+    const db = req.app.locals.db as Database | undefined;
+    if (!db) {
+      res.status(503).json({ code: 1, message: "Database unavailable" });
+      return;
+    }
+    const parsed = adapterOrderSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ code: 1, message: "Invalid adapter order" });
+      return;
+    }
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const order = new AdapterOrderRepository(db, userId).set(parsed.data.order);
+    res.json({ code: 0, data: { order }, message: "" });
   });
 
   router.post("/:adapterId/update", async (req, res) => {

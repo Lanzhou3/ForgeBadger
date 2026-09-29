@@ -1,3 +1,4 @@
+import { adapterIds } from "../lib/adapter-ids.js";
 import { canUseProjectPath, hasDeliveryHistory } from '../db/repositories/managed-project-access.js';
 import { randomUUID } from "node:crypto";
 import { PlatformActions } from "../services/platform-commands/actions.js";
@@ -43,7 +44,7 @@ export {
   buildProjectConfigRenderPlan
 } from "../services/project-config-render.js";
 
-const aiToolSchema = z.enum(["claude", "opencode", "codex", "kimi", "pi"]);
+const aiToolSchema = z.enum(adapterIds);
 
 const createProjectSchema = z.object({
   name: z.string().min(1),
@@ -84,7 +85,7 @@ const configComplianceQuerySchema = z.object({
 const aiConfigWriteSchema = z.object({
   relativePath: z.string().min(1).max(512),
   content: z.string().max(128 * 1024),
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi"]).optional()
+  aiTool: z.enum(adapterIds).optional()
 });
 
 const aiConfigQuerySchema = z.object({

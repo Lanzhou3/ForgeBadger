@@ -1,8 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Cpu, Download, RefreshCw } from "lucide-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, Cpu, Download, GripVertical, RefreshCw } from "lucide-react";
 
 import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { CliBrandChip } from "@/components/cli-brand-chip";
@@ -17,11 +33,13 @@ import {
   discoverAdapters,
   getDependencies,
   installAdapter,
+  putAdapterOrder,
   updateAdapter,
   type AdapterDiscovery,
   type AdapterUpdateStatus,
   type RuntimeAdapterId,
 } from "@/lib/api";
+import { ADAPTER_ORDER_QUERY_KEY, useOrderedAdapters } from "@/lib/adapter-order";
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +55,7 @@ export function AdapterSettings() {
   const [updateRefreshError, setUpdateRefreshError] = useState(false);
   const [updateFeedback, setUpdateFeedback] = useState<Partial<Record<RuntimeAdapterId, "done" | "behind" | "failed">>>({});
   const [installFeedback, setInstallFeedback] = useState<Partial<Record<RuntimeAdapterId, "done" | "not_detected" | "failed">>>({});
+  const [orderSaveFailed, setOrderSaveFailed] = useState(false);
 
   const {
     data: adapterData,
@@ -68,6 +87,37 @@ export function AdapterSettings() {
     queryKey: ["dependencies"],
     queryFn: getDependencies,
   });
+
+  const orderedAdapters = useOrderedAdapters(adapterData?.adapters ?? []);
+  const dragSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+  const orderMutation = useMutation({
+    mutationFn: (order: RuntimeAdapterId[]) => putAdapterOrder(order),
+    onMutate: async (order) => {
+      await queryClient.cancelQueries({ queryKey: ADAPTER_ORDER_QUERY_KEY });
+      const previous = queryClient.getQueryData<{ order: RuntimeAdapterId[] }>(ADAPTER_ORDER_QUERY_KEY);
+      queryClient.setQueryData(ADAPTER_ORDER_QUERY_KEY, { order });
+      setOrderSaveFailed(false);
+      return { previous };
+    },
+    onError: (_error, _order, context) => {
+      queryClient.setQueryData(ADAPTER_ORDER_QUERY_KEY, context?.previous ?? { order: [] });
+      setOrderSaveFailed(true);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ADAPTER_ORDER_QUERY_KEY }),
+  });
+
+  function handleAdapterDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const ids = orderedAdapters.map((adapter) => adapter.id);
+    const from = ids.indexOf(active.id as RuntimeAdapterId);
+    const to = ids.indexOf(over.id as RuntimeAdapterId);
+    if (from < 0 || to < 0) return;
+    orderMutation.mutate(arrayMove(ids, from, to));
+  }
 
   async function handleDependencyRefresh() {
     setRefreshingUpdates(true);
@@ -237,26 +287,45 @@ export function AdapterSettings() {
             <p className="text-xs text-muted-foreground">
               {t("settings.adapterReadinessNotice")}
             </p>
-            <div className="space-y-2">
-              {adapterData?.adapters.map((adapter) => (
-                <AdapterItem
-                  key={adapter.id}
-                  adapter={adapter}
-                  update={updateRefreshError ? undefined : adapterUpdates?.updates.find((item) => item.id === adapter.id)}
-                  canUpdate={adapterUpdates?.canUpdate ?? false}
-                  canInstall={adapterUpdates?.canInstall ?? false}
-                  checkingUpdate={updatesFetching || refreshingUpdates}
-                  updateCheckFailed={updatesError || updateRefreshError}
-                  updating={updatingAdapter === adapter.id}
-                  installing={installingAdapter === adapter.id}
-                  operationBlocked={updatingAdapter !== null || installingAdapter !== null}
-                  feedback={updateFeedback[adapter.id]}
-                  installFeedback={installFeedback[adapter.id]}
-                  onUpdate={() => void handleAdapterUpdate(adapter.id)}
-                  onInstall={() => void handleAdapterInstall(adapter.id)}
-                />
-              ))}
-            </div>
+            <p className="text-xs text-muted-foreground">
+              {t("settings.adapterOrderHint")}
+            </p>
+            {orderSaveFailed && (
+              <p role="status" className="text-xs text-destructive">
+                {t("settings.adapterOrderSaveFailed")}
+              </p>
+            )}
+            <DndContext
+              sensors={dragSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleAdapterDragEnd}
+            >
+              <SortableContext
+                items={orderedAdapters.map((adapter) => adapter.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="space-y-2">
+                  {orderedAdapters.map((adapter) => (
+                    <SortableAdapterItem
+                      key={adapter.id}
+                      adapter={adapter}
+                      update={updateRefreshError ? undefined : adapterUpdates?.updates.find((item) => item.id === adapter.id)}
+                      canUpdate={adapterUpdates?.canUpdate ?? false}
+                      canInstall={adapterUpdates?.canInstall ?? false}
+                      checkingUpdate={updatesFetching || refreshingUpdates}
+                      updateCheckFailed={updatesError || updateRefreshError}
+                      updating={updatingAdapter === adapter.id}
+                      installing={installingAdapter === adapter.id}
+                      operationBlocked={updatingAdapter !== null || installingAdapter !== null}
+                      feedback={updateFeedback[adapter.id]}
+                      installFeedback={installFeedback[adapter.id]}
+                      onUpdate={() => void handleAdapterUpdate(adapter.id)}
+                      onInstall={() => void handleAdapterInstall(adapter.id)}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
           </>
         )}
       </CardContent>
@@ -264,10 +333,7 @@ export function AdapterSettings() {
   );
 }
 
-function AdapterItem({
-  adapter, update, canUpdate, canInstall, checkingUpdate, updateCheckFailed,
-  updating, installing, operationBlocked, feedback, installFeedback, onUpdate, onInstall,
-}: {
+interface AdapterItemProps {
   adapter: AdapterDiscovery;
   update?: AdapterUpdateStatus;
   canUpdate: boolean;
@@ -281,7 +347,43 @@ function AdapterItem({
   installFeedback?: "done" | "not_detected" | "failed";
   onUpdate: () => void;
   onInstall: () => void;
-}) {
+}
+
+function SortableAdapterItem(props: AdapterItemProps) {
+  const { t } = useLanguage();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: props.adapter.id,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+        transition: transition ?? undefined,
+      }}
+      className={cn("flex items-start gap-1", isDragging && "relative z-10 opacity-80")}
+    >
+      <button
+        type="button"
+        aria-label={t("settings.adapterOrderDragHandle")}
+        className="mt-3 shrink-0 cursor-grab touch-none rounded p-0.5 text-muted-foreground hover:text-foreground active:cursor-grabbing"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="size-4" />
+      </button>
+      <div className="min-w-0 flex-1">
+        <AdapterItem {...props} />
+      </div>
+    </div>
+  );
+}
+
+function AdapterItem({
+  adapter, update, canUpdate, canInstall, checkingUpdate, updateCheckFailed,
+  updating, installing, operationBlocked, feedback, installFeedback, onUpdate, onInstall,
+}: AdapterItemProps) {
   const { t } = useLanguage();
 
   return (

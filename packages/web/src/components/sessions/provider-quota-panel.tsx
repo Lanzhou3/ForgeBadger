@@ -20,6 +20,7 @@ import {
 import { useLanguage } from "@/hooks/use-language";
 import {
   checkProviderBalance,
+  CLI_ACCOUNT_ADAPTERS,
   getCliAccount,
   getAppliedProviderForAdapter,
   refreshCliAccountQuota,
@@ -27,6 +28,7 @@ import {
   type CliLoginStatus,
   type CliQuotaResult,
   type ProviderBalanceEntry,
+  runtimeAdapterIds,
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -36,14 +38,16 @@ interface Props {
 }
 
 const REFRESH_INTERVAL_MS = 60_000;
-const KNOWN_TOOLS = new Set(["claude", "opencode", "codex", "kimi", "pi"]);
+const KNOWN_TOOLS = new Set<string>(runtimeAdapterIds);
 
 export function ProviderQuotaPanel({ aiTool }: Props) {
   const { t } = useLanguage();
   const knownTool = KNOWN_TOOLS.has(aiTool);
-  // Only these CLIs expose a native login quota through the gateway.
+  // Only CLIs with a native login/quota surface are probed by the gateway.
+  // Derived from one list so a new adapter does not need a second edit here
+  // (opencode and pi have no account surface, so they stay excluded).
   const nativeAdapter: CliAccountAdapter | null =
-    aiTool === "claude" || aiTool === "codex" || aiTool === "kimi" ? aiTool : null;
+    CLI_ACCOUNT_ADAPTERS.includes(aiTool as CliAccountAdapter) ? (aiTool as CliAccountAdapter) : null;
 
   const appliedQuery = useQuery({
     queryKey: ["applied-provider", aiTool],
@@ -96,28 +100,25 @@ export function ProviderQuotaPanel({ aiTool }: Props) {
   const nativeBlockLabel = dualMode
     ? `${t("sessions.providerQuotaNative")}${nativeMethod ? ` · ${nativeMethod}` : ""}`
     : null;
-  // Native refresh button: visible for a ready login, and in the no-provider
-  // fallback also for not-logged-in CLIs (refreshing re-checks the login).
+  // Native refresh eligibility: a ready login can always be refreshed, and in
+  // the no-provider fallback a not-logged-in CLI can too (refreshing
+  // re-checks the login).
   const nativeRefreshVisible =
     nativeAdapter !== null &&
     nativeLogin !== null &&
     (nativeLogin.state === "ready" || (!providerBlockVisible && nativeLogin.state === "not_authenticated"));
-  // With both sources visible the refresh buttons need per-source labels to
-  // stay distinguishable; a single source keeps the original neutral label.
-  const providerRefreshLabel = dualMode
-    ? t("sessions.providerQuotaRefreshProvider")
-    : t("sessions.providerQuotaRefresh");
-  const nativeRefreshLabel = dualMode
-    ? t("sessions.providerQuotaRefreshNative")
-    : t("sessions.providerQuotaRefresh");
 
-  const handleRefreshNative = () => {
-    if (!nativeAdapter) return;
-    setRefreshingNative(true);
-    refreshCliAccountQuota(nativeAdapter)
-      .then(() => nativeQuery.refetch())
-      .catch(() => toast.error(t("models.cliAccountQuotaRefreshFailed")))
-      .finally(() => setRefreshingNative(false));
+  // One header refresh button updates every visible source at once: the
+  // applied provider balance and the native login quota.
+  const handleRefreshAll = () => {
+    if (providerId) void balanceQuery.refetch();
+    if (nativeAdapter && nativeRefreshVisible) {
+      setRefreshingNative(true);
+      refreshCliAccountQuota(nativeAdapter)
+        .then(() => nativeQuery.refetch())
+        .catch(() => toast.error(t("models.cliAccountQuotaRefreshFailed")))
+        .finally(() => setRefreshingNative(false));
+    }
   };
 
   if (!knownTool) return null;
@@ -150,30 +151,17 @@ export function ProviderQuotaPanel({ aiTool }: Props) {
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {providerId ? (
+          {providerId || nativeRefreshVisible ? (
             <Button
               variant="ghost"
               size="icon"
               className="size-6 shrink-0 text-muted-foreground"
-              disabled={refreshing}
-              onClick={() => void balanceQuery.refetch()}
-              aria-label={providerRefreshLabel}
-              title={providerRefreshLabel}
+              disabled={refreshing || refreshingNative}
+              onClick={handleRefreshAll}
+              aria-label={t("sessions.providerQuotaRefresh")}
+              title={t("sessions.providerQuotaRefresh")}
             >
-              <RefreshCw className={cn("size-3", refreshing && "animate-spin")} />
-            </Button>
-          ) : null}
-          {nativeRefreshVisible ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-6 shrink-0 text-muted-foreground"
-              disabled={refreshingNative}
-              onClick={handleRefreshNative}
-              aria-label={nativeRefreshLabel}
-              title={nativeRefreshLabel}
-            >
-              <RefreshCw className={cn("size-3", refreshingNative && "animate-spin")} />
+              <RefreshCw className={cn("size-3", (refreshing || refreshingNative) && "animate-spin")} />
             </Button>
           ) : null}
         </div>

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import { checkAdapterCommand, runCommand, type CommandRunner } from "../lib/dependency-check.js";
+import { adapterIds } from "../lib/adapter-ids.js";
 import { getAdapterDefinition, type AdapterId } from "./adapter-discovery.js";
 import { assertResolvedPublicHttpsEndpoint, type OutboundHostResolver } from "./network-policy.js";
 
@@ -51,15 +52,46 @@ export class AdapterUpdateError extends Error {
   }
 }
 
-const updateConfig: Record<AdapterId, { npmPackage: string; args: string[]; installArgs: string[]; minNode?: string }> = {
+interface AdapterUpdateConfig {
+  npmPackage: string;
+  args: string[];
+  installArgs: string[];
+  minNode?: string;
+  /**
+   * Human-readable engines range. The check itself only enforces `minNode`, so
+   * this is what the user is shown when the host Node cannot run the CLI.
+   */
+  nodeRange?: string;
+}
+
+const updateConfig: Record<AdapterId, AdapterUpdateConfig> = {
   claude: { npmPackage: "@anthropic-ai/claude-code", args: ["update"], installArgs: ["install", "-g", "@anthropic-ai/claude-code"] },
   opencode: { npmPackage: "opencode-ai", args: ["upgrade"], installArgs: ["install", "-g", "opencode-ai"] },
   codex: { npmPackage: "@openai/codex", args: ["update"], installArgs: ["install", "-g", "@openai/codex"] },
   kimi: { npmPackage: "@moonshot-ai/kimi-code", args: ["upgrade", "--yes"], installArgs: ["install", "-g", "@moonshot-ai/kimi-code"], minNode: "22.19.0" },
-  pi: { npmPackage: "@earendil-works/pi-coding-agent", args: ["update", "--self"], installArgs: ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"], minNode: "22.19.0" }
+  pi: { npmPackage: "@earendil-works/pi-coding-agent", args: ["update", "--self"], installArgs: ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"], minNode: "22.19.0" },
+  // MiniMax Code ships `@minimax-ai/code` and self-updates with `mcode
+  // update`. better-sqlite3 is an optional native dependency, so the install
+  // must opt into optional packages AND approve exactly those two lifecycle
+  // scripts — npm 12 blocks unapproved scripts by default and the CLI then
+  // fails at startup with a missing-better_sqlite3.node binding. The explicit
+  // registry also matters for mirrors.
+  mcode: {
+    npmPackage: "@minimax-ai/code",
+    args: ["update"],
+    installArgs: [
+      "install", "-g", "@minimax-ai/code",
+      "--registry=https://registry.npmjs.org/",
+      "--ignore-scripts=false",
+      "--include=optional",
+      "--allow-scripts=@minimax-ai/code,better-sqlite3"
+    ],
+    minNode: "22.19.0",
+    nodeRange: ">=22.19.0 <23 || >=24.2.0 <27"
+  }
 };
 
-const ADAPTER_IDS: AdapterId[] = ["claude", "opencode", "codex", "kimi", "pi"];
+const ADAPTER_IDS: AdapterId[] = [...adapterIds];
 const VERSION_PATTERN = /(?:^|[^\d])v?(\d+)\.(\d+)\.(\d+)(?:-([\da-z.-]+))?/i;
 let cliOperationInProgress = false;
 
@@ -177,7 +209,11 @@ export async function installAdapter(
     if (before.available) throw new AdapterUpdateError("CLI is already installed", 409);
     if (before.checkFailed) throw new AdapterUpdateError("CLI installation state could not be verified", 503);
     if (await requiredNodeVersion(id, dependencies)) {
-      throw new AdapterUpdateError(`CLI npm installation requires Node.js ${updateConfig[id].minNode} or later`, 409);
+      const range = updateConfig[id].nodeRange;
+      throw new AdapterUpdateError(
+        `CLI npm installation requires Node.js ${range ?? `${updateConfig[id].minNode} or later`}`,
+        409
+      );
     }
     const npm = await checkAdapterCommand("npm", ["--version"], dependencies.runner, {
       timeoutMs: 10_000,

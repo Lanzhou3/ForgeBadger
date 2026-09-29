@@ -91,15 +91,15 @@ it("keeps other mouse-reporting CLIs on xterm's existing wheel path", async () =
 });
 it("ACKs each frame only after xterm consumption and ignores callbacks after unmount", async () => {
   const { view, socket } = await start();
-  act(() => { socket.message("terminal_history", { data: "history", sequence: 1 }); socket.message("terminal_output", { data: "live", sequence: 2 }); });
+  act(() => { socket.message("terminal_history", { data: "history", sequence: 1 }); socket.message("terminal_history_end", { data: "", sequence: 2 }); socket.message("terminal_output", { data: "live", sequence: 3 }); });
   expect(terminal.reset).toHaveBeenCalledOnce();
   expect(terminal.write.mock.calls.map(call => call[0])).toEqual(["history", "live"]);
   expect(socket.send.mock.calls.some(call => String(call[0]).includes("terminal_ack"))).toBe(false);
   act(() => terminal.write.mock.calls[0]![1]());
-  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 1 } }));
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 2 } }));
   view.unmount();
   terminal.write.mock.calls[1]![1]();
-  expect(socket.send).not.toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 2 } }));
+  expect(socket.send).not.toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 3 } }));
 });
 it.each([1011, 4001])("reconnects temporary close code %s despite a clean handshake", async code => {
   const { socket } = await start();
@@ -162,4 +162,50 @@ it("shows a back-to-bottom control while detached and clicking it restores the b
   act(() => button.click());
   expect(terminal.scrollToBottom).toHaveBeenCalledOnce();
   expect(screen.queryByText("terminal.backToBottom")).toBeNull();
+});
+
+it("stages the replay until the marker, then applies it in order with per-frame ACKs", async () => {
+  const { socket } = await start();
+  act(() => { socket.message("terminal_history", { data: "abcd", sequence: 1 }); socket.message("terminal_output", { data: "ef", sequence: 2 }); });
+  expect(terminal.reset).not.toHaveBeenCalled();
+  expect(terminal.write).not.toHaveBeenCalled();
+  act(() => { socket.message("terminal_history_end", { data: "", sequence: 3 }); socket.message("terminal_output", { data: "live", sequence: 4 }); });
+  expect(terminal.reset).toHaveBeenCalledOnce();
+  expect(terminal.write.mock.calls.map(call => call[0])).toEqual(["abcd", "ef", "live"]);
+  act(() => terminal.write.mock.calls[0]![1]());
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 3 } }));
+  act(() => terminal.write.mock.calls[1]![1]());
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 2 } }));
+  act(() => terminal.write.mock.calls[2]![1]());
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 4 } }));
+});
+it("drops a staged replay when the process exits before the marker", async () => {
+  const { socket } = await start();
+  act(() => { socket.message("terminal_history", { data: "history", sequence: 1 }); socket.message("terminal_exit", { exitCode: 0 }); });
+  expect(terminal.write).not.toHaveBeenCalled();
+  expect(terminal.reset).not.toHaveBeenCalled();
+  expect(screen.getByText("disconnected")).toBeTruthy();
+});
+it("replays the staged snapshot again on a replacement connection", async () => {
+  const { view, socket } = await start();
+  act(() => { socket.message("terminal_history", { data: "history-1", sequence: 1 }); socket.message("terminal_history_end", { data: "", sequence: 2 }); socket.message("terminal_output", { data: "live-1", sequence: 3 }); });
+  expect(terminal.write.mock.calls.map(call => call[0])).toEqual(["history-1", "live-1"]);
+  view.unmount();
+  renderTerminalView({ sessionId: "s", authToken: "a", attachToken: "t" });
+  await waitFor(() => expect(Socket.instances).toHaveLength(2));
+  const replacement = Socket.instances[1]!;
+  act(() => replacement.dispatchEvent(new Event("open")));
+  act(() => { replacement.message("terminal_history", { data: "history-2", sequence: 1 }); replacement.message("terminal_history_end", { data: "", sequence: 2 }); replacement.message("terminal_output", { data: "live-2", sequence: 3 }); });
+  expect(terminal.write.mock.calls.map(call => call[0])).toEqual(["history-1", "live-1", "history-2", "live-2"]);
+  expect(terminal.reset).toHaveBeenCalledTimes(2);
+});
+it("keeps the frame layout stable when the status flips to connected", async () => {
+  renderTerminalView({ sessionId: "s", authToken: "a", attachToken: "t" });
+  await waitFor(() => expect(Socket.instances).toHaveLength(1));
+  const socket = Socket.instances[0]!;
+  expect(screen.getByText("connecting")).toBeTruthy();
+  const frameBefore = screen.getByTestId("terminal-frame").className;
+  act(() => socket.dispatchEvent(new Event("open")));
+  expect(screen.queryByText("connecting")).toBeNull();
+  expect(screen.getByTestId("terminal-frame").className).toBe(frameBefore);
 });

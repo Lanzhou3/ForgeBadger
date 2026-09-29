@@ -7,6 +7,7 @@ import type { AdapterId } from "./adapter-discovery.js";
 import { atomicWriteConfig } from "./cli-config-fs.js";
 import { globalConfigRoot } from "./cli-config-target.js";
 import { maskSecrets } from "./cli-config-apply.js";
+import { loadYamlConfig, serializeYamlPreservingComments } from "./cli-config-yaml.js";
 import {
   findCliConfigField,
   listCliConfigFields,
@@ -63,7 +64,7 @@ const aliasPattern = /^[A-Za-z0-9][A-Za-z0-9_./-]{0,127}$/u;
 interface CliConfigMeta {
   mainFile: string;
   editableFiles: string[];
-  fileType: "json" | "toml";
+  fileType: "json" | "toml" | "yaml";
   configRoot: () => string;
 }
 
@@ -99,6 +100,15 @@ const cliConfigMeta: Record<AdapterId, CliConfigMeta> = {
     editableFiles: ["models.json", "settings.json"],
     fileType: "json",
     configRoot: () => globalConfigRoot("pi")
+  },
+  mcode: {
+    mainFile: "config.yaml",
+    // Only config.yaml is managed. `auth.json` / `auth-state.json` /
+    // `auth.lock` belong to the CLI's own OAuth flow, and `agents/.builtin`,
+    // `sessions/`, `plugins/` are its runtime state.
+    editableFiles: ["config.yaml"],
+    fileType: "yaml",
+    configRoot: () => globalConfigRoot("mcode")
   }
 };
 
@@ -237,6 +247,25 @@ export async function upsertCliProvider(
         }
         providers[providerId] = next;
       });
+    case "mcode":
+      return mutateMcodeConfig((doc) => {
+        const providers = ensureRecord(doc, "custom_provider");
+        const existing = asRecord(providers[providerId]);
+        const options: Record<string, unknown> = { ...asRecord(existing?.options) };
+        if (input.baseUrl !== undefined) options.baseURL = input.baseUrl;
+        if (input.envKey !== undefined) options.apiKey = input.envKey;
+        options.authMode = "api-key";
+        const models = { ...asRecord(existing?.models) };
+        providers[providerId] = {
+          ...existing,
+          name: input.name ?? providerId,
+          kind: "custom",
+          enabled: true,
+          api: mcodeApiNameForProtocol(input.protocol),
+          options,
+          models
+        };
+      });
   }
 }
 
@@ -289,6 +318,16 @@ export async function removeCliProvider(adapter: AdapterId, providerId: string):
       });
     case "pi":
       return removePiProvider(providerId);
+    case "mcode":
+      return mutateMcodeConfig((doc) => {
+        const providers = asRecord(doc.custom_provider);
+        if (!providers) return;
+        delete providers[providerId];
+        if (typeof doc.defaultModel === "string"
+          && doc.defaultModel.startsWith(`custom_provider:${providerId}/`)) {
+          delete doc.defaultModel;
+        }
+      });
   }
 }
 
@@ -435,6 +474,22 @@ export async function setCliDefaultModel(
         }
         doc.defaultModel = bareModel;
       });
+    case "mcode":
+      return mutateMcodeConfig((doc) => {
+        // A custom provider must be addressed as
+        // `custom_provider:<key>/<modelId>`; the bare form only resolves inside
+        // the bundled registry. Accept an alias that already carries the
+        // prefix, or build it from providerId + model.
+        const next = model.startsWith("custom_provider:")
+          ? model
+          : providerId
+            ? `custom_provider:${providerId}/${model}`
+            : model;
+        if (providerId) {
+          assertValidId(providerId, "provider id");
+        }
+        doc.defaultModel = next;
+      });
   }
 }
 
@@ -545,7 +600,44 @@ async function parseMainConfig(adapter: AdapterId): Promise<{
   if (adapter === "claude") return describeClaude(doc);
   if (adapter === "opencode") return describeOpenCode(doc);
   if (adapter === "codex") return describeCodex(doc);
+  if (adapter === "mcode") return describeMcode(doc);
   return describeKimi(doc);
+}
+
+/**
+ * MiniMax Code snapshot. Third-party providers live under
+ * `custom_provider`; the `provider` key is the CLI's bundled inference
+ * registry and is intentionally not surfaced as a switchable provider.
+ * Custom models are referenced as `custom_provider:<key>/<modelId>`.
+ */
+function describeMcode(doc: ConfigDoc) {
+  const defaultModel = stringValue(doc.defaultModel);
+  const providers: CliProviderEntry[] = [];
+  const models: CliModelEntry[] = [];
+  for (const [key, value] of Object.entries(asRecord(doc.custom_provider) ?? {})) {
+    const entry = asRecord(value) ?? {};
+    if (entry.enabled === false) continue;
+    const options = asRecord(entry.options) ?? {};
+    const baseUrl = stringValue(options.baseURL);
+    const hasApiKey = Boolean(stringValue(options.apiKey));
+    if (!baseUrl || !hasApiKey) continue;
+    providers.push({
+      id: key,
+      name: stringValue(entry.name) || key,
+      protocol: stringValue(entry.api) || "anthropic-messages",
+      baseUrl,
+      hasApiKey,
+      isActive: defaultModel.startsWith(`custom_provider:${key}/`)
+    });
+    for (const modelId of Object.keys(asRecord(entry.models) ?? {})) {
+      models.push({
+        alias: `custom_provider:${key}/${modelId}`,
+        provider: key,
+        modelId
+      });
+    }
+  }
+  return { providers, models, defaultModel };
 }
 
 function describeClaude(doc: ConfigDoc) {
@@ -763,20 +855,46 @@ async function mutateMainConfig(adapter: AdapterId, mutate: (doc: ConfigDoc) => 
   mutate(doc);
   const serialized = meta.fileType === "json"
     ? `${JSON.stringify(doc, null, 2)}\n`
-    : stringifyToml(doc);
+    : meta.fileType === "yaml"
+      // Replay onto the original document so comments and unknown keys survive.
+      ? serializeYamlPreservingComments(content ?? "", doc)
+      : stringifyToml(doc);
   await writeConfigFile(root, meta.mainFile, serialized);
   return readCliConfig(adapter);
 }
 
-function parseConfigDoc(fileType: "json" | "toml", content: string): ConfigDoc {
+/**
+ * MiniMax Code's config.yaml is a single global file, so this is
+ * `mutateMainConfig` with a YAML round-trip that keeps the comments and unknown
+ * top-level keys the CLI itself preserves.
+ */
+async function mutateMcodeConfig(mutate: (doc: ConfigDoc) => void): Promise<CliConfigSnapshot> {
+  return mutateMainConfig("mcode", mutate);
+}
+
+/**
+ * MiniMax Code API format names, verified against @minimax-ai/code 0.4.12.
+ * Unknown protocols fall back to the Anthropic Messages shape, which is what
+ * the CLI itself defaults to when `api` is absent.
+ */
+function mcodeApiNameForProtocol(
+  protocol: string | undefined
+): "anthropic-messages" | "openai-responses" | "openai-completions" {
+  if (protocol?.includes("openai-responses")) return "openai-responses";
+  if (protocol?.includes("openai")) return "openai-completions";
+  return "anthropic-messages";
+}
+
+function parseConfigDoc(fileType: "json" | "toml" | "yaml", content: string): ConfigDoc {
   try {
+    if (fileType === "yaml") return loadYamlConfig(content).root;
     const parsed = fileType === "json" ? JSON.parse(content) : parseToml(content);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error("Config root must be an object");
     }
     return parsed as ConfigDoc;
   } catch (error) {
-    const label = fileType === "json" ? "JSON" : "TOML";
+    const label = fileType === "json" ? "JSON" : fileType === "toml" ? "TOML" : "YAML";
     throw new Error(`Global config file is not valid ${label}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

@@ -1,3 +1,4 @@
+import { adapterIds } from "../lib/adapter-ids.js";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -26,7 +27,7 @@ const createTemplateSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   version: z.string().optional(),
-  adapter: z.enum(["claude", "opencode", "codex", "kimi"]).optional(),
+  adapter: z.enum(adapterIds).optional(),
   visibility: z.enum(["private", "shared", "admin"]).optional(),
   files: z.array(templateFileSchema).optional()
 });
@@ -35,7 +36,7 @@ const updateTemplateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   version: z.string().optional(),
-  adapter: z.enum(["claude", "opencode", "codex", "kimi"]).nullable().optional(),
+  adapter: z.enum(adapterIds).nullable().optional(),
   visibility: z.enum(["private", "shared", "admin"]).optional(),
   status: z.string().optional()
 });

@@ -199,6 +199,11 @@ describe("terminal WS attach on session-server", () => {
       ws.send(JSON.stringify({ type: "terminal_input", payload: { data: "echo live-marker\n" } }));
       await pollFrames(() => frames.some((f) => f.type === "terminal_output" && f.data.includes("live-marker")));
 
+      const endIndex = frames.findIndex((f) => f.type === "terminal_history_end");
+      assert.ok(endIndex > 0, "replay must end with a terminal_history_end marker frame");
+      const firstLive = frames.findIndex((f) => f.type === "terminal_output");
+      assert.ok(firstLive > endIndex, "live output must follow the marker, not interleave with the replay");
+
       const historyCount = frames.filter((f) => f.type === "terminal_history").length;
       assert.equal(historyCount, 1, "history must be replayed exactly once");
       const liveHistEcho = frames

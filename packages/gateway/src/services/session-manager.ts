@@ -132,7 +132,8 @@ const DEFAULT_PROGRAMMATIC_SETTLE_MS: Readonly<Record<AdapterId, number>> = Obje
   opencode: 150,
   codex: 350,
   kimi: 150,
-  pi: 150
+  pi: 150,
+  mcode: 150
 });
 
 /**
