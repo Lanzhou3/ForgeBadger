@@ -37,8 +37,9 @@ describe("runtimeAdapterIds", () => {
   it("resolves MiniMax Code by its adapter id", () => {
     const brand = getCliBrand("mcode");
     expect(brand.label).toBe("MiniMax Code");
-    // Accent is the official gradient's start stop (#E2167E), not a placeholder.
-    expect(brand.color).toBe("#e2167e");
+    // Accent is the product's own brand blue (#68C0FF, from the CLI's
+    // built-in TUI "minimax" theme), not a placeholder.
+    expect(brand.color).toBe("#68c0ff");
   });
 
   it("still falls back for an unknown adapter instead of throwing", () => {

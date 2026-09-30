@@ -277,9 +277,15 @@ function SessionTabItem({
           }
           style={{ backgroundColor: brand.color }}
         />
-        {/* Official CLI logo; fall back to the text short label for unknown CLIs. */}
+        {/* Official CLI logo; fall back to the text short label for unknown CLIs.
+            mcode renders its full app-icon tile (blue tile + white card + thin
+            frame), so it gets one size step up here to match the visual weight
+            of the filled single-color marks at this small slot. */}
         {brand.id !== "unknown" ? (
-          <CliBrandIcon aiTool={tab.aiTool} className="size-3" />
+          <CliBrandIcon
+            aiTool={tab.aiTool}
+            className={brand.id === "mcode" ? "size-3.5" : "size-3"}
+          />
         ) : (
           <span
             className="text-[10px] font-semibold uppercase tracking-wider"

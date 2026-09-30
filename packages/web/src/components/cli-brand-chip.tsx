@@ -20,7 +20,12 @@ export function CliBrandChip({ aiTool, className }: Props) {
       {brand.id === "unknown" ? (
         <span className="size-1.5 rounded-full" style={{ backgroundColor: brand.color }} />
       ) : (
-        <CliBrandIcon aiTool={aiTool} className="size-3" />
+        // mcode's app-icon tile reads smaller than the filled marks, so it
+        // gets one size step up in this 12px chip.
+        <CliBrandIcon
+          aiTool={aiTool}
+          className={brand.id === "mcode" ? "size-3.5" : "size-3"}
+        />
       )}
       {brand.label}
     </span>

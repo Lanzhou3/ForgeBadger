@@ -1,4 +1,4 @@
-import { createElement, useId, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { getCliBrand, type CliBrandId } from "@/lib/cli-brand";
 import { cn } from "@/lib/utils";
@@ -25,18 +25,19 @@ interface Props {
  *            (OpenCode square mark, intentionally monochrome/grayscale)
  * - PI:      https://pi.dev/logo-auto.svg
  *            (official PI π mark from pi.dev, three-color)
- * - mcode:   https://unpkg.com/@lobehub/icons-static-svg/icons/minimax-color.svg
- *            (official MiniMax mark, magenta→coral gradient; rendered by
- *            MiniMaxMark because a gradient needs a per-instance id)
+ * - mcode:   the official MiniMax Code app icon (favicon_v2.png on
+ *            agent.minimax.io/download; the docs-site logo is the same
+ *            mark, monochrome). Three layers, all official geometry: a
+ *            #7DC6FF rounded tile, a white card, and the black "terminal
+ *            card" frame with two legs. The glyph paths are the official
+ *            docs-logo vector (mintcdn.com/agent-cn/.../logo/dark.svg),
+ *            verbatim — NOT the MiniMax corporate M logo (magenta→coral
+ *            gradient), which the product does not use.
  *
  * All trademarks belong to their respective owners and are used here solely
  * to identify the corresponding CLI.
  */
-/**
- * Marks are either an inline node or a component. A component is required when
- * the mark needs per-instance state (see MiniMaxMark's gradient id).
- */
-const CLI_ICON_MARKS: Record<Exclude<CliBrandId, "codex">, ReactNode | (() => ReactNode)> = {
+const CLI_ICON_MARKS: Record<Exclude<CliBrandId, "codex">, ReactNode> = {
   claude: (
     <path
       d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"
@@ -57,58 +58,37 @@ const CLI_ICON_MARKS: Record<Exclude<CliBrandId, "codex">, ReactNode | (() => Re
     </>
   ),
   opencode: <path d="M16 6H8v12h8V6zm4 16H4V2h16v20z" fillRule="evenodd" />,
+  // The official π mark only occupies ~59% of its 24×24 viewBox, while the
+  // other marks fill ~85–100%, so it reads as much smaller at chip/tab sizes.
+  // Scale it about the box center (it is square and centered at 12,12) to
+  // match their visual weight; the path data stays verbatim from pi.dev.
   pi: (
-    <>
+    <g transform="translate(12 12) scale(1.45) translate(-12 -12)">
       <path d="M4.959 4.959H15.521V12H12V8.48H4.959z" fill="#F09082" />
       <path d="M4.959 8.48H8.48V12H12V15.521H8.48V19.042H4.959z" fill="#4D9ABF" />
       <path d="M15.521 12H19.042V19.042H15.521z" fill="#F1BE58" />
+    </g>
+  ),
+  // Official MiniMax Code app icon (matches favicon_v2.png on the download
+  // page): #7DC6FF rounded tile + white card + black "terminal card" frame
+  // with two legs. The two glyph paths are the official docs-logo vector
+  // verbatim (first subpath = the card silhouette, full path = frame with
+  // the cut-out hole via nonzero winding). In that 112×32 logo box the mark
+  // is 24.97×20.30 at offset (3.583, 5.804); the transform re-centers it at
+  // ~76% tile width, mirroring the favicon's layout.
+  mcode: (
+    <>
+      <rect width="24" height="24" rx="5" fill="#7DC6FF" />
+      <g transform="translate(2.75 4.584) scale(0.73077) translate(-3.58308 -5.80436)">
+        <path d="M27.0157 5.80436C27.867 5.80448 28.5567 6.49502 28.5567 7.34635V20.7487C28.5567 21.2424 28.3347 21.7099 27.9522 22.0221L23.4102 25.7311C23.1167 25.9708 22.7491 26.1021 22.3702 26.1022H5.12508C4.27367 26.1022 3.58308 25.4116 3.58308 24.5602V11.5592C3.58308 11.0643 3.80649 10.5951 4.19051 10.2829L9.24519 6.17253C9.53831 5.93433 9.90459 5.80436 10.2823 5.80436H27.0157Z" fill="#FFFFFF" />
+        <path d="M27.0157 5.80436C27.867 5.80448 28.5567 6.49502 28.5567 7.34635V20.7487C28.5567 21.2424 28.3347 21.7099 27.9522 22.0221L23.4102 25.7311C23.1167 25.9708 22.7491 26.1021 22.3702 26.1022H5.12508C4.27367 26.1022 3.58308 25.4116 3.58308 24.5602V11.5592C3.58308 11.0643 3.80649 10.5951 4.19051 10.2829L9.24519 6.17253C9.53831 5.93433 9.90459 5.80436 10.2823 5.80436H27.0157ZM11.0587 8.88053C10.8705 8.88052 10.6884 8.94584 10.5421 9.06413L6.99519 11.9313C6.80216 12.0874 6.69051 12.3227 6.69051 12.571V22.4987C6.69073 22.7823 6.92051 23.0124 7.20418 23.0124H9.7491V17.6745C9.74924 17.2206 10.1175 16.8524 10.5714 16.8522H12.5245C12.9784 16.8523 13.3466 17.2206 13.3468 17.6745V23.0124H15.1964V17.6745C15.1965 17.2205 15.5647 16.8522 16.0186 16.8522H17.9718C18.4256 16.8524 18.7939 17.2206 18.794 17.6745V23.0124H21.5587C21.7476 23.0124 21.9306 22.947 22.0772 22.8278L25.17 20.3112C25.3618 20.1551 25.4736 19.9208 25.4737 19.6735V9.40104C25.4736 9.11741 25.2437 8.8875 24.96 8.88737L11.0587 8.88053Z" fill="#000000" />
+      </g>
     </>
   ),
-  // MiniMax Code, official MiniMax mark. The mark is a two-stop gradient
-  // rather than a flat fill, so it is rendered by a component instead of a
-  // static node: the gradient id must be per-instance, otherwise a page showing
-  // several CLI icons emits duplicate <linearGradient> ids and `url(#...)`
-  // resolves against whichever one the browser finds first.
-  mcode: MiniMaxMark,
 };
 
 /** Marks that follow the surrounding text color instead of a fixed brand color. */
 const CURRENT_COLOR_MARKS: ReadonlySet<string> = new Set(["opencode"]);
-
-/**
- * Official MiniMax mark for MiniMax Code.
- *
- * Source: `@lobehub/icons-static-svg` (the same registry the Claude / Kimi /
- * OpenCode marks in this file come from — <https://unpkg.com/@lobehub/icons-static-svg/icons/minimax-color.svg>).
- * Trademark belongs to MiniMax and is used only to identify the CLI.
- *
- * Unlike the other marks this one is a gradient, hence the component form and
- * the per-instance gradient id from `useId()`.
- */
-function MiniMaxMark() {
-  const gradientId = `mcode-mark-${useId().replace(/:/gu, "")}`;
-  return (
-    <>
-      <defs>
-        <linearGradient
-          id={gradientId}
-          x1="0%"
-          x2="100.182%"
-          y1="50.057%"
-          y2="50.057%"
-        >
-          <stop offset="0%" stopColor="#E2167E" />
-          <stop offset="100%" stopColor="#FE603C" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M16.278 2c1.156 0 2.093.927 2.093 2.07v12.501a.74.74 0 00.744.709.74.74 0 00.743-.709V9.099a2.06 2.06 0 012.071-2.049A2.06 2.06 0 0124 9.1v6.561a.649.649 0 01-.652.645.649.649 0 01-.653-.645V9.1a.762.762 0 00-.766-.758.762.762 0 00-.766.758v7.472a2.037 2.037 0 01-2.048 2.026 2.037 2.037 0 01-2.048-2.026v-12.5a.785.785 0 00-.788-.753.785.785 0 00-.789.752l-.001 15.904A2.037 2.037 0 0113.441 22a2.037 2.037 0 01-2.048-2.026V18.04c0-.356.292-.645.652-.645.36 0 .652.289.652.645v1.934c0 .263.142.506.372.638.23.131.514.131.744 0a.734.734 0 00.372-.638V4.07c0-1.143.937-2.07 2.093-2.07zm-5.674 0c1.156 0 2.093.927 2.093 2.07v11.523a.648.648 0 01-.652.645.648.648 0 01-.652-.645V4.07a.785.785 0 00-.789-.78.785.785 0 00-.789.78v14.013a2.06 2.06 0 01-2.07 2.048 2.06 2.06 0 01-2.071-2.048V9.1a.762.762 0 00-.766-.758.762.762 0 00-.766.758v3.8a2.06 2.06 0 01-2.071 2.049A2.06 2.06 0 010 12.9v-1.378c0-.357.292-.646.652-.646.36 0 .653.29.653.646V12.9c0 .418.343.757.766.757s.766-.339.766-.757V9.099a2.06 2.06 0 012.07-2.048 2.06 2.06 0 012.071 2.048v8.984c0 .419.343.758.767.758.423 0 .766-.339.766-.758V4.07c0-1.143.937-2.07 2.093-2.07z"
-        fill={`url(#${gradientId})`}
-        fillRule="nonzero"
-      />
-    </>
-  );
-}
 
 export function CliBrandIcon({ aiTool, className }: Props) {
   const brand = getCliBrand(aiTool);
@@ -145,9 +125,7 @@ export function CliBrandIcon({ aiTool, className }: Props) {
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
     >
-      {/* createElement, not <mark />: a lowercase JSX tag would be treated as
-          an intrinsic element (an HTML <mark>) rather than the component. */}
-      {typeof mark === "function" ? createElement(mark) : mark}
+      {mark}
     </svg>
   );
 }

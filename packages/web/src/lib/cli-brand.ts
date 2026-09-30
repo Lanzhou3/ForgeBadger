@@ -21,9 +21,10 @@ export interface CliBrand {
  * - OpenCode: OpenCode grayscale (#B7B1B1, from the official dark logo variant;
  *   the opencode.ai brand is deliberately monochrome)
  * - PI: PI blue (#4D9ABF, from the official pi.dev π mark)
- * - MiniMax Code: the official mark is a magenta→coral gradient
- *   (#E2167E → #FE603C). A chip needs a single color, so the gradient's start
- *   stop is used as the accent.
+ * - MiniMax Code: the product brands itself in blue — the CLI's built-in TUI
+ *   "minimax" theme uses #68C0FF as its brand color (and the official app
+ *   icon / favicon sit on a #7DC6FF tile). The MiniMax corporate logo's
+ *   magenta→coral gradient is not part of the product's own identity.
  */
 const CLI_BRANDS: Record<CliBrandId, CliBrand> = {
   claude: { id: "claude", label: "Claude Code", shortLabel: "Claude", color: "#d97757" },
@@ -31,7 +32,7 @@ const CLI_BRANDS: Record<CliBrandId, CliBrand> = {
   kimi: { id: "kimi", label: "Kimi Code", shortLabel: "Kimi", color: "#1783ff" },
   opencode: { id: "opencode", label: "OpenCode", shortLabel: "OpenCode", color: "#b7b1b1" },
   pi: { id: "pi", label: "PI", shortLabel: "PI", color: "#4d9abf" },
-  mcode: { id: "mcode", label: "MiniMax Code", shortLabel: "MiniMax", color: "#e2167e" },
+  mcode: { id: "mcode", label: "MiniMax Code", shortLabel: "MiniMax", color: "#68c0ff" },
 };
 
 const UNKNOWN_CLI_BRAND: CliBrand = {

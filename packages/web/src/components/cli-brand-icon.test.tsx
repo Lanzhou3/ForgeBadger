@@ -17,30 +17,24 @@ describe("CliBrandIcon", () => {
     }
   });
 
-  it("renders the official MiniMax mark with a per-instance gradient id", () => {
-    // Arrange
-    const first = render(<CliBrandIcon aiTool="mcode" />);
-    const second = render(<CliBrandIcon aiTool="mcode" />);
+  it("renders the official MiniMax Code app icon (blue tile + white card + black frame)", () => {
+    // Arrange & Act
+    const { container } = render(<CliBrandIcon aiTool="mcode" />);
 
-    // Act
-    const ids = [first, second].map(
-      (view) => view.container.querySelector("linearGradient")?.getAttribute("id")
+    // Assert — the mark is the official app icon (favicon_v2.png on the
+    // download page): a fixed-color three-layer icon, not a currentColor
+    // monochrome glyph and no gradient.
+    expect(container.querySelector("linearGradient")).toBeNull();
+    const svgClass = container.querySelector("svg")?.getAttribute("class") ?? "";
+    expect(svgClass).not.toContain("text-current");
+    const tile = container.querySelector("rect");
+    expect(tile?.getAttribute("fill")).toBe("#7DC6FF");
+    const paths = Array.from(container.querySelectorAll("path"));
+    expect(paths.map((p) => p.getAttribute("fill"))).toEqual(["#FFFFFF", "#000000"]);
+    // The glyph is re-centered from the 112×32 docs-logo box onto the tile.
+    expect(container.querySelector("g")?.getAttribute("transform")).toBe(
+      "translate(2.75 4.584) scale(0.73077) translate(-3.58308 -5.80436)"
     );
-    const fills = [first, second].map(
-      (view) => view.container.querySelector("path")?.getAttribute("fill")
-    );
-
-    // Assert — the mark is a gradient, so a static id would emit duplicate
-    // <linearGradient> elements and url(#...) would resolve against whichever
-    // the browser happened to find first.
-    for (const id of ids) {
-      expect(id).toBeTruthy();
-      expect(id).not.toContain(":");
-    }
-    expect(new Set(ids).size).toBe(2);
-    // Each path must reference its own gradient, not the sibling's.
-    expect(fills[0]).toBe(`url(#${ids[0]})`);
-    expect(fills[1]).toBe(`url(#${ids[1]})`);
   });
 
   it("renders the official Codex icon with a larger centered crop", () => {
@@ -65,6 +59,19 @@ describe("CliBrandIcon", () => {
     for (const container of [unknownContainer, nullContainer, undefinedContainer]) {
       expect(container.querySelector("svg")).toBeNull();
     }
+  });
+
+  it("scales the PI mark about the box center so it matches the other marks' visual weight", () => {
+    // Arrange & Act
+    const { container } = render(<CliBrandIcon aiTool="pi" />);
+
+    // Assert — the official π mark only fills ~59% of the 24×24 viewBox;
+    // the group transform scales it up about the center (12,12).
+    const group = container.querySelector("svg > g");
+    expect(group?.getAttribute("transform")).toBe(
+      "translate(12 12) scale(1.45) translate(-12 -12)"
+    );
+    expect(group?.querySelectorAll("path").length).toBe(3);
   });
 
   it("applies custom classes on top of the default sizing", () => {
