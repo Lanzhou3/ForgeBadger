@@ -89,14 +89,17 @@ it("keeps other mouse-reporting CLIs on xterm's existing wheel path", async () =
   expect(handleWheel(new WheelEvent("wheel", { deltaY: -120 }))).toBe(true);
   expect(terminal.input).not.toHaveBeenCalled();
 });
-it("ACKs each frame only after xterm consumption and ignores callbacks after unmount", async () => {
+it("ACKs replay frames at receipt and live frames after xterm consumption", async () => {
   const { view, socket } = await start();
   act(() => { socket.message("terminal_history", { data: "history", sequence: 1 }); socket.message("terminal_history_end", { data: "", sequence: 2 }); socket.message("terminal_output", { data: "live", sequence: 3 }); });
   expect(terminal.reset).toHaveBeenCalledOnce();
   expect(terminal.write.mock.calls.map(call => call[0])).toEqual(["history", "live"]);
-  expect(socket.send.mock.calls.some(call => String(call[0]).includes("terminal_ack"))).toBe(false);
-  act(() => terminal.write.mock.calls[0]![1]());
+  // Replay frames ACK at receipt: the gateway output gate stops at
+  // 256KB/128 unacked frames, so deferring them would hold back the
+  // terminal_history_end marker itself and deadlock the replay.
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 1 } }));
   expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 2 } }));
+  expect(socket.send).not.toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 3 } }));
   view.unmount();
   terminal.write.mock.calls[1]![1]();
   expect(socket.send).not.toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 3 } }));
@@ -164,18 +167,20 @@ it("shows a back-to-bottom control while detached and clicking it restores the b
   expect(screen.queryByText("terminal.backToBottom")).toBeNull();
 });
 
-it("stages the replay until the marker, then applies it in order with per-frame ACKs", async () => {
+it("stages the replay until the marker, then applies it in order", async () => {
   const { socket } = await start();
   act(() => { socket.message("terminal_history", { data: "abcd", sequence: 1 }); socket.message("terminal_output", { data: "ef", sequence: 2 }); });
   expect(terminal.reset).not.toHaveBeenCalled();
   expect(terminal.write).not.toHaveBeenCalled();
+  // Buffered frames still ACK at receipt so the gateway gate keeps flowing.
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 1 } }));
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 2 } }));
   act(() => { socket.message("terminal_history_end", { data: "", sequence: 3 }); socket.message("terminal_output", { data: "live", sequence: 4 }); });
   expect(terminal.reset).toHaveBeenCalledOnce();
   expect(terminal.write.mock.calls.map(call => call[0])).toEqual(["abcd", "ef", "live"]);
-  act(() => terminal.write.mock.calls[0]![1]());
   expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 3 } }));
-  act(() => terminal.write.mock.calls[1]![1]());
-  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 2 } }));
+  expect(socket.send).not.toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 4 } }));
+  // Only live output written after the replay keeps write-callback ACKs.
   act(() => terminal.write.mock.calls[2]![1]());
   expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "terminal_ack", payload: { sequence: 4 } }));
 });

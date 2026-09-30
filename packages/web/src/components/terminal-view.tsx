@@ -130,8 +130,9 @@ export function TerminalView({
    *  terminal_history_end marker arrives, then applied with one reset+write
    *  so a tab switch swaps screens in a single frame instead of filling the
    *  old screen chunk by chunk. Live output received while buffering is
-   *  queued and written right after the replay. */
-  const replayRef = useRef<{ history: string[]; live: Array<{ data: string; sequence?: number }> } | null>(null);
+   *  queued and written right after the replay. Frames are ACKed at receipt
+   *  (the gateway output gate would otherwise stall the replay itself). */
+  const replayRef = useRef<{ history: string[]; live: string[] } | null>(null);
   const mountedRef = useRef(true);
   const lastWheelUpAtRef = useRef(0);
   const atBottomRef = useRef(true);
@@ -301,36 +302,32 @@ export function TerminalView({
         // repainted chunk by chunk. On a reconnect the same xterm instance is
         // reused; the reset leaves a clean normal buffer for the history (a
         // full-screen TUI may have switched xterm to the alternate buffer).
+        // ACK at receipt, not at flush: the gateway output gate stops at
+        // 256KB/128 unacked frames, so deferring ACKs would hold back the
+        // terminal_history_end marker itself and deadlock the replay.
         const replay = replayRef.current ?? (replayRef.current = { history: [], live: [] });
         replay.history.push(message.payload.data);
+        ackSequence(message.payload.sequence);
         return;
       }
 
       if (message.type === "terminal_history_end") {
+        ackSequence(message.payload.sequence);
         const replay = replayRef.current;
         replayRef.current = null;
         if (replay) {
           terminal.reset();
           stickToBottomUnlessUserScrolled();
           const historyData = replay.history.join("");
-          const finishHistory = () => {
-            syncAtBottom();
-            ackSequence(message.payload.sequence);
-          };
           if (historyData) {
-            terminal.write(historyData, finishHistory);
+            terminal.write(historyData, () => syncAtBottom());
           } else {
-            finishHistory();
+            syncAtBottom();
           }
-          for (const frame of replay.live) {
+          for (const data of replay.live) {
             stickToBottomUnlessUserScrolled();
-            terminal.write(frame.data, () => {
-              syncAtBottom();
-              ackSequence(frame.sequence);
-            });
+            terminal.write(data, () => syncAtBottom());
           }
-        } else {
-          ackSequence(message.payload.sequence);
         }
         return;
       }
@@ -339,8 +336,10 @@ export function TerminalView({
         // While the replay is staged, queue live frames — this also catches
         // history continuation chunks, which the gateway retags as
         // terminal_output — so nothing writes before the marker's reset.
+        // ACKed at receipt for the same gate reason as terminal_history.
         if (replayRef.current !== null) {
-          replayRef.current.live.push(message.payload);
+          replayRef.current.live.push(message.payload.data);
+          ackSequence(message.payload.sequence);
           return;
         }
         stickToBottomUnlessUserScrolled();
