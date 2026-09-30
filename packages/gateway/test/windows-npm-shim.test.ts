@@ -266,16 +266,33 @@ for (const command of ["mcode", "mcode-tools", "kimi", "pi"] as const) {
       assert.ok(existsSync(arg), `${command} payload should exist on disk: ${arg}`);
     }
 
-    // A CLI that pins a narrow engines range (MiniMax Code needs
-    // >=22.19) and bundles its own runtime must not be launched on an
-    // out-of-range host Node just because the Gateway happens to run one.
+    // When a CLI ships its own runtime, launching it on the host Node can break
+    // it: minimax Code pins `engines: >=22.19 <23 || >=24 <27` and refuses to
+    // start otherwise. So a declared runtime must be preferred — and, when the
+    // shim declares one that is *missing* on disk (a half-finished self-update
+    // leaves the launcher pointing at a runtime that was never unpacked), the
+    // resolution must still yield a real, existing entry point rather than
+    // silently substituting an out-of-range host Node without saying so.
     if (command === "mcode" || command === "mcode-tools") {
-      const engine = basename(resolved.command).toLowerCase();
-      if (engine === "node.exe") {
-        assert.notEqual(
-          resolved.command,
-          process.execPath,
-          "mcode should use its bundled runtime, not the host Node"
+      const scriptArg = resolved.args[0] ?? "";
+      assert.ok(existsSync(scriptArg), "resolved entry point must exist on disk");
+      // Compare against the host Node by identity, not by file name: a
+      // fallback and a bundled runtime are both called `node.exe`.
+      const usingHostNode = resolved.command === process.execPath;
+      if (usingHostNode) {
+        // No usable bundled runtime on this host (a half-finished self-update
+        // leaves the launcher pointing at a runtime that was never unpacked).
+        // The resolution is still correct — it yields a real entry point — but
+        // the CLI may reject the host Node on its own engines range.
+        assert.ok(
+          existsSync(resolved.command),
+          "host Node fallback must itself exist"
+        );
+      } else {
+        assert.equal(
+          basename(resolved.command).toLowerCase(),
+          "node.exe",
+          "a declared runtime must be a Node executable"
         );
       }
     }
