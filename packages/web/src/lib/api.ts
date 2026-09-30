@@ -2861,6 +2861,17 @@ export async function updateSessionLastPrompt(
 
 export type TerminalShell = "pwsh" | "powershell" | "cmd" | "bash" | "zsh" | "sh";
 
+export interface TerminalShellAvailability {
+  shell: TerminalShell;
+  available: boolean;
+  command: string;
+}
+
+/** Probe which shells are installed on this host (launch-dialog defaults). */
+export async function listTerminalShells(): Promise<{ shells: TerminalShellAvailability[] }> {
+  return fetchJson("/api/v1/sessions/shells") as Promise<{ shells: TerminalShellAvailability[] }>;
+}
+
 export async function createSession(data: {
   projectId: string;
   aiTool?: RuntimeAdapterId | "terminal";

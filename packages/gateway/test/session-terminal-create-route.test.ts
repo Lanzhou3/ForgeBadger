@@ -155,3 +155,88 @@ describe("POST /api/v1/sessions terminal shell validation", () => {
     assert.equal(session?.aiTool, "terminal");
   });
 });
+
+describe("GET /api/v1/sessions/shells (availability probe)", () => {
+  let db: Database.Database;
+  let token: string;
+
+  beforeEach(() => {
+    db = createTestDb();
+    const user = new UserRepository(db).create("shells-route@example.com", "hash");
+    token = signJwt({ userId: user.id, email: user.email }, secret);
+  });
+
+  function buildApp(runner: import("../src/lib/dependency-check.js").CommandRunner): express.Express {
+    const app = express();
+    app.locals.jwtSecret = secret;
+    app.use(express.json());
+    app.use(
+      "/api/v1/sessions",
+      createSessionRoutes(
+        db,
+        masterKey,
+        new InMemorySessionManager(fakeBackend()),
+        new RuntimeAuthorizationInvalidator(),
+        undefined,
+        runner
+      )
+    );
+    return app;
+  }
+
+  it("reports every canonical shell with its availability", async () => {
+    const app = buildApp(okRunner);
+    const server = http.createServer(app);
+    const baseUrl = await listen(server);
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/sessions/shells`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const body = await res.json();
+      assert.equal(res.status, 200);
+      assert.equal(body.code, 0);
+      const shells = body.data.shells as Array<{ shell: string; available: boolean; command: string }>;
+      assert.deepEqual(
+        shells.map((entry) => entry.shell).sort(),
+        [...TERMINAL_SHELLS].sort()
+      );
+      for (const entry of shells) {
+        assert.equal(entry.available, true, `${entry.shell} should be available under the ok runner`);
+        assert.equal(typeof entry.command, "string");
+        assert.ok(entry.command.length > 0);
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("marks missing shells as unavailable (so the dialog can auto-fall-back)", async () => {
+    const failingRunner: import("../src/lib/dependency-check.js").CommandRunner = async (command: string) =>
+      command === "pwsh" || command === "zsh"
+        ? { exitCode: 127, stdout: "", stderr: command + ": not found" }
+        : { exitCode: 0, stdout: "", stderr: "" };
+    const app = buildApp(failingRunner);
+    const server = http.createServer(app);
+    const baseUrl = await listen(server);
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/sessions/shells`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const body = await res.json();
+      assert.equal(res.status, 200);
+      const byShell = new Map(
+        (body.data.shells as Array<{ shell: string; available: boolean }>).map((entry) => [
+          entry.shell,
+          entry.available
+        ])
+      );
+      assert.equal(byShell.get("pwsh"), false);
+      assert.equal(byShell.get("zsh"), false);
+      // Windows PowerShell 5.1 and cmd remain available on Windows.
+      assert.equal(byShell.get("powershell"), true);
+      assert.equal(byShell.get("cmd"), true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});

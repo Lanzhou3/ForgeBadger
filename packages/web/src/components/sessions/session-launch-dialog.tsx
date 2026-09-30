@@ -12,11 +12,17 @@ import { useLanguage } from "@/hooks/use-language";
 import {
   createSession,
   discoverAdapters,
+  listTerminalShells,
   type RuntimeAdapterId,
   type Session,
   type TerminalShell,
 } from "@/lib/api";
 import { useOrderedAdapters } from "@/lib/adapter-order";
+import {
+  defaultTerminalShellForPlatform,
+  pickAvailableShell,
+  platformShellOrder,
+} from "@/lib/terminal-shells";
 
 type LaunchMode = "cli" | "terminal";
 
@@ -31,47 +37,62 @@ interface SessionLaunchDialogProps {
 const isWindowsPlatform = () =>
   typeof navigator !== "undefined" && navigator.platform?.startsWith("Win");
 
-function defaultShellForPlatform(): TerminalShell {
-  // POSIX default is "sh", which the gateway resolves to the user's $SHELL
-  // (zsh on modern macOS, bash on most Linux) instead of forcing one binary.
-  return isWindowsPlatform() ? "pwsh" : "sh";
-}
+const TERMINAL_SHELLS_QUERY_KEY = ["terminal-shell-availability"] as const;
 
 interface ShellOption {
   value: TerminalShell;
   label: string;
+  disabled?: boolean;
 }
 
 export function SessionLaunchDialog({ projectId, open, onOpenChange, onCreated, initialAdapter }: SessionLaunchDialogProps) {
   const { t } = useLanguage();
   const [mode, setMode] = useState<LaunchMode>("cli");
   const [adapter, setAdapter] = useState<RuntimeAdapterId>(initialAdapter ?? "claude");
-  const [shell, setShell] = useState<TerminalShell>(defaultShellForPlatform());
+  const [shell, setShell] = useState<TerminalShell>(() =>
+    defaultTerminalShellForPlatform(isWindowsPlatform())
+  );
   const discoveryQuery = useQuery({ queryKey: ADAPTER_DISCOVERY_QUERY_KEY, queryFn: discoverAdapters, enabled: open });
-
-  // Only offer shells that can plausibly exist on this platform — zsh/bash
-  // never show up on Windows, pwsh/cmd never on POSIX. The gateway still
-  // probes the binary at create time (409 when missing) as the backstop for
-  // less common host setups (e.g. a Linux box without bash).
-  const shellOptions = useMemo<ShellOption[]>(() => {
-    if (isWindowsPlatform()) {
-      return [
-        { value: "pwsh", label: "pwsh (PowerShell 7+)" },
-        { value: "powershell", label: "powershell (Windows PowerShell 5.1)" },
-        { value: "cmd", label: "cmd.exe" }
-      ];
-    }
-    return [
-      { value: "sh", label: t("projects.terminalShellSystem") },
-      { value: "bash", label: "bash" },
-      { value: "zsh", label: "zsh" }
-    ];
-  }, [t]);
+  // Probe which shells are actually installed so the default can fall back
+  // (e.g. Windows without PowerShell 7 → Windows PowerShell 5.1) and missing
+  // options can be greyed out. A failed probe just keeps the static default.
+  const shellAvailability = useQuery({ queryKey: TERMINAL_SHELLS_QUERY_KEY, queryFn: listTerminalShells, enabled: open });
+  const isWindows = isWindowsPlatform();
+  const shellOrder = useMemo(() => platformShellOrder(isWindows), [isWindows]);
 
   useEffect(() => {
     if (!open) return;
-    setShell(defaultShellForPlatform());
-  }, [open]);
+    const data = shellAvailability.data;
+    const installed = data
+      ? data.shells.filter((entry) => entry.available).map((entry) => entry.shell)
+      : null;
+    setShell((current) => pickAvailableShell(current, shellOrder, installed));
+  }, [open, shellAvailability.data, shellOrder]);
+
+  // Only offer shells that can plausibly exist on this platform — zsh/bash
+  // never show up on Windows, pwsh/cmd never on POSIX. The availability probe
+  // below additionally greys out platform-plausible shells that are missing.
+  const shellOptions = useMemo<ShellOption[]>(() => {
+    const base: ShellOption[] = isWindows
+      ? [
+          { value: "pwsh", label: "pwsh (PowerShell 7+)" },
+          { value: "powershell", label: "powershell (Windows PowerShell 5.1)" },
+          { value: "cmd", label: "cmd.exe" }
+        ]
+      : [
+          { value: "sh", label: t("projects.terminalShellSystem") },
+          { value: "bash", label: "bash" },
+          { value: "zsh", label: "zsh" }
+        ];
+    const probe = shellAvailability.data;
+    return base.map((option) => {
+      const missing = probe !== undefined &&
+        !probe.shells.some((entry) => entry.shell === option.value && entry.available);
+      return missing
+        ? { ...option, label: option.label + t("projects.terminalShellNotInstalled"), disabled: true }
+        : option;
+    });
+  }, [isWindows, t, shellAvailability.data]);
 
   const launchableAdapters = useMemo(
     () => (discoveryQuery.data?.adapters ?? []).filter((entry) => entry.available && entry.launchEnabled && entry.runtimeModes.includes("terminal")),
@@ -157,7 +178,7 @@ export function SessionLaunchDialog({ projectId, open, onOpenChange, onCreated, 
                   onChange={(e) => setShell(e.target.value as TerminalShell)}
                 >
                   {shellOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
+                    <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>
                   ))}
                 </select>
               </div>

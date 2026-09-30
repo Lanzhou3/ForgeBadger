@@ -269,6 +269,22 @@ export function createSessionRoutes(
     }
   });
 
+  // Shell availability probe for the launch dialog (auto-select an installed
+  // default shell, grey out the rest). Must be registered before "/:id".
+  router.get("/shells", async (_req, res) => {
+    const shells = await Promise.all(
+      TERMINAL_SHELLS.map(async (shell) => {
+        const status = await checkTerminalShell(shell, undefined, undefined, adapterCommandRunner);
+        return {
+          shell,
+          available: status.available,
+          command: status.command
+        };
+      })
+    );
+    res.json({ code: 0, data: { shells }, message: "" });
+  });
+
   router.get("/:id", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const repo = new SessionRepository(db, userId);
