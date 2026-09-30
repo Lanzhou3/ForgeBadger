@@ -956,12 +956,12 @@ function SyntaxHighlightedEditor({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-input bg-[#05070a] shadow-inner shadow-black/30">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-800 bg-slate-950/80 px-3 py-2">
-        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-slate-400">
+    <div className="overflow-hidden rounded-lg border border-input bg-muted shadow-inner shadow-black/30">
+      <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/60 px-3 py-2">
+        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           {readOnly ? "Readonly config" : "Live syntax editor"}
         </span>
-        <Badge variant="outline" className="border-slate-700 bg-slate-900/80 text-[10px] text-slate-300">
+        <Badge variant="outline" className="border-border bg-background text-[10px] text-muted-foreground">
           {hasHighlighting ? fileType : "plain"}
         </Badge>
       </div>
@@ -969,7 +969,7 @@ function SyntaxHighlightedEditor({
         <div
           ref={gutterRef}
           aria-hidden="true"
-          className="overflow-hidden border-r border-slate-800 bg-slate-950/70 px-2 py-4 text-right font-mono text-[11px] leading-6 text-slate-600 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="overflow-hidden border-r border-border bg-muted/40 px-2 py-4 text-right font-mono text-[11px] leading-6 text-muted-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {lineNumbers.map((lineNumber) => (
             <div key={lineNumber}>{lineNumber}</div>
@@ -981,7 +981,7 @@ function SyntaxHighlightedEditor({
             aria-hidden={!readOnly}
             onScroll={readOnly ? syncGutterScroll : undefined}
             className={cn(
-              "inset-0 whitespace-pre p-4 font-mono text-[13px] leading-6 text-slate-200",
+              "inset-0 whitespace-pre p-4 font-mono text-[13px] leading-6 text-foreground/90",
               readOnly
                 ? "h-full max-h-[420px] overflow-auto"
                 : "pointer-events-none absolute overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"

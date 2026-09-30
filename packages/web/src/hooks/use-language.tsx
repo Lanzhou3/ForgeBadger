@@ -10,8 +10,9 @@ import {
 } from "react";
 
 import {
+  detectSystemLanguage,
   getTranslation,
-  normalizeLanguage,
+  supportedLanguages,
   type Language,
   type TranslationKey,
 } from "@/lib/i18n";
@@ -30,7 +31,12 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const stored = window.localStorage.getItem(LANGUAGE_KEY);
-    const nextLanguage = normalizeLanguage(stored);
+    // A valid stored preference always wins; otherwise follow the system
+    // locale so first-time visitors see the UI in their own language.
+    const nextLanguage =
+      stored !== null && supportedLanguages.includes(stored as Language)
+        ? (stored as Language)
+        : detectSystemLanguage(window.navigator.languages);
     setLanguageState(nextLanguage);
     document.documentElement.lang = nextLanguage;
   }, []);

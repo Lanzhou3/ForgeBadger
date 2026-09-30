@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { LanguageProvider } from "@/hooks/use-language";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
 import { GatewayApiError } from "@/lib/api";
+import type { RobotCorner } from "@/lib/pixel-robot";
 import {
   ROBOT_CONVERSATION_STORAGE_KEY,
   RobotChatPanel,
@@ -146,13 +147,17 @@ function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-function renderPanel(overrides: { onClose?: () => void; onExpandFull?: (id: string | null) => void } = {}) {
+function renderPanel(overrides: { onClose?: () => void; onExpandFull?: (id: string | null) => void; corner?: RobotCorner } = {}) {
   const onClose = overrides.onClose ?? vi.fn();
   const onExpandFull = overrides.onExpandFull ?? vi.fn();
   render(
     <LanguageProvider>
       <QueryClientProvider client={createQueryClient()}>
-        <RobotChatPanel onClose={onClose} onExpandFull={onExpandFull} />
+        <RobotChatPanel
+          onClose={onClose}
+          onExpandFull={onExpandFull}
+          corner={overrides.corner ?? "bottom-right"}
+        />
       </QueryClientProvider>
     </LanguageProvider>
   );
@@ -302,13 +307,33 @@ describe("RobotChatPanel", () => {
     // The empty state shares the console's suggestion set.
     expect(screen.getByRole("button", { name: "项目整体进展如何？" })).toBeTruthy();
     // Mobile (<768px): near-fullscreen bottom sheet; desktop: 380x520 card
-    // anchored bottom-right above the robot.
+    // anchored to the robot's corner (bottom-right by default) beside it.
     const panel = screen.getByTestId("robot-chat-panel");
     expect(panel.className).toContain("inset-x-2");
     expect(panel.className).toContain("bottom-2");
     expect(panel.className).toContain("md:w-[380px]");
     expect(panel.className).toContain("md:h-[520px]");
     expect(panel.className).toContain("md:bottom-32");
+    expect(panel.className).toContain("md:right-4");
+  });
+
+  it.each([
+    { corner: "top-left", vertical: "md:top-32", horizontal: "md:left-4", released: "md:bottom-auto" },
+    { corner: "top-right", vertical: "md:top-32", horizontal: "md:right-4", released: "md:bottom-auto" },
+    { corner: "bottom-left", vertical: "md:bottom-32", horizontal: "md:left-4", released: "md:top-auto" },
+  ] as const)("anchors beside the robot pinned to the $corner corner", ({ corner, vertical, horizontal, released }) => {
+    renderPanel({ corner });
+
+    const panel = screen.getByTestId("robot-chat-panel");
+    expect(panel.className).toContain(vertical);
+    expect(panel.className).toContain(horizontal);
+    // The opposite edge releases the mobile sheet so the card hugs its
+    // corner instead of stretching edge to edge.
+    expect(panel.className).toContain(released);
+    // Mobile keeps the near-fullscreen sheet regardless of the robot corner.
+    expect(panel.className).toContain("inset-x-2");
+    expect(panel.className).toContain("top-14");
+    expect(panel.className).toContain("bottom-2");
   });
 
   it("renders a floating composer instead of a docked bottom bar", () => {

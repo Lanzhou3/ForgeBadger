@@ -1,7 +1,7 @@
 import type { AdapterDiscovery as RuntimeAdapter } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
 
-export type CliBrandId = "claude" | "codex" | "kimi" | "opencode" | "pi" | "mcode";
+export type CliBrandId = "claude" | "codex" | "kimi" | "opencode" | "pi" | "mcode" | "terminal";
 
 export interface CliBrand {
   id: CliBrandId | "unknown";
@@ -33,6 +33,7 @@ const CLI_BRANDS: Record<CliBrandId, CliBrand> = {
   opencode: { id: "opencode", label: "OpenCode", shortLabel: "OpenCode", color: "#b7b1b1" },
   pi: { id: "pi", label: "PI", shortLabel: "PI", color: "#4d9abf" },
   mcode: { id: "mcode", label: "MiniMax Code", shortLabel: "MiniMax", color: "#68c0ff" },
+  terminal: { id: "terminal", label: "Terminal", shortLabel: "Terminal", color: "#71717a" },
 };
 
 const UNKNOWN_CLI_BRAND: CliBrand = {
@@ -44,6 +45,7 @@ const UNKNOWN_CLI_BRAND: CliBrand = {
 
 export function getCliBrand(aiTool?: string | null): CliBrand {
   if (!aiTool) return UNKNOWN_CLI_BRAND;
+  if (aiTool === "terminal") return CLI_BRANDS.terminal;
   const normalized = aiTool.trim().toLowerCase() as CliBrandId;
   return CLI_BRANDS[normalized] ?? UNKNOWN_CLI_BRAND;
 }

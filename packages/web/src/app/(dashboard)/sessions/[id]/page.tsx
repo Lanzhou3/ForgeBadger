@@ -365,6 +365,7 @@ export default function TerminalPage() {
             aiTool={session?.aiTool}
             historyOpen={outputHistoryOpen}
             onHistoryClose={() => setOutputHistoryOpen(false)}
+            credentialsPending={!hasAttachToken}
           />
         </div>
         {!focusMode && (

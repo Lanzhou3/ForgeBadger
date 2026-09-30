@@ -41,7 +41,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const queryClient = new QueryClient();
-function renderTerminalView(props: { sessionId: string; authToken: string; attachToken: string; aiTool?: string }) {
+function renderTerminalView(props: { sessionId: string; authToken: string; attachToken: string; aiTool?: string; credentialsPending?: boolean }) {
   return render(
     <QueryClientProvider client={queryClient}>
       <TerminalView {...props} />
@@ -213,4 +213,10 @@ it("keeps the frame layout stable when the status flips to connected", async () 
   act(() => socket.dispatchEvent(new Event("open")));
   expect(screen.queryByText("connecting")).toBeNull();
   expect(screen.getByTestId("terminal-frame").className).toBe(frameBefore);
+});
+it("shows the connecting strip instead of the credentials panel while the attach token is in flight", async () => {
+  renderTerminalView({ sessionId: "s", authToken: "a", attachToken: "", credentialsPending: true });
+  await waitFor(() => expect(screen.getByText("connecting")).toBeTruthy());
+  expect(screen.queryByText("terminal.missingCredentials")).toBeNull();
+  expect(Socket.instances).toHaveLength(0);
 });

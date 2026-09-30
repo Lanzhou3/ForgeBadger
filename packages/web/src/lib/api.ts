@@ -2859,9 +2859,12 @@ export async function updateSessionLastPrompt(
   }) as Promise<{ session: Session }>;
 }
 
+export type TerminalShell = "pwsh" | "powershell" | "cmd" | "bash" | "zsh" | "sh";
+
 export async function createSession(data: {
   projectId: string;
-  aiTool?: RuntimeAdapterId;
+  aiTool?: RuntimeAdapterId | "terminal";
+  shell?: TerminalShell;
 }): Promise<{ session: Session }> {
   return fetchJson("/api/v1/sessions", { method: "POST", body: JSON.stringify(data) }) as Promise<{ session: Session }>;
 }

@@ -7,6 +7,8 @@ import { ArrowDown } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useTerminalWriter } from "@/hooks/use-terminal-writer";
+import { useColorMode } from "@/hooks/use-color-mode";
+import { useTerminalFont } from "@/hooks/use-terminal-font";
 import { Button } from "@/components/ui/button";
 import { SessionOutputHistory } from "@/components/sessions/session-output-history";
 import { useLanguage } from "@/hooks/use-language";
@@ -19,6 +21,8 @@ import { copySelectedTerminalText, shouldCopyTerminalSelection } from "@/lib/ter
 import { createTerminalInputMessage, createTerminalResizeMessage } from "@/lib/terminal-messages";
 import { createTerminalPromptCapture } from "@/lib/terminal-prompt-capture";
 import { notifySessionTabsChanged, setSessionTabPrompt } from "@/lib/session-tabs";
+import { getTerminalPalette } from "@/lib/terminal-theme";
+import { ensureTerminalFontLoaded } from "@/lib/terminal-font";
 import { parseTerminalWebSocketMessage } from "@/lib/terminal-websocket-messages";
 import { replaceTerminalInputListener, type DisposableInputListener } from "@/lib/terminal-input-listener";
 import {
@@ -100,6 +104,7 @@ export function TerminalView({
   aiTool,
   historyOpen = false,
   onHistoryClose,
+  credentialsPending = false,
 }: {
   sessionId: string;
   authToken: string;
@@ -108,12 +113,22 @@ export function TerminalView({
   /** Controlled read-only output-history overlay (trigger lives in the tab strip). */
   historyOpen?: boolean;
   onHistoryClose?: () => void;
+  /** The session page is still fetching the attach token (connect in flight).
+   *  Render the connecting strip instead of the missing-credentials panel so
+   *  a tab switch never flashes an error while the token is on its way. */
+  credentialsPending?: boolean;
 }) {
   const { t } = useLanguage();
+  const { resolved: colorModeResolved } = useColorMode();
+  const terminalFont = useTerminalFont();
   const writer = useTerminalWriter(sessionId);
   const queryClient = useQueryClient();
   const writerRef = useRef(writer);
   writerRef.current = writer;
+  // Mirror of the font settings for the async creation closure, which cannot
+  // safely depend on the hook value without re-creating the terminal.
+  const terminalFontRef = useRef(terminalFont);
+  terminalFontRef.current = terminalFont;
   const aiToolRef = useRef(aiTool);
   aiToolRef.current = aiTool;
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -255,7 +270,7 @@ export function TerminalView({
     if (!mountedRef.current) return;
     if (!terminalReady) return;
     if (!authToken || !attachToken) {
-      setStatus("disconnected");
+      setStatus(credentialsPending ? "connecting" : "disconnected");
       return;
     }
     // A fresh attach re-sends the whole scrollback; discard any replay that
@@ -410,7 +425,7 @@ export function TerminalView({
       });
       replaceTerminalInputListener(inputDisposableRef, disposable);
     }
-  }, [sessionId, authToken, attachToken, terminalReady, fitAndSendResize, clearReconnectTimer, stickToBottomUnlessUserScrolled, syncAtBottom, reportSessionPrompt]);
+  }, [sessionId, authToken, attachToken, credentialsPending, terminalReady, fitAndSendResize, clearReconnectTimer, stickToBottomUnlessUserScrolled, syncAtBottom, reportSessionPrompt]);
 
   const handleManualReconnect = useCallback(() => {
     clearReconnectTimer();
@@ -438,21 +453,25 @@ export function TerminalView({
       if (event.deltaY < 0) lastWheelUpAtRef.current = Date.now();
     };
     const timer = window.setTimeout(() => {
-      void Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]).then(
+      void Promise.all([
+        import("@xterm/xterm"),
+        import("@xterm/addon-fit"),
+        ensureTerminalFontLoaded(terminalFontRef.current.fontFamily)
+      ]).then(
         ([xterm, fit]) => {
           const host = hostRef.current;
           if (cancelled || !host) return;
 
           const terminal = new xterm.Terminal({
             cursorBlink: true,
-            fontFamily:
-              'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-            fontSize: 14,
-            theme: {
-              background: "#05070a",
-              foreground: "#e5edf7",
-              cursor: "#5cc8ff"
-            }
+            fontFamily: terminalFontRef.current.fontFamily,
+            fontSize: terminalFontRef.current.fontSize,
+            // Palette chosen from the DOM class: the beforeInteractive script
+            // has already stamped the correct `dark` class before paint, so
+            // this is always in sync with the stored preference on first open.
+            theme: getTerminalPalette(
+              document.documentElement.classList.contains("dark") ? "dark" : "light"
+            )
           });
           terminal.attachCustomKeyEventHandler((event) => {
             if (event.type !== "keydown") return true;
@@ -616,13 +635,32 @@ export function TerminalView({
     };
   }, [syncAtBottom]);
 
+  // Follow the app color mode at runtime: xterm.js re-renders the viewport
+  // (including scrollback) when the theme option changes, so a light/dark
+  // switch never re-opens the terminal. No-op while the instance is still
+  // initializing; creation already picked the palette from the DOM class.
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.theme = getTerminalPalette(colorModeResolved);
+  }, [colorModeResolved]);
+
+  // Follow the terminal font preference at runtime (xterm re-renders on
+  // option changes; no re-open needed).
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.fontFamily = terminalFont.fontFamily;
+    terminal.options.fontSize = terminalFont.fontSize;
+  }, [terminalFont.fontFamily, terminalFont.fontSize]);
+
   // Manage connection lifecycle
   useEffect(() => {
     if (!terminalReady) {
       return;
     }
     if (!authToken || !attachToken) {
-      setStatus("disconnected");
+      setStatus(credentialsPending ? "connecting" : "disconnected");
       return;
     }
 
@@ -639,7 +677,7 @@ export function TerminalView({
         socketRef.current = null;
       }
     };
-  }, [authToken, attachToken, connect, clearReconnectTimer, terminalReady]);
+  }, [authToken, attachToken, credentialsPending, connect, clearReconnectTimer, terminalReady]);
 
   // Resize handler
   useEffect(() => {
@@ -681,7 +719,9 @@ export function TerminalView({
   // The status strip floats over the terminal instead of taking flow space,
   // so a connecting → connected flip never re-layouts the pane.
   const showStatusBar = status !== "connected";
-  const missingCredentials = !authToken || !attachToken;
+  // Genuine missing credentials (not a token still in flight from the page's
+  // connect round-trip) replace the terminal with an explanatory panel.
+  const missingCredentials = (!authToken || !attachToken) && !credentialsPending;
   const statusTone =
     status === "connected"
       ? "bg-emerald-500"
@@ -696,7 +736,7 @@ export function TerminalView({
     <div
       data-testid="terminal-frame"
       className={cn(
-        "grid h-full min-h-0 overflow-hidden bg-[#05070a]",
+        "grid h-full min-h-0 overflow-hidden bg-terminal",
         missingCredentials ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]"
       )}
     >
@@ -724,11 +764,11 @@ export function TerminalView({
         {(showStatusBar || writer.readOnly) && (
           <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col items-stretch gap-2 p-2">
             {showStatusBar && (
-              <div className="pointer-events-auto flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-border bg-[#05070a]/85 px-3 py-2 text-xs text-muted-foreground">
+              <div className="pointer-events-auto flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-border bg-terminal/85 px-3 py-2 text-xs text-muted-foreground">
                 <span className={cn("size-2 rounded-full", statusTone)} aria-hidden="true" />
                 <span aria-live="polite">{status}</span>
                 {attemptCount > 0 && (
-                  <span className="text-amber-300">
+                  <span className="text-amber-600 dark:text-amber-300">
                     {attemptCount}/{MAX_RECONNECT_ATTEMPTS}
                   </span>
                 )}
@@ -736,7 +776,7 @@ export function TerminalView({
               </div>
             )}
             {writer.readOnly && (
-              <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-[#05070a]/85 p-2 text-xs text-amber-300" role="status">
+              <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-terminal/85 p-2 text-xs text-amber-600 dark:text-amber-300" role="status">
                 <span>
                   {writer.loading
                     ? "正在检查终端写入权限…"

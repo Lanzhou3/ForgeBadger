@@ -1,5 +1,25 @@
 @import "tailwindcss";
 
+/* Bundled Nerd Font (JetBrains Mono Nerd Font Mono, OFL): the default
+   terminal font so prompt themes like Oh My Posh render their Powerline /
+   Nerd glyphs without any user-side font install. Served locally (local-
+   first) from /brand/fonts. Weight 700 is bundled; italics synthesize. */
+@font-face {
+  font-family: "ForgeBadger Nerd";
+  src: url("/brand/fonts/forgebadger-nerd-regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "ForgeBadger Nerd";
+  src: url("/brand/fonts/forgebadger-nerd-bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme inline {
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
@@ -34,6 +54,7 @@
 
 @layer base {
   :root {
+    color-scheme: light;
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -58,7 +79,9 @@
     --brand: 187 86% 53%;
     --brand-foreground: 220 30% 6%;
     --surface-raised: 0 0% 100%;
-    --terminal-bg: 220 33% 3%;
+    /* Matches the light xterm palette background (#f6f8fa) so the terminal
+       surface blends with the frame in light mode. */
+    --terminal-bg: 208 27% 97%;
     --radius: 0.5rem;
   }
 

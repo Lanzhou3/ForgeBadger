@@ -14,6 +14,9 @@ export interface CommandContext {
     masterKey?: string;
     adapterCommandRunner?: import('../../lib/dependency-check.js').CommandRunner | undefined;
     eventBus?: import('../event-bus.js').ForgeBadgerEventBus | undefined;
+    runId?: string | undefined;
+    stepId?: string | undefined;
+    conversationId?: string | undefined;
 }
 export interface CommandResources {
     stopTarget?: import("../session-stop-target.js").SessionStopTarget;

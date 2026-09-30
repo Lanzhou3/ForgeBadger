@@ -36,12 +36,18 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <body>
         <Script src="/forgebadger-runtime.js" strategy="beforeInteractive" />
         {/* Restore the accent theme before first paint to avoid a color flash. */}
         <Script id="accent-theme" strategy="beforeInteractive">
           {`try{var a=localStorage.getItem("forgebadger.accent");if(a)document.documentElement.dataset.accent=a;}catch(e){}`}
+        </Script>
+        {/* Resolve the color mode (light / dark / system) before first paint so
+            the surface tokens never flash the wrong scheme. Mirrors the
+            accent-theme script above. */}
+        <Script id="color-mode" strategy="beforeInteractive">
+          {`try{var m=localStorage.getItem("forgebadger.color-mode");var d=m==="dark"||(m!=="light"&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;if(d){r.classList.add("dark");r.style.colorScheme="dark";}else{r.style.colorScheme="light";}}catch(e){}`}
         </Script>
         <Providers>{children}</Providers>
       </body>

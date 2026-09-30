@@ -48,7 +48,7 @@ export function GitDiffSheet({ projectId, target, onClose }: Props) {
             {target?.untracked ? t("sessions.gitDiffUntracked") : t("sessions.gitDiffTitle")}
           </SheetDescription>
         </SheetHeader>
-        <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border bg-[#05070a] p-2">
+        <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border bg-terminal p-2">
           {isLoading ? (
             <p className="p-2 text-xs text-muted-foreground">{t("sessions.gitDiffLoading")}</p>
           ) : error ? (

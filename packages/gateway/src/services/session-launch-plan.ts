@@ -1,6 +1,7 @@
 import { createAdapterLaunchPlan } from "../adapters/index.js";
 import type { LaunchPlan } from "../adapters/claude.js";
 import { isAdapterId, type AdapterId } from "./adapter-discovery.js";
+import { checkCommand, type CommandRunner } from "../lib/dependency-check.js";
 import type { Database } from "../db/types.js";
 import { ensureClaudeNotificationSettings } from "./claude-notification-settings.js";
 import {
@@ -127,4 +128,119 @@ function getGatewayUrl(): string {
     || process.env.NEXT_PUBLIC_GATEWAY_URL
     || `http://${process.env.FORGEBADGER_HOST || "127.0.0.1"}:${process.env.FORGEBADGER_PORT || "3000"}`
   );
+}
+
+/**
+ * Session kind: a CLI adapter id, or the CLI-agnostic "terminal" shell kind.
+ * Stored verbatim in the `sessions.ai_tool` text column (no CHECK constraint).
+ */
+export type SessionKind = AdapterId | "terminal";
+
+/**
+ * Normalize a raw session-kind string. Returns undefined for anything that is
+ * neither a canonical adapter id nor the terminal kind.
+ */
+export function normalizeSessionKind(value: string): SessionKind | undefined {
+  if (value === "terminal") return "terminal";
+  return isAdapterId(value) ? value : undefined;
+}
+
+/** Shells offered for a terminal session, per platform. Single source of
+ * truth for the union type AND the zod route enum (keep both in lockstep). */
+export const TERMINAL_SHELLS = ["pwsh", "powershell", "cmd", "bash", "zsh", "sh"] as const;
+export type TerminalShell = (typeof TERMINAL_SHELLS)[number];
+
+export interface TerminalLaunchPlanInput {
+  projectRoot: string;
+  sessionId: string;
+  /** Explicit shell choice; omitted → platform default is resolved. */
+  shell?: TerminalShell;
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Resolve the platform-default shell for a terminal session. win32 prefers
+ * pwsh when present, falling back to cmd.exe; POSIX uses $SHELL then sh.
+ */
+export function defaultTerminalShell(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env
+): TerminalShell {
+  if (platform === "win32") {
+    return "pwsh";
+  }
+  const shell = env.SHELL?.trim();
+  if (shell === "/bin/zsh" || shell?.endsWith("/zsh")) return "zsh";
+  if (shell === "/bin/bash" || shell?.endsWith("/bash")) return "bash";
+  return "sh";
+}
+
+/**
+ * Build a launch plan for a CLI-agnostic terminal (shell) session. Unlike the
+ * CLI adapter launch plans, no hooks/notifications are injected and no
+ * provider credentials are touched — env is host_environment + session id.
+ */
+export function createTerminalLaunchPlan(input: TerminalLaunchPlanInput): LaunchPlan {
+  const platform = input.platform ?? process.platform;
+  const env = input.env ?? process.env;
+  const shell = input.shell ?? defaultTerminalShell(platform, env);
+  const { command, args } = resolveShellCommand(shell, platform, env);
+  return {
+    command,
+    args,
+    cwd: input.projectRoot,
+    env: {
+      FORGEBADGER_SESSION_ID: input.sessionId,
+      FORGEBADGER_GATEWAY_URL: getGatewayUrl()
+    },
+    secretEnvNames: [],
+    credentialMode: "host_environment"
+  };
+}
+
+function resolveShellCommand(
+  shell: TerminalShell,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv
+): { command: string; args: string[] } {
+  switch (shell) {
+    case "pwsh":
+      return { command: "pwsh", args: [] };
+    case "powershell":
+      // Windows PowerShell 5.1 (powershell.exe, always present on Windows).
+      // Distinct from pwsh 7: a user who installed Oh My Posh into the 5.1
+      // profile needs this shell to see their prompt.
+      return { command: "powershell.exe", args: [] };
+    case "cmd":
+      return { command: env.ComSpec?.trim() || env.COMSPEC?.trim() || "cmd.exe", args: [] };
+    case "bash":
+      return { command: "bash", args: ["-l"] };
+    case "zsh":
+      return { command: "zsh", args: ["-l"] };
+    case "sh":
+      return { command: env.SHELL?.trim() || "sh", args: [] };
+  }
+}
+
+/**
+ * Probe whether a shell binary is launchable. Returns the resolved command on
+ * success, or an error message on failure. Used as the terminal equivalent of
+ * `getAdapterLaunchStatus` (no adapter discovery to lean on for shells).
+ */
+export async function checkTerminalShell(
+  shell: TerminalShell,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  runner: CommandRunner | undefined = undefined
+): Promise<{ available: boolean; command: string; error?: string }> {
+  const { command, args } = resolveShellCommand(shell, platform, env);
+  // A cheap, universally-supported probe: print nothing and exit 0.
+  const probeArgs = shell === "cmd" ? ["/c", "exit", "0"] : [...args, "-c", "exit", "0"];
+  const status = await checkCommand(command, probeArgs, runner, { timeoutMs: 5000 });
+  return {
+    available: status.available,
+    command,
+    ...(status.error ? { error: status.error } : {})
+  };
 }

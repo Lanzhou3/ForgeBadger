@@ -27,8 +27,14 @@ import { recordSessionSnapshot } from "../services/session-snapshots.js";
 import { buildSessionBoard } from "../services/session-board.js";
 import {
   createLaunchPlan,
+  createTerminalLaunchPlan,
+  checkTerminalShell,
+  defaultTerminalShell,
   normalizeAdapter,
-  prepareAdapterLaunchExtras
+  normalizeSessionKind,
+  prepareAdapterLaunchExtras,
+  TERMINAL_SHELLS,
+  type TerminalShell
 } from "../services/session-launch-plan.js";
 export {
   createLaunchPlan,
@@ -37,9 +43,12 @@ export {
 };
 export type { LaunchPlanInput } from "../services/session-launch-plan.js";
 
+const terminalShellSchema = z.enum(TERMINAL_SHELLS).optional();
+
 const createSessionSchema = z.object({
   projectId: z.string().min(1),
-  aiTool: z.enum(adapterIds).optional()
+  aiTool: z.enum([...adapterIds, "terminal"]).optional(),
+  shell: terminalShellSchema
 }).strict();
 
 const listSessionsQuerySchema = z.object({
@@ -104,7 +113,7 @@ export function createSessionRoutes(
       return;
     }
 
-    const { projectId, aiTool } = parseResult.data;
+    const { projectId, aiTool, shell } = parseResult.data;
     const projectRepo = new ProjectRepository(db, userId);
     const project = projectRepo.getById(projectId);
     if (!project) {
@@ -112,39 +121,55 @@ export function createSessionRoutes(
       return;
     }
 
-    if (!aiTool && !project.aiTool) {
+    const resolvedKind = aiTool ?? project.aiTool;
+    if (!resolvedKind) {
       res.status(400).json({
         code: 1,
         message: "Runtime CLI selection is required for CLI-agnostic projects"
       });
       return;
     }
-    const adapter = normalizeAdapter(aiTool ?? project.aiTool);
-    if (!adapter) {
+    const kind = normalizeSessionKind(resolvedKind);
+    if (!kind) {
       res.status(400).json({ code: 1, message: "Unsupported project adapter" });
       return;
     }
+    const isTerminal = kind === "terminal";
 
-    const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner, sessionManager.terminalBackendHealth());
-    if (!launchStatus.launchEnabled) {
-      res.status(409).json({
-        code: 1,
-        message: `${launchStatus.label} is not available for launch`,
-        details: {
-          adapter: launchStatus.id,
-          command: launchStatus.command,
-          status: launchStatus.status,
-          error: launchStatus.error
-        }
-      });
-      return;
+    if (isTerminal) {
+      const chosenShell = shell ?? defaultTerminalShell();
+      const shellStatus = await checkTerminalShell(chosenShell, undefined, undefined, adapterCommandRunner);
+      if (!shellStatus.available) {
+        res.status(409).json({
+          code: 1,
+          message: `${chosenShell} is not available for launch`,
+          details: { shell: chosenShell, command: shellStatus.command, error: shellStatus.error }
+        });
+        return;
+      }
+    } else {
+      const adapter = kind;
+      const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner, sessionManager.terminalBackendHealth());
+      if (!launchStatus.launchEnabled) {
+        res.status(409).json({
+          code: 1,
+          message: `${launchStatus.label} is not available for launch`,
+          details: {
+            adapter: launchStatus.id,
+            command: launchStatus.command,
+            status: launchStatus.status,
+            error: launchStatus.error
+          }
+        });
+        return;
+      }
     }
 
     const sessionRepo = new SessionRepository(db, userId);
     const dbSession = sessionRepo.create({
       projectId: project.id,
       name: project.name,
-      aiTool: adapter,
+      aiTool: kind,
       workingDir: project.path,
       credentialMode: "host_environment"
     });
@@ -159,13 +184,23 @@ export function createSessionRoutes(
     });
 
     try {
-      const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, project.path);
-      const launchPlan = createLaunchPlan({
-        adapter,
-        projectRoot: project.path,
-        sessionId: dbSession.id,
-        ...(pluginDirs.length > 0 ? { pluginDirs } : {})
-      });
+      let launchPlan: LaunchPlan;
+      if (isTerminal) {
+        launchPlan = createTerminalLaunchPlan({
+          projectRoot: project.path,
+          sessionId: dbSession.id,
+          ...(shell ? { shell } : {})
+        });
+      } else {
+        const adapter = kind;
+        const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, project.path);
+        launchPlan = createLaunchPlan({
+          adapter,
+          projectRoot: project.path,
+          sessionId: dbSession.id,
+          ...(pluginDirs.length > 0 ? { pluginDirs } : {})
+        });
+      }
       const attachToken = randomUUID();
       sessionRepo.update(dbSession.id, { attachToken });
 

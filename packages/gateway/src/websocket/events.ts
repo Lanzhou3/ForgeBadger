@@ -201,6 +201,18 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
       };
     case "copilot_development_updated":
       return {task_id:event.taskId,status:event.status,revision:event.revision,event_id:event.eventId};
+    case "terminal_command_progress":
+      return {
+        project_id: event.projectId,
+        ...(event.sessionId ? { session_id: event.sessionId } : {}),
+        ...(event.conversationId ? { conversation_id: event.conversationId } : {}),
+        ...(event.runId ? { run_id: event.runId } : {}),
+        ...(event.stepId ? { step_id: event.stepId } : {}),
+        command: event.commandPreview,
+        output_tail: event.outputTail,
+        status: event.status,
+        occurred_at: event.occurredAt.toISOString()
+      };
     case "copilot_run_updated":
       return {
         run_id: event.runId,

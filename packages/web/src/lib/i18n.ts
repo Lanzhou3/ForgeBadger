@@ -12,6 +12,30 @@ export function normalizeLanguage(value: string | null | undefined): Language {
   return supportedLanguages.includes(value as Language) ? (value as Language) : fallbackLanguage;
 }
 
+/**
+ * Maps the browser's preferred locales (e.g. `navigator.languages`) to the
+ * first supported UI language in preference order, so a first-time visitor
+ * follows their system locale. Unknown locales are skipped; the final
+ * fallback is Simplified Chinese.
+ */
+export function detectSystemLanguage(languages: readonly string[] | undefined): Language {
+  for (const raw of languages ?? []) {
+    const tag = raw.trim().toLowerCase().replace("_", "-");
+    if (!tag) continue;
+    const [base, subtag] = tag.split("-");
+    if (base === "en") return "en";
+    if (base === "zh") {
+      // Traditional-Chinese locales (incl. the Hant script subtag) map to
+      // zh-TW; all other zh variants default to Simplified Chinese.
+      if (subtag === "tw" || subtag === "hk" || subtag === "mo" || subtag === "hant") {
+        return "zh-TW";
+      }
+      return "zh-CN";
+    }
+  }
+  return fallbackLanguage;
+}
+
 export function getTranslation(language: Language, key: TranslationKey): string {
   return translations[language][key] ?? translations.en[key] ?? key;
 }
@@ -150,6 +174,11 @@ export const translations = {
     "copilot.approvalFailed": "审批未确认，请同步状态后重试。",
     "copilot.deleteConversationConfirm": "删除该对话？不可撤销。",
     "copilot.running": "Copilot 正在思考…",
+    "copilot.terminalRunning": "正在执行终端命令",
+    "copilot.terminalCompleted": "终端命令已完成",
+    "copilot.terminalTimedOut": "终端命令超时",
+    "copilot.terminalUserTookOver": "你接管了终端，命令已中止",
+    "copilot.terminalError": "终端命令执行失败",
     "copilot.stop": "停止",
     "copilot.retry": "重试",
     "copilot.scrollDown": "回到底部",
@@ -1153,6 +1182,10 @@ export const translations = {
     "projects.authenticationMethod": "认证方式",
     "projects.hostEnvironmentHint": "沿用 CLI 当前主机环境与全局配置，不注入额外模型配置。",
     "projects.launchSessionDescription": "选择要启动的 Code CLI；会话沿用该 CLI 的主机环境与全局配置。",
+    "projects.launchTerminalTab": "终端",
+    "projects.launchTerminalDescription": "启动一个不绑定 CLI 的纯终端（shell）会话。",
+    "projects.terminalShell": "Shell",
+    "projects.terminalShellSystem": "系统默认（$SHELL）",
     "projects.storedCredential": "存储的 API Key",
     "projects.storedCredentialDescription": "使用 ForgeBadger 加密保存的 API Key，并在启动会话时注入给对应 CLI。",
     "projects.apiKey": "API Key",
@@ -1425,6 +1458,16 @@ export const translations = {
     "settings.language": "语言",
     "settings.theme": "主题",
     "settings.themeDescription": "选择界面的品牌强调色，立即生效并保存在本机。",
+    "settings.colorMode": "外观模式",
+    "settings.colorModeDescription": "选择浅色、深色或跟随系统，立即生效并保存在本机。",
+    "settings.colorModeLight": "浅色",
+    "settings.colorModeDark": "深色",
+    "settings.colorModeSystem": "跟随系统",
+    "settings.terminalFont": "终端字体",
+    "settings.terminalFontDescription": "终端会话使用的字体与字号。默认内置 Nerd Font，Oh My Posh 等提示词主题图标可直接显示。",
+    "settings.terminalFontFamily": "字体",
+    "settings.terminalFontSize": "字号",
+    "settings.terminalFontReset": "恢复默认",
     "settings.themeCyan": "蓝青",
     "settings.themeOrange": "橙",
     "settings.themeViolet": "紫",
@@ -1722,6 +1765,11 @@ export const translations = {
     "copilot.approvalFailed": "核准尚未確認，請同步狀態後重試。",
     "copilot.deleteConversationConfirm": "刪除此對話？無法復原。",
     "copilot.running": "Copilot 正在思考…",
+    "copilot.terminalRunning": "正在執行終端命令",
+    "copilot.terminalCompleted": "終端命令已完成",
+    "copilot.terminalTimedOut": "終端命令逾時",
+    "copilot.terminalUserTookOver": "你接管了終端，命令已中止",
+    "copilot.terminalError": "終端命令執行失敗",
     "copilot.stop": "停止",
     "copilot.retry": "重試",
     "copilot.scrollDown": "回到底部",
@@ -2725,6 +2773,10 @@ export const translations = {
     "projects.authenticationMethod": "認證方式",
     "projects.hostEnvironmentHint": "沿用 CLI 的主機環境與全域設定，不注入額外模型設定。",
     "projects.launchSessionDescription": "選擇要啟動的 Code CLI；工作階段沿用該 CLI 的主機環境與全域設定。",
+    "projects.launchTerminalTab": "終端",
+    "projects.launchTerminalDescription": "啟動一個不綁定 CLI 的純終端（shell）工作階段。",
+    "projects.terminalShell": "Shell",
+    "projects.terminalShellSystem": "系統預設（$SHELL）",
     "projects.storedCredential": "儲存的 API Key",
     "projects.storedCredentialDescription": "使用 ForgeBadger 加密儲存的 API Key，並在啟動會話時注入給對應 CLI。",
     "projects.apiKey": "API Key",
@@ -2997,6 +3049,16 @@ export const translations = {
     "settings.language": "語言",
     "settings.theme": "主題",
     "settings.themeDescription": "選擇介面的品牌強調色，立即生效並儲存在本機。",
+    "settings.colorMode": "外觀模式",
+    "settings.colorModeDescription": "選擇淺色、深色或跟隨系統，立即生效並儲存在本機。",
+    "settings.colorModeLight": "淺色",
+    "settings.colorModeDark": "深色",
+    "settings.colorModeSystem": "跟隨系統",
+    "settings.terminalFont": "終端字體",
+    "settings.terminalFontDescription": "終端會話使用的字體與字號。預設內建 Nerd Font，Oh My Posh 等提示詞主題圖標可直接顯示。",
+    "settings.terminalFontFamily": "字體",
+    "settings.terminalFontSize": "字號",
+    "settings.terminalFontReset": "恢復預設",
     "settings.themeCyan": "藍青",
     "settings.themeOrange": "橙",
     "settings.themeViolet": "紫",
@@ -3294,6 +3356,11 @@ export const translations = {
     "copilot.approvalFailed": "Approval is unconfirmed. Sync the status and retry.",
     "copilot.deleteConversationConfirm": "Delete this conversation? This cannot be undone.",
     "copilot.running": "Copilot is thinking…",
+    "copilot.terminalRunning": "Running terminal command",
+    "copilot.terminalCompleted": "Terminal command completed",
+    "copilot.terminalTimedOut": "Terminal command timed out",
+    "copilot.terminalUserTookOver": "You took over the terminal; the command was aborted",
+    "copilot.terminalError": "Terminal command failed",
     "copilot.stop": "Stop",
     "copilot.retry": "Retry",
     "copilot.scrollDown": "Back to bottom",
@@ -4295,6 +4362,10 @@ export const translations = {
     "projects.authenticationMethod": "Authentication Method",
     "projects.hostEnvironmentHint": "Use the CLI's host environment and global config without extra model injection.",
     "projects.launchSessionDescription": "Choose the Code CLI to launch; the session uses that CLI's host environment and global config.",
+    "projects.launchTerminalTab": "Terminal",
+    "projects.launchTerminalDescription": "Launch a CLI-agnostic plain terminal (shell) session.",
+    "projects.terminalShell": "Shell",
+    "projects.terminalShellSystem": "System default ($SHELL)",
     "projects.storedCredential": "Stored API Key",
     "projects.storedCredentialDescription": "Use an API key encrypted by ForgeBadger and inject it into the matching CLI when the session starts.",
     "projects.apiKey": "API Key",
@@ -4567,6 +4638,16 @@ export const translations = {
     "settings.language": "Language",
     "settings.theme": "Theme",
     "settings.themeDescription": "Pick the brand accent color. Applies instantly and is stored on this device.",
+    "settings.colorMode": "Appearance mode",
+    "settings.colorModeDescription": "Choose light, dark, or follow the system. Applies instantly and is stored on this device.",
+    "settings.colorModeLight": "Light",
+    "settings.colorModeDark": "Dark",
+    "settings.colorModeSystem": "System",
+    "settings.terminalFont": "Terminal font",
+    "settings.terminalFontDescription": "Font and size for terminal sessions. The default bundles a Nerd Font so prompt themes like Oh My Posh render their icons directly.",
+    "settings.terminalFontFamily": "Font family",
+    "settings.terminalFontSize": "Font size",
+    "settings.terminalFontReset": "Restore default",
     "settings.themeCyan": "Cyan",
     "settings.themeOrange": "Orange",
     "settings.themeViolet": "Violet",

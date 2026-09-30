@@ -10,7 +10,7 @@ import type { ForgeBadgerEventBus } from "../event-bus.js";
 import { recordActivity } from "../activity-events.js";
 import { recordSessionSnapshot } from "../session-snapshots.js";
 import { getAdapterLaunchStatus } from "../adapter-discovery.js";
-import { createLaunchPlan, normalizeAdapter, prepareAdapterLaunchExtras } from "../session-launch-plan.js";
+import { createLaunchPlan, createTerminalLaunchPlan, checkTerminalShell, defaultTerminalShell, normalizeSessionKind, prepareAdapterLaunchExtras } from "../session-launch-plan.js";
 import { canonical } from "./actions.js";
 import type { CommandContext, PlatformCommand } from "./types.js";
 const inputSchema = z.object({ sessionId: z.string().min(1).max(128) }).strict();
@@ -59,12 +59,19 @@ async function preflight(ctx: CommandContext, sessionId: string, action: string,
         const claimsRunning = live?.status === 'running' || session.status === 'running';
         if (claimsRunning && await manager.hasLiveTerminal(sessionId, session.runtimeSessionName ?? undefined))
             throw new PlatformNoEffectError("Session already running");
-        const adapter = normalizeAdapter(session.aiTool);
-        if (!adapter)
+        const kind = normalizeSessionKind(session.aiTool);
+        if (!kind)
             throw new PlatformNoEffectError("Unsupported session adapter", 400);
-        const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
-        if (!status.launchEnabled)
-            throw new PlatformNoEffectError(`${status.label} is not available for launch`);
+        if (kind === "terminal") {
+            const shellStatus = await checkTerminalShell(defaultTerminalShell(), undefined, undefined, ctx.adapterCommandRunner);
+            if (!shellStatus.available)
+                throw new PlatformNoEffectError(`${defaultTerminalShell()} is not available for launch`);
+        } else {
+            const adapter = kind;
+            const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
+            if (!status.launchEnabled)
+                throw new PlatformNoEffectError(`${status.label} is not available for launch`);
+        }
     }
     else if (action === 'stop' && !live && !session.runtimeSessionName)
         throw new PlatformNoEffectError("Session is not running");
@@ -100,39 +107,61 @@ async function start(ctx: CommandContext, sessionId: string) {
             ) {
                 throw new SessionConflictError("Session already running");
             }
-            const adapter = normalizeAdapter(dbSession.aiTool);
-            if (!adapter) {
+            const kind = normalizeSessionKind(dbSession.aiTool);
+            if (!kind) {
                 const err = new Error("Unsupported session adapter");
                 (err as Error & {
                     httpStatus?: number;
                 }).httpStatus = 400;
                 throw err;
             }
-            const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner, sessionManager.terminalBackendHealth());
-            if (!launchStatus.launchEnabled) {
-                const err = new Error(`${launchStatus.label} is not available for launch`);
-                (err as Error & {
-                    httpStatus?: number;
-                }).httpStatus = 409;
-                (err as Error & {
-                    details?: unknown;
-                }).details = {
-                    adapter: launchStatus.id,
-                    command: launchStatus.command,
-                    status: launchStatus.status,
-                    error: launchStatus.error
-                };
-                throw err;
+            let launchPlan;
+            if (kind === "terminal") {
+                const shellStatus = await checkTerminalShell(defaultTerminalShell(), undefined, undefined, adapterCommandRunner);
+                if (!shellStatus.available) {
+                    const err = new Error(`${defaultTerminalShell()} is not available for launch`);
+                    (err as Error & {
+                        httpStatus?: number;
+                    }).httpStatus = 409;
+                    (err as Error & {
+                        details?: unknown;
+                    }).details = { shell: defaultTerminalShell(), command: shellStatus.command, error: shellStatus.error };
+                    throw err;
+                }
+                authorize();
+                effectsStarted = true;
+                launchPlan = createTerminalLaunchPlan({
+                    projectRoot: dbSession.workingDir,
+                    sessionId: dbSession.id
+                });
+            } else {
+                const adapter = kind;
+                const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner, sessionManager.terminalBackendHealth());
+                if (!launchStatus.launchEnabled) {
+                    const err = new Error(`${launchStatus.label} is not available for launch`);
+                    (err as Error & {
+                        httpStatus?: number;
+                    }).httpStatus = 409;
+                    (err as Error & {
+                        details?: unknown;
+                    }).details = {
+                        adapter: launchStatus.id,
+                        command: launchStatus.command,
+                        status: launchStatus.status,
+                        error: launchStatus.error
+                    };
+                    throw err;
+                }
+                authorize();
+                effectsStarted = true;
+                const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, dbSession.workingDir);
+                launchPlan = createLaunchPlan({
+                    adapter,
+                    projectRoot: dbSession.workingDir,
+                    sessionId: dbSession.id,
+                    ...(pluginDirs.length > 0 ? { pluginDirs } : {})
+                });
             }
-            authorize();
-            effectsStarted = true;
-            const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, dbSession.workingDir);
-            const launchPlan = createLaunchPlan({
-                adapter,
-                projectRoot: dbSession.workingDir,
-                sessionId: dbSession.id,
-                ...(pluginDirs.length > 0 ? { pluginDirs } : {})
-            });
             const attachToken = randomUUID();
             authorize();
             sessionRepo.update(dbSession.id, { attachToken });

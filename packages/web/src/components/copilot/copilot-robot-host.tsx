@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 
 import { RobotWidget } from "@/components/copilot/robot-widget";
 import { usePetPreference } from "@/hooks/use-pet-preference";
+import type { RobotCorner } from "@/lib/pixel-robot";
 
 // Lazy-loaded so the chat panel's heavy dependencies (react-markdown,
 // remark-gfm, shiki) never ship in the shared app-shell bundle — they load
@@ -26,6 +27,9 @@ export function CopilotRobotHost() {
   const pathname = usePathname();
   const petId = usePetPreference();
   const [chatOpen, setChatOpen] = useState(false);
+  // The panel anchors to the same viewport corner as the robot so it opens
+  // beside the pet wherever it was dragged, not always bottom-right.
+  const [panelCorner, setPanelCorner] = useState<RobotCorner>("bottom-right");
 
   const onActivate = useCallback(() => {
     setChatOpen((current) => !current);
@@ -49,9 +53,10 @@ export function CopilotRobotHost() {
         onActivate={onActivate}
         suppressBubbles={pathname === "/copilot"}
         panelOpen={chatOpen}
+        onCornerChange={setPanelCorner}
       />}
       {chatOpen && (
-        <RobotChatPanel onClose={() => setChatOpen(false)} onExpandFull={onExpandFull} />
+        <RobotChatPanel corner={panelCorner} onClose={() => setChatOpen(false)} onExpandFull={onExpandFull} />
       )}
     </div>
   );

@@ -18,6 +18,8 @@ import { AgentMemoryRepository } from '../agent/memory.js';
 import { buildTaskPacket, createTaskPacketContext, createTaskPacketSessionName, findWorkItemByTaskPacketSession, resolveTaskPacketSession, withTaskPacketSessionLink, toTaskPacketSessionDto } from '../project-manager/task-packets.js';
 import { createSessionCommands } from './session-commands.js';
 import { assertAdapterAutonomy } from '../adapter-autonomy.js';
+import { runShellCommand, runShellCommandInSession, openCopilotShell, closeCopilotShell, assertCopilotShellSession, SHELL_COMMAND_MAX_LENGTH, SHELL_COMMAND_MAX_TIMEOUT_MS } from '../shell-command-execution.js';
+import { redactAgentValue } from '../agent/redaction.js';
 import { dispatchSessionInput } from '../agent/platform-access.js';
 import { normalizeAdapter } from '../session-launch-plan.js';
 import { canonical, canonicalRoot } from './actions.js';
@@ -32,6 +34,27 @@ const workItemWithEvidence = workItemCreateInput.extend({assigneeId:id.nullable(
 export const workItemUpdateInput = z.object({expectedRevision:z.number().int().positive().optional(),assigneeId:id.nullable().optional(),reviewerId:id.nullable().optional(), projectId: id, workItemId: id, title: z.string().min(1).max(256).optional(), description: z.string().max(4000).nullable().optional(), priority: z.number().int().min(0).max(100).optional(), acceptanceCriteria: z.array(z.string().max(1000)).max(50).optional(), stageId: id.nullable().optional() }).strict();
 export const taskPrepareInput = z.object({ projectId: id, workItemId: id, aiTool: z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).optional() }).strict();
 export const sessionDispatchInput = z.object({ sessionId: id, message: z.string().min(1).max(4000) }).strict();
+export const terminalRunInput = z.object({ projectId: id, command: z.string().min(1).max(SHELL_COMMAND_MAX_LENGTH), timeoutMs: z.number().int().min(1).max(SHELL_COMMAND_MAX_TIMEOUT_MS).optional(), sessionId: id.optional() }).strict();
+export const terminalOpenInput = z.object({ projectId: id }).strict();
+export const terminalCloseInput = z.object({ sessionId: id }).strict();
+
+function terminalProgressEmitter(ctx: CommandContext, projectId: string, command: string, sessionId?: string) {
+    const bus = ctx.eventBus;
+    if (!bus) return undefined;
+    const base = {
+        type: 'terminal_command_progress' as const,
+        userId: ctx.userId,
+        projectId,
+        commandPreview: command.slice(0, 120),
+        ...(sessionId ? { sessionId } : {}),
+        ...(typeof ctx.conversationId === 'string' ? { conversationId: ctx.conversationId } : {}),
+        ...(typeof ctx.runId === 'string' ? { runId: ctx.runId } : {}),
+        ...(typeof ctx.stepId === 'string' ? { stepId: ctx.stepId } : {})
+    };
+    return (outputTail: string, status: 'running' | 'completed' | 'timed_out' | 'user_took_over' | 'error') => {
+        bus.emitEvent({ ...base, outputTail: String(redactAgentValue(outputTail)), status, occurredAt: new Date() });
+    };
+}
 export const memoryWriteInput = z.object({ kind: z.enum(['fact', 'preference', 'decision', 'project_note']), scope: z.enum(['global', 'project', 'session']), text: z.string().min(1).max(8192), projectId: id.optional(), conversationId: id.optional(), metadata: z.record(z.unknown()).optional() }).strict();
 function project(ctx: CommandContext, id: string) {
     const p = new ProjectRepository(ctx.db, ctx.userId).getById(id);
@@ -236,6 +259,83 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 return new AgentMemoryRepository(ctx.db, ctx.userId).create({ kind: v.kind, scope: v.scope, text: v.text, ...(v.projectId ? { projectId: v.projectId } : {}), ...(v.conversationId ? { conversationId: v.conversationId } : {}), ...(v.metadata ? { metadata: v.metadata } : {}) });
             } })
     ];
-    commands.push(...createSessionCommands(), ...createManagementCommands(), ...createDevelopmentCommands());
+    commands.push(
+        command({ id: 'terminal.run', effect: 'external', inputSchema: terminalRunInput,
+            resolve(ctx, input) {
+                const v = terminalRunInput.parse(input);
+                const p = project(ctx, v.projectId);
+                if (v.sessionId) assertCopilotShellSession(ctx.db, ctx.userId, v.sessionId);
+                return { projectIds: [p.id], rootPaths: [p.path], revision: createHash('sha256').update(canonical(p)).digest('hex') };
+            },
+            async execute(ctx, input) {
+                const v = terminalRunInput.parse(input);
+                const p = project(ctx, v.projectId);
+                const manager = ctx.sessionManager;
+                if (!manager) throw new Error('Session runtime unavailable');
+                ctx.authorize?.();
+                const emit = terminalProgressEmitter(ctx, p.id, v.command);
+                let result;
+                try {
+                    if (v.sessionId) {
+                        result = await runShellCommandInSession({
+                            db: ctx.db,
+                            userId: ctx.userId,
+                            sessionManager: manager,
+                            projectId: p.id,
+                            sessionId: v.sessionId,
+                            command: v.command,
+                            ...(v.timeoutMs ? { timeoutMs: v.timeoutMs } : {}),
+                            ...(emit ? { onProgress: (tail: string) => emit(tail, 'running') } : {})
+                        });
+                    } else {
+                        result = await runShellCommand({
+                            db: ctx.db,
+                            userId: ctx.userId,
+                            sessionManager: manager,
+                            projectRoot: p.path,
+                            command: v.command,
+                            ...(v.timeoutMs ? { timeoutMs: v.timeoutMs } : {}),
+                            ...(emit ? { onProgress: (tail: string) => emit(tail, 'running') } : {})
+                        });
+                    }
+                } catch (error) {
+                    emit?.("", 'error');
+                    throw error;
+                }
+                emit?.(result.output.slice(-2000), result.userTookOver ? 'user_took_over' : result.timedOut ? 'timed_out' : 'completed');
+                return { projectId: p.id, sessionId: result.sessionId, exitCode: result.exitCode, output: result.output, timedOut: result.timedOut, userTookOver: result.userTookOver };
+            } }),
+        command({ id: 'terminal.open', effect: 'external', inputSchema: terminalOpenInput,
+            resolve(ctx, input) {
+                const v = terminalOpenInput.parse(input);
+                const p = project(ctx, v.projectId);
+                return { projectIds: [p.id], rootPaths: [p.path], revision: createHash('sha256').update(canonical(p)).digest('hex') };
+            },
+            async execute(ctx, input) {
+                const v = terminalOpenInput.parse(input);
+                const p = project(ctx, v.projectId);
+                const manager = ctx.sessionManager;
+                if (!manager) throw new Error('Session runtime unavailable');
+                ctx.authorize?.();
+                const shell = await openCopilotShell(ctx.db, ctx.userId, manager, { id: p.id, path: p.path });
+                return { projectId: p.id, sessionId: shell.sessionId, reused: shell.reused };
+            } }),
+        command({ id: 'terminal.close', effect: 'external', inputSchema: terminalCloseInput,
+            resolve(ctx, input) {
+                const v = terminalCloseInput.parse(input);
+                const s = assertCopilotShellSession(ctx.db, ctx.userId, v.sessionId);
+                project(ctx, s.projectId);
+                return { projectIds: [s.projectId], rootPaths: [s.workingDir], revision: createHash('sha256').update(canonical(s)).digest('hex') };
+            },
+            async execute(ctx, input) {
+                const v = terminalCloseInput.parse(input);
+                const s = assertCopilotShellSession(ctx.db, ctx.userId, v.sessionId);
+                const manager = ctx.sessionManager;
+                if (!manager) throw new Error('Session runtime unavailable');
+                ctx.authorize?.();
+                await closeCopilotShell(ctx.db, ctx.userId, manager, s);
+                return { projectId: s.projectId, sessionId: s.id, closed: true };
+            } }),
+        ...createSessionCommands(), ...createManagementCommands(), ...createDevelopmentCommands());
     return new Map(commands.map(c => [c.id, c]));
 }

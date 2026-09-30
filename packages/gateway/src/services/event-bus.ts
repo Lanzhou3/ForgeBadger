@@ -111,6 +111,28 @@ export interface AppActionNotificationEvent {
 
 export interface CopilotDevelopmentUpdatedEvent { type:"copilot_development_updated";userId:string;taskId:string;status:string;revision:number;eventId:string; }
 
+/**
+ * Redacted progress stream for a long-running terminal command executed by
+ * Copilot (terminal_run). `outputTail` is a redacted, length-capped tail of
+ * the command output — never raw scrollback. Emitted ~every 2s while the
+ * command runs and once more with a terminal status.
+ */
+export interface TerminalCommandProgressEvent {
+  type: "terminal_command_progress";
+  userId: string;
+  projectId: string;
+  sessionId?: string | undefined;
+  conversationId?: string | undefined;
+  runId?: string | undefined;
+  stepId?: string | undefined;
+  commandPreview: string;
+  outputTail: string;
+  status: "running" | "completed" | "timed_out" | "user_took_over" | "error";
+  occurredAt: Date;
+  notificationId?: string | undefined;
+  notificationCreatedAt?: Date | undefined;
+}
+
 export type ForgeBadgerEvent =
   | CopilotDevelopmentUpdatedEvent
   | SessionStatusChangedEvent
@@ -120,6 +142,7 @@ export type ForgeBadgerEvent =
   | AppActionNotificationEvent
   | ActivityCreatedEvent
   | CopilotRunUpdatedEvent
+  | TerminalCommandProgressEvent
   | ErrorEvent;
 
 export class ForgeBadgerEventBus extends EventEmitter {

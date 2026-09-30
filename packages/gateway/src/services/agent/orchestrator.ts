@@ -336,7 +336,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         const availableToolSchemas = allVisibleTools(input);
         const context: AgentToolContext = { signal: control.active.get(c.runId)?.controller.signal, executionMode: input.executionMode, runResearch: (research: { projectId: string; goal: string }) => runResearch(ledger, c, step, research), source: input.source ?? "user", runId: c.runId, stepId: step.id, externalActionId: action?.id, checkExecutionAuthority: live, userId: input.userId, db: deps.db, masterKey: deps.masterKey, conversationId: input.conversationId,
             availableToolNames: availableToolSchemas.map(tool => tool.name), availableToolSchemas,
-            ...(input.projectId ? { projectId: input.projectId } : {}), ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}), ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}) };
+            ...(input.projectId ? { projectId: input.projectId } : {}), ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}), ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}), ...(deps.eventBus ? { eventBus: deps.eventBus } : {}) };
         if (!rejection && tool) {
             try { checkAgentScope(context, tool.name, raw); } catch (error) { rejection = error instanceof Error ? error.message : "Tool scope rejected"; }
             if (!rejection && input.executionMode === 'repair' && tool.name === 'submit_development_task') {

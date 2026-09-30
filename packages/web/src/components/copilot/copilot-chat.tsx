@@ -34,6 +34,7 @@ import { GatewayApiError, listProjects, type Project } from "@/lib/api";
 import { readLastCopilotConversation, writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
+import { useTerminalCommandProgress } from "@/hooks/use-terminal-command-progress";
 import { useCopilotChatController } from "@/hooks/use-copilot-chat-controller";
 import { useCopilotFollowups } from "@/hooks/use-copilot-followups";
 import { copilotPhaseLabel } from "@/lib/copilot-phase";
@@ -193,6 +194,19 @@ export function CopilotChat() {
       );
     },
   });
+
+  // Live progress for long-running terminal commands (terminal_run) in this
+  // conversation; pushed over /ws/events by the gateway while the command runs.
+  const terminalProgress = useTerminalCommandProgress(conversationId);
+  const terminalProgressLabel = terminalProgress
+    ? {
+        running: t("copilot.terminalRunning"),
+        completed: t("copilot.terminalCompleted"),
+        timed_out: t("copilot.terminalTimedOut"),
+        user_took_over: t("copilot.terminalUserTookOver"),
+        error: t("copilot.terminalError")
+      }[terminalProgress.status]
+    : null;
 
   const listSerialRef = useRef(0);
 
@@ -482,6 +496,30 @@ export function CopilotChat() {
                   <span className="size-1.5 animate-pulse rounded-full bg-brand" />
                   {t("copilot.running")}
                 </p>
+              ) : null}
+              {terminalProgress && terminalProgressLabel ? (
+                <Card className="w-full gap-2 p-3 text-xs" data-testid="terminal-command-progress">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={
+                        terminalProgress.status === "running"
+                          ? "size-1.5 shrink-0 animate-pulse rounded-full bg-brand"
+                          : terminalProgress.status === "error" || terminalProgress.status === "timed_out" || terminalProgress.status === "user_took_over"
+                            ? "size-1.5 shrink-0 rounded-full bg-destructive"
+                            : "size-1.5 shrink-0 rounded-full bg-emerald-500"
+                      }
+                    />
+                    <span className="shrink-0 font-medium">{terminalProgressLabel}</span>
+                    <code className="min-w-0 flex-1 truncate text-muted-foreground" title={terminalProgress.command}>
+                      {terminalProgress.command}
+                    </code>
+                  </div>
+                  {terminalProgress.outputTail ? (
+                    <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-all rounded bg-muted/40 p-2 text-[11px] leading-relaxed text-muted-foreground">
+                      {terminalProgress.outputTail}
+                    </pre>
+                  ) : null}
+                </Card>
               ) : null}
               {controller.sendFailed && (
                 <div className="flex items-center gap-2">

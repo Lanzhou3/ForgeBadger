@@ -12,7 +12,7 @@ import type { TerminalBackendClient } from "./terminal-backend.js";
 import type { SessionInfo } from "./session-server/ipc-protocol.js";
 import type { ForgeBadgerEventBus } from "./event-bus.js";
 import { SessionOutputRing } from "./session-output-buffer.js";
-import { SessionWriterLeases } from "./session-writer-leases.js";
+import { SessionWriterLeases, type WriterLease } from "./session-writer-leases.js";
 import type { Database } from "../db/types.js";
 import {
   assertSafeProgrammaticMessage,
@@ -152,6 +152,16 @@ class EmptyRecoveryStore implements SessionRecoveryStore {
   async upsertSession(): Promise<void> {}
 
   async removeSession(_id: string, _userId: string): Promise<void> {}
+}
+
+/** Handle for a workspace writer lease as seen by programmatic writers. */
+export interface WriterLeaseHandle {
+  userId: string;
+  sessionId: string;
+  workspace: string;
+  token: string;
+  fence: number;
+  expiresAt: number;
 }
 
 export class InMemorySessionManager {
@@ -646,6 +656,47 @@ export class InMemorySessionManager {
   async captureHistory(id: string): Promise<string> {
     const session = this.requireSession(id);
     return this.backend.capturePane(session.runtimeSessionName);
+  }
+
+  /** Acquire a workspace writer lease (Copilot shell execution path). */
+  acquireWriterLease(scope: { userId: string; sessionId: string; workspace: string }): WriterLeaseHandle {
+    return this.writerLeases.acquire(scope) as unknown as WriterLeaseHandle;
+  }
+
+  /** Release a previously acquired workspace writer lease. */
+  releaseWriterLease(lease: WriterLeaseHandle): void {
+    this.writerLeases.release(lease as unknown as WriterLease);
+  }
+
+  /**
+   * Extend a still-held writer lease by one TTL. Returns the renewed handle;
+   * keep using the returned handle for assert/release afterwards.
+   */
+  renewWriterLease(lease: WriterLeaseHandle): WriterLeaseHandle {
+    return this.writerLeases.renew(lease as unknown as WriterLease) as unknown as WriterLeaseHandle;
+  }
+
+  /**
+   * Check that a workspace writer lease is still held. Throws
+   * SESSION_WRITER_FENCE_STALE when the owner took over (or the lease
+   * expired), which programmatic writers must treat as "the human wins".
+   */
+  assertWriterLeaseCurrent(lease: WriterLeaseHandle): void {
+    this.writerLeases.assertCurrent(lease as unknown as WriterLease);
+  }
+
+  /** Stage programmatic (bracketed-paste) input for a session. */
+  async stageProgrammaticInput(id: string, data: string): Promise<void> {
+    const session = this.requireSession(id);
+    if (!this.backend.stageProgrammaticInput) throw new Error("terminal backend programmatic input is not supported");
+    await this.backend.stageProgrammaticInput(session.runtimeSessionName, data);
+  }
+
+  /** Press Enter on a session (submit staged input). */
+  async pressEnter(id: string): Promise<void> {
+    const session = this.requireSession(id);
+    if (!this.backend.pressEnter) throw new Error("terminal backend press-enter is not supported");
+    await this.backend.pressEnter(session.runtimeSessionName);
   }
 
   async resizeSession(id: string, cols: number, rows: number): Promise<void> {

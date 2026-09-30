@@ -7,7 +7,7 @@ import { CliBrandIcon } from "./cli-brand-icon";
 describe("CliBrandIcon", () => {
   it("renders inline svg marks for the other known CLI brands", () => {
     // Arrange & Act
-    const rendered = ["claude", "kimi", "opencode", "pi", "mcode"].map((aiTool) =>
+    const rendered = ["claude", "kimi", "opencode", "pi", "mcode", "terminal"].map((aiTool) =>
       render(<CliBrandIcon aiTool={aiTool} />)
     );
 
@@ -15,6 +15,28 @@ describe("CliBrandIcon", () => {
     for (const view of rendered) {
       expect(view.container.querySelector("svg")).not.toBeNull();
     }
+  });
+
+  it("adds the official black tile behind the Kimi mark in light mode", () => {
+    // Arrange & Act
+    const { container } = render(<CliBrandIcon aiTool="kimi" />);
+
+    // Assert — the official app icon (kimi.moonshot.cn favicon) sits the white
+    // K + blue dot on a black rounded tile; without the tile the white K is
+    // invisible on light surfaces. The tile hides in dark mode, where the bare
+    // white K matches the official favicon-dark variant.
+    const tile = container.querySelector("rect");
+    expect(tile?.getAttribute("fill")).toBe("#000000");
+    expect(tile?.getAttribute("rx")).toBe("5");
+    expect(tile?.getAttribute("class")).toContain("dark:hidden");
+    const group = container.querySelector("g");
+    const groupClass = group?.getAttribute("class") ?? "";
+    expect(groupClass).toContain("scale-[0.9]");
+    expect(groupClass).toContain("dark:scale-100");
+    const fills = Array.from(container.querySelectorAll("path")).map((p) =>
+      p.getAttribute("fill")
+    );
+    expect(fills).toEqual(["#1783FF", "#FFFFFF"]);
   });
 
   it("renders the official MiniMax Code app icon (blue tile + white card + black frame)", () => {
@@ -47,6 +69,23 @@ describe("CliBrandIcon", () => {
     expect(crop?.getAttribute("class")).toContain("size-5");
     expect(crop?.getAttribute("class")).toContain("overflow-hidden");
     expect(container.querySelector("svg")).toBeNull();
+  });
+
+  it("renders the monochrome prompt mark for terminal sessions", () => {
+    // Arrange & Act
+    const { container } = render(<CliBrandIcon aiTool="terminal" />);
+
+    // Assert — the ">_" prompt glyph follows the surrounding text color
+    // (no fixed fill), so it stays legible in active and inactive tabs alike.
+    const svg = container.querySelector("svg");
+    expect(svg).not.toBeNull();
+    const svgClass = svg?.getAttribute("class") ?? "";
+    expect(svgClass).toContain("text-current");
+    const group = container.querySelector("g");
+    expect(group).not.toBeNull();
+    expect(group?.getAttribute("fill")).toBe("none");
+    expect(group?.getAttribute("stroke")).toBe("currentColor");
+    expect(container.querySelectorAll("path").length).toBe(2);
   });
 
   it("renders nothing for unknown or missing aiTool values", () => {

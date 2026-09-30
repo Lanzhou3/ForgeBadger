@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getTranslation, normalizeLanguage } from "./i18n";
+import { detectSystemLanguage, getTranslation, normalizeLanguage } from "./i18n";
 
 describe("i18n", () => {
   it("returns localized labels for each supported language", () => {
@@ -89,5 +89,20 @@ describe("i18n", () => {
   it("normalizes unsupported language values to Simplified Chinese", () => {
     expect(normalizeLanguage("fr")).toBe("zh-CN");
     expect(normalizeLanguage(null)).toBe("zh-CN");
+  });
+
+  it("maps system locales to the first supported language in preference order", () => {
+    expect(detectSystemLanguage(["en-US", "zh-CN"])).toBe("en");
+    expect(detectSystemLanguage(["EN-us", "fr"])).toBe("en");
+    expect(detectSystemLanguage(["zh-CN", "en"])).toBe("zh-CN");
+    expect(detectSystemLanguage(["zh"])).toBe("zh-CN");
+    expect(detectSystemLanguage(["zh-SG"])).toBe("zh-CN");
+    expect(detectSystemLanguage(["zh-TW"])).toBe("zh-TW");
+    expect(detectSystemLanguage(["zh-HK", "en"])).toBe("zh-TW");
+    expect(detectSystemLanguage(["zh-Hant"])).toBe("zh-TW");
+    expect(detectSystemLanguage(["fr", "en"])).toBe("en");
+    expect(detectSystemLanguage(["fr-FR", "fr"])).toBe("zh-CN");
+    expect(detectSystemLanguage(undefined)).toBe("zh-CN");
+    expect(detectSystemLanguage([])).toBe("zh-CN");
   });
 });

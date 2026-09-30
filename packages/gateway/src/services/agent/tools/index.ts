@@ -16,6 +16,7 @@ import { createPlatformManagementTools } from "./platform-management.js";
 import type { AgentTool } from "../tool-registry.js";
 import { createProjectTools } from "./projects.js";
 import { createSessionTools } from "./sessions.js";
+import { createTerminalTools } from "./terminal.js";
 import { createMemoryTools } from "./memory.js";
 import { createUsageTools } from "./usage.js";
 import { createProjectManagerTools } from "./project-manager.js";
@@ -35,6 +36,7 @@ export function createPlatformTools(): AgentTool[] {
     ...createSkillTools(),
     ...createProjectTools(),
     ...createSessionTools(),
+    ...createTerminalTools(),
     ...createMemoryTools(),
     ...createUsageTools(),
     ...createProjectManagerTools(),

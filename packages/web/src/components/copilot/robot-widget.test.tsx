@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { LanguageProvider } from "@/hooks/use-language";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
 import { RobotWidget } from "@/components/copilot/robot-widget";
+import type { RobotCorner } from "@/lib/pixel-robot";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -44,7 +45,7 @@ window.matchMedia = ((query: string) => ({
   dispatchEvent: () => false,
 })) as unknown as typeof window.matchMedia;
 
-function renderWidget(props: { onActivate?: () => void; suppressBubbles?: boolean; panelOpen?: boolean } = {}) {
+function renderWidget(props: { onActivate?: () => void; suppressBubbles?: boolean; panelOpen?: boolean; onCornerChange?: (corner: RobotCorner) => void } = {}) {
   const onActivate = props.onActivate ?? vi.fn();
   render(
     <LanguageProvider>
@@ -52,6 +53,7 @@ function renderWidget(props: { onActivate?: () => void; suppressBubbles?: boolea
         onActivate={onActivate}
         suppressBubbles={props.suppressBubbles}
         panelOpen={props.panelOpen}
+        onCornerChange={props.onCornerChange}
       />
     </LanguageProvider>
   );
@@ -132,6 +134,24 @@ describe("RobotWidget activation", () => {
     // The bubble is dismissed locally instead of navigating to its href.
     expect(routerPushMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "打开会话" })).toBeNull();
+  });
+
+  it("reports the pinned corner so the chat panel anchors beside the robot", async () => {
+    window.localStorage.setItem("forgebadger.robotCorner", "top-left");
+    const onCornerChange = vi.fn();
+    renderWidget({ onCornerChange });
+
+    // The persisted corner is restored on mount and reported to the host.
+    await robotButton();
+    expect(onCornerChange).toHaveBeenLastCalledWith("top-left");
+
+    // Dragging the robot to another corner reports the new snap.
+    const robot = screen.getByRole("button", { name: "Copilot" });
+    fireEvent.pointerDown(robot, { button: 0, pointerId: 1, clientX: 50, clientY: 50 });
+    fireEvent.pointerMove(robot, { pointerId: 1, clientX: 900, clientY: 600 });
+    fireEvent.pointerUp(robot, { pointerId: 1, clientX: 900, clientY: 600 });
+    expect(onCornerChange).toHaveBeenLastCalledWith("bottom-right");
+    expect(window.localStorage.getItem("forgebadger.robotCorner")).toBe("bottom-right");
   });
 });
 

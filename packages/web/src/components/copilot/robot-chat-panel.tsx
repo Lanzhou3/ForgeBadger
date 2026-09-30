@@ -37,6 +37,7 @@ import {
   type CopilotMessage,
 } from "@/lib/copilot-api";
 import { cn } from "@/lib/utils";
+import type { RobotCorner } from "@/lib/pixel-robot";
 import { toast } from "@/lib/toast";
 import { LAST_COPILOT_CONVERSATION_KEY, readLastCopilotConversation, writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
 
@@ -49,16 +50,36 @@ export const ROBOT_CONVERSATION_STORAGE_KEY = LAST_COPILOT_CONVERSATION_KEY;
 // "no project context" in onValueChange (same pattern as the console).
 const NO_PROJECT_VALUE = "__no_project__";
 
+// Desktop anchor per robot corner. The panel keeps the same 128px (md:*-32)
+// gap off the shared edge as the classic bottom-right placement: the robot
+// itself spans 20px corner margin + 88px sprite = 108px, leaving a 20px
+// breathing gap. The opposite edge releases the mobile sheet so the 380px
+// card hugs its corner; the shared 9rem max-height still reserves the 128px
+// robot zone plus a 16px margin on the far edge for every corner.
+const PANEL_DESKTOP_ANCHOR_BY_CORNER: Record<RobotCorner, string> = {
+  "bottom-right": "md:bottom-32 md:right-4 md:top-auto",
+  "bottom-left": "md:bottom-32 md:left-4 md:top-auto",
+  "top-right": "md:bottom-auto md:right-4 md:top-32",
+  "top-left": "md:bottom-auto md:left-4 md:top-32",
+};
+
 interface RobotChatPanelProps {
   onClose: () => void;
   /** Expand to the full Copilot console, carrying the current conversation. */
   onExpandFull: (conversationId: string | null) => void;
+  /**
+   * Viewport corner the robot is pinned to. The panel anchors to the same
+   * corner — above the robot for bottom corners, below it for top corners —
+   * so it opens beside the pet instead of always bottom-right.
+   */
+  corner?: RobotCorner;
 }
 
 /**
- * Floating quick-chat panel anchored above the robot (Linear/v0-style
- * side assistant). Desktop: a 380x520 card pinned to the bottom-right corner;
- * small screens: a near-fullscreen bottom sheet. Conversations are created
+ * Floating quick-chat panel anchored beside the robot (Linear/v0-style
+ * side assistant). Desktop: a 380x520 card pinned to the robot's corner
+ * (bottom-right by default); small screens: a near-fullscreen bottom sheet.
+ * Conversations are created
  * lazily on the first message (no empty-conversation litter) and the active
  * conversation id persists in localStorage so reopening the panel resumes the
  * same conversation.
@@ -69,7 +90,7 @@ interface RobotChatPanelProps {
  * row (project context, run options) and the model/thinking pickers from
  * CopilotStatusBar.
  */
-export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
+export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" }: RobotChatPanelProps) {
   const { t } = useLanguage();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -329,7 +350,10 @@ export function RobotChatPanel({ onClose, onExpandFull }: RobotChatPanelProps) {
       onKeyDown={event => {
         if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); onClose(); }
       }}
-      className="fixed inset-x-2 bottom-2 top-14 z-40 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl shadow-black/40 md:inset-x-auto md:bottom-32 md:right-4 md:top-auto md:h-[520px] md:max-h-[calc(100dvh-9rem)] md:w-[380px]"
+      className={cn(
+        "fixed inset-x-2 bottom-2 top-14 z-40 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl shadow-black/40 md:inset-x-auto md:h-[520px] md:max-h-[calc(100dvh-9rem)] md:w-[380px]",
+        PANEL_DESKTOP_ANCHOR_BY_CORNER[corner]
+      )}
     >
       <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3">
         <div className="flex min-w-0 items-center gap-2">

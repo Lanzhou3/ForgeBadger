@@ -7,11 +7,15 @@ import {
   Bell,
   Cpu,
   Globe2,
+  Moon,
   Palette,
   Plug,
   Server,
   Settings2,
   ShieldCheck,
+  Sun,
+  MonitorSmartphone,
+  Type,
   type LucideIcon,
 } from "lucide-react";
 
@@ -27,7 +31,10 @@ import { SecurityBaselineSettings } from "@/components/settings/SecurityBaseline
 import { SettingsCardHeader, SettingsSection, SettingRow } from "@/components/settings/ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
+import { useColorMode } from "@/hooks/use-color-mode";
 import { useLanguage } from "@/hooks/use-language";
 import {
   ACCENT_THEMES,
@@ -35,6 +42,14 @@ import {
   applyAccentTheme,
   readStoredAccent,
 } from "@/lib/accent-theme";
+import { setColorMode } from "@/lib/color-mode";
+import {
+  DEFAULT_TERMINAL_FONT,
+  MAX_TERMINAL_FONT_SIZE,
+  MIN_TERMINAL_FONT_SIZE,
+  readStoredTerminalFont,
+  setTerminalFont,
+} from "@/lib/terminal-font";
 import {
   getBrowserNotificationPermission,
   getBrowserNotificationPreference,
@@ -74,12 +89,37 @@ export default function SettingsPage() {
   const [browserNotificationPermission, setBrowserNotificationPermission] =
     useState<BrowserNotificationPermission>("unsupported");
   const [accentId, setAccentId] = useState(DEFAULT_ACCENT_ID);
+  // The color mode is app-global (see Providers -> initColorMode): the hook
+  // observes the module store, and setColorMode applies + persists it.
+  const { mode: colorMode } = useColorMode();
+  // Terminal font draft inputs commit on blur/Enter so each keystroke does
+  // not re-render every live xterm instance. Initialized from localStorage on
+  // mount (same pattern as accentId).
+  const [fontFamilyDraft, setFontFamilyDraft] = useState(DEFAULT_TERMINAL_FONT.fontFamily);
+  const [fontSizeDraft, setFontSizeDraft] = useState(String(DEFAULT_TERMINAL_FONT.fontSize));
 
   useEffect(() => {
     setAccentId(readStoredAccent());
+    const storedFont = readStoredTerminalFont();
+    setFontFamilyDraft(storedFont.fontFamily);
+    setFontSizeDraft(String(storedFont.fontSize));
     setBrowserNotificationsEnabled(getBrowserNotificationPreference());
     setBrowserNotificationPermission(getBrowserNotificationPermission());
   }, []);
+
+  function commitTerminalFont() {
+    const size = Number(fontSizeDraft);
+    setTerminalFont({
+      fontFamily: fontFamilyDraft,
+      fontSize: Number.isFinite(size) && fontSizeDraft !== "" ? size : DEFAULT_TERMINAL_FONT.fontSize
+    });
+  }
+
+  function resetTerminalFont() {
+    setFontFamilyDraft(DEFAULT_TERMINAL_FONT.fontFamily);
+    setFontSizeDraft(String(DEFAULT_TERMINAL_FONT.fontSize));
+    setTerminalFont(DEFAULT_TERMINAL_FONT);
+  }
 
   const isAdmin = user?.role === "admin";
   const sections = isAdmin
@@ -129,7 +169,7 @@ export default function SettingsPage() {
                 "flex h-8 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition-colors duration-150",
                 active.id === section.id
                   ? "bg-brand/10 text-foreground"
-                  : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
               )}
             >
               <section.icon
@@ -147,6 +187,43 @@ export default function SettingsPage() {
           {active.id === "appearance" && (
             <SettingsSection title={t(active.labelKey)} description={t(active.descriptionKey)}>
               <Card className="forgebadger-animate-in">
+                <SettingsCardHeader
+                  icon={<Palette className="size-4" />}
+                  title={t("settings.colorMode")}
+                  description={t("settings.colorModeDescription")}
+                />
+                <CardContent>
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      { id: "light", labelKey: "settings.colorModeLight", icon: Sun },
+                      { id: "dark", labelKey: "settings.colorModeDark", icon: Moon },
+                      { id: "system", labelKey: "settings.colorModeSystem", icon: MonitorSmartphone },
+                    ] as const).map((option) => {
+                      const selected = colorMode === option.id;
+                      return (
+                        <Button
+                          key={option.id}
+                          type="button"
+                          aria-pressed={selected}
+                          variant={selected ? "default" : "outline"}
+                          size="sm"
+                          className={
+                            selected
+                              ? "bg-brand text-brand-foreground hover:bg-brand/90"
+                              : undefined
+                          }
+                          onClick={() => setColorMode(option.id)}
+                        >
+                          <option.icon className="size-4" />
+                          {t(option.labelKey)}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="forgebadger-animate-in" style={{ animationDelay: "40ms" }}>
                 <SettingsCardHeader
                   icon={<Globe2 className="size-4" />}
                   title={t("settings.language")}
@@ -170,7 +247,7 @@ export default function SettingsPage() {
                 </CardContent>
               </Card>
 
-              <Card className="forgebadger-animate-in" style={{ animationDelay: "40ms" }}>
+              <Card className="forgebadger-animate-in" style={{ animationDelay: "80ms" }}>
                 <SettingsCardHeader
                   icon={<Palette className="size-4" />}
                   title={t("settings.theme")}
@@ -205,11 +282,59 @@ export default function SettingsPage() {
                 </CardContent>
               </Card>
 
-              <div className="forgebadger-animate-in" style={{ animationDelay: "80ms" }}>
+              <Card className="forgebadger-animate-in" style={{ animationDelay: "120ms" }}>
+                <SettingsCardHeader
+                  icon={<Type className="size-4" />}
+                  title={t("settings.terminalFont")}
+                  description={t("settings.terminalFontDescription")}
+                />
+                <CardContent>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="grid min-w-52 flex-1 gap-2">
+                      <Label htmlFor="terminal-font-family" className="text-xs text-muted-foreground">
+                        {t("settings.terminalFontFamily")}
+                      </Label>
+                      <Input
+                        id="terminal-font-family"
+                        value={fontFamilyDraft}
+                        onChange={(e) => setFontFamilyDraft(e.target.value)}
+                        onBlur={commitTerminalFont}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitTerminalFont();
+                        }}
+                        spellCheck={false}
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                    <div className="grid w-24 gap-2">
+                      <Label htmlFor="terminal-font-size" className="text-xs text-muted-foreground">
+                        {t("settings.terminalFontSize")}
+                      </Label>
+                      <Input
+                        id="terminal-font-size"
+                        type="number"
+                        min={MIN_TERMINAL_FONT_SIZE}
+                        max={MAX_TERMINAL_FONT_SIZE}
+                        value={fontSizeDraft}
+                        onChange={(e) => setFontSizeDraft(e.target.value)}
+                        onBlur={commitTerminalFont}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitTerminalFont();
+                        }}
+                      />
+                    </div>
+                    <Button type="button" variant="outline" size="sm" onClick={resetTerminalFont}>
+                      {t("settings.terminalFontReset")}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="forgebadger-animate-in" style={{ animationDelay: "160ms" }}>
                 <PetSettings />
               </div>
 
-              <Card className="forgebadger-animate-in" style={{ animationDelay: "120ms" }}>
+              <Card className="forgebadger-animate-in" style={{ animationDelay: "200ms" }}>
                 <SettingsCardHeader
                   icon={<Settings2 className="size-4" />}
                   title={t("settings.console")}

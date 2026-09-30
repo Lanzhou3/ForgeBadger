@@ -53,6 +53,12 @@ interface RobotWidgetProps {
   suppressBubbles?: boolean;
   /** While the chat panel is open, notification bubbles stay out of the way. */
   panelOpen?: boolean;
+  /**
+   * Reports the viewport corner the robot is pinned to (restored preference,
+   * drag snap, …) so the chat panel can anchor beside it instead of always
+   * opening bottom-right.
+   */
+  onCornerChange?: (corner: RobotCorner) => void;
 }
 
 type RobotMode = "stand" | "walk" | "sit";
@@ -78,7 +84,7 @@ interface DragState {
 
 const DIRECTION_DEAD_ZONE_PX = 2;
 
-export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = false }: RobotWidgetProps) {
+export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = false, onCornerChange }: RobotWidgetProps) {
   const { t } = useLanguage();
   const router = useRouter();
   const { markRead } = useNotifications();
@@ -105,6 +111,12 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
   const nudgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modeRef = useRef<RobotMode>(mode);
   const cornerRef = useRef<RobotCorner>(corner);
+  // Latest callback in a ref: the report effect must only re-run when the
+  // corner changes, not when the parent re-renders with a fresh closure.
+  const onCornerChangeRef = useRef(onCornerChange);
+  useEffect(() => {
+    onCornerChangeRef.current = onCornerChange;
+  });
   const suppressBubblesRef = useRef(suppressBubbles);
   const motionEnabled = useRobotMotion();
   const motionEnabledRef = useRef(motionEnabled);
@@ -120,6 +132,12 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
+
+  // Tell the host which corner the robot occupies so the floating panel
+  // anchors next to the pet (fires on mount restore and on every drag snap).
+  useEffect(() => {
+    onCornerChangeRef.current?.(corner);
+  }, [corner]);
 
   // The queue's head is the bubble on screen; dismissals always drop the head.
   const dismissHeadBubble = useCallback(() => {

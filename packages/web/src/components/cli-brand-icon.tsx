@@ -20,7 +20,12 @@ interface Props {
  * - Codex:   /brand/cli/codex.png (original icon-codex-dark-color.png bundled
  *            with OpenAI's desktop app)
  * - Kimi:    https://unpkg.com/@lobehub/icons-static-svg/icons/kimi-color.svg
- *            (Kimi / Moonshot AI mark)
+ *            (Kimi / Moonshot AI mark), plus the official black app-icon tile
+ *            measured from the kimi.moonshot.cn favicon (corner radius ~10/48
+ *            → rx 5; the glyph is scaled to 90% so its visual weight matches
+ *            the neighboring marks at chip sizes).
+ *            The tile only shows in light mode; in dark mode the bare white K
+ *            matches the official favicon-dark variant.
  * - OpenCode: https://unpkg.com/@lobehub/icons-static-svg/icons/opencode.svg
  *            (OpenCode square mark, intentionally monochrome/grayscale)
  * - PI:      https://pi.dev/logo-auto.svg
@@ -47,14 +52,31 @@ const CLI_ICON_MARKS: Record<Exclude<CliBrandId, "codex">, ReactNode> = {
   ),
   kimi: (
     <>
-      <path
-        d="M21.846 0a1.923 1.923 0 110 3.846H20.15a.226.226 0 01-.227-.226V1.923C19.923.861 20.784 0 21.846 0z"
-        fill="#1783FF"
-      />
-      <path
-        d="M11.065 11.199l7.257-7.2c.137-.136.06-.41-.116-.41H14.3a.164.164 0 00-.117.051l-7.82 7.756c-.122.12-.302.013-.302-.179V3.82c0-.127-.083-.23-.185-.23H3.186c-.103 0-.186.103-.186.23V19.77c0 .128.083.23.186.23h2.69c.103 0 .186-.102.186-.23v-3.25c0-.069.025-.135.069-.178l2.424-2.406a.158.158 0 01.205-.023l6.484 4.772a7.677 7.677 0 003.453 1.283c.108.012.2-.095.2-.23v-3.06c0-.117-.07-.212-.164-.227a5.028 5.028 0 01-2.027-.807l-5.613-4.064c-.117-.078-.132-.279-.028-.381z"
-        fill="#FFFFFF"
-      />
+      {/* Official app-icon tile (kimi.moonshot.cn favicon: full-bleed black
+          square, corner radius ~10/48 → rx 5). Light mode only — on the dark
+          theme the bare white K already reads correctly against the dark
+          surface, matching the official favicon-dark variant. */}
+      <rect className="dark:hidden" width="24" height="24" rx="5" fill="#000000" />
+      {/* The bare glyph fills ~86% of the viewBox, while on the official light
+          tile it occupies ~60% — shrink it about its own center in light mode
+          (fill-box origin). 0.9 (rather than the official ~0.7) matches the
+          visual weight of the neighboring claude/mcode marks at chip/tab
+          sizes; any larger and the dot clips the rounded corner. Dark mode
+          keeps the full-bleed glyph, matching the official favicon-dark
+          variant. */}
+      <g
+        className="origin-center scale-[0.9] dark:scale-100"
+        style={{ transformBox: "fill-box" }}
+      >
+        <path
+          d="M21.846 0a1.923 1.923 0 110 3.846H20.15a.226.226 0 01-.227-.226V1.923C19.923.861 20.784 0 21.846 0z"
+          fill="#1783FF"
+        />
+        <path
+          d="M11.065 11.199l7.257-7.2c.137-.136.06-.41-.116-.41H14.3a.164.164 0 00-.117.051l-7.82 7.756c-.122.12-.302.013-.302-.179V3.82c0-.127-.083-.23-.185-.23H3.186c-.103 0-.186.103-.186.23V19.77c0 .128.083.23.186.23h2.69c.103 0 .186-.102.186-.23v-3.25c0-.069.025-.135.069-.178l2.424-2.406a.158.158 0 01.205-.023l6.484 4.772a7.677 7.677 0 003.453 1.283c.108.012.2-.095.2-.23v-3.06c0-.117-.07-.212-.164-.227a5.028 5.028 0 01-2.027-.807l-5.613-4.064c-.117-.078-.132-.279-.028-.381z"
+          fill="#FFFFFF"
+        />
+      </g>
     </>
   ),
   opencode: <path d="M16 6H8v12h8V6zm4 16H4V2h16v20z" fillRule="evenodd" />,
@@ -85,10 +107,20 @@ const CLI_ICON_MARKS: Record<Exclude<CliBrandId, "codex">, ReactNode> = {
       </g>
     </>
   ),
+  // ForgeBadger's CLI-agnostic terminal session. Original mark: the classic
+  // shell prompt glyph (">" + underscore cursor), monochrome — it follows the
+  // surrounding text color like the OpenCode mark so it stays legible in both
+  // active and inactive tabs.
+  terminal: (
+    <g fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5.5 6.5L12 12l-6.5 5.5" />
+      <path d="M14 17.5h5" />
+    </g>
+  ),
 };
 
 /** Marks that follow the surrounding text color instead of a fixed brand color. */
-const CURRENT_COLOR_MARKS: ReadonlySet<string> = new Set(["opencode"]);
+const CURRENT_COLOR_MARKS: ReadonlySet<string> = new Set(["opencode", "terminal"]);
 
 export function CliBrandIcon({ aiTool, className }: Props) {
   const brand = getCliBrand(aiTool);

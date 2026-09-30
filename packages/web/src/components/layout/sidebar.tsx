@@ -173,7 +173,7 @@ function NavLinkItem({
         collapsed ? "justify-center px-2" : "px-2.5",
         active
           ? "bg-brand/10 text-foreground"
-          : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground"
       )}
     >
       <item.icon
@@ -289,7 +289,7 @@ export function Sidebar({
   );
 
   const UserSection = (
-    <div className="mt-auto border-t border-white/[0.06] px-2 py-2.5">
+    <div className="mt-auto border-t border-border px-2 py-2.5">
       <div className="flex items-center gap-2.5 rounded-md px-1.5 py-1">
         <Avatar size="sm" className="size-6">
           <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
@@ -317,7 +317,7 @@ export function Sidebar({
       onClick={onToggleCollapse}
       aria-label={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
       title={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
-      className="absolute -right-3 top-1/2 z-20 flex size-6 -translate-y-1/2 items-center justify-center rounded-full border border-white/[0.08] bg-[#0b0f16] text-muted-foreground opacity-0 shadow-lg transition-opacity duration-150 hover:text-foreground focus-visible:opacity-100 group-hover/sidebar:opacity-100"
+      className="absolute -right-3 top-1/2 z-20 flex size-6 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-lg transition-opacity duration-150 hover:text-foreground focus-visible:opacity-100 group-hover/sidebar:opacity-100"
     >
       {collapsed ? <ChevronsRight className="size-3.5" /> : <ChevronsLeft className="size-3.5" />}
     </button>
@@ -347,7 +347,7 @@ export function Sidebar({
       {/* Desktop sidebar */}
       <aside
         className={cn(
-          "group/sidebar relative hidden h-full flex-col border-r border-white/[0.06] bg-[#080b10] bg-gradient-to-b from-white/[0.02] to-transparent py-3 transition-[width] duration-200 ease-out md:flex",
+          "group/sidebar relative hidden h-full flex-col border-r border-border bg-card py-3 transition-[width] duration-200 ease-out md:flex",
           collapsed ? "w-[60px]" : "w-[220px]"
         )}
       >
@@ -358,7 +358,7 @@ export function Sidebar({
               <BrandMark />
             </div>
             <NavLinks collapsed />
-            <div className="mt-auto flex flex-col items-center gap-2.5 border-t border-white/[0.06] px-2 pt-3">
+            <div className="mt-auto flex flex-col items-center gap-2.5 border-t border-border px-2 pt-3">
               <Avatar size="sm" className="size-6">
                 <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
               </Avatar>
