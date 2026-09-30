@@ -76,12 +76,15 @@ export function ensureMcodeNotificationPreference(
     const current = handle.root.notifications;
     const method = isRecord(current) && typeof current.method === "string" ? current.method : undefined;
 
-    if (method !== undefined && !REPLACEABLE_METHODS.has(method)) {
-      // The user picked a payload-carrying method deliberately.
-      return { changed: false, reason: "user_choice" };
-    }
     if (method === PREFERRED_METHOD) {
+      // Already correct. Checked before the user-choice branch so an
+      // already-pinned config is reported as unchanged rather than as a
+      // deliberate user choice.
       return { changed: false, reason: "unchanged" };
+    }
+    if (method !== undefined && !REPLACEABLE_METHODS.has(method)) {
+      // The user picked a different payload-carrying method deliberately.
+      return { changed: false, reason: "user_choice" };
     }
 
     handle.doc.setIn(["notifications", "method"], PREFERRED_METHOD);
