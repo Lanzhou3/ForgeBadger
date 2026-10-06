@@ -56,6 +56,22 @@ HTTP status codes still carry transport semantics:
 
 ## 3. REST Surface
 
+### Host Directory Picker
+
+- `GET /api/v1/system/desktop` returns `{ platform, directoryPickerSupported }`.
+- `POST /api/v1/system/select-directory` opens a native folder-selection dialog
+  on the Gateway host. Both endpoints require authentication.
+
+Windows and macOS support directory picking; other platforms return
+`{ supported: false, reason }`. A selected directory returns
+`{ supported: true, path, cancelled: false }`; user cancellation returns
+`{ supported: true, cancelled: true }` without changing the form's path.
+The Windows dialog has a topmost owner so it can appear over the browser.
+Windows launch failures and the 120-second dialog timeout return HTTP `500`
+with the error envelope, rather than reporting cancellation. The web client
+allows 130 seconds for this request and displays failures while keeping manual
+path entry and retry available.
+
 ### Auth
 
 - `POST /api/v1/auth/register`

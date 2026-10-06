@@ -5,7 +5,7 @@ import { useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, FolderOpen } from "lucide-react";
+import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, FolderOpen, LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -54,6 +54,7 @@ export default function ImportProjectPage() {
   const [scannedPath, setScannedPath] = useState("");
   const [directoryPickerSupported, setDirectoryPickerSupported] = useState(false);
   const [pickingDirectory, setPickingDirectory] = useState(false);
+  const [directoryPickerError, setDirectoryPickerError] = useState<string | null>(null);
   const [templateId, setTemplateId] = useState("");
 
   useEffect(() => {
@@ -115,13 +116,16 @@ export default function ImportProjectPage() {
   async function onPickDirectory() {
     if (pickingDirectory) return;
     setPickingDirectory(true);
+    setDirectoryPickerError(null);
     try {
       const result = await selectNativeDirectory();
-      if (result.path) {
+      if (!result.supported) {
+        setDirectoryPickerError(result.reason || t("projects.failedPickDirectory"));
+      } else if (result.path) {
         pathForm.setValue("path", result.path, { shouldValidate: true });
       }
-    } catch {
-      // Native picker unavailable or failed; the manual input remains usable.
+    } catch (error) {
+      setDirectoryPickerError(error instanceof Error ? error.message : t("projects.failedPickDirectory"));
     } finally {
       setPickingDirectory(false);
     }
@@ -187,29 +191,36 @@ export default function ImportProjectPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>{t("projects.directoryPath")}</FormLabel>
-                      <FormControl>
-                        <div className="flex gap-2">
+                      <div className="flex gap-2">
+                        <FormControl>
                           <Input placeholder="/path/to/existing/project" {...field} className="flex-1" />
-                          {directoryPickerSupported && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              className="shrink-0"
-                              title={t("projects.browseDirectory")}
-                              aria-label={t("projects.browseDirectory")}
-                              disabled={pickingDirectory}
-                              onClick={onPickDirectory}
-                            >
-                              <FolderOpen className="size-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </FormControl>
+                        </FormControl>
+                        {directoryPickerSupported && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="shrink-0"
+                            title={t("projects.browseDirectory")}
+                            aria-label={t("projects.browseDirectory")}
+                            disabled={pickingDirectory}
+                            aria-busy={pickingDirectory}
+                            onClick={onPickDirectory}
+                          >
+                            {pickingDirectory ? <LoaderCircle className="size-4 animate-spin" /> : <FolderOpen className="size-4" />}
+                          </Button>
+                        )}
+                      </div>
                       <FormMessage />
                     </FormItem>
                   )}
               />
+
+                {directoryPickerError && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {directoryPickerError}
+                  </p>
+                )}
 
                 {scanMutation.isError && (
                   <p className="text-sm text-destructive">

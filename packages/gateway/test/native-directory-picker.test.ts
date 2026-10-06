@@ -49,7 +49,8 @@ describe("native directory picker", () => {
     });
     assert.equal(command, "powershell.exe");
     assert.ok(args.includes("-STA"));
-    assert.ok(args.some((arg) => arg.includes("FolderBrowserDialog")));
+    const script = Buffer.from(args[args.indexOf("-EncodedCommand") + 1]!, "base64").toString("utf16le");
+    assert.match(script, /FolderBrowserDialog/u);
     assert.deepEqual(result, { supported: true, path: "C:\\Users\\dev\\projects\\demo", cancelled: false });
   });
 
@@ -59,6 +60,38 @@ describe("native directory picker", () => {
       runner: async () => okResult("")
     });
     assert.deepEqual(result, { supported: true, cancelled: true });
+  });
+
+  it("gives the Windows dialog a topmost owner and disposes both windows", async () => {
+    const result = await selectNativeDirectory({
+      platform: "win32",
+      runner: async (_command, args) => {
+        const encodedIndex = args.indexOf("-EncodedCommand");
+        assert.notEqual(encodedIndex, -1);
+        const script = Buffer.from(args[encodedIndex + 1]!, "base64").toString("utf16le");
+        assert.match(script, /\$ErrorActionPreference\s*=\s*'Stop'/u);
+        assert.match(script, /\$owner\.TopMost\s*=\s*\$true/u);
+        assert.match(script, /\$owner\.Show\(\)/u);
+        assert.match(script, /\$dialog\.ShowDialog\(\$owner\)/u);
+        assert.match(script, /finally\s*\{[\s\S]*\$dialog\.Dispose\(\)[\s\S]*\$owner\.Dispose\(\)/u);
+        return okResult("D:\\工作项目\\demo\r\n");
+      }
+    });
+    assert.deepEqual(result, { supported: true, path: "D:\\工作项目\\demo", cancelled: false });
+  });
+
+  it("reports Windows startup failures instead of treating them as cancellation", async () => {
+    await assert.rejects(selectNativeDirectory({
+      platform: "win32",
+      runner: async () => ({ exitCode: 127, stdout: "", stderr: "spawn powershell.exe ENOENT" })
+    }), /Could not open the directory picker.*ENOENT/u);
+  });
+
+  it("reports a timed-out Windows dialog instead of treating it as cancellation", async () => {
+    await assert.rejects(selectNativeDirectory({
+      platform: "win32",
+      runner: async () => ({ exitCode: 124, stdout: "", stderr: "" })
+    }), /Directory selection timed out/u);
   });
 
   it("drives osascript choose-folder on darwin and strips the trailing slash", async () => {

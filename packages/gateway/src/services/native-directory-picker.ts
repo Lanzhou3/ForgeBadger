@@ -11,6 +11,39 @@ export interface NativeDirectoryPickerDeps {
 }
 
 const DIRECTORY_PICKER_TIMEOUT_MS = 120_000;
+// The Gateway has no foreground window. An owned, topmost dialog stays visible
+// over the browser; otherwise Windows can open it behind the web console.
+const WINDOWS_DIRECTORY_PICKER_SCRIPT = [
+  "$ErrorActionPreference = 'Stop'",
+  "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+  "$owner = $null",
+  "$dialog = $null",
+  "try {",
+  "  Add-Type -AssemblyName System.Windows.Forms",
+  "  [System.Windows.Forms.Application]::EnableVisualStyles()",
+  "  $owner = New-Object System.Windows.Forms.Form",
+  "  $owner.TopMost = $true",
+  "  $owner.ShowInTaskbar = $false",
+  "  $owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen",
+  "  $owner.Width = 1",
+  "  $owner.Height = 1",
+  "  $owner.Opacity = 0",
+  "  $owner.Show()",
+  "  $owner.Activate()",
+  "  $dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
+  "  $dialog.Description = 'Select a project directory'",
+  "  $dialog.ShowNewFolderButton = $true",
+  "  if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {",
+  "    [Console]::WriteLine($dialog.SelectedPath)",
+  "  }",
+  "} catch {",
+  "  [Console]::Error.WriteLine($_.Exception.Message)",
+  "  exit 1",
+  "} finally {",
+  "  if ($null -ne $dialog) { $dialog.Dispose() }",
+  "  if ($null -ne $owner) { $owner.Dispose() }",
+  "}"
+].join("\n");
 
 export function directoryPickerSupported(platform: NodeJS.Platform = process.platform): boolean {
   return platform === "win32" || platform === "darwin";
@@ -37,28 +70,25 @@ export async function selectNativeDirectory(
 
 async function selectWindowsDirectory(deps: NativeDirectoryPickerDeps): Promise<DirectoryPickerStatus> {
   const runner = deps.runner ?? runCommand;
-  const script = [
-    "Add-Type -AssemblyName System.Windows.Forms",
-    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-    "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
-    "$dialog.Description = 'Select a project directory'",
-    "$dialog.ShowNewFolderButton = $true",
-    "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {",
-    "  Write-Output $dialog.SelectedPath",
-    "}"
-  ].join("; ");
+  // PowerShell's encoded-command contract is UTF-16LE, independent of the
+  // Windows command-line quoting rules and console code page.
+  const encodedScript = Buffer.from(WINDOWS_DIRECTORY_PICKER_SCRIPT, "utf16le").toString("base64");
 
   const result = await runner(
     "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-STA", "-Command", script],
+    ["-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", encodedScript],
     { timeoutMs: DIRECTORY_PICKER_TIMEOUT_MS }
   );
   return windowsResultToStatus(result);
 }
 
 function windowsResultToStatus(result: CommandResult): DirectoryPickerStatus {
+  if (result.exitCode === 124) {
+    throw new Error("Directory selection timed out. Please try again or enter the directory path manually.");
+  }
   if (result.exitCode !== 0) {
-    return { supported: true, cancelled: true };
+    const reason = result.stderr.trim() || "Please enter the directory path manually.";
+    throw new Error(`Could not open the directory picker. ${reason}`);
   }
   const path = result.stdout.trim();
   if (path.length === 0) {

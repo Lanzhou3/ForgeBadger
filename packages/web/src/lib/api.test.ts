@@ -1523,6 +1523,47 @@ describe("api client", () => {
     );
   });
 
+  it("allows directory selection to take longer than a normal API request", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => {
+        setTimeout(() => resolve(mockEnvelope({
+          supported: true, path: "D:\\workspace\\project", cancelled: false,
+        })), 45_000);
+      })));
+      const selected = selectNativeDirectory().then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      );
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(await selected).toMatchObject({
+        result: { path: "D:\\workspace\\project", cancelled: false },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("times out an unresponsive directory picker after the host dialog deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+      let settled = false;
+      const selected = selectNativeDirectory().finally(() => { settled = true; }).then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      );
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await selected).toMatchObject({
+        error: { message: "Gateway request timed out. Check that the Gateway service is running." },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("builds safe default config decisions from conflict reports", () => {
     const decisions = defaultConfigConflictDecisions([
       {

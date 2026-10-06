@@ -3107,6 +3107,8 @@ export interface DirectoryPickerResult {
 export async function selectNativeDirectory(): Promise<DirectoryPickerResult> {
   return fetchJson("/api/v1/system/select-directory", {
     method: "POST",
+    // The host dialog allows 120 seconds; leave time for its error response.
+    timeoutMs: 130_000,
   }) as Promise<DirectoryPickerResult>;
 }
 

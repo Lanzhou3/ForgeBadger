@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { signJwt } from "../src/auth/jwt.js";
 import { createSystemRoutes } from "../src/routes/system.js";
+import { selectNativeDirectory } from "../src/services/native-directory-picker.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 
@@ -85,6 +86,25 @@ describe("system routes", () => {
       const body = (await res.json()) as { code: number; data: { path?: string } };
       assert.equal(body.code, 0);
       assert.equal(body.data.path, "D:\\workspace\\project");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("returns a failure envelope when Windows cannot open the directory picker", async () => {
+    const { server, baseUrl } = await startServer("win32", () => selectNativeDirectory({
+      platform: "win32",
+      runner: async () => ({ exitCode: 1, stdout: "", stderr: "Folder dialog failed" })
+    }));
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/system/select-directory`, {
+        method: "POST",
+        headers: { authorization: authHeader() }
+      });
+      assert.equal(res.status, 500);
+      const body = (await res.json()) as { code: number; message: string };
+      assert.equal(body.code, 1);
+      assert.match(body.message, /Folder dialog failed/u);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
