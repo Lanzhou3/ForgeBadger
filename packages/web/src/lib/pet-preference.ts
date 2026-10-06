@@ -1,11 +1,12 @@
 import type { TranslationKey } from "./i18n";
 
 export const PET_OPTIONS = [
+  { id: "honey-badger", nameKey: "settings.petHoneyBadger", descriptionKey: "settings.petHoneyBadgerDescription" },
   { id: "robot", nameKey: "settings.petRobot", descriptionKey: "settings.petRobotDescription" },
 ] as const satisfies readonly { id: string; nameKey: TranslationKey; descriptionKey: TranslationKey }[];
 
 export type PetId = (typeof PET_OPTIONS)[number]["id"];
-export const DEFAULT_PET_ID: PetId = "robot";
+export const DEFAULT_PET_ID: PetId = "honey-badger";
 export const PET_STORAGE_KEY = "forgebadger.pet";
 const PET_CHANGED_EVENT = "forgebadger:pet-changed";
 

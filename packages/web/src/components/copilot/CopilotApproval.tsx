@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { GatewayApiError } from "@/lib/api";
+import type { TranslationKey } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/hooks/use-language";
 import { decidePendingAction, type CopilotPendingAction } from "@/lib/copilot-api";
@@ -9,6 +11,16 @@ import { getSessionStopApprovalTarget, SessionStopApprovalTarget } from './Sessi
 interface Props {
   action: CopilotPendingAction;
   onDecided: () => Promise<void> | void;
+}
+
+function approvalRemedy(error: unknown): TranslationKey {
+  const code = error instanceof GatewayApiError && typeof error.details?.code === "string" ? error.details.code : "";
+  if (["PLATFORM_INTENT_EXPIRED", "COPILOT_APPROVAL_EXPIRED", "COPILOT_TIME_BUDGET", "COPILOT_TOKEN_BUDGET"].includes(code)) return "copilot.approvalExpired";
+  if (["COPILOT_APPROVAL_CHANGED", "COPILOT_REQUEST_CONFLICT", "PLATFORM_STALE_RESOURCE", "COPILOT_NOT_FOUND"].includes(code)) return "copilot.approvalInputChanged";
+  if (["COPILOT_APPROVAL_DENIED", "COPILOT_APPROVAL_SCOPE", "COPILOT_PROJECT_AUTONOMY_OFF", "COPILOT_USER_INACTIVE"].includes(code)) return "copilot.approvalAuthorityChanged";
+  if (code === "COPILOT_TOOL_DISABLED") return "copilot.approvalToolDisabled";
+  if (code === "COPILOT_TOOL_UNAVAILABLE") return "copilot.approvalToolUnavailable";
+  return "copilot.approvalUncertain";
 }
 
 /** One exact server-issued action; approval never grants future authority. */
@@ -31,10 +43,18 @@ export function CopilotApproval({ action, onDecided }: Props) {
       const result = await decidePendingAction(action.runId, action.id, approved);
       if (!mounted.current) return;
       if (!result.resumed) setError(t("copilot.approvalChanged"));
-      await onDecided();
-    } catch {
-      if (mounted.current) setError(t("copilot.approvalFailed"));
+    } catch (failure) {
+      if (mounted.current) {
+        setError(t(approvalRemedy(failure)));
+      }
     } finally {
+      if (mounted.current) {
+        // The decision may have succeeded despite a lost response. Refresh
+        // the receipt once; never automatically resubmit the write.
+        await Promise.resolve().then(onDecided).catch(() => {
+          if (mounted.current) setError(current => current ?? t("copilot.approvalUncertain"));
+        });
+      }
       submitting.current = false;
       if (mounted.current) setPending(false);
     }

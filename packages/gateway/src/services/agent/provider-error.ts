@@ -1,10 +1,29 @@
 import { AgentError } from './types.js';
 import { withAbort } from './llm-response.js';
 
+export class ProviderHttpError extends AgentError {
+  readonly category: 'authentication' | 'permission' | 'rate_limit' | 'unavailable' | 'rejected';
+  readonly retryAfterSeconds: number | null;
+  constructor(readonly status: number, retryAfter: string | null) {
+    super('AGENT_HTTP_ERROR', `Provider returned HTTP ${status}`);
+    this.category = status === 401 ? 'authentication' : status === 403 ? 'permission'
+      : status === 429 ? 'rate_limit' : status >= 500 ? 'unavailable' : 'rejected';
+    this.retryAfterSeconds = retryAfter && /^\d{1,5}$/.test(retryAfter) ? Number(retryAfter) : null;
+  }
+  diagnostic() {
+    return { code: this.code, httpStatus: this.status, category: this.category, retryAfterSeconds: this.retryAfterSeconds };
+  }
+  publicText() {
+    const remedies = { authentication: 'Check the provider credential.', permission: 'Check provider/model access.',
+      rate_limit: 'Wait for the provider rate limit before retrying.', unavailable: 'The provider is unavailable.', rejected: 'Check the model request configuration.' };
+    return `Provider HTTP ${this.status} (${this.category}). ${remedies[this.category]}`;
+  }
+}
+
 /** Read only a bounded structured rejection. Provider bodies may contain secrets;
  * classification never copies them into errors, logs, receipts or prompts. */
 export async function providerRejection(response: Response, signal: AbortSignal): Promise<AgentError> {
-  const fallback = new AgentError('AGENT_HTTP_ERROR', `Provider returned HTTP ${response.status}`);
+  const fallback = new ProviderHttpError(response.status, response.headers.get('retry-after'));
   if (![400,413].includes(response.status) || !response.body) {
     void response.body?.cancel().catch(()=>undefined);
     return fallback;

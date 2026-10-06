@@ -205,13 +205,8 @@ export default function SettingsPage() {
                           key={option.id}
                           type="button"
                           aria-pressed={selected}
-                          variant={selected ? "default" : "outline"}
+                          variant={selected ? "brand" : "outline"}
                           size="sm"
-                          className={
-                            selected
-                              ? "bg-brand text-brand-foreground hover:bg-brand/90"
-                              : undefined
-                          }
                           onClick={() => setColorMode(option.id)}
                         >
                           <option.icon className="size-4" />
@@ -235,9 +230,8 @@ export default function SettingsPage() {
                       <Button
                         key={option.code}
                         type="button"
-                        variant={language === option.code ? "default" : "outline"}
+                        variant={language === option.code ? "brand" : "outline"}
                         size="sm"
-                        className={language === option.code ? "bg-brand text-brand-foreground hover:bg-brand/90" : undefined}
                         onClick={() => setLanguage(option.code as typeof language)}
                       >
                         {option.label}

@@ -49,10 +49,6 @@ import type { InMemorySessionManager } from "../session-manager.js";
 import { resolveTaskPacketSession } from "../project-manager/task-packets.js";
 import { assertMcpTokenAuthority } from "./token-authority.js";
 
-const MCP_EXCLUDED_TOOLS = new Set([
-  "dispatch_task_to_session", "discover_tools", "read_tool_result", "takeover_session",
-  "submit_development_task", "cancel_development_task", "accept_development_task"
-]);
 const MCP_CLI_TOOLS = new Set(["pm_execute_task_packet", "import_project", "apply_project_config", "list_templates", "preview_project_config"]);
 const MCP_SCOPED_TOOLS = new Set([
   "list_projects", "get_project", "list_sessions", "get_session", "get_session_output", "get_session_writer",
@@ -67,6 +63,14 @@ const MCP_SCOPED_TOOLS = new Set([
 ]);
 // Existing-project grants cannot create new project identities or read global catalogs.
 const MCP_SELECTED_PROJECT_EXCLUDED = new Set(["create_project", "import_project", "list_templates"]);
+
+// A new Copilot capability must not silently expand existing external credentials.
+// Listing, execution lookup and discovery use this same explicit capability table.
+const MCP_ALLOWED_TOOLS = new Set([...MCP_SCOPED_TOOLS,
+  'get_project_git_status', 'read_project_diff', 'research_project', 'search_project_files',
+  'list_development_tasks', 'get_development_task', 'pm_overview', 'list_playbooks',
+  'load_playbook', 'read_skill_resource', 'search_memory', 'list_memory', 'write_memory', 'get_usage_summary'
+]);
 
 function usesSelectedProjects(deps: McpBridgeDeps): boolean {
   return new McpTokenRepository(deps.db).findActiveById(deps.tokenId, deps.userId)?.allowedProjects != null;
@@ -93,7 +97,7 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
   const scoped = canDispatch || selectedProjects;
   const candidates = [...createPlatformTools(), ...createMcpProjectTools()];
   const tools = candidates.filter(
-    (tool) => (tool.risk === "read" || canOperate) && preferences.isEnabled(tool.name) && !toolUnavailableReason(tool.name, !!deps.sessionManager) && !MCP_EXCLUDED_TOOLS.has(tool.name) && (!MCP_CLI_TOOLS.has(tool.name) || canDispatch) && (!scoped || MCP_SCOPED_TOOLS.has(tool.name)) && (!selectedProjects || !MCP_SELECTED_PROJECT_EXCLUDED.has(tool.name))
+    (tool) => MCP_ALLOWED_TOOLS.has(tool.name) && (tool.risk === "read" || canOperate) && preferences.isEnabled(tool.name) && !toolUnavailableReason(tool.name, !!deps.sessionManager) && (!MCP_CLI_TOOLS.has(tool.name) || canDispatch) && (!scoped || MCP_SCOPED_TOOLS.has(tool.name)) && (!selectedProjects || !MCP_SELECTED_PROJECT_EXCLUDED.has(tool.name))
   );
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
 
@@ -174,7 +178,7 @@ async function executeMcpTool(tool: AgentTool, rawInput: unknown, deps: McpBridg
       (candidate.risk === "read" || deps.scopes.includes("operate")) &&
       new CopilotToolPreferenceRepository(deps.db, deps.userId).isEnabled(candidate.name) &&
       !toolUnavailableReason(candidate.name, !!deps.sessionManager) &&
-      !MCP_EXCLUDED_TOOLS.has(candidate.name) &&
+      MCP_ALLOWED_TOOLS.has(candidate.name) &&
       (!MCP_CLI_TOOLS.has(candidate.name) || (deps.scopes.includes("operate") && hasCliScope)) &&
       (!scoped || MCP_SCOPED_TOOLS.has(candidate.name)) &&
       (!selectedProjects || !MCP_SELECTED_PROJECT_EXCLUDED.has(candidate.name))

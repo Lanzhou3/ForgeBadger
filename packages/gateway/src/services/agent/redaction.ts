@@ -1,3 +1,4 @@
+import { redactPrivateKeyBlocks } from '../redaction.js';
 /**
  * Redaction helpers for the Copilot agent harness.
  *
@@ -28,6 +29,7 @@ export function redactAgentText(text: string): string {
 }
 
 function redactAgentTextInternal(text: string, preserveCodeReferences: boolean): string {
+  text = redactPrivateKeyBlocks(text);
   const quotedKeys = text.replace(
     /(["'])([A-Za-z][A-Za-z0-9_-]*)\1(\s*:\s*)(["'])(?:\\.|(?!\4)[^\\\r\n])*\4/g,
     (match, keyQuote: string, key: string, separator: string, valueQuote: string) =>

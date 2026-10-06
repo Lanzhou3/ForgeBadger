@@ -11,6 +11,7 @@ import { ProjectRepository } from '../src/db/repositories/project-repository.js'
 import { FeishuChannelRepository } from '../src/db/repositories/feishu-channel-repository.js';
 import { FeishuIntegrationRepository } from '../src/db/repositories/feishu-integration-repository.js';
 import { ChannelIdentityService, type TrustedChannelPeer } from '../src/services/channels/channel-identity-service.js';
+import { agentActions } from '../src/services/platform-commands/agent-actions.js';
 import { NativeChannelInbox } from '../src/services/channels/native-channel-inbox.js';
 import { NativeChannelDelivery } from '../src/services/channels/native-channel-delivery.js';
 import { createFeishuNativeSender } from '../src/services/integrations/feishu-native-sender.js';
@@ -43,8 +44,13 @@ function fixture(group = false) {
   if (adopted.status !== 'adopted') throw new Error('admission failed');
   const ledger = new CopilotRunLedger(db, user.id);
   const claim = ledger.claim(adopted.runId, 'fixture', 30_000)!;
-  const step = ledger.addStep(adopted.runId, { kind: 'tool', toolName: 'test_approval', toolCallId: 'call-1',
+  const step = ledger.addStep(adopted.runId, { kind: 'tool', toolName: 'update_project', toolCallId: 'call-1',
     inputJson: JSON.stringify({ projectId: project.id, name: 'New project name' }), effect: 'write' });
+  // A channel-scoped run may only await approval on channel-catalog writes, and
+  // the orchestrator attaches the approved platform intent before pausing.
+  agentActions({ db, userId: user.id, masterKey: key, runId: adopted.runId, stepId: step.id,
+    conversationId: ledger.get(adopted.runId)!.conversation_id })
+    .preview({ commandId: 'project.metadata.update', input: { projectId: project.id, name: 'New project name' }, idempotencyKey: step.id });
   ledger.waitApproval(claim, step);
   const action = ledger.log.listPendingActions(adopted.runId)[0]!;
   let sent: Record<string, unknown> | undefined;
@@ -79,12 +85,11 @@ import { encryptSecret } from '../src/crypto/secret-box.js';
 
 type Fixture = ReturnType<typeof fixture>;
 function runtime(f: Fixture, toolExists = true) {
-  let effects = 0;
   const orchestrator = createCopilotOrchestrator({ db: f.db, masterKey: f.key, eventBus: new ForgeBadgerEventBus(),
-    toolRegistry: createAgentToolRegistry(toolExists ? [{ name: 'test_approval', description: 'test approval', risk: 'operate', requiresApproval: true,
-      inputSchema: z.object({ projectId: z.string(), name: z.string() }), execute: async () => { effects++; return { changed: true }; } }] : []),
+    toolRegistry: createAgentToolRegistry(toolExists ? [{ name: 'update_project', description: 'test approval', risk: 'operate', requiresApproval: true,
+      inputSchema: z.object({ projectId: z.string(), name: z.string() }), execute: async () => ({ changed: true }) }] : []),
     llm: { async streamTurn() { return { text: '操作已处理', toolCalls: [] }; }, async summarize() { return ''; }, async generateTitle() { return '审批测试'; }, async proposeMemory() { return []; } } });
-  return { orchestrator, get effects() { return effects; } };
+  return { orchestrator, projectName: () => f.projects.getById(f.project.id)!.name };
 }
 function callback(f: Fixture, approved = true) {
   const card = JSON.parse(f.sent.content as string);
@@ -112,12 +117,12 @@ for (const approved of [true, false]) it(`records ${approved ? 'approval' : 'rej
     assert.match(JSON.stringify(response), /New project name/);
     assert.equal(f.ledger.log.getPendingAction(f.action.id)?.status, approved ? 'approved' : 'rejected');
     assert.equal(f.ledger.get(f.action.runId)?.status, 'pending');
-    assert.equal(r.effects, 0, 'callback must not execute an external effect');
+    assert.equal(r.projectName(), 'Approval project', 'callback must not execute an external effect');
     assert.match(handle(f, event, r).toast.content, approved ? /已批准/ : /已拒绝/);
     assert.equal((f.db.prepare("SELECT count(*) n FROM audit_logs WHERE action='copilot.channel.approval'").get() as {n:number}).n, 1);
     await r.orchestrator.executeRun(f.user.id, f.action.runId);
     await r.orchestrator.executeRun(f.user.id, f.action.runId);
-    assert.equal(r.effects, approved ? 1 : 0);
+    assert.equal(r.projectName(), approved ? 'New project name' : 'Approval project');
   } finally { f.db.close(); }
 });
 
@@ -192,7 +197,7 @@ it('does not offer approval for truncated parameters or a missing stop target, a
     try {
       const input = scenario === 'long' ? JSON.stringify({ content: '字'.repeat(6000) })
         : scenario === 'secret' ? '{"password":"secret-never-show"}' : '{"sessionId":"target"}';
-      f.db.prepare('UPDATE copilot_pending_actions SET input_json=?,tool=? WHERE id=?').run(input, scenario === 'stop' ? 'stop_session' : 'test_approval', f.action.id);
+      f.db.prepare('UPDATE copilot_pending_actions SET input_json=?,tool=? WHERE id=?').run(input, scenario === 'stop' ? 'stop_session' : 'update_project', f.action.id);
       await f.worker.runOnce(new AbortController().signal);
       const content = f.sent.content as string;
       assert.doesNotMatch(content, /secret-never-show/);

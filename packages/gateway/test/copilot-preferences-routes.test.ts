@@ -92,7 +92,7 @@ it("persists and validates the copilot model + thinking preference", async () =>
     assert.equal(res.status, 400);
     assert.equal(rejected.code, 1);
     assert.equal(rejected.message, "Copilot operation rejected");
-    assert.equal(rejected.details.code, "Model profile is not available for the Copilot preference");
+    assert.equal(rejected.details.code, "COPILOT_MODEL_INVALID");
 
     // Invalid effort: schema rejection.
     res = await fetch(base, { method: "PUT", headers, body: JSON.stringify({ thinkingEffort: "ultra" }) });

@@ -3,6 +3,7 @@ import type { Database } from '../../db/types.js';
 import { CopilotRunLedger, inputDigest, type TurnInput } from './run-ledger.js';
 import { AgentError } from './types.js';
 import { redactAgentText } from './redaction.js';
+import { prepareChannelAdmission } from '../channels/channel-run-scope.js';
 
 export interface Followup { id: string; conversation_id: string; status: string; run_id: string | null; error: string | null; created_at: number; input_json: string }
 
@@ -12,6 +13,7 @@ export class CopilotFollowups {
 
   enqueue(input: TurnInput): Followup {
     return this.db.transaction(() => {
+      input = prepareChannelAdmission(this.db, this.userId, input);
       const ledger = new CopilotRunLedger(this.db, this.userId);
       ledger.validateScope(input);
       if (input.source && input.source !== 'user') throw new AgentError('COPILOT_QUEUE_SOURCE', 'Only owner follow-ups can be queued');

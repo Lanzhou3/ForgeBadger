@@ -12,6 +12,8 @@ export interface CustomProviderForm {
   providerKey: string;
   apiFormat: ProviderApiFormat;
   authType: ProviderAuthType;
+  /** Raw stored endpoint; kept so an edit never drops a provider's bare baseUrl. */
+  baseUrl: string;
   anthropicBaseUrl: string;
   openaiBaseUrl: string;
   supportedAdapters: ProviderSupportedAdapter[];
@@ -39,9 +41,9 @@ export interface ModelForm {
 }
 
 export type DeleteTarget =
-  | { kind: "provider"; providerId: string }
-  | { kind: "model"; modelId: string }
-  | { kind: "credential"; credentialId: string };
+  | { kind: "provider"; providerId: string; name: string }
+  | { kind: "model"; modelId: string; name: string }
+  | { kind: "credential"; credentialId: string; name: string };
 
 export type Translate = (key: any) => string;
 
@@ -50,6 +52,7 @@ export const emptyCustomProvider: CustomProviderForm = {
   providerKey: "",
   apiFormat: "anthropic",
   authType: "api_key",
+  baseUrl: "",
   anthropicBaseUrl: "",
   openaiBaseUrl: "",
   supportedAdapters: ["claude"],
@@ -65,18 +68,48 @@ export function slugifyProviderKey(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/**
+ * Build the provider-dialog form from a stored provider profile. Providers
+ * created outside this dialog may carry only a bare baseUrl, so when neither
+ * format-specific field is set, fall back to it on the side matching the
+ * provider's wire format (anthropic vs. everything else).
+ */
+export function hydrateCustomProviderForm(provider: ProviderProfile): CustomProviderForm {
+  const anthropicBaseUrl = provider.anthropicBaseUrl ?? "";
+  const openaiBaseUrl = provider.openaiBaseUrl ?? "";
+  const baseUrl = provider.baseUrl ?? "";
+  const fallbackBaseUrl = baseUrl && !anthropicBaseUrl && !openaiBaseUrl ? baseUrl : "";
+  return {
+    name: provider.name,
+    providerKey: provider.providerKey,
+    apiFormat: provider.apiFormat,
+    authType: provider.authType,
+    baseUrl,
+    anthropicBaseUrl: anthropicBaseUrl || (provider.apiFormat === "anthropic" ? fallbackBaseUrl : ""),
+    openaiBaseUrl: openaiBaseUrl || (provider.apiFormat === "anthropic" ? "" : fallbackBaseUrl),
+    supportedAdapters: [...provider.supportedAdapters],
+    allowPlaintextHttp: provider.allowPlaintextHttp ?? false,
+    allowPrivateNetworks: provider.allowPrivateNetworks ?? false,
+  };
+}
+
+/** Endpoint submitted as the provider's bare baseUrl. */
+export function customProviderPrimaryBaseUrl(form: CustomProviderForm): string {
+  return form.anthropicBaseUrl.trim() || form.openaiBaseUrl.trim() || form.baseUrl.trim();
+}
+
 export function customProviderHasEndpoint(form: CustomProviderForm): boolean {
-  return Boolean(form.anthropicBaseUrl.trim() || form.openaiBaseUrl.trim());
+  return Boolean(customProviderPrimaryBaseUrl(form));
 }
 
 export function customProviderHasPlaintextHttp(form: CustomProviderForm): boolean {
-  const urls = [form.anthropicBaseUrl.trim(), form.openaiBaseUrl.trim()].filter(Boolean);
+  const urls = [form.baseUrl, form.anthropicBaseUrl, form.openaiBaseUrl].map((url) => url.trim()).filter(Boolean);
   return urls.some((url) => url.toLowerCase().startsWith("http://"));
 }
 
 /** True when any configured endpoint points at a loopback / private / single-label host. */
 export function customProviderHasPrivateNetworkUrl(form: CustomProviderForm): boolean {
-  const urls = [form.anthropicBaseUrl.trim(), form.openaiBaseUrl.trim()].filter(Boolean);
+  const urls = [form.baseUrl, form.anthropicBaseUrl, form.openaiBaseUrl].map((url) => url.trim()).filter(Boolean);
   return urls.some((url) => {
     let host: string;
     try {
@@ -134,9 +167,9 @@ export function productTypeLabel(productType: string | null | undefined, t: Tran
   return t("models.productTypePaygApi");
 }
 
-export function formatCheckedAt(value: string): string {
+export function formatCheckedAt(value: string, locale: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale);
 }
 
 /**

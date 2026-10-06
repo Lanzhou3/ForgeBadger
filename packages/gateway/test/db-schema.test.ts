@@ -60,6 +60,8 @@ describe("db schema", () => {
       "channel_routes",
       "claude_route_assignments",
       "cli_config_applied_providers",
+      "cli_observation_runtimes",
+      "cli_observations",
       "cli_skill_revisions",
       "collaboration_events",
       "collaboration_members",

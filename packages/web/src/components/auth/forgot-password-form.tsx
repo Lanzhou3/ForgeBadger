@@ -97,7 +97,7 @@ export function ForgotPasswordForm() {
           {errors.root.message}
         </p>
       )}
-      <Button type="submit" disabled={isSubmitting} className="mt-1 bg-brand text-brand-foreground hover:bg-brand/90">
+      <Button type="submit" disabled={isSubmitting} variant="brand" className="mt-1">
         {isSubmitting ? t("auth.resetting") : t("auth.resetPassword")}
       </Button>
       <p className="text-xs text-muted-foreground">

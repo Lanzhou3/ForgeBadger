@@ -59,15 +59,16 @@ describe("CliBrandIcon", () => {
     );
   });
 
-  it("renders the official Codex icon with a larger centered crop", () => {
+  it("renders the official transparent Codex SVG without cropping", () => {
     const { container } = render(<CliBrandIcon aiTool="codex" className="size-5" />);
     const icon = container.querySelector("img");
-    const crop = icon?.parentElement;
 
-    expect(icon?.getAttribute("src")).toBe("/brand/cli/codex.png");
-    expect(icon?.getAttribute("class")).toContain("size-[150%]");
-    expect(crop?.getAttribute("class")).toContain("size-5");
-    expect(crop?.getAttribute("class")).toContain("overflow-hidden");
+    expect(icon?.getAttribute("src")).toBe("/brand/cli/codex.svg");
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
+    expect(icon?.getAttribute("alt")).toBe("");
+    expect(icon?.getAttribute("class")).toContain("size-5");
+    expect(icon?.getAttribute("class")).toContain("[.dark_&]:invert");
+    expect(container.querySelector("span")).toBeNull();
     expect(container.querySelector("svg")).toBeNull();
   });
 

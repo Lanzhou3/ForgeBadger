@@ -14,6 +14,7 @@ export interface SessionTab {
 }
 
 const SESSION_TABS_KEY = "forgebadger.sessionTabs.v1";
+const SESSION_TAB_GROUPS_KEY = "forgebadger.sessionTabGroups.v1";
 /** Most recent stopped/idle tabs kept. Running tabs are never capped — the
  *  strip exists to show what's active, so a live session is not trimmed. */
 const MAX_INACTIVE_TABS = 8;
@@ -150,21 +151,77 @@ export function removeSessionTab(
   return writeSessionTabs(readSessionTabs(storage).filter((tab) => tab.id !== id), storage);
 }
 
+/** Project identity also distinguishes projects with the same display name. */
+export function sessionTabGroupKey(tab: Pick<SessionTab, "projectId" | "projectName">): string {
+  if (tab.projectId) return `project:${tab.projectId}`;
+  return tab.projectName ? `name:${tab.projectName}` : "__no_project__";
+}
+
+export function readCollapsedSessionTabGroups(
+  storage: BrandStorage = window.localStorage
+): ReadonlySet<string> {
+  try {
+    const parsed: unknown = JSON.parse(storage.getItem(SESSION_TAB_GROUPS_KEY) ?? "[]");
+    return new Set(Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string" && value.length > 0)
+      : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function setSessionTabGroupCollapsed(
+  groupId: string,
+  collapsed: boolean,
+  storage: BrandStorage = window.localStorage
+): ReadonlySet<string> {
+  const groups = new Set(readCollapsedSessionTabGroups(storage));
+  if (collapsed) groups.add(groupId);
+  else groups.delete(groupId);
+  storage.setItem(SESSION_TAB_GROUPS_KEY, JSON.stringify([...groups]));
+  return groups;
+}
+
+/** Reorder within a group without shifting the slots belonging to other projects. */
+export function reorderSessionTab(
+  sourceId: string,
+  targetId: string,
+  storage: BrandStorage = window.localStorage
+): SessionTab[] {
+  const tabs = readSessionTabs(storage);
+  const source = tabs.find(tab => tab.id === sourceId);
+  const target = tabs.find(tab => tab.id === targetId);
+  if (!source || !target || sourceId === targetId) return tabs;
+  const groupId = sessionTabGroupKey(source);
+  if (groupId !== sessionTabGroupKey(target)) return tabs;
+  const ordered = tabs.filter(tab => sessionTabGroupKey(tab) === groupId);
+  const from = ordered.findIndex(tab => tab.id === sourceId);
+  const to = ordered.findIndex(tab => tab.id === targetId);
+  ordered.splice(from, 1);
+  ordered.splice(to, 0, source);
+  let groupIndex = 0;
+  return writeSessionTabs(tabs.map(tab => {
+    if (sessionTabGroupKey(tab) !== groupId) return tab;
+    return ordered[groupIndex++] ?? tab;
+  }), storage);
+}
+
 export interface SessionTabGroup {
+  id: string;
+  projectId?: string;
   projectName?: string;
   tabs: SessionTab[];
 }
 
 /**
- * Groups tabs by project while preserving the order in which projects first
- * appear and the tab order within each project. Tabs without a project name
- * share one anonymous group.
+ * Groups tabs by project identity (legacy tabs fall back to name) while
+ * preserving project order and the tab order within each project.
  */
 export function groupSessionTabs(tabs: SessionTab[]): SessionTabGroup[] {
   const groups: SessionTabGroup[] = [];
   const indexByProject = new Map<string, number>();
   for (const tab of tabs) {
-    const key = tab.projectName ?? "";
+    const key = sessionTabGroupKey(tab);
     const groupIndex = indexByProject.get(key);
     const group = groupIndex === undefined ? undefined : groups[groupIndex];
     if (group) {
@@ -173,6 +230,8 @@ export function groupSessionTabs(tabs: SessionTab[]): SessionTabGroup[] {
     }
     indexByProject.set(key, groups.length);
     groups.push({
+      id: key,
+      ...(tab.projectId ? { projectId: tab.projectId } : {}),
       ...(tab.projectName ? { projectName: tab.projectName } : {}),
       tabs: [tab],
     });
@@ -187,17 +246,24 @@ export function groupSessionTabs(tabs: SessionTab[]): SessionTabGroup[] {
  * otherwise fall past the limit it is still shown inline (so it costs no
  * budget only in that off-screen case); within the limit it occupies a slot
  * like any other tab. Hidden tabs keep display order.
+ * Collapsed groups contribute no inline tabs or budget, including the active
+ * tab; their headers remain visible and the overflow menu can reveal them.
  */
 export function splitSessionTabsByVisibility(
   tabs: SessionTab[],
   activeId: string,
-  maxVisible = MAX_VISIBLE_TABS
+  maxVisible = MAX_VISIBLE_TABS,
+  collapsedGroups: ReadonlySet<string> = new Set()
 ): { visibleIds: ReadonlySet<string>; hiddenTabs: SessionTab[] } {
   const ordered = groupSessionTabs(tabs).flatMap((group) => group.tabs);
   let budget = maxVisible;
   const visibleIds = new Set<string>();
   const hiddenTabs: SessionTab[] = [];
   for (const tab of ordered) {
+    if (collapsedGroups.has(sessionTabGroupKey(tab))) {
+      hiddenTabs.push(tab);
+      continue;
+    }
     const inBudget = budget > 0;
     if (tab.id === activeId) {
       // Always inline; consumes a slot only if there is one left (i.e. it is

@@ -207,8 +207,7 @@ export function ProjectManagerWorkItemsSection({
           <div className="inline-flex w-fit rounded-md border border-border/70 bg-muted/20 p-1">
             <Button
               size="sm"
-              variant={viewMode === "board" ? "default" : "ghost"}
-              className={viewMode === "board" ? "bg-brand text-brand-foreground hover:bg-brand/90" : undefined}
+              variant={viewMode === "board" ? "brand" : "ghost"}
               aria-pressed={viewMode === "board"}
               onClick={() => onViewModeChange("board")}
             >
@@ -217,8 +216,7 @@ export function ProjectManagerWorkItemsSection({
             </Button>
             <Button
               size="sm"
-              variant={viewMode === "table" ? "default" : "ghost"}
-              className={viewMode === "table" ? "bg-brand text-brand-foreground hover:bg-brand/90" : undefined}
+              variant={viewMode === "table" ? "brand" : "ghost"}
               aria-pressed={viewMode === "table"}
               onClick={() => onViewModeChange("table")}
             >
@@ -227,8 +225,7 @@ export function ProjectManagerWorkItemsSection({
             </Button>
             <Button
               size="sm"
-              variant={viewMode === "queue" ? "default" : "ghost"}
-              className={viewMode === "queue" ? "bg-brand text-brand-foreground hover:bg-brand/90" : undefined}
+              variant={viewMode === "queue" ? "brand" : "ghost"}
               aria-pressed={viewMode === "queue"}
               onClick={() => onViewModeChange("queue")}
             >
@@ -242,6 +239,7 @@ export function ProjectManagerWorkItemsSection({
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder={t("projects.projectManagerSearchPlaceholder")}
+              aria-label={t("projects.projectManagerSearchPlaceholder")}
               className="h-9 pl-8"
             />
           </div>
@@ -267,7 +265,7 @@ export function ProjectManagerWorkItemsSection({
           </Select>
           <Button
             size="sm"
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            variant="brand"
             disabled={!canEdit} onClick={onCreate}
           >
             <Plus className="mr-2 size-4" />
@@ -388,7 +386,7 @@ export function ProjectManagerWorkItemsSection({
           )}
           <Button
             size="sm"
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            variant="brand"
             onClick={onBatchStatusSubmit}
             disabled={!canEdit || batchStatusPending || !batchTargetStatus}
           >

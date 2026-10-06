@@ -24,7 +24,6 @@ export interface ProjectGitChanges {
   commits: GitCommitEntry[];
 }
 
-const MAX_CHANGED_ENTRIES = 200;
 const MAX_COMMITS = 15;
 const GIT_TIMEOUT_MS = 5_000;
 const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
@@ -40,9 +39,8 @@ function runGit(cwd: string, args: string[]): Promise<string> {
         timeout: GIT_TIMEOUT_MS,
         // Large working trees (e.g. untracked node_modules/.pnpm-store content)
         // can produce git status output far beyond 1 MiB. execFile rejects with
-        // ENOBUFS when stdout exceeds maxBuffer, which getProjectGitChanges
-        // would silently swallow and report an empty change list. Keep the
-        // buffer generous so the working tree is actually reported.
+        // ENOBUFS when stdout exceeds maxBuffer. Keep the buffer generous;
+        // failed status reads are surfaced instead of reporting a clean tree.
         maxBuffer: GIT_MAX_BUFFER_BYTES,
         env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
       },
@@ -75,7 +73,6 @@ function parsePorcelain(output: string): GitWorkingTreeEntry[] {
       status: xy,
       staged: xy[0] !== " " && xy[0] !== "?",
     });
-    if (entries.length >= MAX_CHANGED_ENTRIES) break;
   }
   return entries;
 }
@@ -100,7 +97,7 @@ export async function getProjectGitChanges(projectPath: string): Promise<Project
 
   const [branch, statusOutput, logOutput] = await Promise.all([
     runGit(projectPath, ["branch", "--show-current"]).catch(() => ""),
-    runGit(projectPath, ["status", "--porcelain=v1", "-z", "-uall"]).catch(() => ""),
+    runGit(projectPath, ["status", "--porcelain=v1", "-z", "-uall"]),
     runGit(projectPath, [
       "log",
       `-${MAX_COMMITS}`,

@@ -1,6 +1,7 @@
 "use client";
 
 import { z } from 'zod';
+import { useUiLocale } from "@/hooks/use-language";
 import { useLanguage } from '@/hooks/use-language';
 import type { CopilotPendingAction } from '@/lib/copilot-api';
 
@@ -28,6 +29,7 @@ interface Props { target: Target | null }
 
 export function SessionStopApprovalTarget({ target }: Props) {
   const { t } = useLanguage();
+  const locale = useUiLocale();
   if (!target) return <p role="alert" className="text-sm text-destructive">{t('copilot.stopTargetMissing')}</p>;
   return <div className="space-y-2 rounded-md border border-border/70 p-3 text-sm">
     <p className="font-medium">{t('copilot.stopTargetTitle')}</p>
@@ -35,7 +37,7 @@ export function SessionStopApprovalTarget({ target }: Props) {
     <p>{target.projectName} · {target.sessionName}</p>
     <p className="break-all font-mono text-xs">{target.sessionId}</p>
     <p className="text-xs text-muted-foreground">{t(target.titleSource === 'terminal_footer' ? 'copilot.stopTitleTerminal'
-      : target.titleSource === 'last_prompt' ? 'copilot.stopTitlePrompt' : 'copilot.stopTitleSession')} · {new Date(target.observedAt).toLocaleString()}</p>
+      : target.titleSource === 'last_prompt' ? 'copilot.stopTitlePrompt' : 'copilot.stopTitleSession')} · {new Date(target.observedAt).toLocaleString(locale)}</p>
     <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 text-xs">{target.terminalExcerpt}</pre>
     <p className="text-xs text-muted-foreground">{t('copilot.stopTargetScope')}</p>
   </div>;

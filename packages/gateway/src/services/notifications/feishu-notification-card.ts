@@ -1,6 +1,6 @@
 import type { Notification } from '../../db/repositories/notification-repository.js';
 import type { FeishuNotificationDelivery } from '../../db/repositories/feishu-notification-repository.js';
-import { redactAgentText } from '../agent/redaction.js';
+import { cliAdapterLabels, cliText, readCliSummary, type CliSummary } from './cli-observation.js';
 
 const titles: Record<FeishuNotificationDelivery['event_type'], string> = {
   attention: '需要你处理', failure: '任务失败或权限被拒绝', completion: '执行结果通知',
@@ -17,12 +17,7 @@ const cliProgress = new Map<string, CliProgress>([
   ['attention', { title: '等待你处理' }],
 ]);
 
-function clean(value: unknown, max = 200, singleLine = false): string {
-  if (typeof value !== 'string') return '';
-  const redacted = redactAgentText(value).trim();
-  const chars = Array.from(singleLine ? redacted.replace(/\s+/g, ' ') : redacted);
-  return chars.length > max ? chars.slice(0, max - 1).join('') + '…' : chars.join('');
-}
+const clean = cliText;
 
 function readPayload(notification: Notification | undefined): Record<string, unknown> {
   try {
@@ -43,46 +38,76 @@ function notificationTime(date: Date): string {
   return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}:${part('second')} (${part('timeZoneName')})`;
 }
 
-function contextLines(notification: Notification | undefined, payload: Record<string, unknown>): string[] {
-  return [
-    ['最近请求', payload.last_prompt],
-    ['项目', payload.project_name], ['会话', payload.session_name],
-    ['会话 ID', notification?.sessionId], ['CLI', payload.adapter],
-    ['通知主题', payload.title], ['操作', payload.tool_name],
-  ].flatMap(([label, value]) => {
-    const text = clean(value, label === '最近请求' ? 400 : 200, true);
-    return text ? [`${label}：${text}`] : [];
-  });
-}
-
-function notificationSummary(notification: Notification | undefined, payload: Record<string, unknown>, progress: CliProgress | undefined): string {
+const errorCategories: Record<NonNullable<CliSummary['errorCategory']>, string> = {
+  authentication: '认证错误', rate_limit: '配额或限频', network: '连接异常',
+  permission: '权限不足', context_limit: '上下文限制', execution: '执行错误',
+};
+function legacyMessage(notification: Notification | undefined, payload: Record<string, unknown>): string {
   if (!notification) return '飞书通知连接正常。启用后，新通知将以卡片发送到所选会话。';
-  const summary = clean(notification.message, 1400);
-  // Replace only the exact boilerplate produced by our CLI hooks. Keep real error/detail text.
-  const label = new Map([['claude', 'Claude Code'], ['codex', 'Codex'], ['opencode', 'OpenCode'], ['kimi', 'Kimi Code'], ['pi', 'PI']])
-    .get(typeof payload.adapter === 'string' ? payload.adapter : 'claude');
-  const boilerplate = label && ['task completed', 'session ended', 'task was interrupted', 'task failed', 'notification']
-    .some(suffix => summary === `${label} ${suffix}`);
-  return progress && boilerplate ? '' : summary;
+  const text = clean(notification.message, 1400);
+  const label = cliAdapterLabels[payload.adapter as keyof typeof cliAdapterLabels] ?? 'Claude Code';
+  return ['task completed', 'session ended', 'task was interrupted', 'task failed', 'notification']
+    .some(suffix => text === `${label} ${suffix}`) ? '' : text;
 }
-
-export function renderFeishuNotificationCard(item: FeishuNotificationDelivery, notification: Notification | undefined, webBaseUrl: string) {
+function cliLines(notification: Notification, payload: Record<string, unknown>): string[] {
+  const snapshot = readCliSummary(payload.cli_summary);
+  const summary = snapshot;
+  const identity = [clean(payload.project_name, 80, true),
+    cliAdapterLabels[payload.adapter as keyof typeof cliAdapterLabels] ?? clean(payload.adapter, 40, true),
+    payload.session_name === payload.project_name ? '' : clean(payload.session_name, 80, true),
+    notification.sessionId ? `[${clean(notification.sessionId, 128, true).slice(0, 8)}]` : ''].filter(Boolean).join(' · ');
+  const time = `通知时间：${notificationTime(notification.createdAt)}`;
+  const lines = [identity];
+  const kind = String(payload.notification_type);
+  const message = legacyMessage(notification, payload);
+  if (kind === 'task_failed') {
+    lines.push(`失败原因：${summary?.error?.text ? clean(summary.error.text, 400) : snapshot?.errorCategory
+      ? errorCategories[snapshot.errorCategory] : message || '未采集到具体错误，请查看会话'}`);
+  } else if (['permission_prompt', 'permission_denied', 'attention'].includes(kind)) {
+    lines.push(`待处理事项：${message || (kind === 'permission_denied' ? '操作未获授权，请查看会话' : '请在会话中查看提示并处理')}`);
+  } else if (kind === 'task_completed') {
+    lines.push(summary?.result?.text ? `结果（CLI 最终回复）：\n${clean(summary.result.text, 600)}`
+      : `未采集到本轮结果，请查看会话${message ? '\n' + message : ''}`);
+  } else if (message) lines.push(message);
+  if (payload.tool_name) lines.push(`操作：${clean(payload.tool_name, 80, true)}`);
+  if (summary?.verification.length) lines.push('命令验证证据：\n' + summary.verification.map(v => clean(v.text, 160)).join('\n'));
+  else if (kind === 'task_completed') lines.push('未采集到命令验证证据');
+  const request = clean(summary?.request ?? payload.last_prompt, 160, true);
+  if (request) {
+    // Remove only entire echoed lines, never a substring of a result claim.
+    for (let i = 1; i < lines.length; i++) lines[i] = lines[i]!.split('\n')
+      .filter(line => line.trim().replace(/\s+/g, ' ') !== request).join('\n');
+    lines.push(`${snapshot?.identityQuality === 'exact_turn' ? '本轮请求' : '会话最近请求'}：${request}`);
+  }
+  if (summary?.progress.length) lines.push('最近进度（工具事件）：\n' + summary.progress.map(p => clean(p.text, 160)).join('\n'));
+  if (summary?.nextAction) lines.push(`后续事项：${clean(summary.nextAction.text, 200)}`);
+  if (summary) {
+    lines.push(`最后观察：${notificationTime(new Date(summary.observedAt))}`);
+    if (summary.identityQuality !== 'exact_turn') lines.push('轮次未确认，仅展示本次事件摘录');
+    if (summary.startedAt && summary.endedAt && summary.endedAt >= summary.startedAt)
+      lines.push(`本轮耗时：${Math.round((summary.endedAt - summary.startedAt) / 1000)} 秒`);
+  }
+  // Reserve the persisted event timestamp. Lower-priority fields are clipped
+  // as a whole-card budget, never at UTF-16 surrogate boundaries.
+  const budget = 1800 - Array.from(time).length - 1;
+  return [clean(lines.filter(Boolean).join('\n'), budget), time];
+}
+export function renderFeishuNotificationCard(item: FeishuNotificationDelivery, notification: Notification | undefined,
+  webBaseUrl: string, _legacyContentLevel?: 'status' | 'summary') {
   const payload = readPayload(notification);
   const isCli = notification?.type === 'claude_notification';
   const progress = isCli ? cliProgress.get(String(payload.notification_type)) : undefined;
-  const lines = contextLines(notification, payload);
-  lines.push(`通知时间：${notificationTime(notification?.createdAt ?? new Date(item.created_at))}`);
-  const elements: Record<string, unknown>[] = [{ tag: 'div', text: { tag: 'plain_text', content: lines.join('\n') } }];
-  const summary = notificationSummary(notification, payload, progress);
-  // All model/CLI-supplied content remains plain_text, never executable Markdown or button values.
-  if (summary) elements.push({ tag: 'div', text: { tag: 'plain_text', content: summary } });
+  const lines = isCli ? cliLines(notification, payload) : [
+    ...[['项目', payload.project_name], ['会话', payload.session_name], ['操作', payload.tool_name]].flatMap(([label, value]) => {
+      const text = clean(value, 100, true); return text ? [`${label}：${text}`] : [];
+    }), legacyMessage(notification, payload), `通知时间：${notificationTime(notification?.createdAt ?? new Date(item.created_at))}`,
+  ];
+  const elements: Record<string, unknown>[] = [{ tag: 'div', text: { tag: 'plain_text', content: lines.filter(Boolean).join('\n') } }];
   const path = notificationPath(notification, payload);
   if (webBaseUrl && path) elements.push({ tag: 'button', text: { tag: 'plain_text', content: isCli && notification.sessionId ? '查看会话' : '查看详情' },
     type: 'primary', behaviors: [{ type: 'open_url', default_url: webBaseUrl + path }] });
-  const subject = clean(payload.last_prompt, 52, true) || clean(payload.session_name, 36, true) || '会话';
-  const identity = isCli && notification.sessionId ? ` · ${subject} [${clean(notification.sessionId, 128, true).slice(0, 8)}]` : '';
   return { schema: '2.0', config: { update_multi: true }, header: {
-    title: { tag: 'plain_text', content: `ForgeBadger · ${progress?.title ?? titles[item.event_type]}${identity}` },
+    title: { tag: 'plain_text', content: `ForgeBadger · ${progress?.title ?? titles[item.event_type]}` },
     template: item.event_type === 'failure' ? 'red' : item.event_type === 'attention' ? 'orange' : 'blue',
   }, body: { elements } };
 }

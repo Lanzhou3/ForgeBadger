@@ -284,6 +284,7 @@ export function providerPresetToForm(preset: ProviderPreset): CustomProviderForm
     providerKey: preset.id,
     apiFormat: preset.apiFormat,
     authType: preset.authType,
+    baseUrl: "",
     anthropicBaseUrl: preset.anthropicBaseUrl ?? "",
     openaiBaseUrl: preset.openaiBaseUrl ?? "",
     supportedAdapters: [...preset.supportedAdapters],

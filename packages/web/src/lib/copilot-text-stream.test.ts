@@ -29,3 +29,31 @@ it('rejects old workers across step identities after a higher run fence',()=>{
  expect(stream.accept('run',frame(2,2,'!','new-step'))).toBe('confirmed earlier new answer!');
  expect(stream.accept('next-run',frame(1,1,'fresh'))).toBe('fresh');
 });
+
+it('recovers missing deltas from a cumulative snapshot without replay or stale replacement', () => {
+ const stream=new CopilotTextStream();
+ expect(stream.accept('run',frame(1,1,'first '))).toBe('first ');
+ expect(stream.accept('run',frame(1,3,'third '))).toBe('first ');
+ expect(stream.gapKey()).toBeTruthy();
+ expect(stream.restore('run',{steps:[{stepId:'step',fence:1,sequence:2,text:'first second '}]})).toBe('first second third ');
+ expect(stream.gapKey()).toBe('');
+ expect(stream.restore('run',{steps:[{stepId:'step',fence:1,sequence:1,text:'stale'}]})).toBe('first second third ');
+ expect(stream.accept('run',frame(1,4,'fourth'))).toBe('first second third fourth');
+ expect(stream.accept('run',frame(2,1,'retry'))).toBe('retry');
+ expect(stream.restore('run',{steps:[{stepId:'step',fence:1,sequence:4,text:'old'}]})).toBe('retry');
+});
+
+it('preserves earlier step order when a partial snapshot only contains the current step',()=>{
+ const stream=new CopilotTextStream();
+ stream.accept('run',frame(1,1,'Earlier. ','earlier'));
+ stream.accept('run',frame(1,1,'Later. ','later'));
+ expect(stream.restore('run',{steps:[{stepId:'later',fence:1,sequence:2,text:'Later. continued.'}]})).toBe('Earlier. Later. continued.');
+});
+
+it('uses full server step order after reconnect while preserving newer local cursors',()=>{
+ const stream=new CopilotTextStream();
+ stream.accept('run',frame(1,1,'Later. ','later'));
+ stream.accept('run',frame(1,2,'local','later'));
+ expect(stream.restore('run',{steps:[{stepId:'earlier',fence:1,sequence:1,text:'Earlier. '},{stepId:'later',fence:1,sequence:1,text:'stale'}]})).toBe('Earlier. Later. local');
+ expect(stream.restore('run',{steps:[{stepId:'later',fence:1,sequence:1,text:'stale'}]})).toBe('Earlier. Later. local');
+});

@@ -2,7 +2,7 @@
 import { createRef } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { LanguageProvider } from "@/hooks/use-language";
 import { ConfigSyncPanel, type ConfigSyncPanelHandle } from "./ConfigSyncPanel";
 
@@ -206,22 +206,23 @@ describe("ConfigSyncPanel", () => {
 
   it("stops tracking only after confirmation", async () => {
     updateProjectTemplateMock.mockResolvedValue({ project: { id: "project-1", templateId: null } });
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-    const { ref } = renderPanel();
+    renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /停止跟踪模板/ }));
 
+    // The ConfirmDialog gates the mutation: nothing happens before confirming.
+    const dialog = await screen.findByRole("dialog");
+    expect(updateProjectTemplateMock).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: /停止跟踪模板/ }));
     await waitFor(() => expect(updateProjectTemplateMock).toHaveBeenCalledWith("project-1", null));
-    confirmSpy.mockRestore();
   });
 
   it("does not stop tracking when confirmation is cancelled", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const { ref } = renderPanel();
+    renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /停止跟踪模板/ }));
-
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(updateProjectTemplateMock).not.toHaveBeenCalled();
-    confirmSpy.mockRestore();
   });
 });

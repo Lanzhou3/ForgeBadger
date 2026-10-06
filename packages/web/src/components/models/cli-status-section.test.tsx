@@ -16,7 +16,7 @@ import {
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
 
-vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) => key }) }));
+vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) => key }), useUiLocale: () => "en-US" }));
 vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 vi.mock("@/lib/api", () => ({
   discoverAdapters: vi.fn(async () => ({ adapters: [] })),

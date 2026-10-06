@@ -3,6 +3,7 @@ import { CopilotRunOptions } from "./CopilotRunOptions";
 import { CopilotFollowupChips } from "./CopilotFollowupChips";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowDown, ArrowUp, ListTodo, MessageSquare, PanelLeft, Square } from "lucide-react";
@@ -103,6 +104,13 @@ export function CopilotChat() {
 
   // Conversation creation may race the project list; surface a single toast.
   const projectErrorToastRef = useRef(false);
+
+  // Lazy conversation creation (empty state): creatingRef dedupes overlapping
+  // send attempts so a double Enter cannot create two conversations, and
+  // untitledRef marks the lazily created id so it is auto-titled at most once
+  // (same contract as the floating robot panel).
+  const creatingRef = useRef<Promise<string | null> | null>(null);
+  const untitledRef = useRef<string | null>(null);
 
   const readMessages = useCallback(async (id: string) => {
     if (controllerConversationIdRef.current !== id) return false;
@@ -227,6 +235,10 @@ export function CopilotChat() {
   }, [conversationId]);
 
   const autoTitleIfUntitled = useCallback(async (id: string, text: string) => {
+    // Consume the lazy-creation marker so a lazily created conversation is
+    // auto-titled at most once; the controller's wasUntitled list check keeps
+    // covering conversations created explicitly via "new conversation".
+    if (untitledRef.current === id) untitledRef.current = null;
     await renameConversation(id, text).catch(() => undefined);
   }, []);
 
@@ -258,6 +270,42 @@ export function CopilotChat() {
   const controllerEpochRef = controller.selectionEpochRef;
   const controllerMessageSerialRef = controller.messageSerialRef;
   const controllerConversationIdRef = controller.conversationIdRef;
+
+  // Lazy creation: with no conversation selected the composer would otherwise
+  // be a dead end (Send disabled, suggestion chips silently dropped by the
+  // controller's null-id guard). Mirrors the robot panel's contract:
+  // flushSync forces the new id into the controller options before
+  // controller.send reads them (React would otherwise batch the render until
+  // after the null-id guard bailed), creatingRef dedupes overlapping attempts,
+  // and a creation failure toasts while the typed draft stays for a retry.
+  const ensureConversation = useCallback((): Promise<string | null> => {
+    if (controller.conversationIdRef.current) return Promise.resolve(controller.conversationIdRef.current);
+    if (!creatingRef.current) {
+      const epoch = controllerEpochRef.current;
+      creatingRef.current = createConversation()
+        .then(({ conversation }) => {
+          if (epoch !== controllerEpochRef.current) return null;
+          flushSync(() => {
+            controller.conversationIdRef.current = conversation.id;
+            untitledRef.current = conversation.id;
+            setConversationId(conversation.id);
+            writeLastCopilotConversation(conversation.id);
+          });
+          // Surface the new conversation in the sidebar; the in-flight ref
+          // already set above keeps refreshConversations from re-selecting.
+          void refreshConversations();
+          return conversation.id;
+        })
+        .catch(() => {
+          if (epoch === controllerEpochRef.current) toast.error(t("copilot.loadError"));
+          return null;
+        })
+        .finally(() => {
+          creatingRef.current = null;
+        });
+    }
+    return creatingRef.current;
+  }, [controller, refreshConversations, t]);
 
   const selectConversation = useCallback(async (id: string) => {
     const epoch = controller.advanceSelectionEpoch();
@@ -345,6 +393,8 @@ export function CopilotChat() {
     conversationId,
     ...(projectId ? { projectId } : {}),
     ...(modelId ? { modelId } : {}),
+    reviewTaskResults,
+    repairFailedChecks,
     active: isBusy,
   });
   const enqueueRef = useRef(followups.enqueue);
@@ -354,19 +404,38 @@ export function CopilotChat() {
   const runningRef = useRef(Boolean(isRunning));
   runningRef.current = Boolean(isRunning);
 
-  const submit = useCallback(async () => {
+  const submit = useCallback(async (textOverride?: string) => {
+    // Lazy creation in flight: the controller's sending guard is not armed
+    // yet, so a second Enter here would double-submit (duplicate message +
+    // run). Drop the duplicate and let the user know their input was not
+    // lost — the first submit owns the in-flight creation and will deliver
+    // the message.
+    if (creatingRef.current) {
+      toast.info(t("copilot.creatingConversation"));
+      return;
+    }
     if (runningRef.current) {
       const text = inputRef.current.trim();
       if (!text || !conversationId) return;
-      if (await enqueueRef.current(text)) setInputRef.current("");
+      const clearSubmittedDraft = controller.captureDraft(text);
+      if (await enqueueRef.current(text)) clearSubmittedDraft();
       return;
     }
-    await controller.send();
-  }, [controller, conversationId]);
+    if (!conversationId) {
+      const text = (textOverride ?? inputRef.current).trim();
+      if (!text) return;
+      const clearSubmittedDraft = controller.captureDraft(text);
+      const id = await ensureConversation();
+      // Creation failed: the toast above fired and the draft stays in the
+      // input, so the user can retry without retyping.
+      if (!id) return;
+      await controller.send(text, false, textOverride === undefined ? clearSubmittedDraft : undefined);
+      return;
+    }
+    await controller.send(textOverride, false);
+  }, [controller, conversationId, ensureConversation, t]);
   const inputRef = useRef(controller.input);
   inputRef.current = controller.input;
-  const setInputRef = useRef(controller.setInput);
-  setInputRef.current = controller.setInput;
 
   // Index tool_result rows by their provider toolCallId so MessageRow can pair
   // them with the corresponding tool_call row and render a single status
@@ -374,7 +443,7 @@ export function CopilotChat() {
   const toolResultById = useMemo(() => indexToolResults(messages), [messages]);
 
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-[1600px] gap-4 p-2 md:p-6">
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-[1600px] gap-4 p-2 pt-16 md:p-6">
       {sidebarOpen && (
         <Card className="hidden min-h-0 w-[280px] shrink-0 flex-col gap-0 overflow-hidden py-0 md:flex">
           <ConversationSidebar
@@ -390,7 +459,7 @@ export function CopilotChat() {
       )}
 
       <Card className="flex min-h-0 min-w-0 flex-1 flex-col gap-0 overflow-hidden py-0">
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b py-2 pr-3 pl-14 md:pl-3">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b py-2 pr-3 pl-3">
           <div className="flex min-w-0 items-center gap-1">
             {/* Mobile: opens the conversation Sheet; desktop: toggles the column. */}
             <Button
@@ -411,10 +480,10 @@ export function CopilotChat() {
             >
               <PanelLeft className="size-4" />
             </Button>
-            <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold">
+            <h1 className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold">
               <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
               {activeConversation?.title || t("copilot.untitled")}
-            </span>
+            </h1>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {isRunning ? (
@@ -453,7 +522,7 @@ export function CopilotChat() {
                 </div>
               )}
               {!loadError && !loadingConversations && !loadingMessages && messages.length === 0 && !active && (
-                <CopilotWelcomeState onSuggestion={(text) => void controller.send(text)} />
+                <CopilotWelcomeState onSuggestion={(text) => void submit(text)} />
               )}
               {messages.map((message) => {
                 const pairedResultId = message.toolCallId && toolResultById.has(message.toolCallId)
@@ -476,7 +545,14 @@ export function CopilotChat() {
                   />
                 );
               })}
-              {(syncError || active?.error) && <p role="status" className="text-sm text-muted-foreground">{syncError || active?.error}</p>}
+              {(syncError || active?.error) && (
+                <p role="status" className="text-sm text-muted-foreground">
+                  {syncError || active?.error}
+                  {!syncError && active?.errorCode ? (
+                    <span className="text-xs opacity-70"> ({active.errorCode})</span>
+                  ) : null}
+                </p>
+              )}
               {active?.status === "awaiting_approval" && (active.pendingAction
                 ? <CopilotApproval key={active.pendingAction.id} action={active.pendingAction} onDecided={reconcile} />
                 : <p role="status" className="text-sm text-muted-foreground">{t("copilot.awaitingApproval")}</p>)}
@@ -618,7 +694,7 @@ export function CopilotChat() {
               size="icon"
               className="size-9 shrink-0 rounded-full"
               onClick={() => void submit()}
-              disabled={controller.sending || savingPreferences || followups.enqueuing || !controller.input.trim() || !conversationId}
+              disabled={controller.sending || savingPreferences || followups.enqueuing || !controller.input.trim()}
               aria-label={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
               title={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
             >

@@ -1,22 +1,21 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useLanguage } from "@/hooks/use-language";
+import { useTrilingual } from "@/hooks/use-trilingual";
 import { cn } from "@/lib/utils";
 
 export function SkillNavigation() {
   const path = usePathname();
-  const { language } = useLanguage();
-  const en = language === "en";
+  const pick = useTrilingual();
   return (
     <nav
-      aria-label={en ? "Skill navigation" : "Skill 导航"}
+      aria-label={pick("Skill 导航", "Skill 導覽", "Skill navigation")}
       className="flex gap-1 border-b border-border"
     >
       {[
-        { href: "/skills", label: en ? "Installed" : "已安装" },
-        { href: "/skills/discover", label: en ? "Discover" : "发现" },
-        { href: "/skills/sources", label: en ? "Sources" : "来源管理" },
+        { href: "/skills", label: pick("已安装", "已安裝", "Installed") },
+        { href: "/skills/discover", label: pick("发现", "發現", "Discover") },
+        { href: "/skills/sources", label: pick("来源管理", "來源管理", "Sources") },
       ].map((item) => (
         <Link
           key={item.href}

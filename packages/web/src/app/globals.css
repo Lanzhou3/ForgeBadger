@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* Bundled Nerd Font (JetBrains Mono Nerd Font Mono, OFL): the default
    terminal font so prompt themes like Oh My Posh render their Powerline /
@@ -434,5 +435,13 @@
     min-height: 100dvh;
     overflow-x: hidden;
     @apply bg-background text-foreground antialiased;
+  }
+
+  /* Session focus mode (see app/(dashboard)/sessions/[id]/page.tsx): the
+     terminal takes the full window width, so the app sidebar and the mobile
+     navigation trigger stay hidden while the body attribute is set. */
+  body[data-session-focus-mode] [data-app-sidebar],
+  body[data-session-focus-mode] [data-app-sidebar-trigger] {
+    display: none;
   }
 }

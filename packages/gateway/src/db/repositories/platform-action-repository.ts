@@ -33,6 +33,19 @@ export interface DispatchHistory {
   status: ActionIntent['status'];
   receiptOutcome: ActionReceipt['outcome'] | null;
 }
+export interface CopilotActionOriginRecord {
+    run_id: string;
+    conversation_id: string;
+    source: string;
+    run_input_json: string;
+    run_status: string;
+    step_id: string;
+    step_status: string;
+    tool_name: string;
+    tool_call_id: string | null;
+    input_json: string;
+    input_digest: string;
+}
 
 export class PlatformActionRepository {
     constructor(private db: Database, private userId: string) {
@@ -42,6 +55,33 @@ export class PlatformActionRepository {
     }
     byKey(key: string) {
         return this.db.prepare('SELECT * FROM platform_action_intents WHERE user_id=? AND idempotency_key=?').get(this.userId, key) as ActionIntent | undefined;
+    }
+    copilotOrigin(runId: string, stepId: string): CopilotActionOriginRecord | undefined {
+        return this.db.prepare(`SELECT r.id AS run_id,r.conversation_id,r.source,r.input_json AS run_input_json,
+            r.status AS run_status,s.id AS step_id,s.status AS step_status,s.tool_name,s.tool_call_id,s.input_json,s.input_digest
+            FROM copilot_run_steps s JOIN copilot_runs r ON r.user_id=s.user_id AND r.id=s.run_id
+            JOIN copilot_conversations c ON c.user_id=r.user_id AND c.id=r.conversation_id AND c.status!='deleted'
+            WHERE s.user_id=? AND s.id=? AND r.id=? AND s.kind='tool'`)
+            .get(this.userId, stepId, runId) as CopilotActionOriginRecord | undefined;
+    }
+    pendingApproval(actionId: string, runId: string, stepId: string) {
+        return this.db.prepare(`SELECT tool,tool_call_id,input_json,input_digest FROM copilot_pending_actions
+            WHERE user_id=? AND id=? AND run_id=? AND step_id=? AND status='pending'`)
+            .get(this.userId, actionId, runId, stepId) as {
+                tool: string; tool_call_id: string | null; input_json: string; input_digest: string;
+            } | undefined;
+    }
+    /** Caller must consume the pending decision in the same immediate transaction. */
+    refreshCopilotApproval(intent: ActionIntent, actionId: string, expiresAt: number): boolean {
+        return this.db.prepare(`UPDATE platform_action_intents SET expires_at=?
+            WHERE user_id=? AND id=? AND status='approved' AND expires_at=? AND origin_kind='copilot'
+            AND origin_run_id=? AND origin_step_id=? AND idempotency_key=? AND digest=?
+            AND execution_owner IS NULL AND execution_lease_expires_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM platform_action_receipts r WHERE r.user_id=platform_action_intents.user_id AND r.intent_id=platform_action_intents.id)
+            AND EXISTS (SELECT 1 FROM copilot_pending_actions a WHERE a.user_id=platform_action_intents.user_id
+                AND a.id=? AND a.run_id=platform_action_intents.origin_run_id AND a.step_id=platform_action_intents.origin_step_id AND a.status='pending')`)
+            .run(expiresAt, this.userId, intent.id, intent.expires_at, intent.origin_run_id, intent.origin_step_id,
+                intent.idempotency_key, intent.digest, actionId).changes === 1;
     }
     create(input: Omit<ActionIntent, 'id' | 'user_id' | 'created_at' | 'execution_owner' | 'execution_lease_expires_at' | 'channel_conversation_id' | 'origin_kind' | 'origin_run_id' | 'origin_step_id'>, originSource?:ActionOrigin) {
         return this.db.transaction(() => {

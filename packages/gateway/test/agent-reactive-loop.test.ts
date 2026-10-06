@@ -9,6 +9,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
 import { attachCopilotReactiveLoop, PROACTIVE_CONVERSATION_TITLE } from "../src/services/agent/reactive-loop.js";
+import { AgentError } from "../src/services/agent/types.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import type { AgentStack } from "../src/services/agent/agent-stack.js";
 
@@ -151,6 +152,42 @@ describe("copilot reactive loop", () => {
     const conversations = log.listConversations();
     assert.equal(conversations.length, 2);
     loop.stop();
+  });
+
+  it("backs off and drops a retained event after repeated busy rejections instead of hot-retrying", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("loop-busy@example.com", "hash");
+    const bus = new ForgeBadgerEventBus();
+    let runCalls = 0;
+    const stack = {
+      log: new CopilotConversationLog(db, user.id),
+      orchestrator: {
+        runTurn: async () => {
+          runCalls += 1;
+          throw new AgentError("COPILOT_CONVERSATION_BUSY", "Conversation already has an active run");
+        }
+      }
+    } as unknown as AgentStack;
+    const loop = attachCopilotReactiveLoop({
+      deps: { db, masterKey: "mk", eventBus: bus },
+      buildAgentStack: () => stack,
+      debounceMs: 5,
+      cooldownMs: 1
+    });
+    try {
+      bus.emitEvent({ type: "activity_created", userId: user.id, activityId: "busy-1", activityType: "session", status: "done", message: "m", createdAt: new Date() });
+      // Four attempts at expanding backoff (5/10/20ms), then the event drops.
+      await sleep(150);
+      assert.equal(runCalls, 4);
+      const settled = runCalls;
+      await sleep(100);
+      assert.equal(runCalls, settled, "dropped event must not be retried again");
+
+      // A fresh event starts a new backoff sequence rather than staying wedged.
+      bus.emitEvent({ type: "activity_created", userId: user.id, activityId: "busy-2", activityType: "session", status: "done", message: "m2", createdAt: new Date() });
+      await sleep(150);
+      assert.equal(runCalls, settled + 4);
+    } finally { loop.stop(); db.close(); }
   });
 
   it("does not reuse another user's proactive conversation for the rolling window", async () => {

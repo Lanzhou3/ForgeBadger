@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import type { Database } from '../../db/types.js';
 import type { InMemorySessionManager } from '../session-manager.js';
 export interface CommandContext {
+    signal?: AbortSignal | undefined;
     db: Database;
     actionIntentId?: string;
     actionOrigin?: import('../../db/repositories/platform-action-repository.js').ActionOrigin;
@@ -21,8 +22,22 @@ export interface CommandContext {
 export interface CommandResources {
     stopTarget?: import("../session-stop-target.js").SessionStopTarget;
     projectIds: string[];
+    /** Exact session-memory resource, derived from the durable Copilot origin. */
+    conversationId?: string;
     rootPaths?: string[];
     revision: string;
+}
+export interface CopilotApprovalRevalidation {
+    runId: string;
+    stepId: string;
+    pendingActionId: string;
+    commandId: string;
+    /** Original platform input, including trusted session-memory conversation injection. */
+    input: unknown;
+    inputDigest: string;
+    source: 'user' | 'reactive' | 'scheduled';
+    /** Web decisions may renew admission; channel decisions retain their signed expiry. */
+    refreshExpiry: boolean;
 }
 export interface PlatformCommand {
     id: string;

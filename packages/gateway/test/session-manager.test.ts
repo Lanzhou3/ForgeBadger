@@ -212,7 +212,7 @@ describe("InMemorySessionManager", () => {
 
     assert.equal(receipt.adapter, "codex");
     assert.deepEqual(calls.filter((call) => call === "enter"), ["enter"]);
-    assert.deepEqual(calls.slice(1), ["inspect", "stage:第一行\n第二行", "settle", "inspect", "enter"]);
+    assert.deepEqual(calls.slice(1), ["inspect", "stage:第一行\n第二行", "settle", "inspect", "settle", "enter"]);
   });
 
   it("rechecks runtime authorization after pane inspection and before programmatic input", async () => {
@@ -279,7 +279,7 @@ describe("InMemorySessionManager", () => {
 
     await manager.submitProgrammaticTask(session.id, { adapter: "codex", message });
 
-    assert.deepEqual(calls.slice(1), ["inspect", "stage", "settle", "inspect", "enter"]);
+    assert.deepEqual(calls.slice(1), ["inspect", "stage", "settle", "inspect", "settle", "enter"]);
   });
 
   it("rejects an adapter mismatch before writing to backend", async () => {
@@ -396,7 +396,7 @@ describe("InMemorySessionManager", () => {
       () => manager.submitProgrammaticTask(session.id, { adapter: "codex", message: "hello" }),
       /PROGRAMMATIC_SUBMIT_INDETERMINATE/
     );
-    assert.deepEqual(terminalCalls, ["inspect", "stage:hello", "settle", "inspect", "enter"]);
+    assert.deepEqual(terminalCalls, ["inspect", "stage:hello", "settle", "inspect", "settle", "enter"]);
   });
 
   it("marks launch failures as errors", async () => {

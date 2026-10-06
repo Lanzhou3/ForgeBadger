@@ -1,4 +1,5 @@
 import { adapterIds } from "../../../lib/adapter-ids.js";
+import { assertChannelToolScope } from '../../channels/channel-run-scope.js';
 import { getTaskProgress, taskCloseInput, taskProgressInput } from '../../project-manager/task-progress.js';
 import { executeAgentAction } from "../../platform-commands/agent-actions.js";
 /** Project Manager reads and governed task preparation. Preparation never launches a CLI. */
@@ -96,6 +97,10 @@ export function createProjectManagerTools(): AgentTool[] {
         const sessionsByWorkItem = resolveTaskPacketSessions(db, userId, projectId, items);
         const packets: ProjectManagerTaskPacket[] = [];
         for (const workItem of items) {
+          if (context.channelScope) {
+            try { assertChannelToolScope(context, 'pm_get_task_packet', { projectId, workItemId: workItem.id }); }
+            catch { continue; }
+          }
           const session = sessionsByWorkItem.get(workItem.id) ?? null;
           packets.push(buildTaskPacket({ project, workItem, session }));
         }

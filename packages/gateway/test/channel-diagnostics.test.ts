@@ -56,9 +56,10 @@ it('projects notifications into a remote conversation using its current route, w
     if (adopted.status !== 'adopted') throw new Error('fixture');
     const run = new CopilotRunLedger(f.db, f.user.id).get(adopted.runId)!;
     const input = JSON.parse(run.input_json);
-    assert.equal(input.projectId, undefined);
+    assert.equal(input.projectId, f.project.id);
+    assert.deepEqual(input.channelScope.projectIds, [f.project.id]);
     assert.match(JSON.stringify(notificationContext(f.db, input)), /review 通知/);
-    assert.doesNotMatch(JSON.stringify(notificationContext(f.db, { ...input, projectId: elsewhere.id })), /PRIVATE_OTHER_PROJECT/);
+    assert.throws(() => notificationContext(f.db, { ...input, projectId: elsewhere.id }), /CHANNEL_AUTHORITY_REJECTED/);
     f.config.upsertConfig({ emergencyDisabled: true });
     assert.throws(() => notificationContext(f.db, input), /CHANNEL_AUTHORITY_REJECTED/);
     f.config.upsertConfig({ emergencyDisabled: false });

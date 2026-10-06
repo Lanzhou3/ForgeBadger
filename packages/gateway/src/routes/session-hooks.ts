@@ -14,6 +14,7 @@ import { recordActivity } from "../services/activity-events.js";
 import { defaultNotificationDeduper, type NotificationDeduper } from "../services/notification-dedupe.js";
 import { shouldNotifyCliHook } from '../services/cli-notification-policy.js';
 import { redactAgentText } from '../services/agent/redaction.js';
+import { observeCliHook } from '../services/notifications/observe-cli-hook.js';
 
 const claudeHookEventSchema = z.object({
   hook_event_name: z.string().optional(),
@@ -163,8 +164,13 @@ export function handleClaudeNotificationHook(
 
   const native = nativePromptIdentity(parsed.event.session_id, parsed.event.turn_id);
   const isSubagent = parsed.event.agent_id !== undefined && parsed.event.agent_id !== null && parsed.event.agent_id !== '';
+  const adapter = parsed.event.adapter ?? session.aiTool;
+  let cliSummary;
+  try { cliSummary = observeCliHook(db, session, parsed.event, adapter); }
+  catch { /* Optional summary failures must not fail CLI hooks. */ }
   if (parsed.event.hook_event_name === 'UserPromptSubmit') {
-    // Metadata only: no notification, model wake-up, transcript read or CLI input.
+    // Metadata and work indicator only: no notification, model wake-up,
+    // transcript read or CLI input.
     // Child-agent prompts must not overwrite the human's latest request.
     if (!isSubagent && parsed.event.prompt?.trim()) {
       const lastPrompt = notificationPromptSummary(parsed.event.prompt);
@@ -173,7 +179,19 @@ export function handleClaudeNotificationHook(
         if (native) new SessionNotificationPromptRepository(db, session.userId).save(session.id, native, parsed.event.prompt!);
       }).immediate();
     }
+    if (!isSubagent) eventBus.setSessionWorkState({
+      userId: session.userId, sessionId: session.id, state: 'working',
+      nativeSessionId: native?.sessionId, nativeTurnId: native?.turnId,
+    });
     return { status: 200, body: { code: 0, data: { accepted: true }, message: '' } };
+  }
+
+  if (!isSubagent && ['TaskStarted', 'TurnStarted', 'Interrupt', 'SessionEnd'].includes(parsed.event.hook_event_name ?? '')) {
+    eventBus.setSessionWorkState({
+      userId: session.userId, sessionId: session.id,
+      state: ['TaskStarted', 'TurnStarted'].includes(parsed.event.hook_event_name ?? '') ? 'working' : 'idle',
+      nativeSessionId: native?.sessionId, nativeTurnId: native?.turnId,
+    });
   }
 
   const hookEventName = redactAgentText(parsed.event.hook_event_name ?? "Notification");
@@ -187,6 +205,10 @@ export function handleClaudeNotificationHook(
   ));
   const dedupeKey = native ? JSON.stringify([session.id, native.sessionId, native.turnId ?? '', isSubagent]) : session.id;
   if (deduper.shouldDrop(dedupeKey, notificationType, "hook", Date.now())) {
+    if (!isSubagent && ['task_completed', 'task_failed'].includes(notificationType)) {
+      eventBus.setSessionWorkState({ userId: session.userId, sessionId: session.id, state: 'idle',
+        nativeSessionId: native?.sessionId, nativeTurnId: native?.turnId });
+    }
     traceClaudeNotificationHook("deduped", { sessionId: session.id, notificationType });
     return { status: 200, body: { code: 0, data: { accepted: true }, message: "" } };
   }
@@ -195,7 +217,6 @@ export function handleClaudeNotificationHook(
   const message = redactAgentText(notificationMessage(parsed.event, hookEventName, notificationType, toolName));
   const activityType = notificationType;
 
-  const adapter = parsed.event.adapter;
   eventBus.emitEvent({
     type: "claude_notification",
     userId: session.userId,
@@ -208,7 +229,8 @@ export function handleClaudeNotificationHook(
     hookEventName,
     notificationType,
     message,
-    adapter: adapter ?? "claude",
+    adapter,
+    ...(cliSummary ? { cliSummary } : {}),
     ...(parsed.event.title ? { title: redactAgentText(parsed.event.title) } : {}),
     ...(toolName ? { toolName } : {})
   });
@@ -224,7 +246,7 @@ export function handleClaudeNotificationHook(
     metadata: {
       hookEventName,
       notificationType,
-      adapter: adapter ?? "claude",
+      adapter,
       ...(toolName ? { toolName } : {})
     }
   });

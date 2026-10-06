@@ -20,20 +20,21 @@ it('OpenCode only notifies root busy-to-idle and permissions still pending after
     const event=(type:string,properties:Record<string,unknown>)=>plugin.event({event:{type,properties}});
     for(const id of ['root','child']){await event('session.status',{sessionID:id,status:{type:'busy'}});await event('session.idle',{sessionID:id});}
     await event('session.idle',{sessionID:'root'});
-    assert.equal(sent.length,1);assert.equal(sent[0]?.session_id,'root');
+    assert.deepEqual(sent.map(event => event.hook_event_name), ['TaskStarted', 'Stop']);
+    assert.ok(sent.every(event => event.session_id === 'root'));
     t.mock.timers.enable({apis:['setTimeout']});
     await event('permission.asked',{id:'auto',sessionID:'root',permission:'bash'});
     await event('permission.replied',{requestID:'auto',sessionID:'root'});
     t.mock.timers.tick(1000);await new Promise(resolve=>setImmediate(resolve));
-    assert.equal(sent.length,1);
+    assert.equal(sent.length,2);
     pending=[{id:'human',sessionID:'root'}];
     await event('permission.asked',{id:'human',sessionID:'root',permission:'bash'});
     t.mock.timers.tick(1000);await new Promise(resolve=>setImmediate(resolve));
-    assert.equal(sent.length,2);assert.equal(sent[1]?.hook_event_name,'PermissionRequest');
+    assert.equal(sent.length,3);assert.equal(sent[2]?.hook_event_name,'PermissionRequest');
     pending=[];
     await event('permission.asked',{id:'resolved-without-event',sessionID:'root',permission:'bash'});
     t.mock.timers.tick(1000);await new Promise(resolve=>setImmediate(resolve));
-    assert.equal(sent.length,2);
+    assert.equal(sent.length,3);
   }finally{
     t.mock.timers.reset();globalThis.fetch=originalFetch;
     for(const key of ['FORGEBADGER_GATEWAY_URL','FORGEBADGER_SESSION_ID','FORGEBADGER_ATTACH_TOKEN']){if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];}

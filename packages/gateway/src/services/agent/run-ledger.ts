@@ -4,7 +4,7 @@ import { validateRepairJob } from '../development/repair-scope.js';
 import { ProjectManagerRepository } from '../../db/repositories/project-manager-repository.js';
 import { readTaskDispatchAttempt } from '../project-manager/task-execution.js';
 import { verifiedDispatchEvidence } from '../project-manager/task-progress.js';
-import { assertChannelConversationAuthority } from "../channels/channel-run-authority.js";
+import { assertChannelRunScope, prepareChannelAdmission, type ChannelRunScope } from '../channels/channel-run-scope.js';
 import { projectActionReceipt } from "../platform-commands/receipt-projection.js";
 import { PlatformActionRepository } from "../../db/repositories/platform-action-repository.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -12,7 +12,10 @@ import type { Database } from "../../db/types.js";
 import { CopilotConversationLog } from "./conversation-log.js";
 import { AgentError, type AgentRunStatus } from "./types.js";
 import { redactAgentText } from "./redaction.js";
+import { runDuration, settleApprovalWait } from './approval-clock.js';
 export interface TurnInput {
+    /** Server-derived authority; never accepted from HTTP/model JSON. */
+    channelScope?: ChannelRunScope;
     executionMode?: 'research' | 'review' | 'repair';
     repairOrigin?: RepairOrigin;
     repairFailedChecks?: boolean;
@@ -127,11 +130,12 @@ export class CopilotRunLedger {
         } | undefined;
         if (user?.status !== "active")
             throw new AgentError("COPILOT_USER_INACTIVE", "User is not active");
-        assertChannelConversationAuthority(this.db,this.userId,input.conversationId);
+        assertChannelRunScope(this.db, this.userId, input);
         if (input.projectId && !this.db.prepare("SELECT id FROM projects WHERE user_id=? AND id=?").get(this.userId, input.projectId))
             throw new AgentError("COPILOT_PROJECT_NOT_FOUND", "Project not found");
     }
     findRequest(input: TurnInput): string | undefined {
+        input = prepareChannelAdmission(this.db, this.userId, input);
         this.validateScope(input);
         if (input.clientRequestId === undefined) return;
         if (!input.clientRequestId.trim() || input.clientRequestId.length > 128)
@@ -145,6 +149,7 @@ export class CopilotRunLedger {
     }
     admit(input: TurnInput, maxSteps: number): string {
         return this.db.transaction(() => {
+            input = prepareChannelAdmission(this.db, this.userId, input);
             const existing = this.findRequest(input);
             if (existing) return existing;
             const digest = requestDigest(input);
@@ -286,10 +291,30 @@ export class CopilotRunLedger {
     }
     waitApproval(c: Claim, step: RunStep): void {
         this.commit(c, () => {
-            const action = this.log.createPendingAction({ runId: c.runId, tool: step.tool_name!, inputJson: step.input_json!, inputDigest: step.input_digest! });
+            const stored = this.steps(c.runId).find(s => s.id === step.id);
+            // A repeat wait on an already-parked step is an idempotent no-op.
+            if (stored?.status === 'awaiting_approval') return;
+            const current = stored?.status === 'pending' ? stored : undefined;
+            if (!current || current.kind !== 'tool' || !current.input_json || current.input_digest !== inputDigest(current.input_json)
+                || current.input_digest !== step.input_digest || current.input_json !== step.input_json
+                || current.tool_name !== step.tool_name || current.tool_call_id !== step.tool_call_id) {
+                // Stale claims never reach this commit (owns() gates it), so an
+                // inconsistent stored step is terminal: settle the run loudly
+                // instead of leaving the recovery pump to re-drive the identical
+                // mismatch until the run's time budget exhausts. A step from
+                // another run is never touched; only this run is settled.
+                const reason = 'COPILOT_APPROVAL_CHECKPOINT_MISMATCH';
+                if (current)
+                    this.db.prepare("UPDATE copilot_run_steps SET status='failed',result_json=?,completed_at=? WHERE user_id=? AND id=?")
+                        .run(JSON.stringify({ code: reason }), Date.now(), this.userId, step.id);
+                this.finishUnowned(c.runId, 'failed', reason);
+                return;
+            }
+            const now = Date.now();
+            const action = this.log.createPendingAction({ runId: c.runId, tool: current.tool_name!, inputJson: current.input_json, inputDigest: current.input_digest! });
             this.db.prepare("UPDATE copilot_pending_actions SET step_id=?,tool_call_id=? WHERE user_id=? AND id=?").run(step.id, step.tool_call_id, this.userId, action.id);
             this.db.prepare("UPDATE copilot_run_steps SET status='awaiting_approval' WHERE user_id=? AND id=?").run(this.userId, step.id);
-            this.db.prepare("UPDATE copilot_runs SET status='awaiting_approval',execution_phase='awaiting_approval',phase_started_at=updated_at,lease_owner=NULL,lease_expires_at=NULL WHERE user_id=? AND id=?").run(this.userId, c.runId);
+            this.db.prepare("UPDATE copilot_runs SET status='awaiting_approval',execution_phase='awaiting_approval',phase_started_at=?,approval_wait_started_at=?,lease_owner=NULL,lease_expires_at=NULL WHERE user_id=? AND id=?").run(now, now, this.userId, c.runId);
         });
     }
     decide(runId: string, actionId: string, approved: boolean): boolean {
@@ -298,21 +323,25 @@ export class CopilotRunLedger {
             const a = this.log.getPendingAction(actionId);
             if (r?.status !== "awaiting_approval" || a?.runId !== runId || a.status !== "pending" || !a.stepId)
                 return false;
-            if (approved) assertChannelConversationAuthority(this.db,this.userId,r.conversation_id);
+            if (approved) assertChannelRunScope(this.db, this.userId, JSON.parse(r.input_json) as TurnInput);
             const s = this.steps(runId).find(s => s.id === a.stepId);
-            if (!s || s.status !== "awaiting_approval" || s.input_digest !== a.inputDigest || s.tool_call_id !== a.toolCallId)
+            if (!s || s.status !== "awaiting_approval" || s.input_digest !== a.inputDigest || s.tool_call_id !== a.toolCallId
+                || s.tool_name !== a.tool || s.input_json !== a.inputJson || inputDigest(a.inputJson) !== a.inputDigest)
                 return false;
+            const now = Date.now();
+            const { approvalWaitMs } = runDuration(this.db, this.userId, runId, now);
             const result = this.db.prepare("UPDATE copilot_pending_actions SET status=?,decided_at=?,updated_at=? WHERE user_id=? AND id=? AND status='pending'")
-                .run(approved ? "approved" : "rejected", Date.now(), Date.now(), this.userId, actionId);
+                .run(approved ? "approved" : "rejected", now, now, this.userId, actionId);
             if (!result.changes)
                 return false;
             this.db.prepare("UPDATE copilot_run_steps SET status='pending' WHERE user_id=? AND id=?").run(this.userId, s.id);
-            this.db.prepare("UPDATE copilot_runs SET status='pending',revision=revision+1 WHERE user_id=? AND id=?").run(this.userId, runId);
+            this.db.prepare("UPDATE copilot_runs SET status='pending',approval_wait_ms=?,approval_wait_started_at=NULL,revision=revision+1 WHERE user_id=? AND id=?").run(approvalWaitMs, this.userId, runId);
             return true;
         }).immediate();
     }
     finish(c: Claim, status: AgentRunStatus, reason?: string): boolean { return this.commit(c, () => this.finishUnowned(c.runId, status, reason)); }
     private finishUnowned(runId: string, status: AgentRunStatus, reason?: string): void {
+        settleApprovalWait(this.db, this.userId, runId);
         this.db.prepare("UPDATE copilot_runs SET execution_phase='finished',status=?,stop_reason=?,error=?,completed_at=?,lease_owner=NULL,lease_expires_at=NULL,fence=fence+1,revision=revision+1,updated_at=? WHERE user_id=? AND id=?")
             .run(status, reason ?? null, status === "failed" ? reason ?? null : null, Date.now(), Date.now(), this.userId, runId);
     }

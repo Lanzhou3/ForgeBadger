@@ -3,26 +3,35 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit";
 import type { Terminal as TerminalInstance } from "@xterm/xterm";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, ClipboardCopy, Copy, Eraser, GripVertical, Minus, Plus } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useTerminalWriter } from "@/hooks/use-terminal-writer";
 import { useColorMode } from "@/hooks/use-color-mode";
 import { useTerminalFont } from "@/hooks/use-terminal-font";
+import { useTerminalToolbarDrag } from "@/hooks/use-terminal-toolbar-drag";
 import { Button } from "@/components/ui/button";
 import { SessionOutputHistory } from "@/components/sessions/session-output-history";
 import { useLanguage } from "@/hooks/use-language";
+import type { TranslationKey } from "@/lib/i18n";
 import { updateSessionLastPrompt } from "@/lib/api";
 import { resolveWheelAction } from "@/lib/terminal-scroll";
 import { CodexWheelInput } from "@/lib/codex-wheel-input";
 import { installSafariTerminalInputFix } from "@/lib/terminal-safari-input";
 import { terminalAltArrowInput } from "@/lib/terminal-alt-arrows";
-import { copySelectedTerminalText, shouldCopyTerminalSelection } from "@/lib/terminal-copy";
-import { createTerminalInputMessage, createTerminalResizeMessage } from "@/lib/terminal-messages";
+import { copyTerminalText, getTerminalBufferText, shouldCopyTerminalSelection } from "@/lib/terminal-copy";
+import { toast } from "@/lib/toast";
+import { createTerminalInputMessage, createTerminalResizeMessage, MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS } from "@/lib/terminal-messages";
 import { createTerminalPromptCapture } from "@/lib/terminal-prompt-capture";
 import { notifySessionTabsChanged, setSessionTabPrompt } from "@/lib/session-tabs";
 import { getTerminalPalette } from "@/lib/terminal-theme";
-import { ensureTerminalFontLoaded } from "@/lib/terminal-font";
+import {
+  ensureTerminalFontLoaded,
+  MAX_TERMINAL_FONT_SIZE,
+  MIN_TERMINAL_FONT_SIZE,
+  setTerminalFont,
+} from "@/lib/terminal-font";
+import { useTerminalToolbarCopy } from "./terminal-copy";
 import { parseTerminalWebSocketMessage } from "@/lib/terminal-websocket-messages";
 import { replaceTerminalInputListener, type DisposableInputListener } from "@/lib/terminal-input-listener";
 import {
@@ -44,6 +53,13 @@ type ConnectionStatus =
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000];
+const TERMINAL_STATUS_LABEL_KEYS: Record<ConnectionStatus, TranslationKey> = {
+  connecting: "terminal.status.connecting",
+  connected: "terminal.status.connected",
+  reconnecting: "terminal.status.reconnecting",
+  disconnected: "terminal.status.disconnected",
+  failed: "terminal.status.failed",
+};
 /**
  * xterm latches `isUserScrolling` on any upward scroll and then never follows
  * output again until the user returns to the very bottom. Trackpad momentum
@@ -119,6 +135,7 @@ export function TerminalView({
   credentialsPending?: boolean;
 }) {
   const { t } = useLanguage();
+  const toolbarCopy = useTerminalToolbarCopy();
   const { resolved: colorModeResolved } = useColorMode();
   const terminalFont = useTerminalFont();
   const writer = useTerminalWriter(sessionId);
@@ -132,6 +149,8 @@ export function TerminalView({
   const aiToolRef = useRef(aiTool);
   aiToolRef.current = aiTool;
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const toolbarContainerRef = useRef<HTMLDivElement | null>(null);
+  const toolbarDrag = useTerminalToolbarDrag(toolbarContainerRef);
   const terminalRef = useRef<TerminalInstance | null>(null);
   const fitAddonRef = useRef<FitAddonInstance | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -156,6 +175,11 @@ export function TerminalView({
   const [attemptCount, setAttemptCount] = useState(0);
   const [terminalReady, setTerminalReady] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
+  const [hasSelection, setHasSelection] = useState(false);
+  const [alternateScreen, setAlternateScreen] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const copyBusyRef = useRef(false);
+  const toolbarMountedRef = useRef(true);
   const [terminalToast, setTerminalToast] = useState<TerminalNotificationToast | null>(null);
   const terminalToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const terminalToastSeqRef = useRef(0);
@@ -211,6 +235,7 @@ export function TerminalView({
     const terminal = terminalRef.current;
     if (!terminal) return;
     const buffer = terminal.buffer.active;
+    setAlternateScreen(buffer.type === "alternate");
     const next = buffer.type !== "normal" || buffer.viewportY >= buffer.baseY;
     if (atBottomRef.current !== next) {
       atBottomRef.current = next;
@@ -232,6 +257,7 @@ export function TerminalView({
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.scrollToBottom();
+    terminal.focus();
     lastWheelUpAtRef.current = 0;
     atBottomRef.current = true;
     setAtBottom(true);
@@ -249,7 +275,17 @@ export function TerminalView({
     const fitAddon = fitAddonRef.current;
     if (!terminal || !fitAddon) return;
 
+    const buffer = terminal.buffer.active;
+    const wasAtBottom = buffer.type === "normal" && buffer.viewportY >= buffer.baseY;
+    const previousCols = terminal.cols, previousRows = terminal.rows;
     fitAddon.fit();
+    // Small fonts on large displays can exceed the Gateway's grid limits.
+    // Keep xterm and the PTY on the same grid instead of dropping that resize.
+    if (terminal.cols > MAX_TERMINAL_COLS || terminal.rows > MAX_TERMINAL_ROWS) {
+      terminal.resize(Math.min(terminal.cols, MAX_TERMINAL_COLS), Math.min(terminal.rows, MAX_TERMINAL_ROWS));
+    }
+    if (wasAtBottom && (terminal.cols !== previousCols || terminal.rows !== previousRows)) terminal.scrollToBottom();
+    syncAtBottom();
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
 
@@ -264,7 +300,7 @@ export function TerminalView({
       socket.send(resizeMessage);
       lastSentSizeRef.current = { cols: terminal.cols, rows: terminal.rows };
     }
-  }, []);
+  }, [syncAtBottom]);
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
@@ -439,6 +475,63 @@ export function TerminalView({
     connect();
   }, [clearReconnectTimer, connect]);
 
+  // Font size rides the existing terminal-font preference store: setTerminalFont
+  // persists to the same localStorage key the font settings UI uses, and the
+  // font-follow effect below re-applies it to the live xterm instance.
+  const adjustFontSize = useCallback((delta: number) => {
+    setTerminalFont({
+      fontFamily: terminalFontRef.current.fontFamily,
+      fontSize: terminalFontRef.current.fontSize + delta,
+    });
+  }, []);
+
+  const clearTerminal = useCallback(() => {
+    const terminal = terminalRef.current;
+    // Full-screen TUIs track their own cursor and diff-rendered screen. A local
+    // clear would desynchronize that state without asking the CLI to redraw.
+    if (!terminal || terminal.buffer.active.type !== "normal") return;
+    terminal.clearSelection();
+    terminal.clear();
+    syncAtBottom();
+  }, [syncAtBottom]);
+
+  // Toolbar work can finish while the connection effect is awaiting a token.
+  // Its lifetime follows the component, rather than the current WebSocket.
+  useEffect(() => {
+    toolbarMountedRef.current = true;
+    return () => { toolbarMountedRef.current = false; };
+  }, []);
+
+  const copyText = useCallback(async (text: string) => {
+    if (copyBusyRef.current) return;
+    if (!text) { toast.info(toolbarCopy.copyEmpty); return; }
+    copyBusyRef.current = true;
+    setCopying(true);
+    try {
+      const copied = await copyTerminalText(text);
+      if (!toolbarMountedRef.current) return;
+      if (copied) toast.success(toolbarCopy.copied);
+      else toast.error(toolbarCopy.copyFailed);
+    } finally {
+      copyBusyRef.current = false;
+      if (toolbarMountedRef.current) setCopying(false);
+    }
+  }, [toolbarCopy]);
+
+  const copySelection = useCallback(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    void copyText(terminal.getSelection());
+  }, [copyText]);
+  const copySelectionRef = useRef(copySelection);
+  copySelectionRef.current = copySelection;
+
+  const copyEntireBuffer = useCallback(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    void copyText(getTerminalBufferText(terminal));
+  }, [copyText]);
+
   // Initialize terminal instance once
   useEffect(() => {
     let cancelled = false;
@@ -449,6 +542,18 @@ export function TerminalView({
     let osc99Disposable: { dispose(): void } | null = null;
     let osc777Disposable: { dispose(): void } | null = null;
     const codexWheel = new CodexWheelInput();
+    let selectionDisposable: { dispose(): void } | null = null;
+    let bufferDisposable: { dispose(): void } | null = null;
+    let viewportScrollFrame: number | null = null;
+    // xterm suppresses onScroll for native viewport scrolling. Read the
+    // buffer on the next frame, after its DOM scroll handler updates it.
+    const onViewportScroll = () => {
+      if (viewportScrollFrame !== null) return;
+      viewportScrollFrame = window.requestAnimationFrame(() => {
+        viewportScrollFrame = null;
+        syncAtBottom();
+      });
+    };
     const onWheelCapture = (event: WheelEvent) => {
       if (event.deltaY < 0) lastWheelUpAtRef.current = Date.now();
     };
@@ -484,7 +589,7 @@ export function TerminalView({
             if (!shouldCopyTerminalSelection(event, terminal.hasSelection())) return true;
 
             event.preventDefault();
-            void copySelectedTerminalText(terminal);
+            copySelectionRef.current();
             return false;
           });
           // Full-screen TUIs (Claude Code / Kimi Code) run on the alternate
@@ -535,6 +640,11 @@ export function TerminalView({
           terminalRef.current = terminal;
           fitAddonRef.current = fitAddon;
           scrollDisposable = terminal.onScroll(syncAtBottom);
+          bufferDisposable = terminal.buffer.onBufferChange(syncAtBottom);
+          host.addEventListener("scroll", onViewportScroll, { capture: true });
+          selectionDisposable = terminal.onSelectionChange(() => {
+            setHasSelection(terminal.hasSelection());
+          });
           // Terminal-native signals (bell / OSC 9/99/777) become an in-tab
           // toast only — the main channel is the daemon-side PTY scanner that
           // relays the same signals to the Gateway. Nice-to-have layer: it
@@ -629,6 +739,10 @@ export function TerminalView({
       }
       setTerminalToast(null);
       hostRef.current?.removeEventListener("wheel", onWheelCapture, { capture: true });
+      hostRef.current?.removeEventListener("scroll", onViewportScroll, { capture: true });
+      if (viewportScrollFrame !== null) window.cancelAnimationFrame(viewportScrollFrame);
+      selectionDisposable?.dispose();
+      bufferDisposable?.dispose();
       terminalRef.current?.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -645,14 +759,16 @@ export function TerminalView({
     terminal.options.theme = getTerminalPalette(colorModeResolved);
   }, [colorModeResolved]);
 
-  // Follow the terminal font preference at runtime (xterm re-renders on
-  // option changes; no re-open needed).
+  // Font metrics change the cell grid even when the container keeps its size.
+  // Re-fit after rendering and report the new rows/columns to the live PTY.
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.fontFamily = terminalFont.fontFamily;
     terminal.options.fontSize = terminalFont.fontSize;
-  }, [terminalFont.fontFamily, terminalFont.fontSize]);
+    const frame = window.requestAnimationFrame(fitAndSendResize);
+    return () => window.cancelAnimationFrame(frame);
+  }, [terminalFont.fontFamily, terminalFont.fontSize, terminalReady, fitAndSendResize]);
 
   // Manage connection lifecycle
   useEffect(() => {
@@ -719,6 +835,7 @@ export function TerminalView({
   // The status strip floats over the terminal instead of taking flow space,
   // so a connecting → connected flip never re-layouts the pane.
   const showStatusBar = status !== "connected";
+  const statusLabel = t(TERMINAL_STATUS_LABEL_KEYS[status]);
   // Genuine missing credentials (not a token still in flight from the page's
   // connect round-trip) replace the terminal with an explanatory panel.
   const missingCredentials = (!authToken || !attachToken) && !credentialsPending;
@@ -749,12 +866,12 @@ export function TerminalView({
           the host's computed width/height (border-box under Tailwind preflight)
           without subtracting host padding, so padding here would overshoot
           cols/rows and clip the rightmost character column. */}
-      <div className="relative flex h-full min-h-0 flex-col overflow-hidden p-2">
+      <div ref={toolbarContainerRef} className="relative flex h-full min-h-0 flex-col overflow-hidden p-2 pb-12">
         {/* Screen readers still get the connecting → connected transition even
             though the healthy state has no visible strip. */}
         {!showStatusBar && (
           <span aria-live="polite" className="sr-only">
-            {status}
+            {statusLabel}
           </span>
         )}
         {/* Status strip and read-only banner float as a semi-transparent
@@ -762,11 +879,11 @@ export function TerminalView({
             the terminal. pointer-events-none keeps the terminal interactive
             through the gaps; the panels themselves stay clickable. */}
         {(showStatusBar || writer.readOnly) && (
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col items-stretch gap-2 p-2">
+          <div className="pointer-events-none absolute inset-x-0 top-12 z-20 flex flex-col items-stretch gap-2 p-2">
             {showStatusBar && (
               <div className="pointer-events-auto flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-border bg-terminal/85 px-3 py-2 text-xs text-muted-foreground">
                 <span className={cn("size-2 rounded-full", statusTone)} aria-hidden="true" />
-                <span aria-live="polite">{status}</span>
+                <span aria-live="polite">{statusLabel}</span>
                 {attemptCount > 0 && (
                   <span className="text-amber-600 dark:text-amber-300">
                     {attemptCount}/{MAX_RECONNECT_ATTEMPTS}
@@ -779,15 +896,15 @@ export function TerminalView({
               <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-terminal/85 p-2 text-xs text-amber-600 dark:text-amber-300" role="status">
                 <span>
                   {writer.loading
-                    ? "正在检查终端写入权限…"
+                    ? t("terminal.writer.checking")
                     : writer.error
-                      ? "写入状态同步失败，终端保持只读。"
-                      : "Copilot 正在操作此工作区，终端只读。"}
+                      ? t("terminal.writer.syncFailed")
+                      : t("terminal.writer.copilotReadOnly")}
                 </span>
                 <Button size="sm" variant="outline" disabled={writer.loading || writer.takingOver} onClick={writer.takeover}>
-                  接管终端
+                  {t("terminal.writer.takeover")}
                 </Button>
-                <Button size="sm" variant="ghost" onClick={writer.refresh}>刷新状态</Button>
+                <Button size="sm" variant="ghost" onClick={writer.refresh}>{t("terminal.writer.refresh")}</Button>
                 {writer.error && <span role="alert">{writer.error.message}</span>}
               </div>
             )}
@@ -799,13 +916,121 @@ export function TerminalView({
           title={t("terminal.selectionHint")}
           className="min-h-0 flex-1 [&_.xterm-screen]:!h-full [&_.xterm-viewport]:!h-full [&_.xterm]:h-full"
         />
+        {/* Default and reset position: top-right. Status overlays sit below
+            this corner, keeping the controls accessible during reconnects.
+            The bottom band still protects input when the toolbar is moved. */}
+        <div
+          ref={toolbarDrag.toolbarRef}
+          style={toolbarDrag.style}
+          data-testid="terminal-toolbar"
+          aria-busy={copying}
+          onMouseDown={(event) => {
+            // Mouse controls preserve terminal typing focus; keyboard users
+            // can still tab to and activate the buttons normally.
+            if (event.button === 0 && event.target instanceof Element && event.target.closest("button")) event.preventDefault();
+          }}
+          className="absolute right-2 top-2 z-10 flex w-max max-w-[calc(100%-1rem)] flex-wrap items-center gap-0.5 rounded-md border border-border bg-terminal/85 px-1 py-0.5 shadow-sm backdrop-blur-sm"
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-6 touch-none cursor-grab select-none active:cursor-grabbing"
+            aria-label={toolbarCopy.moveToolbar}
+            title={toolbarCopy.moveToolbar}
+            data-testid="terminal-toolbar-drag-handle"
+            {...toolbarDrag.handleProps}
+          >
+            <GripVertical className="size-3.5" />
+          </Button>
+          <span
+            role="status"
+            aria-label={statusLabel}
+            title={statusLabel}
+            className={cn("mx-0.5 size-2 shrink-0 rounded-full", statusTone)}
+          />
+          {aiTool ? (
+            <span className="hidden px-1 font-mono text-[10px] uppercase tracking-wide text-muted-foreground sm:inline">
+              {aiTool}
+            </span>
+          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label={toolbarCopy.fontSmaller}
+            title={toolbarCopy.fontSmaller}
+            disabled={terminalFont.fontSize <= MIN_TERMINAL_FONT_SIZE}
+            onClick={() => adjustFontSize(-1)}
+          >
+            <span className="flex items-center gap-px">
+              <span className="text-[10px] font-semibold leading-none">A</span>
+              <Minus className="size-2.5" />
+            </span>
+          </Button>
+          <span className="hidden w-6 text-center text-[10px] tabular-nums text-muted-foreground sm:inline">
+            {terminalFont.fontSize}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label={toolbarCopy.fontLarger}
+            title={toolbarCopy.fontLarger}
+            disabled={terminalFont.fontSize >= MAX_TERMINAL_FONT_SIZE}
+            onClick={() => adjustFontSize(1)}
+          >
+            <span className="flex items-center gap-px">
+              <span className="text-[10px] font-semibold leading-none">A</span>
+              <Plus className="size-2.5" />
+            </span>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label={toolbarCopy.clear}
+            title={alternateScreen ? toolbarCopy.clearAlternate : toolbarCopy.clear}
+            disabled={!terminalReady || alternateScreen}
+            onClick={clearTerminal}
+          >
+            <Eraser className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label={toolbarCopy.copySelection}
+            title={toolbarCopy.copySelection}
+            disabled={!terminalReady || !hasSelection || copying}
+            onClick={copySelection}
+          >
+            <Copy className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label={toolbarCopy.copyAll}
+            title={toolbarCopy.copyAll}
+            disabled={!terminalReady || copying}
+            onClick={copyEntireBuffer}
+          >
+            <ClipboardCopy className="size-3.5" />
+          </Button>
+        </div>
         {terminalToast && ToastIcon && (
           <div
             key={terminalToast.id}
             role="status"
             aria-live="polite"
             className={cn(
-              "absolute left-1/2 top-2 z-20 flex max-w-[80%] -translate-x-1/2 items-start gap-2 rounded-md border bg-popover px-3 py-2 text-xs shadow-lg",
+              "absolute left-1/2 top-12 z-20 flex max-w-[80%] -translate-x-1/2 items-start gap-2 rounded-md border bg-popover px-3 py-2 text-xs shadow-lg",
               toneAccentClassNames[terminalToast.tone]
             )}
           >
@@ -824,7 +1049,7 @@ export function TerminalView({
             size="sm"
             variant="secondary"
             onClick={handleScrollToBottom}
-            className="absolute bottom-4 right-4 z-10 gap-1 shadow"
+            className="absolute bottom-12 right-4 z-10 gap-1 shadow md:bottom-4"
             aria-label={t("terminal.backToBottom")}
           >
             <ArrowDown className="size-3.5" />

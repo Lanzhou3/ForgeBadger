@@ -15,15 +15,26 @@
  *
  * `copilot_run_updated` never wakes the loop (a proactive turn would otherwise
  * re-trigger itself); `claude_notification` is excluded as too noisy (permission/
- * idle prompts would wake the agent mid-session). All timers are `.unref()`d so a
- * pending debounce never keeps the process alive in tests.
+ * idle prompts would wake the agent mid-session). A turn rejected by a busy
+ * conversation is retained but retried with bounded exponential backoff and
+ * dropped after a cap of consecutive busy rejections. All timers are
+ * `.unref()`d so a pending debounce never keeps the process alive in tests.
  */
 import type { ForgeBadgerEvent, ForgeBadgerEventBus } from "../event-bus.js";
 import { CopilotConversationLog } from "./conversation-log.js";
 import type { AgentStack, AgentStackDeps } from "./agent-stack.js";
+import { AgentError } from './types.js';
 
 const DEFAULT_DEBOUNCE_MS = 20_000;
 const DEFAULT_COOLDOWN_MS = 60_000;
+/**
+ * A busy conversation (a long-running turn still holds the admission slot)
+ * must never hot-retry every debounce tick: retry with tiered exponential
+ * backoff, and after this many consecutive busy rejections drop the retained
+ * event — a fresh platform event will re-trigger the loop at the normal pace.
+ */
+const MAX_CONSECUTIVE_BUSY = 4;
+const MAX_BUSY_RETRY_DELAY_MS = 5 * 60_000;
 export const PROACTIVE_CONVERSATION_TITLE = "Copilot 主动更新";
 /**
  * Rolling conversation window: proactive reports append to the most recent
@@ -62,17 +73,18 @@ export function attachCopilotReactiveLoop(options: CopilotReactiveLoopOptions): 
   const debounceTimers = new Map<string, NodeJS.Timeout>();
   const latestEvent = new Map<string, ForgeBadgerEvent>();
   const lastFireAt = new Map<string, number>();
+  const consecutiveBusy = new Map<string, number>();
   const inFlight = new Set<string>();
   let stopped = false;
 
-  function schedule(userId: string, event: ForgeBadgerEvent): void {
+  function schedule(userId: string, event: ForgeBadgerEvent, delayMs?: number): void {
     latestEvent.set(userId, event);
     const existing = debounceTimers.get(userId);
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
       debounceTimers.delete(userId);
       void fire(userId);
-    }, debounceMs);
+    }, delayMs ?? debounceMs);
     timer.unref?.();
     debounceTimers.set(userId, timer);
   }
@@ -97,9 +109,8 @@ export function attachCopilotReactiveLoop(options: CopilotReactiveLoopOptions): 
       return;
     }
 
-    latestEvent.delete(userId);
     inFlight.add(userId);
-    lastFireAt.set(userId, now);
+    let busyRetryDelay: number | undefined;
     try {
       const prompt = buildProactivePrompt(event);
       // Rolling conversation: reuse the most recent proactive thread inside
@@ -114,11 +125,34 @@ export function attachCopilotReactiveLoop(options: CopilotReactiveLoopOptions): 
         userText: prompt,
         source: "reactive"
       });
-    } catch {
+      if (latestEvent.get(userId) === event) latestEvent.delete(userId);
+      lastFireAt.set(userId, Date.now());
+      consecutiveBusy.delete(userId);
+    } catch (error) {
+      if (error instanceof AgentError && error.code === 'COPILOT_CONVERSATION_BUSY') {
+        const count = (consecutiveBusy.get(userId) ?? 0) + 1;
+        if (count >= MAX_CONSECUTIVE_BUSY) {
+          // Settle: drop the retained event instead of hot-retrying a busy
+          // conversation forever. The count resets so later events retry fresh.
+          consecutiveBusy.delete(userId);
+          if (latestEvent.get(userId) === event) latestEvent.delete(userId);
+          console.error('[copilot reactive]', { userId, timestamp: new Date().toISOString(),
+            code: 'COPILOT_REACTIVE_BUSY_DROPPED' });
+        } else {
+          consecutiveBusy.set(userId, count);
+          busyRetryDelay = Math.min(debounceMs * 2 ** (count - 1), MAX_BUSY_RETRY_DELAY_MS);
+        }
+      } else {
+        consecutiveBusy.delete(userId);
+        if (latestEvent.get(userId) === event) latestEvent.delete(userId);
+        lastFireAt.set(userId, Date.now());
+      }
       // The orchestrator already emits a copilot_run_updated failure; the loop
       // must survive a failed proactive turn (e.g. no model configured).
     } finally {
       inFlight.delete(userId);
+      const pending = latestEvent.get(userId);
+      if (!stopped && pending) schedule(userId, pending, busyRetryDelay);
     }
   }
 
@@ -147,6 +181,7 @@ export function attachCopilotReactiveLoop(options: CopilotReactiveLoopOptions): 
     debounceTimers.clear();
     latestEvent.clear();
     lastFireAt.clear();
+    consecutiveBusy.clear();
   }
 
   return { stop };

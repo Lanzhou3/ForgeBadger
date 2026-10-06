@@ -49,12 +49,13 @@ export function CopilotRobotHost() {
 
   return (
     <div data-floating-copilot data-pet={petId}>
-      {petId === "robot" && <RobotWidget
+      <RobotWidget
+        petId={petId}
         onActivate={onActivate}
         suppressBubbles={pathname === "/copilot"}
         panelOpen={chatOpen}
         onCornerChange={setPanelCorner}
-      />}
+      />
       {chatOpen && (
         <RobotChatPanel corner={panelCorner} onClose={() => setChatOpen(false)} onExpandFull={onExpandFull} />
       )}

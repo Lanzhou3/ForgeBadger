@@ -10,15 +10,17 @@ interface Props {
 
 /**
  * SVG path data for CLI brand marks, except Codex, which uses OpenAI's original
- * app icon. Monochrome SVG marks inherit `currentColor`.
+ * SVG icon. Monochrome inline SVG marks inherit `currentColor`.
  *
  * Sources — most vendor marks come from the LobeHub icon registry
  * (`@lobehub/icons-static-svg`, which tracks vendor branding). Copies are
  * kept at `public/brand/cli/`:
  * - Claude:  https://unpkg.com/@lobehub/icons-static-svg/icons/claude-color.svg
  *            (Anthropic Claude starburst, terracotta #D97757)
- * - Codex:   /brand/cli/codex.png (original icon-codex-dark-color.png bundled
- *            with OpenAI's desktop app)
+ * - Codex:   /brand/cli/codex.svg (original codex_new-f14177b03534.svg from
+ *            OpenAI's ChatGPT desktop app 26.930.21537, webview/assets).
+ *            Transparent outline mark, displayed intact; dark mode inverts
+ *            the official #0D0D0D fill for contrast.
  * - Kimi:    https://unpkg.com/@lobehub/icons-static-svg/icons/kimi-color.svg
  *            (Kimi / Moonshot AI mark), plus the official black app-icon tile
  *            measured from the kimi.moonshot.cn favicon (corner radius ~10/48
@@ -126,16 +128,12 @@ export function CliBrandIcon({ aiTool, className }: Props) {
   const brand = getCliBrand(aiTool);
   if (brand.id === "codex") {
     return (
-      <span
+      <img
         aria-hidden="true"
-        className={cn("relative inline-block size-3.5 shrink-0 overflow-hidden rounded-full", className)}
-      >
-        <img
-          alt=""
-          className="absolute left-1/2 top-1/2 size-[150%] max-w-none -translate-x-1/2 -translate-y-1/2"
-          src="/brand/cli/codex.png"
-        />
-      </span>
+        alt=""
+        className={cn("size-3.5 shrink-0 [.dark_&]:invert", className)}
+        src="/brand/cli/codex.svg"
+      />
     );
   }
   if (brand.id === "unknown") {

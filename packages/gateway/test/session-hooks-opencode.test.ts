@@ -154,7 +154,7 @@ describe("OpenCode session hook route", () => {
     assert.equal(JSON.stringify(notifications).includes(marker), false);
   });
 
-  it("falls back adapter to claude when the request omits the adapter field", async () => {
+  it("uses the authenticated session adapter when the request omits the adapter field", async () => {
     const session = createOpenCodeSession(db);
     attachNotificationPersistence({ db, eventBus });
     const eventPromise = waitForEvent(eventBus);
@@ -173,14 +173,14 @@ describe("OpenCode session hook route", () => {
     const event = await eventPromise;
     assert.equal(event.type, "claude_notification");
     if (event.type === "claude_notification") {
-      assert.equal(event.adapter, "claude");
+      assert.equal(event.adapter, "opencode");
     }
 
     const notification = new NotificationRepository(db, session.userId).list()[0];
     assert.ok(notification);
-    assert.equal(notification.titleKey, "notifications.claudePermissionRequest");
+    assert.equal(notification.titleKey, "notifications.opencodePermissionRequest");
     const payload = JSON.parse(notification.payload ?? "{}") as Record<string, unknown>;
-    assert.equal(payload.adapter, "claude");
+    assert.equal(payload.adapter, "opencode");
   });
 
   it("rejects opencode notifications with a missing session token", async () => {

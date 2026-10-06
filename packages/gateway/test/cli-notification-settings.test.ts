@@ -79,7 +79,7 @@ describe("CLI lifecycle notification settings", () => {
       assert.match(await readFile(configPath, "utf8"), /# Keep this user comment/);
       assert.deepEqual(
         config.hooks?.map((hook) => hook.event).sort(),
-        ["Interrupt", "Notification", "PermissionRequest", "SessionEnd", "Stop", "StopFailure"].sort()
+        ["UserPromptSubmit", "TurnStarted", "PostToolUse", "Interrupt", "Notification", "PermissionRequest", "SessionEnd", "Stop", "StopFailure"].sort()
       );
       assert.ok(config.hooks?.every((hook) => hook.matcher === undefined));
       assert.ok(
@@ -96,6 +96,37 @@ describe("CLI lifecycle notification settings", () => {
       // Legacy per-project block is removed because Kimi never reads it.
       assert.doesNotMatch(await readFile(projectConfigPath, "utf8"), /ForgeBadger managed notification hooks/);
       assert.equal((await ensureKimiNotificationSettings(projectRoot)).changed, false);
+    } finally {
+      if (previousKimiHome === undefined) delete process.env.KIMI_CODE_HOME;
+      else process.env.KIMI_CODE_HOME = previousKimiHome;
+      if (previousStateDir === undefined) delete process.env.FORGEBADGER_STATE_DIR;
+      else process.env.FORGEBADGER_STATE_DIR = previousStateDir;
+    }
+  });
+
+  it("consolidates exact managed Kimi duplicates while preserving custom matchers", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-kimi-duplicates-"));
+    const configPath = path.join(root, "kimi", "config.toml");
+    const previousKimiHome = process.env.KIMI_CODE_HOME;
+    const previousStateDir = process.env.FORGEBADGER_STATE_DIR;
+    process.env.KIMI_CODE_HOME = path.dirname(configPath);
+    process.env.FORGEBADGER_STATE_DIR = path.join(root, "state");
+    try {
+      await ensureKimiNotificationSettings(root);
+      const initial = await readFile(configPath, "utf8");
+      const config = parseToml(initial) as { hooks: Array<{event: string; command: string; timeout: number; matcher?: string}> };
+      const stop = config.hooks.find(hook => hook.event === "Stop")!;
+      const duplicate = `[[hooks]]\nevent = "Stop"\ncommand = ${JSON.stringify(stop.command)}\ntimeout = 5\n`;
+      await writeFile(configPath, initial + duplicate + duplicate + duplicate + 'matcher = "custom-rule"\n');
+      assert.equal((await ensureKimiNotificationSettings(root)).changed, true);
+      const merged = parseToml(await readFile(configPath, "utf8")) as typeof config;
+      const stops = merged.hooks.filter(hook => hook.event === "Stop");
+      assert.equal(stops.length, 2);
+      assert.equal(stops.filter(hook => hook.matcher === undefined).length, 1);
+      assert.equal(stops.find(hook => hook.matcher === "custom-rule")?.command, stop.command);
+      assert.ok(merged.hooks.some(hook => hook.event === "TurnStarted"));
+      assert.ok(merged.hooks.some(hook => hook.event === "PostToolUse"));
+      assert.equal((await ensureKimiNotificationSettings(root)).changed, false);
     } finally {
       if (previousKimiHome === undefined) delete process.env.KIMI_CODE_HOME;
       else process.env.KIMI_CODE_HOME = previousKimiHome;
@@ -127,7 +158,7 @@ describe("CLI lifecycle notification settings", () => {
       assert.match(source, /pi\.on\("agent_settled"/);
       assert.match(source, /pi\.on\("ui_prompt_start"/);
       assert.match(source, /pi\.on\("session_shutdown"/);
-      assert.match(source, /post\("Stop"\)/);
+      assert.match(source, /await post\("Stop",/);
       assert.match(source, /"PermissionRequest"/);
       assert.match(source, /await post\("SessionEnd"\)/);
       assert.match(source, /adapter: "pi"/);

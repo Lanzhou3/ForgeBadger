@@ -230,3 +230,23 @@ it('does not offer new authority when integration configuration failed to load',
  expect(screen.getByRole('button',{name:'启用飞书远程操作'})).toHaveProperty('disabled',true);
  expect(screen.getByTestId('channel-activation-reason').textContent).toContain('渠道配置加载失败');
 });
+
+it('renders the channels setup in English for en users instead of hardcoded Chinese', async () => {
+ window.localStorage.setItem('forgebadger-language', 'en');
+ try {
+  render(<LanguageProvider><QueryClientProvider client={client}><CopilotChannelsPage /></QueryClientProvider></LanguageProvider>);
+  // Step headers, badges, activation button and acknowledgement checkbox all
+  // come from the copy module now.
+  await screen.findByText('2. Confirm private-chat identity');
+  expect(screen.getByText('Credentials saved')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Enable Feishu remote operation' })).toBeTruthy();
+  expect(screen.getByRole('checkbox', { name: 'I confirm this is my own Feishu private chat' })).toBeTruthy();
+  expect(screen.getByTestId('channel-activation-reason').textContent).toContain('Choose a project to authorize.');
+  expect(screen.getByText(/Feishu remote operation is not enabled yet/)).toBeTruthy();
+  // The previously hardcoded zh-CN strings must be gone.
+  expect(screen.queryByText('生成新的配对码')).toBeNull();
+  expect(screen.queryByText('凭证已保存')).toBeNull();
+ } finally {
+  window.localStorage.removeItem('forgebadger-language');
+ }
+});

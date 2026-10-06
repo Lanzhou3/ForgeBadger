@@ -97,6 +97,8 @@ export function TeamSettings({ detail }: { detail: TeamDetail }) {
             )}
           </p>
           <Button
+            // Closing a team is destructive and must not look like a plain save.
+            variant={confirm === "close" ? "destructive" : "default"}
             disabled={action.isPending}
             onClick={() =>
               action.mutate(async () => {

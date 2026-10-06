@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock3, FolderOpen, RotateCcw, TerminalSquare } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Card,
   CardContent,
@@ -15,6 +16,13 @@ import {
   CardTitle
 } from "@/components/ui/card";
 import { CliBrandChip } from "@/components/cli-brand-chip";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import {
   listProjects,
   listSessions,
@@ -24,10 +32,20 @@ import {
   type SessionSnapshot
 } from "@/lib/api";
 import { canRestoreSnapshot, snapshotFiltersFromSearchParams } from "@/lib/snapshot-filters";
-import { useLanguage } from "@/hooks/use-language";
+import { QueryState } from "@/components/ui/query-state";
+import { useLanguage, useUiLocale } from "@/hooks/use-language";
+
+// Radix Select items cannot use an empty value; this sentinel maps back to
+// "no filter" in onValueChange.
+const ALL_FILTER_VALUE = "__all__";
+
+// The snapshots API has no pagination parameters; the page slices the
+// client-side list and offers "load more" once the list grows past one page.
+const SNAPSHOT_PAGE_SIZE = 20;
 
 export default function HistoryPage() {
   const { t } = useLanguage();
+  const locale = useUiLocale();
   const router = useRouter();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
@@ -41,10 +59,12 @@ export default function HistoryPage() {
     queryKey: ["sessions"],
     queryFn: listSessions
   });
-  const { data: snapshotData, isLoading } = useQuery({
+  const { data: snapshotData, isLoading, isError, refetch } = useQuery({
     queryKey: ["snapshots", filters],
     queryFn: () => listSnapshots(filters)
   });
+  const [restoringSnapshot, setRestoringSnapshot] = useState<{ id: string; label: string } | null>(null);
+  const [visibleCount, setVisibleCount] = useState(SNAPSHOT_PAGE_SIZE);
 
   const projects = projectsData?.projects ?? [];
   const sessions = sessionsData?.sessions ?? [];
@@ -61,6 +81,10 @@ export default function HistoryPage() {
     [sessions]
   );
   const snapshots = snapshotData?.snapshots ?? [];
+  // A new filter produces a fresh (usually shorter) list: start back at one page.
+  useEffect(() => {
+    setVisibleCount(SNAPSHOT_PAGE_SIZE);
+  }, [filters.projectId, filters.sessionId]);
   const restoreMutation = useMutation({
     mutationFn: restoreSnapshot,
     onSuccess: async ({ session }) => {
@@ -97,32 +121,38 @@ export default function HistoryPage() {
           <p className="text-xs text-muted-foreground">{t("snapshots.noTerminalHistory")}</p>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2">
-          <select
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            value={filters.projectId ?? ""}
-            onChange={(event) => setFilter("projectId", event.target.value)}
-            aria-label={t("common.project")}
+          <Select
+            value={filters.projectId ?? ALL_FILTER_VALUE}
+            onValueChange={(value) => setFilter("projectId", value === ALL_FILTER_VALUE ? "" : value)}
           >
-            <option value="">{t("snapshots.allProjects")}</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            value={filters.sessionId ?? ""}
-            onChange={(event) => setFilter("sessionId", event.target.value)}
-            aria-label={t("snapshots.session")}
+            <SelectTrigger aria-label={t("common.project")} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_FILTER_VALUE}>{t("snapshots.allProjects")}</SelectItem>
+              {projects.map((project) => (
+                <SelectItem key={project.id} value={project.id}>
+                  {project.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={filters.sessionId ?? ALL_FILTER_VALUE}
+            onValueChange={(value) => setFilter("sessionId", value === ALL_FILTER_VALUE ? "" : value)}
           >
-            <option value="">{t("snapshots.allSessions")}</option>
-            {sessionsForFilter.map((session) => (
-              <option key={session.id} value={session.id}>
-                {session.name || session.runtimeSessionName || session.id}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger aria-label={t("snapshots.session")} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_FILTER_VALUE}>{t("snapshots.allSessions")}</SelectItem>
+              {sessionsForFilter.map((session) => (
+                <SelectItem key={session.id} value={session.id}>
+                  {session.name || session.runtimeSessionName || session.id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </CardContent>
       </Card>
 
@@ -133,32 +163,39 @@ export default function HistoryPage() {
         </div>
       )}
 
-      {isLoading ? (
-        <Card className="forgebadger-animate-in">
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            {t("snapshots.loading")}
-          </CardContent>
-        </Card>
-      ) : snapshots.length === 0 ? (
-        <Card className="forgebadger-animate-in">
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-              <Clock3 className="size-5" />
-            </div>
-            <div>
-              <div className="text-sm font-medium">{t("snapshots.emptyTitle")}</div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {t("snapshots.emptyDescription")}
-              </p>
-            </div>
-            <Button asChild size="sm" variant="outline">
-              <Link href="/sessions">{t("snapshots.viewSession")}</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
+      <QueryState
+        isLoading={isLoading}
+        isError={isError}
+        isEmpty={snapshots.length === 0}
+        onRetry={() => void refetch()}
+        loading={
+          <Card className="forgebadger-animate-in">
+            <CardContent className="py-10 text-center text-sm text-muted-foreground">
+              {t("snapshots.loading")}
+            </CardContent>
+          </Card>
+        }
+        empty={
+          <Card className="forgebadger-animate-in">
+            <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+              <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                <Clock3 className="size-5" />
+              </div>
+              <div>
+                <div className="text-sm font-medium">{t("snapshots.emptyTitle")}</div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("snapshots.emptyDescription")}
+                </p>
+              </div>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/sessions">{t("snapshots.viewSession")}</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        }
+      >
         <div className="space-y-3">
-          {snapshots.map((snapshot, index) => (
+          {snapshots.slice(0, visibleCount).map((snapshot, index) => (
             <div
               key={snapshot.id}
               className="forgebadger-animate-in"
@@ -171,15 +208,54 @@ export default function HistoryPage() {
                 canRestore={canRestoreSnapshot(snapshot)}
                 restoring={restoreMutation.isPending}
                 onRestore={() => {
-                  if (window.confirm(t("snapshots.restoreConfirm"))) {
-                    restoreMutation.mutate(snapshot.id);
-                  }
+                  const session = snapshot.sessionId ? sessionById.get(snapshot.sessionId) : undefined;
+                  const label = [
+                    snapshot.projectId ? projectById.get(snapshot.projectId)?.name : undefined,
+                    session?.name || session?.runtimeSessionName,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
+                  setRestoringSnapshot({ id: snapshot.id, label });
                 }}
               />
             </div>
           ))}
+          {snapshots.length > visibleCount && (
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setVisibleCount((count) => count + SNAPSHOT_PAGE_SIZE)}
+              >
+                {t("snapshots.loadMore")}
+              </Button>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {t("snapshots.showingCount")
+                  .replace("{shown}", String(Math.min(visibleCount, snapshots.length)))
+                  .replace("{total}", String(snapshots.length))}
+              </span>
+            </div>
+          )}
         </div>
-      )}
+      </QueryState>
+
+      <ConfirmDialog
+        open={restoringSnapshot !== null}
+        pending={restoreMutation.isPending}
+        title={t("snapshots.restoreTitle")}
+        description={
+          restoringSnapshot
+            ? [restoringSnapshot.label, t("snapshots.restoreConfirm")].filter(Boolean).join(" ")
+            : ""
+        }
+        onOpenChange={(open) => {
+          if (!open) setRestoringSnapshot(null);
+        }}
+        onConfirm={() => {
+          if (restoringSnapshot) restoreMutation.mutate(restoringSnapshot.id);
+          setRestoringSnapshot(null);
+        }}
+      />
     </div>
   );
 }
@@ -200,6 +276,7 @@ function SnapshotCard({
   onRestore: () => void;
 }) {
   const { t } = useLanguage();
+  const locale = useUiLocale();
 
   return (
     <Card className="transition-colors duration-200 hover:border-brand/30">
@@ -218,7 +295,7 @@ function SnapshotCard({
               </Badge>
             )}
             <span className="text-xs text-muted-foreground">
-              {formatSnapshotTime(snapshot.createdAt)}
+              {formatSnapshotTime(snapshot.createdAt, locale)}
             </span>
           </div>
           <dl className="grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-4">
@@ -239,7 +316,7 @@ function SnapshotCard({
             <Button
               asChild
               size="sm"
-              className="bg-brand text-brand-foreground hover:bg-brand/90"
+              variant="brand"
             >
               <Link href={`/sessions/${snapshot.sessionId}`}>
                 {t("snapshots.viewSession")}
@@ -271,10 +348,10 @@ function SnapshotField({ label, value }: { label: string; value?: string | null 
   );
 }
 
-function formatSnapshotTime(value: string): string {
+function formatSnapshotTime(value: string, locale: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleString();
+  return date.toLocaleString(locale);
 }

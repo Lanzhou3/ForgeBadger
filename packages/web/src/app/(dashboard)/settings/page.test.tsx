@@ -55,6 +55,7 @@ vi.mock("@/hooks/use-language", () => ({
     setLanguage: vi.fn(),
     t: (key: string) => key,
   }),
+  useUiLocale: () => "en-US",
 }));
 
 vi.mock("@/components/settings/AccountSecuritySettings", () => ({
@@ -164,19 +165,25 @@ describe("SettingsPage terminal runtime", () => {
     listAuditLogsMock.mockResolvedValue({ auditLogs: [] });
   });
 
-  it("offers only the robot pet and persists the selection", () => {
+  it("defaults to the honey badger and persists switching between both pets", () => {
     setSection("appearance");
     window.localStorage.clear();
     getDependenciesMock.mockResolvedValue({ dependencies: [] });
     renderSettingsPage();
     const group = screen.getByRole("radiogroup", { name: "settings.pet" });
     const choices = within(group).getAllByRole("radio");
-    expect(choices).toHaveLength(1);
+    expect(choices).toHaveLength(2);
+    const badger = within(group).getByRole("radio", { name: "settings.petHoneyBadger" });
+    expect(badger.getAttribute("aria-checked")).toBe("true");
     const robot = within(group).getByRole("radio", { name: "settings.petRobot" });
-    expect(robot.getAttribute("aria-checked")).toBe("true");
+    expect(robot.getAttribute("aria-checked")).toBe("false");
     expect(within(group).getByText("settings.petRobot")).toBeTruthy();
     fireEvent.click(robot);
     expect(window.localStorage.getItem("forgebadger.pet")).toBe("robot");
+    expect(robot.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(badger);
+    expect(window.localStorage.getItem("forgebadger.pet")).toBe("honey-badger");
+    expect(badger.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("status").textContent).toBe("settings.petSaved");
   });
 
@@ -234,7 +241,7 @@ describe("SettingsPage terminal runtime", () => {
     setSection("adapters");
     getDependenciesMock.mockResolvedValue({ dependencies: [] });
     discoverAdaptersMock.mockResolvedValue({ adapters: [{
-      id: "codex", label: "Codex CLI", command: "codex", supportLevel: "supported",
+      id: "codex", label: "Codex", command: "codex", supportLevel: "supported",
       launchEnabled: true, configDir: ".codex", runtimeModes: ["terminal"],
       available: true, status: "available", version: "codex-cli 1.0.0"
     }] });
@@ -280,7 +287,7 @@ describe("SettingsPage terminal runtime", () => {
     setSection("adapters");
     getDependenciesMock.mockResolvedValue({ dependencies: [] });
     discoverAdaptersMock.mockResolvedValue({ adapters: [{
-      id: "codex", label: "Codex CLI", command: "codex", supportLevel: "supported",
+      id: "codex", label: "Codex", command: "codex", supportLevel: "supported",
       launchEnabled: true, configDir: ".codex", runtimeModes: ["terminal"],
       available: true, status: "available", version: "codex-cli 1.0.0"
     }] });
@@ -345,7 +352,7 @@ describe("SettingsPage terminal runtime", () => {
     setSection("adapters");
     getDependenciesMock.mockResolvedValue({ dependencies: [] });
     discoverAdaptersMock.mockResolvedValue({ adapters: [{
-      id: "codex", label: "Codex CLI", command: "codex", supportLevel: "supported",
+      id: "codex", label: "Codex", command: "codex", supportLevel: "supported",
       launchEnabled: false, configDir: ".codex", runtimeModes: ["terminal"],
       available: false, status: "missing"
     }] });

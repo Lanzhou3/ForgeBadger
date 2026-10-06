@@ -410,7 +410,8 @@ describe("Claude Code session hook route", () => {
     eventBus.on("event", event => shutdownEvents.push(event as ForgeBadgerEvent));
     res = handleClaudeNotificationHook(db,eventBus,{hook_event_name:"SessionEnd",adapter:"pi"},"pi-token",session.id);
     assert.equal(res.status, 200);
-    assert.equal(shutdownEvents.length, 0);
+    assert.equal(shutdownEvents.filter(event => event.type === "claude_notification").length, 0);
+    assert.equal(eventBus.getSessionWorkState(session.userId, session.id)?.state, "idle");
   });
 });
 

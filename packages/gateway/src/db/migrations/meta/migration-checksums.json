@@ -122,5 +122,9 @@
   "0121_session_notification_prompts.sql": "d8e88d64b8d36fc91dc2041af9acc929c0e44411cd56aa83c9b95bb3c2f066b2",
   "0122_mcode_adapter.sql": "f8e20b2e045e799a7160e9a56d7c62aa4c6254819c787089b3864b9b4a256d8c",
   "0123_mcode_supported_adapters_backfill.sql": "1babcca7ffa7a66e0e4c349f5d197b45ce06f1070743ee18bb450da5b48bab4c",
-  "0124_user_adapter_order.sql": "5d26140fa6b0e0c11154d2821de88454e4af16c1dea76a9d757ee7f0ff5feda0"
+  "0124_user_adapter_order.sql": "5d26140fa6b0e0c11154d2821de88454e4af16c1dea76a9d757ee7f0ff5feda0",
+  "0125_copilot_approval_clock.sql": "96bedc587418c02dd0c8f102bddffbca3d857c77037f929aedba167231e09c25",
+  "0126_development_execution_identity.sql": "dc46b09209548a5a0b9b3550766be0e0b20c873cebfe261aea113d2857832c65",
+  "0127_cli_observation_summaries.sql": "d7d32de15e0d18f06a12e9883bd58e82c5f15a416bc49a02dff0ca2ad2b0280c",
+  "0128_feishu_builtin_summaries.sql": "49e56258d48b1c4165f506823894e4df61533afe1f1cce0c835fae53fecdd0fc"
 }

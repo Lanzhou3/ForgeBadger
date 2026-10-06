@@ -110,7 +110,7 @@ export function LoginForm() {
       <Button
         type="submit"
         disabled={!isHydrated || isSubmitting}
-        className="mt-1 bg-brand text-brand-foreground hover:bg-brand/90"
+        variant="brand" className="mt-1"
       >
         {isSubmitting ? t("auth.signingIn") : t("auth.signIn")}
       </Button>

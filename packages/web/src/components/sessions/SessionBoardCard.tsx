@@ -29,6 +29,7 @@ const STATUS_BAR_CLASS: Record<string, string> = {
   running: "bg-emerald-500/80",
   error: "bg-red-500/80",
   stopped: "bg-muted-foreground/30",
+  lost: "bg-amber-500/80",
 };
 
 const VISIBLE_TASKS_PER_CARD = 2;
@@ -38,7 +39,7 @@ interface SessionBoardCardProps {
   tasks: SessionBoardTask[];
   lastPrompt?: string;
   highlight: boolean;
-  now: number;
+  now: number | null;
   actionPending: boolean;
   onOpen: (session: Session) => void;
   onStart: (session: Session) => void;
@@ -62,7 +63,7 @@ export function SessionBoardCard({
   const normalized = normalizeSessionStatus(session.status);
   const isRunning = normalized === "running";
   const picked = pickSessionTitle(session, lastPrompt);
-  const relativeTime = formatSessionRelativeTime(session, now, language);
+  const relativeTime = now === null ? null : formatSessionRelativeTime(session, now, language);
   const visibleTasks = tasks.slice(0, VISIBLE_TASKS_PER_CARD);
   const hiddenTaskCount = tasks.length - visibleTasks.length;
 
@@ -183,7 +184,7 @@ export function SessionBoardCard({
 
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="truncate text-xs tabular-nums text-muted-foreground">
-          {relativeTime ?? t("sessions.noActivity")}
+          {now === null ? "" : (relativeTime ?? t("sessions.noActivity"))}
         </span>
       </div>
     </div>

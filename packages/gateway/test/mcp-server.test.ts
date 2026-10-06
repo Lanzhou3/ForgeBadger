@@ -185,6 +185,18 @@ describe("mcp endpoint", () => {
     assert.ok(operatorNames.includes("stop_session"));
   });
 
+  it('does not expand old account tokens to raw Shell execution', async () => {
+    for (const token of [readToken, operateToken]) {
+      const listing = await mcpRpc(port, token, 'tools/list');
+      const names = listing.messages[0]?.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];
+      for (const name of ['terminal_run', 'terminal_open', 'terminal_close']) {
+        assert.equal(names.includes(name), false, name);
+        const result = await mcpRpc(port, token, 'tools/call', { name, arguments: { projectId: 'fixture', command: 'printf harmless' } });
+        assert.equal(result.messages[0]?.result?.isError, true);
+      }
+    }
+  });
+
   it("executes read tools with tenant-scoped results", async () => {
     // Act
     const res = await mcpRpc(port, readToken, "tools/call", { name: "list_projects", arguments: {} });

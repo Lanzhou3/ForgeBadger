@@ -1,4 +1,5 @@
 import { LlmConnectionError, connectionDiagnosticText } from './llm-connection-error.js';
+import { ProviderHttpError } from './provider-error.js';
 import { notificationContext } from './notification-context.js';
 import { streamWithContextRecovery } from './context-recovery.js';
 import { hasNoProgress } from './no-progress.js';
@@ -33,7 +34,9 @@ import { CopilotRunLedger, inputDigest, type TurnInput, type Claim, type RunStep
 import { executionControl } from "./execution-control.js";
 import { selectDiscoveredTools } from './tool-discovery.js';
 import { PublicTextStream } from './public-text-stream.js';
+import { appendProvisionalText, clearProvisionalText } from './provisional-text.js';
 import { nextReadBatch } from './read-batch.js';
+import { channelToolAllowed } from '../channels/channel-run-scope.js';
 export interface CopilotOrchestratorDependencies {
     db: import("../../db/types.js").Database;
     masterKey: string;
@@ -52,6 +55,11 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     const leaseMs = deps.leaseMs ?? 30000;
     const policy = createSecurityPolicy();
     const ledgerFor = (userId: string) => new CopilotRunLedger(deps.db, userId);
+    function queueRun(userId: string, runId: string): void {
+        queueMicrotask(() => { void executeRun(userId, runId).catch(() => {
+            console.error('[copilot execute]', { userId, runId, code: 'COPILOT_EXECUTION_FAILED', timestamp: new Date().toISOString() });
+        }); });
+    }
     function emit(ledger: CopilotRunLedger, runId: string, extra: {
         textDelta?: string;
         textStepId?: string;
@@ -74,14 +82,14 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     const allVisibleTools = (input: TurnInput) => visibleToolSchemas(deps.toolRegistry, {
         hasSessionManager: !!deps.sessionManager, isToolDisabled: deps.isToolDisabled,
         scheduled: input.source === "scheduled", reactive: input.source === "reactive"
-    }).filter(tool => restrictedToolAllowed(input, tool.name) && (!input.executionMode || deps.toolRegistry.tools.get(tool.name)?.risk === 'read' || input.executionMode === 'repair' && tool.name === 'submit_development_task'));
+    }).filter(tool => channelToolAllowed(input, tool.name) && restrictedToolAllowed(input, tool.name) && (!input.executionMode || deps.toolRegistry.tools.get(tool.name)?.risk === 'read' || input.executionMode === 'repair' && tool.name === 'submit_development_task'));
     const effect = (name: string) => deps.toolRegistry.tools.get(name)?.risk === "operate" || name === "write_memory" ? "write" as const : "read" as const;
     function enqueue(input: TurnInput): string {
         if (control.stopped)
             throw new AgentError("COPILOT_RUNTIME_STOPPED", "Copilot runtime is shutting down");
         const runId = ledgerFor(input.userId).admit(input, deps.maxSteps ?? 16);
         // Admission is synchronous and durable before the worker is queued.
-        queueMicrotask(() => { void executeRun(input.userId, runId); });
+        queueRun(input.userId, runId);
         return runId;
     }
     async function runTurn(input: TurnInput): Promise<string> {
@@ -109,16 +117,19 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             return;
         }
         const controller = new AbortController();
-        const timing = deps.db.prepare('SELECT started_at,max_duration_ms FROM copilot_runs WHERE user_id=? AND id=?').get(userId, runId) as { started_at: number; max_duration_ms: number };
         const deadline = setTimeout(() => controller.abort(new AgentError('COPILOT_TIME_BUDGET', 'Run elapsed-time budget exhausted')),
-            Math.max(1, timing.max_duration_ms - (Date.now() - timing.started_at)));
+            Math.max(1, new RunGovernance(deps.db, userId, runId).remainingDurationMs()));
         deadline.unref();
         const timer = setInterval(() => { if (control.stopped || !deps.db.open) {
             clearInterval(timer);
             controller.abort();
             return;
-        } if (!ledger.renew(claim, leaseMs))
-            controller.abort(); }, Math.max(10, Math.floor(leaseMs / 3)));
+        }
+        try { if (!ledger.renew(claim, leaseMs)) controller.abort(); }
+        catch {
+            clearInterval(timer);
+            controller.abort(new AgentError('COPILOT_LEASE_RENEW_FAILED', 'Run lease could not be renewed; reconcile before retrying.'));
+        } }, Math.max(10, Math.floor(leaseMs / 3)));
         timer.unref();
         const promise = Promise.resolve().then(() => drive(ledger, claim, controller.signal)).catch(error => {
             if (!deps.db.open || control.stopped)
@@ -133,6 +144,10 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 });
             }
             if (controller.signal.reason instanceof AgentError) error = controller.signal.reason;
+            if (error instanceof ProviderHttpError) {
+                const failure = error;
+                ledger.commit(claim, () => ledger.append(runId, { role: 'assistant', kind: 'error', content: failure.publicText() }));
+            }
             const interruptedWrite = ledger.steps(runId).find(s => s.status === "running" && s.effect === "write");
             if (interruptedWrite) {
                 ledger.receipt(claim, interruptedWrite, "Tool outcome unknown after execution error", true);
@@ -144,10 +159,16 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     .recordInvalidResponse(runId, error.message));
             }
             ledger.commit(claim, () => deps.db.prepare("UPDATE copilot_run_steps SET status='failed',result_json=COALESCE(result_json,?),completed_at=? WHERE user_id=? AND run_id=? AND kind='model' AND status='running' AND fence=?")
-                .run(error instanceof AgentError ? error.code : null, Date.now(), userId, runId, claim.fence));
+                .run(error instanceof ProviderHttpError ? JSON.stringify(error.diagnostic()) : error instanceof AgentError ? error.code : null, Date.now(), userId, runId, claim.fence));
             ledger.finish(claim, error instanceof AgentError && ["COPILOT_TIME_BUDGET", "COPILOT_TOKEN_BUDGET"].includes(error.code) ? "stopped" : "failed", error instanceof AgentError ? error.code : redactAgentErrorMessage(error instanceof Error ? error.message : "Copilot failed"));
             emit(ledger, runId);
-        }).finally(() => { clearInterval(timer); clearTimeout(deadline); control.active.delete(runId); });
+        }).finally(() => {
+            clearInterval(timer); clearTimeout(deadline); control.active.delete(runId);
+            // Approval pauses execution, but the run is still visible and can
+            // resume under a new fence. Keep its already-public text bounded.
+            if (!deps.db.open || control.stopped || ledger.get(runId)?.status !== 'awaiting_approval')
+                clearProvisionalText(deps.db, runId);
+        });
         control.active.set(runId, { controller, promise, stopLease: () => clearInterval(timer) });
         return promise;
     }
@@ -199,7 +220,10 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             let text = "";
             let response: LlmResult | undefined;
             const publicText = new PublicTextStream((textDelta, textSequence) => {
-                if (live()) emit(ledger, c.runId, { textDelta, textStepId: step.id, textFence: c.fence, textSequence });
+                if (live()) {
+                    appendProvisionalText(deps.db, input.userId, c.runId, step.id, c.fence, textSequence, textDelta);
+                    emit(ledger, c.runId, { textDelta, textStepId: step.id, textFence: c.fence, textSequence });
+                }
             });
             const modelResponses = new CopilotModelResponseRepository(deps.db, input.userId, deps.masterKey);
             if (command !== null)
@@ -239,7 +263,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     observations: notificationContext(deps.db, input),
                     assistantMessages: modelResponses.list(input.conversationId),
                     ...(!input.executionMode ? { memory: new AgentMemoryRepository(deps.db, input.userId) } : {}), memoryConversationId: input.conversationId, signal,
-                    ...(input.projectId ? { memoryProjectId: input.projectId } : {}), canCommit: live,
+                    ...(input.projectId ? { memoryProjectId: input.projectId } : {}), memoryGlobalAllowed: !input.channelScope, canCommit: live,
                     tools, prefixMessages, reservedChars: 8192,
                     ...(deps.llm.contextBudget ? { maxContextChars: deps.llm.contextBudget(modelId) } : {}),
                     ...(recoveryBudget === undefined ? {} : {maxContextChars:recoveryBudget,strictCompression:true})
@@ -398,9 +422,8 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             const conversation = ledger.log.createConversation('项目只读研究');
             const child = ledger.admit({ userId: ledger.userId, conversationId: conversation.id, userText: research.goal,
                 projectId: research.projectId, executionMode: 'research', parentRunId: claim.runId, ...(origin.modelId ? { modelId: origin.modelId } : {}) }, 6);
-            const timing = deps.db.prepare('SELECT started_at,max_duration_ms FROM copilot_runs WHERE user_id=? AND id=?').get(ledger.userId, claim.runId) as { started_at: number; max_duration_ms: number };
             deps.db.prepare('UPDATE copilot_runs SET max_duration_ms=MIN(max_duration_ms,?) WHERE user_id=? AND id=?')
-                .run(Math.max(1, timing.max_duration_ms - (Date.now() - timing.started_at)), ledger.userId, child);
+                .run(Math.max(1, new RunGovernance(deps.db, ledger.userId, claim.runId).remainingDurationMs()), ledger.userId, child);
             deps.db.prepare('INSERT INTO copilot_research_jobs(id,user_id,origin_run_id,source_key,conversation_id,child_run_id,created_at) VALUES(?,?,?,?,?,?,?)')
                 .run(randomUUID(), ledger.userId, claim.runId, key, conversation.id, child, Date.now());
             return child;
@@ -425,33 +448,76 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         const report = child ? ledger.log.listMessages(child.conversation_id).filter(row => row.role === 'assistant' && row.kind === 'text').at(-1)?.content : undefined;
         return { runId: childId, status: child?.status, report: report ?? 'Research has no final report yet.', evidence: 'Read-only analysis; not owner acceptance or independent test execution.' };
     }
+    function revalidateApproval(ledger: CopilotRunLedger, runId: string, actionId: string, decisionOrigin: 'web' | 'channel') {
+        const run = ledger.get(runId)!;
+        const pending = ledger.log.getPendingAction(actionId)!;
+        const step = ledger.steps(runId).find(row => row.id === pending.stepId);
+        if (!step || step.status !== 'awaiting_approval' || step.tool_name !== pending.tool
+            || step.tool_call_id !== pending.toolCallId || step.input_json !== pending.inputJson
+            || step.input_digest !== pending.inputDigest || inputDigest(pending.inputJson) !== pending.inputDigest)
+            throw new AgentError('COPILOT_APPROVAL_CHANGED', 'Approval input or tool checkpoint changed; create a fresh request.');
+        const origin = JSON.parse(run.input_json) as TurnInput;
+        if (origin.userId !== ledger.userId || origin.conversationId !== run.conversation_id
+            || (origin.source ?? 'user') !== run.source)
+            throw new AgentError('COPILOT_APPROVAL_SCOPE', 'The stored run identity or source changed.');
+        ledger.validateScope(origin);
+        const tool = deps.toolRegistry.tools.get(pending.tool);
+        if (!tool || toolUnavailableReason(tool.name, !!deps.sessionManager))
+            throw new AgentError('COPILOT_TOOL_UNAVAILABLE', 'This tool is no longer available. Reject the old action and create a new request.');
+        if (deps.isToolDisabled?.(tool.name))
+            throw new AgentError('COPILOT_TOOL_DISABLED', 'This tool was disabled by its owner.');
+        if (!restrictedToolAllowed(origin, tool.name)
+            || (origin.executionMode && tool.risk !== 'read' && !(origin.executionMode === 'repair' && tool.name === 'submit_development_task'))
+            || (origin.source === 'scheduled' && effect(tool.name) === 'write')
+            || (tool.name.startsWith('mcp_') && origin.source && origin.source !== 'user'))
+            throw new AgentError('COPILOT_APPROVAL_SCOPE', 'This run cannot execute the requested tool.');
+        const raw = parse(pending.inputJson);
+        if (!tool.inputSchema.safeParse(raw).success)
+            throw new AgentError('COPILOT_APPROVAL_CHANGED', 'Approval input no longer matches the tool schema.');
+        const context: AgentToolContext = { db: deps.db, userId: ledger.userId, masterKey: deps.masterKey,
+            source: origin.source ?? 'user', executionMode: origin.executionMode, runId, stepId: step.id,
+            conversationId: origin.conversationId, ...(origin.projectId ? { projectId: origin.projectId } : {}),
+            ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}),
+            ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}) };
+        checkAgentScope(context, tool.name, raw);
+        const decision = policy.evaluate({ userId: ledger.userId, toolName: tool.name, toolRisk: tool.risk,
+            requiresApproval: tool.requiresApproval, input: raw });
+        if (decision.action === 'deny')
+            throw new AgentError('COPILOT_APPROVAL_DENIED', `Approval rejected: ${decision.reason}`);
+        const commandId = TOOL_COMMANDS[tool.name];
+        if (commandId) agentActions(context).revalidateCopilotApproval({ runId, stepId: step.id, pendingActionId: actionId,
+            commandId, input: agentActionInput(tool.name, raw, context), inputDigest: pending.inputDigest,
+            source: origin.source ?? 'user', refreshExpiry: decisionOrigin === 'web' });
+    }
     function recordApprovalDecision(input: {
         userId: string;
         runId: string;
         actionId: string;
         approved: boolean;
+        /** Set by the authenticated server entry point, never by request body. */
+        decisionOrigin?: 'web' | 'channel';
     }) {
         return deps.db.transaction(() => {
             const ledger = ledgerFor(input.userId);
             const pending = ledger.log.getPendingAction(input.actionId);
-            if (input.approved && pending?.runId === input.runId && pending.status === "pending") {
-                const tool = deps.toolRegistry.tools.get(pending.tool);
-                if (!tool || toolUnavailableReason(tool.name, !!deps.sessionManager)) {
-                    throw new AgentError("COPILOT_TOOL_UNAVAILABLE", "This tool is no longer available. Reject the old action and create a new request.");
-                }
-            }
+            if (ledger.get(input.runId)?.status !== 'awaiting_approval'
+                || pending?.runId !== input.runId || pending.status !== 'pending') return false;
+            if (input.approved) revalidateApproval(ledger, input.runId, input.actionId, input.decisionOrigin ?? 'channel');
             const changed = ledger.decide(input.runId,input.actionId,input.approved);
-            if(!changed)return false;
+            // Revalidation can update the original intent. A failed decision
+            // must roll that update back, rather than leave an unconsumed renewal.
+            if(!changed) throw new AgentError('COPILOT_APPROVAL_CHANGED', 'Approval checkpoint changed; create a fresh request.');
             return true;
         }).immediate();
     }
     async function resumeAfterApproval(input: {
         userId: string; runId: string; actionId: string; approved: boolean; async?: boolean;
+        decisionOrigin?: 'web' | 'channel';
     }) {
         const resumed = recordApprovalDecision(input);
         if (resumed) {
             if (input.async)
-                queueMicrotask(() => { void executeRun(input.userId, input.runId); });
+                queueRun(input.userId, input.runId);
             else
                 await executeRun(input.userId, input.runId);
         }
@@ -464,9 +530,10 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         const ledger = ledgerFor(input.userId);
         const cancelled = ledger.cancel(input.runId);
         if (cancelled) {
+            clearProvisionalText(deps.db, input.runId);
             control.active.get(input.runId)?.controller.abort();
             const children = deps.db.prepare('SELECT child_run_id FROM copilot_research_jobs WHERE user_id=? AND origin_run_id=?').all(input.userId, input.runId) as Array<{ child_run_id: string }>;
-            for (const child of children) { ledger.cancel(child.child_run_id); control.active.get(child.child_run_id)?.controller.abort(); }
+            for (const child of children) { ledger.cancel(child.child_run_id); clearProvisionalText(deps.db, child.child_run_id); control.active.get(child.child_run_id)?.controller.abort(); }
             emit(ledger, input.runId, { message: "Run cancelled" });
         }
         return { cancelled, runId: input.runId };

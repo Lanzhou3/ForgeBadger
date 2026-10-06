@@ -45,6 +45,7 @@ import {
   sessionTaskPacketProjectManagerHref,
 } from "@/components/sessions/session-task-packet";
 import { GitChangesPanel } from "@/components/sessions/git-changes-panel";
+import { SessionSummaryPanel } from '@/components/sessions/SessionSummaryPanel';
 import { ProviderQuotaPanel } from "@/components/sessions/provider-quota-panel";
 import { SessionNotificationBell } from "@/components/sessions/session-notification-bell";
 import {
@@ -53,16 +54,19 @@ import {
   sessionHandoffMarkdownFilename,
   type SessionHandoffAuditIssue,
 } from "@/components/sessions/session-handoff-export";
+import { useSessionProblemCopy } from "@/components/sessions/session-problem-copy";
 import {
   shouldAutoConnectSession,
   shouldShowSessionPreparing,
 } from "@/lib/session-connect-state";
+import { cn } from "@/lib/utils";
 
 export default function TerminalPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { t } = useLanguage();
+  const problemCopy = useSessionProblemCopy();
   const id = params.id as string;
   const [focusMode, setFocusMode] = useState(false);
   const [outputHistoryOpen, setOutputHistoryOpen] = useState(false);
@@ -221,15 +225,43 @@ export default function TerminalPage() {
     );
   }
 
+  // 2a. A lost session's runtime is gone (daemon death / OS restart) and can
+  //     never be reattached: explain what happened and how to get a working
+  //     terminal again, instead of showing the same panel as a deliberate stop.
+  if (session && session.status === "lost" && !hasAttachToken) {
+    return (
+      <SessionProblemPanel
+        sessionId={id}
+        sessionName={session.name}
+        title={t("sessions.lostTitle")}
+        message={t("sessions.lostDescription")}
+        tone="warning"
+        action={
+          <Button
+            size="sm"
+            onClick={() => startMutation.mutate()}
+            disabled={startMutation.isPending}
+          >
+            {t("common.start")}
+          </Button>
+        }
+      />
+    );
+  }
+
   // 2. Session is known but not connectable and we hold no attach token: a
   //    stopped/exited session. Offer an explicit Start instead of a terminal
-  //    that can never attach.
+  //    that can never attach. A deliberate stop is an expected state, not an
+  //    error: neutral tone, and the guidance points at this panel's own Start
+  //    button instead of sending the user away to "use Connect".
   if (session && !sessionRunning && !hasAttachToken) {
     return (
       <SessionProblemPanel
         sessionId={id}
-        title={t("sessions.cannotOpen")}
-        message={t("sessions.notConnectable")}
+        sessionName={session.name}
+        title={problemCopy.stoppedTitle}
+        message={problemCopy.stoppedMessage}
+        tone="muted"
         action={
           <Button
             size="sm"
@@ -261,6 +293,7 @@ export default function TerminalPage() {
           sessionId={id}
           title={t("sessions.cannotOpen")}
           message={connectError}
+          hint={t("sessions.returnToList")}
         />
       );
     }
@@ -293,6 +326,7 @@ export default function TerminalPage() {
         sessionId={id}
         title={t("sessions.cannotOpen")}
         message={connectError}
+        hint={t("sessions.returnToList")}
       />
     );
   }
@@ -356,6 +390,7 @@ export default function TerminalPage() {
         }
       />
 
+      {!focusMode&&<SessionSummaryPanel sessionId={id} />}
       <div className={focusMode ? "grid min-h-0 flex-1 grid-cols-1 overflow-hidden" : "grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px]"}>
         <div className="h-full min-h-0 overflow-hidden">
           <TerminalView
@@ -382,11 +417,17 @@ export default function TerminalPage() {
   );
 }
 
-function SessionFallbackHeader({ sessionId }: { sessionId: string }) {
+function SessionFallbackHeader({ sessionId, sessionName }: { sessionId: string; sessionName?: string }) {
   const { t } = useLanguage();
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+    // pl-16 reserves the mobile top band for the fixed hamburger trigger (the
+    // terminal routes skip the shell's pt-16 because the pane must stay
+    // full-height); md:pl-4 restores desktop padding.
+    <div
+      data-testid="session-fallback-header"
+      className="flex flex-wrap items-center justify-between gap-3 border-b border-border pl-16 pr-4 py-3 md:pl-4"
+    >
       <div className="flex min-w-0 items-center gap-3">
         <Button asChild variant="ghost" size="sm">
           <Link href="/sessions">
@@ -394,7 +435,19 @@ function SessionFallbackHeader({ sessionId }: { sessionId: string }) {
             {t("sessions.back")}
           </Link>
         </Button>
-        <span className="truncate text-sm font-medium">Session {sessionId}</span>
+        {/* Fallback keeps the pre-fix label: this branch only renders while the
+            session record is unknown, so there is no name to show yet. */}
+        <span className="truncate text-sm font-medium">
+          {sessionName ?? `Session ${sessionId}`}
+        </span>
+        {sessionName ? (
+          <span
+            className="hidden max-w-40 truncate font-mono text-xs text-muted-foreground sm:inline"
+            title={sessionId}
+          >
+            {sessionId}
+          </span>
+        ) : null}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <SessionNotificationBell />
@@ -405,30 +458,66 @@ function SessionFallbackHeader({ sessionId }: { sessionId: string }) {
 
 /**
  * Shared error/terminal-less state: the back header plus a centered card that
- * explains why no terminal can be shown. Used for the stopped, 404, and
+ * explains why no terminal can be shown. Used for the stopped, lost, 404, and
  * connect-failed cases so they don't each hand-roll the same layout.
+ *
+ * Tones: "muted" for expected states (stopped), "warning" for recoverable
+ * failures (lost), "destructive" for hard failures (not found, connect
+ * failed). The "return to the list and use Connect" hint is opt-in via `hint`
+ * — it is only accurate for connect failures, never for deleted sessions
+ * (which no longer exist) or the stopped panel (which carries its own Start
+ * button).
  */
 function SessionProblemPanel({
   sessionId,
+  sessionName,
   title,
   message,
+  hint,
   action,
+  tone = "destructive",
 }: {
   sessionId: string;
+  sessionName?: string;
   title: string;
   message: string;
+  hint?: string;
   action?: React.ReactNode;
+  /** "destructive" for hard failures; "warning" for recoverable states like lost;
+   * "muted" for expected, non-error states like a deliberate stop. */
+  tone?: "destructive" | "warning" | "muted";
 }) {
   const { t } = useLanguage();
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <SessionFallbackHeader sessionId={sessionId} />
+      <SessionFallbackHeader sessionId={sessionId} sessionName={sessionName} />
+      {sessionName&&<SessionSummaryPanel sessionId={sessionId} />}
       <div className="flex flex-1 items-center justify-center">
-        <div className="max-w-md rounded-lg border border-destructive/50 bg-destructive/10 p-6 text-center">
-          <h2 className="text-lg font-semibold text-destructive">{title}</h2>
+        <div
+          className={cn(
+            "max-w-md rounded-lg border p-6 text-center",
+            tone === "warning"
+              ? "border-amber-500/50 bg-amber-500/10"
+              : tone === "muted"
+                ? "border-border/70 bg-muted/30"
+                : "border-destructive/50 bg-destructive/10"
+          )}
+        >
+          <h2
+            className={cn(
+              "text-lg font-semibold",
+              tone === "warning"
+                ? "text-amber-500"
+                : tone === "muted"
+                  ? "text-foreground"
+                  : "text-destructive"
+            )}
+          >
+            {title}
+          </h2>
           {message ? (
             <p className="mt-2 text-sm text-muted-foreground">
-              {message} {t("sessions.returnToList")}
+              {message} {hint ?? ""}
             </p>
           ) : null}
           <div className="mt-4 flex flex-wrap justify-center gap-2">
@@ -799,6 +888,13 @@ function SessionStatusBadge({ status }: { status?: string }) {
   }
   if (normalizedStatus === "error") {
     return <Badge variant="destructive">{t("sessions.error")}</Badge>;
+  }
+  if (normalizedStatus === "lost") {
+    return (
+      <Badge className="gap-1.5 bg-amber-600 text-white hover:bg-amber-600">
+        {t("sessions.lost")}
+      </Badge>
+    );
   }
   return <Badge variant="secondary">{t("sessions.stopped")}</Badge>;
 }

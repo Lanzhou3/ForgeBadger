@@ -300,8 +300,9 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     // above the composer shows what is waiting.
     if (runningRef.current) {
       if (!conversationId) { toast.info(t("copilot.creatingConversation")); return; }
+      const clearSubmittedDraft = controller.captureDraft(text);
       const queued = await enqueueRef.current(text);
-      if (queued) controller.setInput("");
+      if (queued) clearSubmittedDraft();
       return;
     }
     const id = await ensureConversation();
@@ -331,6 +332,8 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     conversationId,
     ...(projectId ? { projectId } : {}),
     ...(modelId ? { modelId } : {}),
+    reviewTaskResults,
+    repairFailedChecks,
     active: isBusy,
   });
   const enqueueRef = useRef(followups.enqueue);
@@ -440,7 +443,14 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
               />
             );
           })}
-          {(syncError || active?.error) && <p role="status" className="text-sm text-muted-foreground">{syncError || active?.error}</p>}
+          {(syncError || active?.error) && (
+            <p role="status" className="text-sm text-muted-foreground">
+              {syncError || active?.error}
+              {!syncError && active?.errorCode ? (
+                <span className="text-xs opacity-70"> ({active.errorCode})</span>
+              ) : null}
+            </p>
+          )}
           {active?.status === "awaiting_approval" && (active.pendingAction
             ? <CopilotApproval key={active.pendingAction.id} action={active.pendingAction} onDecided={reconcile} />
             : <p role="status" className="text-sm text-muted-foreground">{t("copilot.awaitingApproval")}</p>)}

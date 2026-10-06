@@ -8,9 +8,11 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { act } from "@testing-library/react";
 import { LanguageProvider } from "@/hooks/use-language";
 import { SkillPackageReview } from "./SkillPackageReview";
 import { SkillDiscoveryPage } from "./SkillDiscoveryPage";
+import { SkillNavigation } from "./SkillNavigation";
 import * as registry from "@/lib/skill-registry-api";
 vi.mock("next/navigation", () => ({ usePathname: () => "/skills/discover" }));
 vi.mock("@/lib/api", () => ({
@@ -117,4 +119,43 @@ it("keeps usable search results visible when a provider fails and debounces keyw
   );
   fireEvent.click(screen.getByRole("button", { name: "预览安装" }));
   expect(await screen.findByRole("dialog")).toBeTruthy();
+});
+it("renders Traditional Chinese navigation for zh-TW instead of Simplified Chinese or English", () => {
+  window.localStorage.setItem("forgebadger-language", "zh-TW");
+  try {
+    wrapper(<SkillNavigation />);
+    expect(screen.getByRole("link", { name: "已安裝" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "已安装" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Installed" })).toBeNull();
+  } finally {
+    window.localStorage.removeItem("forgebadger-language");
+  }
+});
+
+it("disables installation once the preview has expired", async () => {
+  vi.useFakeTimers();
+  try {
+    wrapper(
+      <SkillPackageReview
+        input={{ locator: { kind: "github", repo: "demo/review", path: "SKILL.md" } }}
+        onClose={() => {}}
+      />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const installButton = screen.getByRole("button", { name: "已审阅，确认安装" }) as HTMLButtonElement;
+    expect(installButton.disabled).toBe(false);
+
+    // Advance past the 5-minute preview TTL; the interval re-checks expiry.
+    await act(async () => {
+      vi.advanceTimersByTime(5 * 60 * 1000 + 15_000);
+    });
+    expect(screen.getByRole("alert").textContent).toContain("预览已过期");
+    expect((screen.getByRole("button", { name: "已审阅，确认安装" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "重新获取预览" })).toBeTruthy();
+    expect(registry.installSkillPackage).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
 });

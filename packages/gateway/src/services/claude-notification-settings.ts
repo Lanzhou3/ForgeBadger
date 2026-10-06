@@ -44,6 +44,8 @@ export function buildForgeBadgerClaudeHookSettings(gatewayUrl: string): ClaudeHo
     allowedHttpHookUrls: [forgeBadgerHookUrlAllowlist(gatewayUrl)],
     httpHookAllowedEnvVars: forgeBadgerHookEnvVars(),
     hooks: {
+      PostToolUse: [{ hooks: [httpHook] }],
+      PostToolUseFailure: [{ hooks: [httpHook] }],
       UserPromptSubmit: [{ hooks: [httpHook] }],
       PermissionRequest: [
         {
@@ -103,6 +105,8 @@ function mergeForgeBadgerHookSettings(
   const forgeBadgerHook = buildForgeBadgerHttpHook(gatewayUrl);
 
   hooks.UserPromptSubmit = ensureHookGroup(hooks.UserPromptSubmit, undefined, forgeBadgerHook);
+  hooks.PostToolUse = ensureHookGroup(hooks.PostToolUse, undefined, forgeBadgerHook);
+  hooks.PostToolUseFailure = ensureHookGroup(hooks.PostToolUseFailure, undefined, forgeBadgerHook);
 
   hooks.PermissionRequest = ensureHookGroup(
     hooks.PermissionRequest,

@@ -51,7 +51,7 @@ const adapterDefinitions: AdapterDefinition[] = [
   },
   {
     id: "codex",
-    label: "Codex CLI",
+    label: "Codex",
     command: "codex",
     versionArgs: ["--version"],
     supportLevel: "supported",

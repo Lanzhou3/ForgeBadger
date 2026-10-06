@@ -79,6 +79,10 @@ export class NativeChannelDelivery {
   }
   private assertCurrent(item:ChannelDelivery):void {
     const result=this.inbox.result(item.inbox_id,this.peer(item.inbox_id));
+    if(item.phase==='admission_rejected') {
+      if(result.status!=='rejected'||result.runId!==null)throw new Error('CHANNEL_ADMISSION_RECEIPT_STALE');
+      return;
+    }
     if(item.phase==='command') {
       if(result.status!=='command')throw new Error('CHANNEL_COMMAND_RECEIPT_STALE');
       return;

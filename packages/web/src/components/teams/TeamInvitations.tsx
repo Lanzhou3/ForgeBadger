@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
-import { useLanguage } from "@/hooks/use-language";
+import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import { teamsApi, type Team } from "@/lib/teams-api";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +16,7 @@ import {
 } from "./TeamShared";
 export function TeamInvitations({ team }: { team: Team }) {
   const { t } = useLanguage();
+  const locale = useUiLocale();
   const { user } = useAuth();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"admin" | "member">("member");
@@ -110,7 +111,7 @@ export function TeamInvitations({ team }: { team: Team }) {
                 <p className="break-all text-sm">{i.email}</p>
                 <TeamBadge value={i.role} /> <TeamBadge value={i.state} />
                 <p className="text-xs text-muted-foreground">
-                  {t("teams.expires")}: {new Date(i.expiresAt).toLocaleString()}
+                  {t("teams.expires")}: {new Date(i.expiresAt).toLocaleString(locale)}
                 </p>
               </div>
               {i.state === "pending" &&

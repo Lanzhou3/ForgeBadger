@@ -17,6 +17,7 @@ import type { AgentTool, AgentToolContext } from "../tool-registry.js";
 import type { InMemorySessionManager } from '../../session-manager.js';
 import { SessionOutputRing } from '../../session-output-buffer.js';
 import { assertManagedSessionAccess } from '../../../db/repositories/managed-project-access.js';
+import { channelSessionAllowed } from '../../channels/channel-run-scope.js';
 
 const listSessionsInput = z.object({
   projectId: z.string().max(128).optional(),
@@ -51,7 +52,8 @@ export function createSessionTools(): AgentTool[] {
         const sessions = listSessionSummaries(db, userId, {
           ...(projectId !== undefined ? { projectId } : {}),
           ...(limit !== undefined ? { limit } : {}),
-          ...(allowedProjectIds ? { allowedProjectIds } : {})
+          ...(allowedProjectIds ? { allowedProjectIds } : {}),
+          ...(context.channelScope ? { isSessionAllowed: (id: string) => channelSessionAllowed(context, id) } : {})
         });
         return { sessions, count: sessions.length };
       }

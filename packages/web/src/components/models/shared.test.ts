@@ -6,6 +6,12 @@ import {
   authTypeLabel,
   balanceEntryUsedPercent,
   COMMON_MODEL_CAPABILITIES,
+  customProviderHasEndpoint,
+  customProviderHasPlaintextHttp,
+  customProviderHasPrivateNetworkUrl,
+  customProviderPrimaryBaseUrl,
+  emptyCustomProvider,
+  hydrateCustomProviderForm,
   isProviderActiveOnAdapter,
   mergeCapabilities,
   parseCapabilities,
@@ -13,7 +19,7 @@ import {
   THINKING_EFFORT_LEVELS,
   type Translate,
 } from "./shared";
-import type { AdapterAppliedStatus } from "@/lib/api";
+import type { AdapterAppliedStatus, ProviderProfile } from "@/lib/api";
 
 const identityT: Translate = (key: string) => key;
 
@@ -87,6 +93,77 @@ describe("model form constants", () => {
 
   it("keeps video among the common capability tags", () => {
     expect(COMMON_MODEL_CAPABILITIES).toContain("video");
+  });
+});
+
+describe("custom provider form: bare baseUrl providers", () => {
+  function providerFixture(partial: Partial<ProviderProfile>): ProviderProfile {
+    return {
+      id: "provider-1",
+      providerKey: "custom",
+      name: "Custom Provider",
+      baseUrl: null,
+      authType: "api_key",
+      apiFormat: "openai-compatible",
+      supportedAdapters: ["claude"],
+      status: "active",
+      ...partial,
+    };
+  }
+
+  it("falls back to a bare baseUrl on the openai side for openai-family formats", () => {
+    const form = hydrateCustomProviderForm(
+      providerFixture({ baseUrl: "https://relay.example.com/v1", apiFormat: "openai-compatible" })
+    );
+    expect(form.openaiBaseUrl).toBe("https://relay.example.com/v1");
+    expect(form.anthropicBaseUrl).toBe("");
+    expect(form.baseUrl).toBe("https://relay.example.com/v1");
+    expect(customProviderHasEndpoint(form)).toBe(true);
+  });
+
+  it("falls back to a bare baseUrl on the anthropic side for the anthropic format", () => {
+    const form = hydrateCustomProviderForm(
+      providerFixture({ baseUrl: "https://relay.example.com/anthropic", apiFormat: "anthropic" })
+    );
+    expect(form.anthropicBaseUrl).toBe("https://relay.example.com/anthropic");
+    expect(form.openaiBaseUrl).toBe("");
+    expect(customProviderHasEndpoint(form)).toBe(true);
+  });
+
+  it("does not overwrite format-specific endpoints that are already set", () => {
+    const form = hydrateCustomProviderForm(
+      providerFixture({
+        baseUrl: "https://relay.example.com/v1",
+        openaiBaseUrl: "https://relay.example.com/openai",
+      })
+    );
+    expect(form.openaiBaseUrl).toBe("https://relay.example.com/openai");
+    expect(form.baseUrl).toBe("https://relay.example.com/v1");
+  });
+
+  it("treats a bare baseUrl as a valid endpoint and preserves it as the primary on save", () => {
+    const form = hydrateCustomProviderForm(
+      providerFixture({ baseUrl: "https://relay.example.com/v1" })
+    );
+    // Untouched dialog: save submits the existing baseUrl instead of clearing it.
+    expect(customProviderHasEndpoint(form)).toBe(true);
+    expect(customProviderPrimaryBaseUrl(form)).toBe("https://relay.example.com/v1");
+    // An edit to the hydrated field becomes the new primary endpoint.
+    expect(customProviderPrimaryBaseUrl({ ...form, openaiBaseUrl: " https://new.example.com/v1 " })).toBe(
+      "https://new.example.com/v1"
+    );
+  });
+
+  it("flags plaintext http and private-network hosts on a bare baseUrl", () => {
+    const httpForm = hydrateCustomProviderForm(providerFixture({ baseUrl: "http://relay.example.com/v1" }));
+    expect(customProviderHasPlaintextHttp(httpForm)).toBe(true);
+    const privateForm = hydrateCustomProviderForm(providerFixture({ baseUrl: "http://192.168.1.10:8080/v1" }));
+    expect(customProviderHasPrivateNetworkUrl(privateForm)).toBe(true);
+  });
+
+  it("still requires at least one endpoint for a provider without any baseUrl", () => {
+    expect(customProviderHasEndpoint(emptyCustomProvider)).toBe(false);
+    expect(customProviderHasEndpoint(hydrateCustomProviderForm(providerFixture({})))).toBe(false);
   });
 });
 

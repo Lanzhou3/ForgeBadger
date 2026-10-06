@@ -147,6 +147,20 @@ describe("POST /api/v1/sessions terminal shell validation", () => {
     assert.equal(res.body.message, "Invalid input");
   });
 
+  it("returns 409 without a session row when no shell is installed", async () => {
+    const projectId = await createProject();
+    app = express();
+    app.locals.jwtSecret = secret;
+    app.use(express.json());
+    app.use("/api/v1/sessions", createSessionRoutes(db, masterKey, new InMemorySessionManager(fakeBackend()),
+      new RuntimeAuthorizationInvalidator(), undefined, async () => ({ exitCode: 1, stdout: "", stderr: "missing" })));
+    const res = await postSession({ projectId, aiTool: "terminal" });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.code, 1);
+    assert.match(res.body.message, /TERMINAL_SHELL_UNAVAILABLE/);
+    assert.equal(new SessionRepository(db, userId).list().length, 0);
+  });
+
   it("defaults to the platform shell when shell is omitted", async () => {
     const projectId = await createProject();
     const res = await postSession({ projectId, aiTool: "terminal" });
@@ -195,6 +209,7 @@ describe("GET /api/v1/sessions/shells (availability probe)", () => {
       const body = await res.json();
       assert.equal(res.status, 200);
       assert.equal(body.code, 0);
+      assert.equal(body.data.platform, process.platform);
       const shells = body.data.shells as Array<{ shell: string; available: boolean; command: string }>;
       assert.deepEqual(
         shells.map((entry) => entry.shell).sort(),

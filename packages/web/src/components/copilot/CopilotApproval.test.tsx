@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { GatewayApiError } from "@/lib/api";
 import { LanguageProvider } from "@/hooks/use-language";
 import { CopilotApproval } from "./CopilotApproval";
 import type { CopilotPendingAction } from "@/lib/copilot-api";
@@ -53,4 +54,15 @@ it("blocks approval of legacy stop requests with no trusted target but permits r
   render(<LanguageProvider><CopilotApproval action={stop} onDecided={() => {}} /></LanguageProvider>);
   expect((screen.getByRole('button', { name: '允许本次调用' }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole('button', { name: '拒绝本次调用' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('shows an expired authority remedy and immediately reconciles a failed decision', async () => {
+  decide.mockRejectedValue(new GatewayApiError('operation rejected',400,{code:'PLATFORM_INTENT_EXPIRED'}));
+  const onDecided=vi.fn();
+  render(<LanguageProvider><CopilotApproval action={action} onDecided={onDecided}/></LanguageProvider>);
+  fireEvent.click(screen.getByRole('button',{name:'允许本次调用'}));
+  await waitFor(()=>expect(screen.getByRole('alert').textContent).toContain('已过期'));
+  expect(screen.getByRole('alert').textContent).toContain('重新发起');
+  expect(onDecided).toHaveBeenCalledOnce();
+  expect(decide).toHaveBeenCalledOnce();
 });

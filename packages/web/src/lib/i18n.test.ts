@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { detectSystemLanguage, getTranslation, normalizeLanguage } from "./i18n";
+import {
+  detectSystemLanguage,
+  getTranslation,
+  localeForLanguage,
+  normalizeLanguage,
+  supportedLanguages,
+  translations,
+} from "./i18n";
 
 describe("i18n", () => {
   it("returns localized labels for each supported language", () => {
@@ -52,7 +59,7 @@ describe("i18n", () => {
     expect(getTranslation("zh-CN", "projects.untrackedConfigTitle")).toBe("独立配置");
     expect(getTranslation("en", "projects.stopTrackingTemplate")).toBe("Stop tracking template");
     expect(getTranslation("zh-CN", "templates.governedTitle")).toBe("治理中的模板");
-    expect(getTranslation("en", "templates.seedTitle")).toBe("Seed-only Templates");
+    expect(getTranslation("en", "templates.seedTitle")).toBe("Seed-only templates");
     expect(getTranslation("zh-CN", "templates.catalogInstall")).toBe("从目录安装");
     expect(getTranslation("en", "templates.catalogEmpty")).toContain("catalog");
     expect(getTranslation("zh-CN", "nav.history")).toBe("历史");
@@ -104,5 +111,27 @@ describe("i18n", () => {
     expect(detectSystemLanguage(["fr-FR", "fr"])).toBe("zh-CN");
     expect(detectSystemLanguage(undefined)).toBe("zh-CN");
     expect(detectSystemLanguage([])).toBe("zh-CN");
+  });
+
+  it("keeps translation keys at parity across all supported languages", () => {
+    const keySets = supportedLanguages.map((language) => Object.keys(translations[language]).sort());
+    const [zhCNKeys, ...rest] = keySets;
+    for (const keys of rest) {
+      expect(keys).toEqual(zhCNKeys);
+    }
+  });
+
+  it("never leaves an ASCII ellipsis in a translation value", () => {
+    for (const language of supportedLanguages) {
+      for (const value of Object.values(translations[language])) {
+        expect(value).not.toContain("...");
+      }
+    }
+  });
+
+  it("maps UI languages to BCP 47 locales for date formatting", () => {
+    expect(localeForLanguage("zh-CN")).toBe("zh-CN");
+    expect(localeForLanguage("zh-TW")).toBe("zh-TW");
+    expect(localeForLanguage("en")).toBe("en-US");
   });
 });

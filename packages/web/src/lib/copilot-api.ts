@@ -190,7 +190,7 @@ export function listConversationRuns(conversationId: string) {
 }
 
 export function getRun(runId: string) {
-  return fetchJson<{ run: CopilotRun; pendingActions: CopilotPendingAction[] }>(
+  return fetchJson<{ run: CopilotRun; pendingActions: CopilotPendingAction[]; provisionalText?: import("@/lib/copilot-text-stream").CopilotProvisionalText }>(
     `/api/v1/copilot/runs/${encodeURIComponent(runId)}`
   );
 }
@@ -336,6 +336,8 @@ export interface CopilotAutomationRun {
 export interface CopilotAutomationSuggestion {
   id: string;
   source: string;
+  /** Stable catalog key (e.g. catalog:daily-briefing); map via automations-copy. */
+  dedupKey: string;
   status: "pending" | "accepted" | "dismissed";
   jobSpec: string;
 }

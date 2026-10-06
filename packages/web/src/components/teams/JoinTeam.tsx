@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
-import { useLanguage } from "@/hooks/use-language";
+import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import { setToken, setUser } from "@/lib/auth";
 import {
   captureTeamInvitation,
@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Panel, inputClass, TeamError, TeamBadge } from "./TeamShared";
 export function JoinTeam() {
   const { t } = useLanguage();
+  const locale = useUiLocale();
   const { user, isLoading } = useAuth();
   const router = useRouter();
   const client = useQueryClient();
@@ -72,7 +73,7 @@ export function JoinTeam() {
             <TeamBadge value={preview.role} />
             <p className="text-xs text-muted-foreground">
               {t("teams.expires")}:{" "}
-              {new Date(preview.expiresAt).toLocaleString()}
+              {new Date(preview.expiresAt).toLocaleString(locale)}
             </p>
             {user ? (
               <>

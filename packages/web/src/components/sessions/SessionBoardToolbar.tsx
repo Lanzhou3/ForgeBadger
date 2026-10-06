@@ -6,6 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { getCliBrand } from "@/lib/cli-brand";
 import { useLanguage } from "@/hooks/use-language";
@@ -55,20 +62,22 @@ export function SessionBoardToolbar({
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder={t("sessions.searchPlaceholder")}
+            aria-label={t("sessions.searchPlaceholder")}
             className="pl-9"
           />
         </div>
-        <select
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          value={statusFilter}
-          onChange={(event) => onStatusFilterChange(event.target.value)}
-          aria-label={t("sessions.statusFilter")}
-        >
-          <option value="all">{t("sessions.statusAll")}</option>
-          <option value="running">{t("sessions.running")}</option>
-          <option value="stopped">{t("sessions.stopped")}</option>
-          <option value="error">{t("sessions.error")}</option>
-        </select>
+        <Select value={statusFilter} onValueChange={onStatusFilterChange}>
+          <SelectTrigger aria-label={t("sessions.statusFilter")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("sessions.statusAll")}</SelectItem>
+            <SelectItem value="running">{t("sessions.running")}</SelectItem>
+            <SelectItem value="stopped">{t("sessions.stopped")}</SelectItem>
+            <SelectItem value="error">{t("sessions.error")}</SelectItem>
+            <SelectItem value="lost">{t("sessions.lost")}</SelectItem>
+          </SelectContent>
+        </Select>
         {cliTools.length > 0 ? (
           <div className="flex flex-wrap items-center gap-1.5" aria-label={t("sessions.cliFilter")}>
             {cliTools.map((tool) => {
@@ -100,7 +109,7 @@ export function SessionBoardToolbar({
             </Button>
           ) : null}
           <div
-            className="flex items-center gap-0.5 rounded-md border border-border p-0.5"
+            className="hidden items-center gap-0.5 rounded-md border border-border p-0.5 md:flex"
             role="group"
             aria-label={t("sessions.viewToggle")}
           >

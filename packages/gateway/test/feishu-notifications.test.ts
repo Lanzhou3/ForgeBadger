@@ -62,6 +62,7 @@ it('exposes an owner-only disabled-by-default Feishu notification subscription',
     const response=await fetch(url,{headers:{authorization:`Bearer ${signJwt({userId:user.id,email:user.email},secret)}`}});
     assert.equal(response.status,200);
     const body=await response.json();assert.equal(body.code,0);assert.equal(body.data.config.enabled,false);
+    assert.equal(body.data.config.contentLevel,'summary');
     assert.deepEqual(body.data.config.types,['attention','failure','completion']);
   }finally{await new Promise<void>(r=>server.close(()=>r()));db.close();}
 });
@@ -233,6 +234,7 @@ it('keeps test requests idempotent when the pending queue is full', () => {
 });
 
 const invalidations:Record<string,(f:ReturnType<typeof fixture>)=>void>={
+  'notification types changed':f=>{f.service.update({...f.service.records.config(),types:['failure']});},
   'subscription disabled':f=>{f.service.update({...f.service.records.config(),enabled:false});},
   'identity revoked':f=>{f.identities.revokeIdentity(f.identity.id);},
   'account rotated':f=>{f.accounts.upsertAccount({appId:'new-app',appSecret:randomBytes(24).toString('hex'),enabled:true});},
@@ -240,6 +242,59 @@ const invalidations:Record<string,(f:ReturnType<typeof fixture>)=>void>={
   'user disabled':f=>{f.db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(f.user.id);},
   'source deleted':f=>{f.notifications.clearAll();}
 };
+
+for(const level of [undefined,'status','summary'] as const) it(`worker includes frozen result excerpts by default for ${level??'omitted'} legacy content level`,async()=>{
+  const f=fixture();try {
+    f.enable({contentLevel:level});
+    new NotificationService(f.db,f.user.id).create({type:'claude_notification',titleKey:'notifications.taskCompleted',message:'Codex task completed',href:'/notifications',
+      payload:{adapter:'codex',notification_type:'task_completed',cli_summary:{version:1,runtimeEpoch:'epoch',identityQuality:'session_only',
+        state:'task_completed',observedAt:Date.now(),result:{text:'Frozen private result',source:'native_final_message'},progress:[],verification:[]}}});
+    await f.worker();
+    const message=f.calls.find(c=>c.url.includes('/messages'))!;
+    assert.equal(String(message.body.content).includes('Frozen private result'),true);
+    assert.equal(f.service.records.config().contentLevel,'summary');
+    assert.equal(f.service.records.list()[0]!.status,'delivered');
+  }finally{f.db.close();}
+});
+
+it('normalizes legacy content choices without changing the subscription or backfilling history',()=>{
+  const f=fixture();try {
+    const first=f.enable();f.create();
+    const next=f.service.update({...first.config,contentLevel:'status'});
+    assert.equal(next.config.contentLevel,'summary');
+    assert.equal(next.config.revision,first.config.revision);
+    assert.equal(f.service.records.list()[0]!.status,'pending');
+    const same=f.service.update({...next.config});assert.equal(same.config.revision,next.config.revision);
+    assert.equal(f.notifications.list().length,1);
+    const changed=f.service.update({...next.config,types:['failure']});
+    assert.equal(changed.config.revision,next.config.revision+1);
+    assert.equal(f.service.records.list()[0]!.status,'cancelled');
+    assert.throws(()=>f.service.update({...first.config}),/CONFIG_CONFLICT/);
+  }finally{f.db.close();}
+});
+it('does not start sending from a disabled subscription when summaries become built in',async()=>{
+  const f=fixture();try {
+    f.service.update({...f.service.records.config(),contentLevel:'status'});
+    assert.equal(f.service.records.config().enabled,false);
+    assert.equal(f.service.records.config().contentLevel,'summary');
+    f.create();await f.worker();
+    assert.equal(f.service.records.list().length,0);assert.equal(f.calls.length,0);
+  }finally{f.db.close();}
+});
+it('rejects an old sending claim when summary migration runs during token acquisition',async()=>{
+  const f=fixture();try {
+    f.enable();f.db.prepare("UPDATE feishu_notification_settings SET content_level='status' WHERE user_id=?").run(f.user.id);
+    f.create();const original=f.io.fetch!;
+    f.io.fetch=async(url,init)=>{
+      const response=await original(url,init);
+      if(String(url).includes('/auth/'))f.db.exec(readFileSync(new URL('../src/db/migrations/0128_feishu_builtin_summaries.sql',import.meta.url),'utf8'));
+      return response;
+    };
+    await f.worker();
+    assert.equal(f.calls.filter(call=>call.url.includes('/messages')).length,0);
+    assert.equal(f.service.records.list()[0]!.status,'cancelled');
+  }finally{f.db.close();}
+});
 for(const [name,invalidate] of Object.entries(invalidations))it(`does not send after ${name} during token await`,async()=>{
   const f=fixture();try {
     f.enable();f.create();const original=f.io.fetch!;
@@ -465,8 +520,10 @@ it('migrates existing private settings without redirecting or reviving queued me
       (id,user_id,notification_id,event_type,subscription_revision,identity_revision,status,expires_at,created_at)
       VALUES(?,'owner',?,'completion',4,1,?,100,0)`).run(status,status,status);
     db.exec(readFileSync(new URL('../src/db/migrations/0120_feishu_notification_targets.sql',import.meta.url),'utf8'));
+    db.exec(readFileSync(new URL('../src/db/migrations/0127_cli_observation_summaries.sql',import.meta.url),'utf8'));
     const service=new FeishuNotifications(db,'owner');
     assert.equal(service.records.config().targetId,'private:identity');assert.equal(service.records.config().revision,4);
+    assert.equal(service.records.config().contentLevel,'summary');
     assert.equal(service.records.get('pending')?.status,'cancelled');assert.equal(service.records.get('sending')?.status,'sending');
     assert.equal(service.records.get('delivered')?.status,'delivered');
     assert.equal((db.prepare('SELECT count(*) n FROM feishu_notification_groups').get() as {n:number}).n,0);

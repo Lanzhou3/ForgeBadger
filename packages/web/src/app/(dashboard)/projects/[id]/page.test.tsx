@@ -20,6 +20,7 @@ vi.mock("@/hooks/use-language", () => ({
   useLanguage: () => ({
     t: (key: Parameters<typeof getTranslation>[1]) => getTranslation("en", key),
   }),
+  useUiLocale: () => "en-US",
 }));
 vi.mock("@/lib/project-task-api", () => ({ getProjectTaskContext: vi.fn() }));
 vi.mock("@/components/projects/PrivateProjectPage", () => ({

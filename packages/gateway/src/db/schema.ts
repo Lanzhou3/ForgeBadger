@@ -2,6 +2,17 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { check, foreignKey, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+export const cliObservationRuntimes = sqliteTable('cli_observation_runtimes', {
+  currentNativeSessionId:text('current_native_session_id'),currentTurnId:text('current_turn_id'),
+  userId: text('user_id').notNull(), sessionId: text('session_id').notNull(), epoch: text('epoch').notNull(), tokenFingerprint: text('token_fingerprint').notNull(),
+}, t => ({ pk: primaryKey({ columns: [t.userId, t.sessionId] }),
+  owner: foreignKey({ columns: [t.userId, t.sessionId], foreignColumns: [sessions.userId, sessions.id] }).onDelete('cascade') }));
+export const cliObservations = sqliteTable('cli_observations', {
+  userId: text('user_id').notNull(), sessionId: text('session_id').notNull(), runtimeEpoch: text('runtime_epoch').notNull(),
+  nativeSessionId: text('native_session_id').notNull(), turnId: text('turn_id').notNull(), summaryJson: text('summary_json').notNull(), observedAt: integer('observed_at').notNull(),
+}, t => ({ pk: primaryKey({ columns: [t.userId, t.sessionId, t.runtimeEpoch, t.nativeSessionId, t.turnId] }),
+  latest: index('cli_observation_latest').on(t.userId, t.sessionId, t.observedAt),
+  owner: foreignKey({ columns: [t.userId, t.sessionId], foreignColumns: [sessions.userId, sessions.id] }).onDelete('cascade') }));
 export const sessionNotificationPrompts = sqliteTable('session_notification_prompts', {
   userId: text('user_id').notNull(), sessionId: text('session_id').notNull(),
   nativeSessionId: text('native_session_id').notNull(), nativeTurnId: text('native_turn_id').notNull().default(''),
@@ -12,6 +23,8 @@ export const sessionNotificationPrompts = sqliteTable('session_notification_prom
 }));
 
 export const feishuNotificationSettings = sqliteTable('feishu_notification_settings', {
+  // Historical SQL default is retained; the repository always writes summary.
+  contentLevel:text('content_level').notNull().default('status'),
   targetId:text('target_id'),
   userId:text('user_id').primaryKey().notNull().references(()=>users.id,{onDelete:'cascade'}),
   enabled:integer('enabled',{mode:'boolean'}).notNull().default(false),identityId:text('identity_id'),
@@ -1514,6 +1527,8 @@ export const copilotRuns = sqliteTable("copilot_runs", {
   phaseStartedAt: integer('phase_started_at'),
   tokenBudget: integer('token_budget').notNull().default(500000),
   maxDurationMs: integer('max_duration_ms').notNull().default(1800000),
+  approvalWaitMs: integer('approval_wait_ms').notNull().default(0),
+  approvalWaitStartedAt: integer('approval_wait_started_at'),
   runtimeVersion: integer("runtime_version").notNull().default(0),
   source: text("source").notNull().default("user"),
   clientRequestId: text('client_request_id'),
@@ -1872,7 +1887,7 @@ export const copilotDevelopmentTasks = sqliteTable('copilot_development_tasks', 
  id:text('id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),projectId:text('project_id').notNull(),
  goal:text('goal').notNull(),status:text('status').notNull(),planJson:text('plan_json').notNull(),recipeDigest:text('recipe_digest').notNull(),sourceDigest:text('source_digest').notNull(),outputDigest:text('output_digest').notNull(),
  intentId:text('intent_id').notNull(),originRunId:text('origin_run_id'),originStepId:text('origin_step_id'),projectRoot:text('project_root').notNull(),workspacePath:text('workspace_path'),evidenceJson:text('evidence_json'),artifactDigest:text('artifact_digest'),error:text('error'),
- owner:text('owner'),leaseExpiresAt:integer('lease_expires_at'),cancelRequested:integer('cancel_requested').notNull().default(0),revision:integer('revision').notNull().default(1),createdAt:integer('created_at').notNull(),updatedAt:integer('updated_at').notNull()
+ owner:text('owner'),leaseExpiresAt:integer('lease_expires_at'),executionIdentityJson:text('execution_identity_json'),reconciliationJson:text('reconciliation_json'),cancelRequested:integer('cancel_requested').notNull().default(0),revision:integer('revision').notNull().default(1),createdAt:integer('created_at').notNull(),updatedAt:integer('updated_at').notNull()
 },t=>({projectIdentity:uniqueIndex('idx_copilot_development_project_identity').on(t.userId,t.projectId,t.id),tenant:uniqueIndex('idx_development_tenant').on(t.userId,t.id),intent:uniqueIndex('idx_development_intent').on(t.userId,t.intentId),active:uniqueIndex('idx_copilot_development_active_project').on(t.userId,t.projectId).where(sql`${t.status} IN ('queued','running','indeterminate')`),hostSlot:uniqueIndex('idx_copilot_development_host_slot').on(sql`(1)`).where(sql`${t.status} IN ('running','indeterminate')`),queue:index('idx_copilot_development_queue').on(t.userId,t.status,t.createdAt),project:foreignKey({columns:[t.userId,t.projectId],foreignColumns:[projects.userId,projects.id]}).onDelete('cascade'),action:foreignKey({columns:[t.userId,t.intentId],foreignColumns:[platformActionIntents.userId,platformActionIntents.id]}),state:check('development_state',sql`${t.status} IN ('queued','running','checks_passed','checks_failed','failed','cancelled','indeterminate','accepted')`)}));
 export const copilotDevelopmentEvents=sqliteTable('copilot_development_events',{
  id:text('id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),taskId:text('task_id').notNull(),revision:integer('revision').notNull(),status:text('status').notNull(),createdAt:integer('created_at').notNull(),deliveredAt:integer('delivered_at')

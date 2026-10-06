@@ -34,8 +34,8 @@ export function ChannelDiagnostics({ channelName, isPending, isError, checks, on
     <Card className="forgebadger-animate-in">
       <SettingsCardHeader
         icon={<Activity className="size-4" />}
-        title={`渠道诊断 · ${channelName}`}
-        description="连接、模型与回传链路的实时自检。"
+        title={copy.diagnosticsTitle(channelName)}
+        description={copy.diagnosticsDescription}
         action={
           <Button type="button" variant="outline" size="sm" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
             {expanded ? copy.diagnosticsCollapse : copy.diagnosticsExpand}
@@ -45,9 +45,9 @@ export function ChannelDiagnostics({ channelName, isPending, isError, checks, on
       />
       {expanded && (
         <CardContent className="space-y-2">
-          {isPending && <p role="status">正在检查渠道状态…</p>}
-          {isError && <p role="alert">诊断加载失败，稍后自动重试。</p>}
-          {!isPending && !isError && !checks?.length && <p className="text-sm text-muted-foreground">暂无诊断项。</p>}
+          {isPending && <p role="status">{copy.diagnosticsChecking}</p>}
+          {isError && <p role="alert">{copy.diagnosticsLoadError}</p>}
+          {!isPending && !isError && !checks?.length && <p className="text-sm text-muted-foreground">{copy.diagnosticsEmpty}</p>}
           {checks?.map((check) => {
             const status = check.ok ? "ok" : check.status === "untested" ? "untested" : check.status === "pending" ? "pending" : "failed";
             return (
@@ -69,7 +69,7 @@ export function ChannelDiagnostics({ channelName, isPending, isError, checks, on
                     {status === "failed" && <Badge variant="secondary" className="bg-destructive/15 text-destructive">{copy.diagnosticsStatusFailed}</Badge>}
                   </p>
                   {status === "failed" && check.fixHint && (
-                    <p className="mt-1 text-xs text-muted-foreground">建议：{check.fixHint}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{copy.diagnosticsFixHint(check.fixHint)}</p>
                   )}
                 </div>
               </div>

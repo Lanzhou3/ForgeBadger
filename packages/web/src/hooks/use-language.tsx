@@ -7,16 +7,26 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 import {
   detectSystemLanguage,
   getTranslation,
+  localeForLanguage,
   supportedLanguages,
   type Language,
   type TranslationKey,
+  type UiLocale,
 } from "@/lib/i18n";
 const LANGUAGE_KEY = "forgebadger-language";
+
+// Server markup and the first client render must agree to avoid hydration
+// mismatches, so the server snapshot is always the fallback language. After
+// hydration React reads the client snapshot (stored preference or system
+// locale) and re-renders once if it differs — the useSyncExternalStore
+// contract, unlike a useEffect state flip, never races sibling hydration.
+const serverLanguage: Language = "zh-CN";
 
 interface LanguageContextValue {
   language: Language;
@@ -26,25 +36,42 @@ interface LanguageContextValue {
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
+function readClientLanguage(): Language {
+  try {
+    const stored = window.localStorage.getItem(LANGUAGE_KEY);
+    if (stored && supportedLanguages.includes(stored as Language)) {
+      return stored as Language;
+    }
+  } catch {
+    // localStorage can be unavailable (private mode); fall through.
+  }
+  return detectSystemLanguage(window.navigator.languages);
+}
+
+function subscribeLanguage(): () => void {
+  return () => {};
+}
+
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState<Language>("zh-CN");
+  const detected = useSyncExternalStore(
+    subscribeLanguage,
+    readClientLanguage,
+    () => serverLanguage
+  );
+  const [override, setOverride] = useState<Language | null>(null);
+  const language = override ?? detected;
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(LANGUAGE_KEY);
-    // A valid stored preference always wins; otherwise follow the system
-    // locale so first-time visitors see the UI in their own language.
-    const nextLanguage =
-      stored !== null && supportedLanguages.includes(stored as Language)
-        ? (stored as Language)
-        : detectSystemLanguage(window.navigator.languages);
-    setLanguageState(nextLanguage);
-    document.documentElement.lang = nextLanguage;
-  }, []);
+    document.documentElement.lang = language;
+  }, [language]);
 
   const setLanguage = (nextLanguage: Language) => {
-    setLanguageState(nextLanguage);
-    window.localStorage.setItem(LANGUAGE_KEY, nextLanguage);
-    document.documentElement.lang = nextLanguage;
+    try {
+      window.localStorage.setItem(LANGUAGE_KEY, nextLanguage);
+    } catch {
+      // Persisting the preference is best-effort.
+    }
+    setOverride(nextLanguage);
   };
 
   const value = useMemo<LanguageContextValue>(
@@ -65,4 +92,10 @@ export function useLanguage() {
     throw new Error("useLanguage must be used within LanguageProvider");
   }
   return value;
+}
+
+/** BCP 47 locale matching the current UI language, for toLocale* calls. */
+export function useUiLocale(): UiLocale {
+  const { language } = useLanguage();
+  return localeForLanguage(language);
 }

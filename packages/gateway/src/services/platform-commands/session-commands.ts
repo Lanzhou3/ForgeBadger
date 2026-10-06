@@ -10,7 +10,7 @@ import type { ForgeBadgerEventBus } from "../event-bus.js";
 import { recordActivity } from "../activity-events.js";
 import { recordSessionSnapshot } from "../session-snapshots.js";
 import { getAdapterLaunchStatus } from "../adapter-discovery.js";
-import { createLaunchPlan, createTerminalLaunchPlan, checkTerminalShell, defaultTerminalShell, normalizeSessionKind, prepareAdapterLaunchExtras } from "../session-launch-plan.js";
+import { createLaunchPlan, createTerminalLaunchPlan, checkTerminalShell, resolveAvailableTerminalShell, normalizeSessionKind, prepareAdapterLaunchExtras } from "../session-launch-plan.js";
 import { canonical } from "./actions.js";
 import type { CommandContext, PlatformCommand } from "./types.js";
 const inputSchema = z.object({ sessionId: z.string().min(1).max(128) }).strict();
@@ -63,9 +63,12 @@ async function preflight(ctx: CommandContext, sessionId: string, action: string,
         if (!kind)
             throw new PlatformNoEffectError("Unsupported session adapter", 400);
         if (kind === "terminal") {
-            const shellStatus = await checkTerminalShell(defaultTerminalShell(), undefined, undefined, ctx.adapterCommandRunner);
+            let shell;
+            try { shell = await resolveAvailableTerminalShell(undefined, undefined, ctx.adapterCommandRunner); }
+            catch (error) { throw new PlatformNoEffectError(error instanceof Error ? error.message : "No supported shell is installed"); }
+            const shellStatus = await checkTerminalShell(shell, undefined, undefined, ctx.adapterCommandRunner);
             if (!shellStatus.available)
-                throw new PlatformNoEffectError(`${defaultTerminalShell()} is not available for launch`);
+                throw new PlatformNoEffectError(`${shell} is not available for launch`);
         } else {
             const adapter = kind;
             const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
@@ -117,22 +120,24 @@ async function start(ctx: CommandContext, sessionId: string) {
             }
             let launchPlan;
             if (kind === "terminal") {
-                const shellStatus = await checkTerminalShell(defaultTerminalShell(), undefined, undefined, adapterCommandRunner);
+                const shell = await resolveAvailableTerminalShell(undefined, undefined, adapterCommandRunner);
+                const shellStatus = await checkTerminalShell(shell, undefined, undefined, adapterCommandRunner);
                 if (!shellStatus.available) {
-                    const err = new Error(`${defaultTerminalShell()} is not available for launch`);
+                    const err = new Error(`${shell} is not available for launch`);
                     (err as Error & {
                         httpStatus?: number;
                     }).httpStatus = 409;
                     (err as Error & {
                         details?: unknown;
-                    }).details = { shell: defaultTerminalShell(), command: shellStatus.command, error: shellStatus.error };
+                    }).details = { shell, command: shellStatus.command, error: shellStatus.error };
                     throw err;
                 }
                 authorize();
                 effectsStarted = true;
                 launchPlan = createTerminalLaunchPlan({
                     projectRoot: dbSession.workingDir,
-                    sessionId: dbSession.id
+                    sessionId: dbSession.id,
+                    shell
                 });
             } else {
                 const adapter = kind;

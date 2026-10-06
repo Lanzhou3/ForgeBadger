@@ -24,6 +24,7 @@ import { dispatchSessionInput } from '../agent/platform-access.js';
 import { normalizeAdapter } from '../session-launch-plan.js';
 import { canonical, canonicalRoot } from './actions.js';
 import type { CommandContext, PlatformCommand } from './types.js';
+import { PlatformActionRepository } from '../../db/repositories/platform-action-repository.js';
 const id = z.string().min(1).max(128);
 const projectInput = z.object({ projectId: id }).strict();
 export const projectCreateInput = z.object({ name: z.string().trim().min(1).max(200), path: z.string().trim().min(1).max(1024), description: z.string().max(2000).optional(), techStack: z.string().max(2000).optional(), templateId: id.optional() }).strict();
@@ -250,7 +251,12 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 if (v.scope === 'session') {
                     if (!v.conversationId || !ctx.db.prepare('SELECT id FROM copilot_conversations WHERE user_id=? AND id=?').get(ctx.userId, v.conversationId))
                         throw new Error('Conversation not found');
-                    return { projectIds: [], revision: v.conversationId };
+                    if (ctx.actionOrigin?.kind === 'copilot') {
+                        const origin = new PlatformActionRepository(ctx.db, ctx.userId).copilotOrigin(ctx.actionOrigin.runId, ctx.actionOrigin.stepId);
+                        if (v.projectId !== undefined || origin?.conversation_id !== v.conversationId)
+                            throw new Error('Session memory must match the originating conversation without a project scope');
+                    }
+                    return { projectIds: [], conversationId: v.conversationId, revision: v.conversationId };
                 }
                 return { projectIds: [], revision: 'global' };
             },
@@ -284,6 +290,8 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                             projectId: p.id,
                             sessionId: v.sessionId,
                             command: v.command,
+                            signal: ctx.signal,
+                            authorize: ctx.authorize,
                             ...(v.timeoutMs ? { timeoutMs: v.timeoutMs } : {}),
                             ...(emit ? { onProgress: (tail: string) => emit(tail, 'running') } : {})
                         });
@@ -292,8 +300,11 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                             db: ctx.db,
                             userId: ctx.userId,
                             sessionManager: manager,
+                            projectId: p.id,
                             projectRoot: p.path,
                             command: v.command,
+                            signal: ctx.signal,
+                            authorize: ctx.authorize,
                             ...(v.timeoutMs ? { timeoutMs: v.timeoutMs } : {}),
                             ...(emit ? { onProgress: (tail: string) => emit(tail, 'running') } : {})
                         });

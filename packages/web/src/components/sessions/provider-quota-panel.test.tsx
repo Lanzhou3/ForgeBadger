@@ -13,7 +13,7 @@ import {
   type ProviderBalanceResult,
 } from "@/lib/api";
 
-vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) => key }) }));
+vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) => key }), useUiLocale: () => "en-US" }));
 vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 vi.mock("@/lib/api", () => ({
   getAppliedProviderForAdapter: vi.fn(),

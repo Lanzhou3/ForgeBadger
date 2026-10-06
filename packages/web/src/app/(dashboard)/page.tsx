@@ -16,6 +16,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { QueryState } from "@/components/ui/query-state";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
@@ -33,15 +34,27 @@ import {
   writeActivationDismissed,
 } from "@/lib/activation-dismissal";
 import { normalizeSessionStatus } from "@/lib/session-status";
+import { formatSessionRelativeTime } from "@/components/sessions/session-board-utils";
 import {
   getTerminalRuntimeRemediation,
   getTerminalRuntimeSetupGuidance,
 } from "@/lib/terminal-runtime";
 import { useLanguage } from "@/hooks/use-language";
+import { useDashboardCopy, dashboardHealthDetail } from "@/components/dashboard/dashboard-copy";
 import { cn } from "@/lib/utils";
 
 export default function DashboardPage() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const dashboardCopy = useDashboardCopy();
+  // Client-only clock: relative session times must not participate in SSR
+  // markup (server/client clocks diverge), so render the slot empty until
+  // mount and keep it ticking once a minute.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const dashboardQuery = useQuery({
     queryKey: ["dashboard-summary"],
     queryFn: getDashboardSummary,
@@ -96,23 +109,25 @@ export default function DashboardPage() {
   const runningCount = dashboardStats?.runningSessions
     ?? sessions.filter((session) => normalizeSessionStatus(session.status) === "running").length;
 
-  const stats: { label: string; value: number; sub?: string; icon: typeof FolderOpen; href: string }[] = [
+  // A failed summary query must not masquerade as "everything is zero".
+  const statsUnavailable = dashboardQuery.isError;
+  const stats: { label: string; value: number | string; sub?: string; icon: typeof FolderOpen; href: string }[] = [
     {
       label: t("nav.projects"),
-      value: dashboardStats?.projects ?? 0,
+      value: dashboardStats?.projects ?? (statsUnavailable ? "—" : 0),
       icon: FolderOpen,
       href: "/projects",
     },
     {
       label: t("nav.sessions"),
-      value: dashboardStats?.sessions ?? 0,
+      value: dashboardStats?.sessions ?? (statsUnavailable ? "—" : 0),
       sub: t("dashboard.runningNow").replace("{count}", String(runningCount)),
       icon: TerminalSquare,
       href: "/sessions",
     },
     {
       label: t("nav.skills"),
-      value: dashboardStats?.skills ?? 0,
+      value: dashboardStats?.skills ?? (statsUnavailable ? "—" : 0),
       icon: Wrench,
       href: "/skills",
     },
@@ -163,28 +178,28 @@ export default function DashboardPage() {
     {
       key: "models",
       label: t("dashboard.modelHealth"),
-      detail: dashboardHealth?.models.message ?? t("dashboard.modelHealthDescription"),
+      detail: dashboardHealthDetail(dashboardCopy, "models", dashboardHealth?.models.code, dashboardHealth?.models.message) || t("dashboard.modelHealthDescription"),
       healthy: dashboardHealth?.models.healthy ?? false,
       href: "/models",
     },
     {
       key: "config",
       label: t("dashboard.configHealth"),
-      detail: dashboardHealth?.projectConfig.message ?? t("dashboard.configHealthDescription"),
+      detail: dashboardHealthDetail(dashboardCopy, "projectConfig", dashboardHealth?.projectConfig.code, dashboardHealth?.projectConfig.message) || t("dashboard.configHealthDescription"),
       healthy: dashboardHealth?.projectConfig.healthy ?? false,
       href: "/templates",
     },
     {
       key: "sessions",
       label: t("dashboard.sessionHealth"),
-      detail: dashboardHealth?.sessions.message ?? t("dashboard.sessionHealthDescription"),
+      detail: dashboardHealthDetail(dashboardCopy, "sessions", dashboardHealth?.sessions.code, dashboardHealth?.sessions.message) || t("dashboard.sessionHealthDescription"),
       healthy: dashboardHealth?.sessions.healthy ?? false,
       href: "/sessions",
     },
     {
       key: "skills",
       label: t("dashboard.skillHealth"),
-      detail: dashboardHealth?.skills.message ?? t("dashboard.skillHealthDescription"),
+      detail: dashboardHealthDetail(dashboardCopy, "skills", dashboardHealth?.skills.code, dashboardHealth?.skills.message) || t("dashboard.skillHealthDescription"),
       healthy: dashboardHealth?.skills.healthy ?? false,
       href: "/skills",
     },
@@ -198,10 +213,10 @@ export default function DashboardPage() {
           <p className="mt-1 text-sm text-muted-foreground">{t("dashboard.subtitle")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+          <Button asChild size="sm" variant="brand">
             <Link href="/sessions">
               <Plus className="size-4" />
-              {t("projects.newSession")}
+              {t("dashboard.openSessions")}
             </Link>
           </Button>
           <Button asChild size="sm" variant="outline">
@@ -290,7 +305,7 @@ export default function DashboardPage() {
               ))}
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+              <Button asChild size="sm" variant="brand">
                 <Link href={activationReadiness.primaryAction.href}>
                   {t(activationReadiness.primaryAction.labelKey)}
                 </Link>
@@ -322,7 +337,15 @@ export default function DashboardPage() {
               <Link href="/sessions">{t("dashboard.viewAll")}</Link>
             </Button>
           </div>
-          {recentSessions.length === 0 ? (
+          {sessionsQuery.isError ? (
+            <QueryState
+              isLoading={false}
+              isError
+              isEmpty={false}
+              onRetry={() => void sessionsQuery.refetch()}
+              empty={null}
+            />
+          ) : recentSessions.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
                 <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
@@ -344,27 +367,37 @@ export default function DashboardPage() {
             </Card>
           ) : (
             <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
-              {recentSessions.map((session, index) => (
-                <Link
-                  key={session.id}
-                  href={`/sessions/${session.id}`}
-                  className="group flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
-                  style={{ animationDelay: `${index * 40}ms` }}
-                >
-                  <SessionStatusDot status={session.status} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">
-                      {session.name || session.runtimeSessionName || session.id}
+              {recentSessions.map((session, index) => {
+                const relativeTime =
+                  now === null ? null : formatSessionRelativeTime(session, now, language);
+                return (
+                  <Link
+                    key={session.id}
+                    href={`/sessions/${session.id}`}
+                    className="group flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
+                    style={{ animationDelay: `${index * 40}ms` }}
+                  >
+                    <SessionStatusDot status={session.status} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">
+                        {session.name || session.runtimeSessionName || session.id}
+                      </div>
+                      {/* The relative time tells same-named sessions apart. */}
+                      <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {session.projectName ?? "—"}
+                        {relativeTime ? ` · ${relativeTime}` : ""}
+                      </div>
                     </div>
-                    <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {session.projectName ?? "—"}
-                    </div>
-                  </div>
-                  <CliBrandChip aiTool={session.aiTool} />
-                  <SessionStatusText status={session.status} />
-                  <ArrowUpRight className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-brand" />
-                </Link>
-              ))}
+                    <CliBrandChip aiTool={session.aiTool} />
+                    {/* Status text drops on narrow screens: the row already
+                        truncates, and the dot + CLI chip carry the state. */}
+                    <span className="hidden sm:inline">
+                      <SessionStatusText status={session.status} />
+                    </span>
+                    <ArrowUpRight className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-brand" />
+                  </Link>
+                );
+              })}
             </div>
           )}
         </section>
@@ -411,7 +444,9 @@ function SessionStatusDot({ status }: { status: string }) {
           ? "animate-pulse bg-emerald-400"
           : normalized === "error"
             ? "bg-red-400"
-            : "bg-muted-foreground/40"
+            : normalized === "lost"
+              ? "bg-amber-400"
+              : "bg-muted-foreground/40"
       )}
     />
   );
@@ -428,14 +463,18 @@ function SessionStatusText({ status }: { status: string }) {
           ? "text-emerald-400"
           : normalized === "error"
             ? "text-red-400"
-            : "text-muted-foreground"
+            : normalized === "lost"
+              ? "text-amber-400"
+              : "text-muted-foreground"
       )}
     >
       {normalized === "running"
         ? t("sessions.running")
         : normalized === "error"
           ? t("sessions.error")
-          : t("sessions.stopped")}
+          : normalized === "lost"
+            ? t("sessions.lost")
+            : t("sessions.stopped")}
     </span>
   );
 }

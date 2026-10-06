@@ -484,6 +484,30 @@ All responses use the standard `{code,data,message}` envelope and authenticated 
 
 Run terminal states are `completed`, `failed`, `cancelled`, `stopped` (for example `step_budget_exhausted`) and `indeterminate` (unconfirmed side effects). `pending`, `running` and `awaiting_approval` remain active. Cancellation may retain an indeterminate write step; a later receipt records the outcome without reviving the run. There is no automatic retry endpoint for unknown writes.
 
+Approval lifecycle (2026-10-04): a verified `awaiting_approval` interval is
+persisted and excluded from the run time budget. Multiple intervals accumulate;
+duplicate decisions do not restore spent execution time. `started_at`, token
+and step budgets remain unchanged. Ordinary queue time and Gateway downtime
+outside an approval interval retain their existing wall-clock semantics.
+The originating budget also bounds read-only research started after approval.
+
+The authenticated Web decision route can renew the original, still-unexecuted
+platform intent's 15-minute admission deadline only after atomically rechecking
+the exact input/digest, original resources, actor, tool, project and channel
+authority. Changed resources require a fresh request. Rejected, executing,
+indeterminate or receipted intents cannot be renewed. Decision origin is set
+by the Gateway, never accepted from the request body. Feishu decisions retain
+their signed original deadline; expired cards remain rejected.
+
+Copilot session memory writes are restricted to the originating run's owned
+conversation and cannot carry a project association. They do not require
+project autonomy. Global writes and other projectless actions remain Web-only;
+scheduled and restricted runs do not gain memory write authority. This change
+does not alter running development tasks' existing intent deadline checks or
+provide Shell cancellation/job recovery.
+An older session-memory intent without the conversation resource fact must be
+replaced by a fresh request; its original resource baseline is not rewritten.
+
 `copilot_run_updated` includes `revision` and is a refresh hint; REST is authoritative. Memory endpoints accept `conversationId` for session scope. Global memory rejects project/conversation association; project/session writes require owned scope IDs. Unbound historical session memories are excluded from recall. `write_memory` is an operation, not a scheduled read.
 
 ### Governed platform actions and mixed-project management (P1, 2026-09-05)
@@ -827,10 +851,14 @@ Project workspace context:
   traversal or file reads.
 - `GET /api/v1/projects/:id/git-changes` returns the project's git state for
   the session side panel: `{ isGitRepo, branch?, changed, commits }` with
-  working-tree entries (porcelain status + staged flag, capped at 200) and up
-  to 15 recent commits. Git is invoked via `execFile` with the tenant-scoped
+  all working-tree entries (porcelain status + staged flag, including individual
+  untracked files) and up to 15 recent commits. The Web panel shows the full
+  count, filters by path, and renders 100 entries per page. Git is invoked via
+  `execFile` with the tenant-scoped
   project path as cwd (no shell interpolation, 5 s timeout, optional locks
-  disabled); non-git directories return `isGitRepo: false` instead of an error.
+  disabled, 64 MiB output buffer); non-git directories return `isGitRepo: false`
+  instead of an error. A failed working-tree read (including timeout or output
+  overflow) returns an error instead of an empty change list.
 - `GET /api/v1/projects/:id/git-diff?path=<relative-path>&untracked=0|1`
   returns the unified diff (`git diff HEAD -- <path>`, falling back to staged +
   unstaged diffs when the repo has no commits) for one tracked file, capped at
@@ -893,13 +921,43 @@ Project Agent orchestration:
 - `GET /api/v1/sessions`
 - `POST /api/v1/sessions`
 - `GET /api/v1/sessions/board`
+- `GET /api/v1/sessions/work-state`
+- `GET /api/v1/sessions/shells`
 - `GET /api/v1/sessions/:id`
+- `GET /api/v1/sessions/:id/summary`
 - `PUT /api/v1/sessions/:id/last-prompt`
 - `POST /api/v1/sessions/:id/connect`
 - `POST /api/v1/sessions/:id/start`
 - `POST /api/v1/sessions/:id/stop`
 - `DELETE /api/v1/sessions/:id`
 - `DELETE /api/v1/sessions/:id?force=true`
+
+`GET /api/v1/sessions/:id/summary` requires authentication and returns
+`{ summary, latestResult, workState }` inside `data`; another tenant's session
+returns `404`. `summary` is the current launch/round observation, not the last
+arriving event. `latestResult` is a separate historical response-end record;
+either may be `null`. `workState` is `working`, `idle`, or `unknown` and does
+not imply task success. Old completions cannot replace a newer current round.
+
+Version-1 observations include `runtimeEpoch`, `identityQuality`
+(`exact_turn`, `session_only`, `unknown`), optional native session/turn IDs,
+`state`, millisecond observation/start/end times, and bounded `request`,
+`result`, `error`, `progress`, `verification`, and `nextAction` fields.
+Excerpt fields carry `text` and source provenance. Replies are CLI reports;
+tool-return events alone are not command or test verification. No command
+verification contract is enabled by this change. Unidentified events never
+borrow another event's request, progress, or result.
+
+Migration `0127` adds tenant/session/launch/turn-scoped redacted observations,
+bounded to 128 records per session and pruned after seven days on observation
+or read. Full transcripts, reasoning, tool stdout and terminal history are
+not stored. The server owns launch epochs; the attach-token fingerprint stays
+internal. Supported final fields are Codex/Claude Stop replies, root OpenCode
+completed assistant text with matching user parent, and Pi finalized text at
+`agent_settled`. Kimi request/error fields are supported, but native final-file
+reading remains disabled until source and round ownership can be established.
+MiniMax Code's current fixed OSC signals provide status only. Missing result
+or verification data is stated explicitly in cards and the Web summary panel.
 
 Create body:
 
@@ -909,6 +967,26 @@ Create body:
   "aiTool": "codex"
 }
 ```
+
+Plain terminal creation also accepts `aiTool: "terminal"` and an optional
+`shell` (`pwsh`, `powershell`, `cmd`, `bash`, `zsh`, `sh`). When omitted, the
+Gateway probes its preferred shell and falls back to an installed native
+shell; no supported shell returns `409` without creating a session row.
+`GET /api/v1/sessions/shells` returns `{ platform, shells }` inside `data`,
+where `platform` is the Gateway host's Node platform and each shell reports
+`{ shell, available, command }`. Browser operating-system detection is only
+an initial UI fallback; launch choices follow the Gateway host.
+
+Copilot shell commands use temporary database-backed sessions or a reused
+persistent Copilot shell. A command timeout stops the entire shell, preserves
+the captured output tail and marks it exited; reopen a persistent shell to
+continue. Post-submission monitoring errors also stop the shell. If shutdown
+cannot be confirmed, `SHELL_SESSION_STOP_UNCONFIRMED` retains an error row
+and blocks further Copilot shell commands for that project until the runtime
+is verified stopped. Owner takeover transfers control and ends Copilot
+monitoring; `userTookOver: true` does not imply the existing command stopped
+and must not trigger an automatic retry. Copilot-only automatic shells skip
+interactive profiles to avoid startup prompts consuming command input.
 
 Delete semantics: a delete requires a confirmed stop receipt from the Session
 Server daemon; while the stop is unconfirmed (the CLI exited but a descendant
@@ -1603,7 +1681,10 @@ accepts the legacy wrapper payload used by older command-hook templates.
 
 - `GET /api/v1/notifications/feishu` returns `{ config, ready, blocker, targets }`.
 - `PUT /api/v1/notifications/feishu` replaces the personal subscription with
-  `{ enabled, targetId, types, webBaseUrl, revision }`. The revision must match
+  `{ enabled, targetId, types, webBaseUrl, revision }`.
+  Result summaries are built-in notification content, with no extra opt-in.
+  The retired `contentLevel` field accepts legacy `status`/`summary` inputs
+  but normalizes both, and omitted fields, to `summary`. The revision must match
   the current version (initially `0`); stale updates return `409` with
   `details.code=CONFIG_CONFLICT`. Identical updates preserve the revision.
   Legacy `identityId` requests still select a private-chat target. Supplying
@@ -1634,6 +1715,16 @@ to persisted CLI notifications, app-action results, and automation result
 notifications; ordinary Copilot runs do not emit a notification merely by
 finishing. Existing notification history is not backfilled.
 
+CLI card headers contain the event state, with the request shown once in the
+body. Result/error/pending-action information precedes secondary context.
+Captured native reply, progress, and detailed-error excerpts appear by default
+for enabled subscriptions. The settings UI explains that the selected
+private-chat recipient or group members can see those excerpts; it has no
+content-level selector. They are redacted before truncation and kept
+as inert plain text within an 1800-Unicode-character body budget. The summary
+is frozen before local notification/queue creation, rather than looked up
+again when delivery occurs. CLI response completion is not task acceptance.
+
 Saving an enabled subscription explicitly authorizes outbound notifications to
 one selected private chat or verified group. Group targets are never selected
 automatically; the UI identifies that group members can see the chosen notification
@@ -1651,6 +1742,12 @@ Settings and delivery metadata remain tenant scoped. Disabling is possible after
 the target becomes stale. Configuration changes cancel pending deliveries; sends
 recheck the exact subscription/target versions and source notification after
 network waits and immediately before the message request.
+Migration `0128` upgrades historical `status` rows to `summary`, cancels their
+old pending work and increments revision. It preserves notification enablement,
+target, types and Web address and does not backfill notification history.
+Already-submitted Feishu requests cannot be recalled; their receipt retains
+the existing delivered/failed/unknown semantics. Long-task progress
+subscriptions and in-place card updates are not enabled by this change.
 
 Target unavailability and recovery increment its revision so old queued work
 cannot revive. Updating a group name or verification timestamp preserves the
@@ -1765,6 +1862,15 @@ model. Optional per-model rates are user-configured hourly rates. Cost fields
 are labeled `estimated` and are duration-based only; ForgeBadger does not claim
 provider token billing accuracy from this endpoint.
 
+`GET /api/v1/sessions/work-state` returns `{ states, snapshotAt }` for the
+authenticated user's sessions. Each state is `{ sessionId, state, updatedAt }`,
+where `state` is `working`, `idle`, or `unknown`; timestamps are epoch milliseconds.
+This runtime snapshot repairs missed task lifecycle events after browser navigation,
+refresh, or event-stream reconnect. A live CLI process does not imply active work.
+Before a native task event is observed (including after Gateway restart), a running
+session is `unknown` and its tab dot is static. Non-running sessions are `idle`.
+No prompts or terminal history are retained in this runtime work-state cache.
+
 ### Session Hooks
 
 - `POST /api/v1/session-hooks/claude-notification`
@@ -1782,6 +1888,14 @@ in the path or `X-ForgeBadger-Session-Id`. The payload may carry an optional
 `permission_prompt`, `permission_denied`, `task_completed`, `task_interrupted`,
 `task_failed`, or `session_ended` and emit a user-scoped `claude_notification` event on
 `/ws/events`.
+
+Root `UserPromptSubmit`, `TaskStarted`, and `TurnStarted` hooks update the work
+indicator to `working` without creating notifications. Root completion/failure,
+interrupt, session-end, and process-stop events reset it to `idle`. Child-agent
+completion and an older identified native turn cannot clear a newer task's work
+indicator. Claude/Codex use their prompt hooks, OpenCode uses root busy/retry
+status, Kimi uses prompt/turn-start hooks, and Pi uses interactive `agent_start`.
+Changed hook bundles are loaded by CLI sessions on their next restart.
 
 ### External MCP Endpoint
 
@@ -1826,7 +1940,11 @@ revokes immediately. MCP requests present the token as
 request and revocation takes effect at once.
 
 The tool surface reuses the native Copilot platform tools
-(`services/agent/tools`). Legacy account tokens without `cli_dispatch` expose read tools
+(`services/agent/tools`) through an explicit MCP allowlist shared by listing, lookup and available-tool
+validation. New native tools are not automatically granted to existing tokens.
+Raw `terminal_run`, `terminal_run_in_session` and `open_copilot_shell` remain
+unavailable for every token type, including `operate` and CLI-scoped tokens.
+Legacy account tokens without `cli_dispatch` expose read tools
 (`list_projects`, `get_project`,
 `list_sessions`, `get_session`, `get_session_output`, `list_playbooks`,
 `load_playbook`, `read_skill_resource`, `search_memory`, `list_memory`, `get_usage_summary`,
@@ -1920,6 +2038,7 @@ activity rows, and the notification center.
 ```json
 { "type": "session_created", "payload": { "session_id": "...", "project_id": "...", "name": "..." } }
 { "type": "session_status_changed", "payload": { "session_id": "...", "old_status": "starting", "new_status": "running" } }
+{ "type": "session_work_state_changed", "payload": { "session_id": "...", "state": "working", "updated_at": 1777680000000 } }
 { "type": "session_deleted", "payload": { "session_id": "..." } }
 { "type": "claude_notification", "payload": { "session_id": "...", "hook_event_name": "Notification", "notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash", "tool_name": "Bash", "notification_id": "...", "created_at": "2026-05-02T00:00:00.000Z", "read": false } }
 { "type": "activity_created", "payload": { "activity_id": "...", "session_id": "...", "project_id": "...", "activity_type": "permission_prompt", "status": "warning", "message": "Permission prompt: Bash", "created_at": "2026-05-02T00:00:00.000Z" } }
@@ -2233,6 +2352,14 @@ groups and topics receive separate histories. Every execution revalidates the
 parent route, identity, account, project autonomy and chat allowlist. Telegram
 retains `message_thread_id`; Feishu uses actual `thread_id` and replies to the
 persisted inbound message. A Feishu quote `root_id` alone does not create a topic.
+Admission persists a trusted snapshot of the route/identity revisions, original
+allowed projects and canonical roots. Followups and research/review/repair children
+inherit it. Reading, memory recall, notifications, artifacts, approvals, execution
+and result delivery recheck that snapshot against current authority; changes do
+not expand an existing run. Resource lists contain only the original project set.
+Global memory/usage, raw Shell and unreviewed extension tools are unavailable to
+channel runs. Legacy runs and derived children without trustworthy snapshots are
+fenced; unknown write outcomes remain indeterminate rather than being replayed.
 Deleting the parent route conversation revokes all child conversation authority,
 including Web admission, approval resumption and development effects; rejection
 and cancellation remain available. The target child must also remain active.
@@ -2759,6 +2886,7 @@ envelope; project/task lookup requires the current tenant and explicit `projectI
 | GET | `/development/capability` | `{ available, reason }`; actual local sandbox probe. Task execution requires macOS (Seatbelt `sandbox-exec`) plus Node >=22.8; other platforms fail closed with reason codes such as `DEVELOPMENT_SANDBOX_REQUIRES_MACOS` |
 | GET | `/development/tasks?projectId=...` | `{ tasks }`, latest 50 for the project |
 | GET | `/development/tasks/:id?projectId=...` | `{ task, evidence }`, finite diff/check receipts |
+| POST | `/development/tasks/:id/reconcile` | Owner JWT; strict `{ projectId, expectedRevision }`. Returns `{ task }` after independent proof that the recorded execution ended. Never accepts client-provided stop evidence or queues another execution. |
 
 `submit_development_task` maps to `development.task.submit`. Input contains
 `projectId`, `goal`, explicit `sourceFiles`, `changes: [{ path, beforeSha256,
@@ -2784,6 +2912,17 @@ Task states: `queued`, `running`, `checks_passed`, `checks_failed`, `failed`,
 semantic goal or imply acceptance. Indeterminate execution is not automatically
 replayed and keeps the single host slot reserved for operator reconciliation.
 Summaries expose IDs, goal, status, revision, digests, timestamps and safe error.
+Reconciliation adds a safe `reconciliation` summary: `{ version: 1, outcome:
+"unknown", basis: "supervisor_stopped" | "host_reboot", identityDigest,
+observedAt }`. A reconciled task becomes `failed` and releases the host slot;
+its result remains unknown and it is never automatically replayed. Same-boot
+proof requires the private supervisor stop receipt plus an independent empty
+process-group observation. A different trusted boot identity can prove the
+recorded execution ended. Legacy records without complete execution identity,
+missing receipts, active processes or stale revisions remain fenced. HTTP 409
+returns `details.code` (`DEVELOPMENT_RECONCILIATION_*`) and `details.remedy`;
+foreign or missing tasks return 404. PID, nonce and private evidence paths are
+not exposed by task summaries.
 Evidence includes file hashes, diff, check path/exit/output/timing/cancel fields.
 `copilot_development_updated` events carry `taskId`, `status`, `revision`, `eventId`;
 at-least-once delivery requires clients to deduplicate or refresh by revision.
@@ -3110,6 +3249,19 @@ replaces text for a higher execution fence, ignores older fences and replaces
 provisional output with durable history at settlement. Incomplete tokens are
 buffered; possible credential introducers freeze the remaining response until
 redaction and valid completion. Private reasoning is never a public text stream.
+`GET /runs/:id` may include `provisionalText: { steps: [{ stepId, fence, sequence,
+text }] }`, in model-step order, to fill missing public frames. It contains only
+text already released by the safe public stream, is tenant/run/fence scoped,
+and is held in memory (32 runs, 256 Ki characters per run). Settlement and
+shutdown clear it; overflow or restart may omit it. Final messages remain the
+durable transcript. The client combines refreshes and does not fetch each delta.
+
+Approval failures preserve a stable `details.code`; the client displays a remedy
+and refreshes authoritative state without automatically resending the decision.
+Model HTTP failures preserve safe `httpStatus`, `category` and optional numeric
+`retryAfterSeconds` on the model step, plus a visible diagnostic message. Provider
+response bodies and credentials are excluded. Model configuration and active
+credentials are resolved for each call; `authType: "none"` needs no credential.
 
 ### Copilot memory search index (0113)
 

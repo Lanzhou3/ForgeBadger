@@ -7,6 +7,7 @@ import { Lock, Server } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -30,6 +31,8 @@ import { toast } from "@/lib/toast";
 
 export const runtimeSettingsQueryKey = ["runtime-settings"] as const;
 
+const SESSION_PREFIX_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
 /**
  * Instance settings card: registration mode and the terminal session name
  * prefix, stored as DB overrides on top of the .env defaults. Admin-only;
@@ -42,6 +45,7 @@ export function InstanceRuntimeSettings() {
   const [registration, setRegistration] = useState<string>("");
   const [prefix, setPrefix] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [pendingRegistration, setPendingRegistration] = useState<string | null>(null);
 
   const settings = useQuery({
     queryKey: runtimeSettingsQueryKey,
@@ -76,6 +80,7 @@ export function InstanceRuntimeSettings() {
   const readonly = settings.data?.readonly ?? false;
   const registrationSource = settings.data ? runtimeSettingsMeta(settings.data, "registration")?.source : undefined;
   const prefixSource = settings.data ? runtimeSettingsMeta(settings.data, "session_prefix")?.source : undefined;
+  const prefixInvalid = !SESSION_PREFIX_PATTERN.test(prefix);
 
   return (
     <Card className="forgebadger-animate-in">
@@ -114,6 +119,12 @@ export function InstanceRuntimeSettings() {
               <Select
                 value={registration}
                 onValueChange={(value) => {
+                  // Tightening registration is an impactful, hard-to-notice
+                  // change: explain the consequences before staging it.
+                  if (value === "off" || value === "invite") {
+                    setPendingRegistration(value);
+                    return;
+                  }
                   setRegistration(value);
                   setDirty(true);
                 }}
@@ -149,13 +160,18 @@ export function InstanceRuntimeSettings() {
                 disabled={readonly}
                 className="h-8 w-48 font-mono text-xs"
               />
-              <p className="text-xs text-muted-foreground">{t("settings.sessionPrefixDescription")}</p>
+              {prefixInvalid ? (
+                <p className="text-xs text-destructive">{t("settings.sessionPrefixInvalid")}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">{t("settings.sessionPrefixDescription")}</p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
                 className="h-8"
-                disabled={readonly || !dirty || save.isPending}
+                disabled={readonly || !dirty || prefixInvalid || save.isPending}
+                title={prefixInvalid ? t("settings.sessionPrefixInvalid") : undefined}
                 onClick={() => save.mutate()}
               >
                 {save.isPending ? t("common.loading") : t("common.save")}
@@ -164,6 +180,26 @@ export function InstanceRuntimeSettings() {
           </>
         )}
       </CardContent>
+
+      <ConfirmDialog
+        open={pendingRegistration !== null}
+        title={t("settings.registrationRestrictConfirmTitle")}
+        description={t("settings.registrationRestrictConfirmDescription").replace(
+          "{mode}",
+          t(pendingRegistration === "off" ? "settings.registrationOff" : "settings.registrationInvite")
+        )}
+        confirmLabel={t("settings.registrationRestrictConfirmAction")}
+        onOpenChange={(open) => {
+          if (!open) setPendingRegistration(null);
+        }}
+        onConfirm={() => {
+          if (pendingRegistration) {
+            setRegistration(pendingRegistration);
+            setDirty(true);
+          }
+          setPendingRegistration(null);
+        }}
+      />
     </Card>
   );
 }

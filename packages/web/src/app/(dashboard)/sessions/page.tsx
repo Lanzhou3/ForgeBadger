@@ -63,6 +63,21 @@ export default function SessionsPage() {
     queryFn: getDependencies,
   });
   const prefs = useSessionBoardPrefs();
+  // The kanban board uses fixed pixel column widths with horizontal scrolling,
+  // which degrades on small screens: below md always render the list view
+  // (the desktop preference is preserved and re-applies at md and up).
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      return;
+    }
+    const media = window.matchMedia("(min-width: 768px)");
+    const update = () => setIsDesktop(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  const boardView = isDesktop ? prefs.view : "list";
 
   const refreshSessions = () => {
     queryClient.invalidateQueries({ queryKey: ["sessions-board"] });
@@ -189,7 +204,15 @@ export default function SessionsPage() {
     return merged;
   }, [sessions, localPrompts]);
 
-  const now = Date.now();
+  // Relative times must not participate in SSR/hydration rendering (server
+  // clock vs client clock diverge); render a placeholder until mounted, then
+  // keep the clock fresh so relative labels tick over.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const actionPending = startMutation.isPending || stopMutation.isPending || deleteMutation.isPending;
 
   const toggleCliTool = (tool: string) => {
@@ -229,14 +252,14 @@ export default function SessionsPage() {
         {hasProjects ? (
           <Button
             size="sm"
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            variant="brand"
             onClick={() => setProjectPickerOpen(true)}
           >
             <Plus className="size-4" />
             {t("projects.newSession")}
           </Button>
         ) : (
-          <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+          <Button asChild size="sm" variant="brand">
             <Link href="/projects/new">
               <Plus className="size-4" />
               {t("sessions.createProject")}
@@ -249,7 +272,7 @@ export default function SessionsPage() {
         <SessionBoardSkeleton />
       ) : sessions.length === 0 ? (
         <Card>
-          <CardContent className="flex flex-col items-center justify-center gap-4 py-12 text-center">
+          <CardContent className="flex min-h-[50vh] flex-col items-center justify-center gap-4 py-12 text-center">
             <div
               className={cn(
                 "flex size-10 items-center justify-center rounded-md",
@@ -294,34 +317,20 @@ export default function SessionsPage() {
               {hasProjects ? (
                 <Button
                   size="sm"
-                  className="bg-brand text-brand-foreground hover:bg-brand/90"
+                  variant="brand"
                   onClick={() => setProjectPickerOpen(true)}
                 >
                   <FolderOpen className="size-4" />
                   {t("sessions.createFromProject")}
                 </Button>
               ) : (
-                <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+                <Button asChild size="sm" variant="brand">
                   <Link href="/projects/new">
                     <Plus className="size-4" />
                     {t("sessions.createProject")}
                   </Link>
                 </Button>
               )}
-            </div>
-          </CardContent>
-        </Card>
-      ) : filteredSessions.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center gap-3 py-10 text-center">
-            <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-              <TerminalSquare className="size-5" />
-            </div>
-            <div>
-              <div className="text-sm font-medium">{t("sessions.noMatchesTitle")}</div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {t("sessions.noMatchesDescription")}
-              </p>
             </div>
           </CardContent>
         </Card>
@@ -339,10 +348,24 @@ export default function SessionsPage() {
             onShowEmptyProjectsChange={setShowEmptyProjects}
             hasCustomColumnOrder={prefs.columnOrder.length > 0}
             onResetColumnOrder={prefs.resetColumnOrder}
-            view={prefs.view}
+            view={boardView}
             onViewChange={prefs.setView}
           />
-          {prefs.view === "list" ? (
+          {filteredSessions.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center gap-3 py-10 text-center">
+                <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                  <TerminalSquare className="size-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-medium">{t("sessions.noMatchesTitle")}</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("sessions.noMatchesDescription")}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : boardView === "list" ? (
             <SessionBoardListView
               columns={orderedColumns}
               prompts={prompts}
@@ -403,7 +426,7 @@ export default function SessionsPage() {
                 <p className="text-sm text-muted-foreground">
                   {t("sessions.chooseProjectEmpty")}
                 </p>
-                <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+                <Button asChild size="sm" variant="brand">
                   <Link href="/projects/new">
                     <Plus className="size-4" />
                     {t("sessions.createProject")}

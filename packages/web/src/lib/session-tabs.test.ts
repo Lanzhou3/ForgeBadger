@@ -3,14 +3,18 @@ import { describe, expect, it } from "vitest";
 import {
   getLatestRunningTab,
   groupSessionTabs,
+  readCollapsedSessionTabGroups,
+  reorderSessionTab,
   pruneSessionTabs,
   readSessionTabs,
   removeSessionTab,
   sessionTabGroupColor,
   sessionToTab,
+  setSessionTabGroupCollapsed,
   setSessionTabPrompt,
   splitSessionTabsByVisibility,
-  upsertSessionTab
+  upsertSessionTab,
+  writeSessionTabs,
 } from "./session-tabs";
 
 class MemoryStorage implements Pick<Storage, "getItem" | "setItem"> {
@@ -30,6 +34,66 @@ class MemoryStorage implements Pick<Storage, "getItem" | "setItem"> {
 }
 
 describe("session tabs", () => {
+  it("reorders only the selected project's slots and preserves group order and metadata", () => {
+    const storage = new MemoryStorage();
+    writeSessionTabs([
+      { id: "a1", label: "A1", projectId: "a", projectName: "Alpha", status: "running", updatedAt: 1 },
+      { id: "b1", label: "B1", projectId: "b", projectName: "Beta", status: "running", updatedAt: 2 },
+      { id: "a2", label: "A2", projectId: "a", projectName: "Alpha", status: "running", updatedAt: 3 },
+      { id: "a3", label: "A3", projectId: "a", projectName: "Alpha", lastPrompt: "Keep this", status: "running", updatedAt: 4 },
+      { id: "b2", label: "B2", projectId: "b", projectName: "Beta", status: "running", updatedAt: 5 },
+    ], storage);
+
+    const reordered = reorderSessionTab("a3", "a1", storage);
+
+    expect(reordered.map(tab => tab.id)).toEqual(["a3", "b1", "a1", "a2", "b2"]);
+    expect(groupSessionTabs(reordered).map(group => group.projectName)).toEqual(["Alpha", "Beta"]);
+    expect(reordered[0]).toMatchObject({ lastPrompt: "Keep this", updatedAt: 4 });
+    upsertSessionTab({ id: "a3", label: "Refreshed", status: "running", updatedAt: 10 }, storage);
+    expect(readSessionTabs(storage).map(tab => tab.id)).toEqual(["a3", "b1", "a1", "a2", "b2"]);
+    expect(reorderSessionTab("a3", "a2", storage).map(tab => tab.id)).toEqual(["a1", "b1", "a2", "a3", "b2"]);
+  });
+
+  it("rejects moves between projects even when their names match, and ignores missing targets", () => {
+    const storage = new MemoryStorage();
+    const tabs = writeSessionTabs([
+      { id: "a", label: "A", projectId: "one", projectName: "Same", updatedAt: 1 },
+      { id: "b", label: "B", projectId: "two", projectName: "Same", updatedAt: 2 },
+    ], storage);
+    expect(groupSessionTabs(tabs)).toHaveLength(2);
+    expect(reorderSessionTab("a", "b", storage)).toEqual(tabs);
+    expect(reorderSessionTab("missing", "b", storage)).toEqual(tabs);
+    expect(reorderSessionTab("a", "missing", storage)).toEqual(tabs);
+    expect(reorderSessionTab("a", "a", storage)).toEqual(tabs);
+  });
+
+  it("persists collapsed groups independently of tab updates and tolerates corrupt preferences", () => {
+    const storage = new MemoryStorage();
+    expect([...readCollapsedSessionTabGroups(storage)]).toEqual([]);
+    setSessionTabGroupCollapsed("project:one", true, storage);
+    setSessionTabGroupCollapsed("project:two", true, storage);
+    upsertSessionTab({ id: "a", label: "A", projectId: "one", updatedAt: 1 }, storage);
+    expect([...readCollapsedSessionTabGroups(storage)]).toEqual(["project:one", "project:two"]);
+    setSessionTabGroupCollapsed("project:one", false, storage);
+    expect([...readCollapsedSessionTabGroups(storage)]).toEqual(["project:two"]);
+    storage.setItem("forgebadger.sessionTabGroups.v1", "{");
+    expect([...readCollapsedSessionTabGroups(storage)]).toEqual([]);
+    storage.setItem("forgebadger.sessionTabGroups.v1", JSON.stringify([null, 5, "", "project:valid"]));
+    expect([...readCollapsedSessionTabGroups(storage)]).toEqual(["project:valid"]);
+  });
+
+  it("reclaims inline slots from collapsed groups while leaving all their sessions accessible", () => {
+    const tabs = [
+      { id: "a1", label: "A1", projectId: "a", projectName: "Alpha", updatedAt: 1 },
+      { id: "a2", label: "A2", projectId: "a", projectName: "Alpha", updatedAt: 2 },
+      { id: "b1", label: "B1", projectId: "b", projectName: "Beta", updatedAt: 3 },
+      { id: "b2", label: "B2", projectId: "b", projectName: "Beta", updatedAt: 4 },
+    ];
+    const { visibleIds, hiddenTabs } = splitSessionTabsByVisibility(tabs, "a1", 2, new Set(["project:a"]));
+    expect([...visibleIds]).toEqual(["b1", "b2"]);
+    expect(hiddenTabs.map(tab => tab.id)).toEqual(["a1", "a2"]);
+  });
+
   it("upserts tabs without reordering existing tabs", () => {
     const storage = new MemoryStorage();
 

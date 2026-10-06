@@ -1,5 +1,5 @@
 import type { Database } from '../types.js';
-import { redactAgentText } from '../../services/agent/redaction.js';
+import { cliText } from '../../services/notifications/cli-observation.js';
 
 export const MAX_SESSION_NOTIFICATION_PROMPTS = 128;
 export interface NativePromptIdentity { sessionId: string; turnId?: string }
@@ -12,8 +12,7 @@ export function nativePromptIdentity(sessionId: unknown, turnId: unknown): Nativ
 }
 
 export function notificationPromptSummary(prompt: string): string {
-  const chars = Array.from(redactAgentText(prompt).replace(/\s+/gu, ' ').trim());
-  return chars.length > 600 ? chars.slice(0, 599).join('') + '…' : chars.join('');
+  return cliText(prompt, 600, true);
 }
 
 /** Native IDs have meaning only within a tenant-owned ForgeBadger session. */

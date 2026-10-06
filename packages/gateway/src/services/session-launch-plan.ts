@@ -160,8 +160,8 @@ export interface TerminalLaunchPlanInput {
 }
 
 /**
- * Resolve the platform-default shell for a terminal session. win32 prefers
- * pwsh when present, falling back to cmd.exe; POSIX uses $SHELL then sh.
+ * Resolve the preferred shell without probing availability. Windows prefers
+ * pwsh; POSIX uses $SHELL then sh. Use resolveAvailableTerminalShell to launch.
  */
 export function defaultTerminalShell(
   platform: NodeJS.Platform = process.platform,
@@ -174,6 +174,19 @@ export function defaultTerminalShell(
   if (shell === "/bin/zsh" || shell?.endsWith("/zsh")) return "zsh";
   if (shell === "/bin/bash" || shell?.endsWith("/bash")) return "bash";
   return "sh";
+}
+
+/** Resolve a launchable default, including Windows hosts without PowerShell 7. */
+export async function resolveAvailableTerminalShell(
+  platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env,
+  runner?: CommandRunner
+): Promise<TerminalShell> {
+  const preferred = defaultTerminalShell(platform, env);
+  const fallback: TerminalShell[] = platform === "win32" ? ["pwsh", "powershell", "cmd"] : ["bash", "zsh", "sh"];
+  for (const shell of new Set([preferred, ...fallback])) {
+    if ((await checkTerminalShell(shell, platform, env, runner)).available) return shell;
+  }
+  throw new Error("TERMINAL_SHELL_UNAVAILABLE: no supported shell is installed");
 }
 
 /**

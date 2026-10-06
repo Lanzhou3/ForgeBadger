@@ -24,11 +24,11 @@ export const COPILOT_DELIVERY_UNCONFIRMED = "COPILOT_DELIVERY_UNCONFIRMED";
 export function listSessionSummaries(
   db: Database,
   userId: string,
-  input: { projectId?: string; limit?: number; allowedProjectIds?: string[] }
+  input: { projectId?: string; limit?: number; allowedProjectIds?: string[]; isSessionAllowed?: (sessionId: string) => boolean }
 ) {
   const repository = new SessionRepository(db, userId);
   const rows = input.projectId ? repository.listByProject(input.projectId) : repository.list();
-  return rows.filter(row=>!input.allowedProjectIds||input.allowedProjectIds.includes(row.projectId)).slice(0, input.limit ?? 50).map((session) => ({
+  return rows.filter(row=>(!input.allowedProjectIds||input.allowedProjectIds.includes(row.projectId)) && (!input.isSessionAllowed || input.isSessionAllowed(row.id))).slice(0, input.limit ?? 50).map((session) => ({
     id: session.id,
     name: session.name,
     aiTool: session.aiTool,

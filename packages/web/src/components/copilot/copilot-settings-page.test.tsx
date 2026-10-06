@@ -49,6 +49,11 @@ it("renders the settings nav with entries into every Copilot settings section", 
   expect(nav.querySelector('a[href="/copilot/extensions"]')).toBeTruthy();
   expect(nav.querySelector('a[href="/copilot/channels"]')).toBeTruthy();
   expect(nav.querySelector('a[href="/copilot/automations"]')).toBeTruthy();
+  // Horizontal chip row on mobile: the overflow is hinted with a right-edge
+  // fade, and the desktop column drops both the mask and the overflow.
+  expect(nav.className).toContain("overflow-x-auto");
+  expect(nav.className).toContain("[mask-image:linear-gradient");
+  expect(nav.className).toContain("lg:[mask-image:none]");
 });
 it("links summary cards to extensions, channels and automations", () => {
   mount();

@@ -38,7 +38,6 @@ export function DiagnosticsSettings() {
           type="button"
           variant="outline"
           size="sm"
-          className="w-full justify-start"
           onClick={handleDiagnosticsExport}
           disabled={diagnosticsState === "exporting"}
         >

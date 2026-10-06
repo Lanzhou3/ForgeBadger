@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { useSettingsCopy } from "./settings-copy";
 import {
   getProjectOverview,
   setCopilotAutonomy,
@@ -17,6 +18,7 @@ import {
  * plus the per-project management progress view.
  */
 export function CopilotManagementPanel() {
+  const copy = useSettingsCopy();
   const overview = useQuery({
     queryKey: ["project-management-overview"],
     queryFn: () => getProjectOverview(),
@@ -25,27 +27,26 @@ export function CopilotManagementPanel() {
   return (
     <div className="space-y-6 p-4 text-sm">
       <section className="space-y-3">
-        <h2 className="font-semibold">Copilot 项目自治</h2>
+        <h2 className="font-semibold">{copy.mgmtTitle}</h2>
         <p className="text-xs text-muted-foreground">
-          打开开关即授权 Copilot 在该项目内直接执行平台动作（创建任务、创建会话、下发指令），
-          无需逐条审批；关闭后立即停止授权，新动作会被拒绝。
+          {copy.mgmtDescription}
         </p>
-        {overview.isPending && <p role="status">正在加载项目…</p>}
+        {overview.isPending && <p role="status">{copy.projectsLoading}</p>}
         {overview.isError && (
           <p role="alert">
-            项目加载失败{" "}
+            {copy.mgmtLoadFailed}{" "}
             <Button
               size="sm"
               variant="outline"
               onClick={() => void overview.refetch()}
             >
-              重试
+              {copy.autonomyRetry}
             </Button>
           </p>
         )}
         {overview.data?.projects.length === 0 && (
           <p className="text-muted-foreground">
-            暂无项目，请先在项目页创建或导入。
+            {copy.mgmtNoProjects}
           </p>
         )}
         {overview.data?.projects.map((project) => (
@@ -58,6 +59,7 @@ export function CopilotManagementPanel() {
 }
 
 function AutonomyRow({ project }: { project: ManagedProject }) {
+  const copy = useSettingsCopy();
   const client = useQueryClient();
   const mutation = useMutation({
     mutationFn: (enabled: boolean) => setCopilotAutonomy(project.id, enabled),
@@ -74,15 +76,15 @@ function AutonomyRow({ project }: { project: ManagedProject }) {
           {project.name}
         </a>
         <p className="text-xs text-muted-foreground">
-          {project.copilotAutonomy ? "已授权 Copilot 自治执行" : "未授权"}
-          {mutation.isError ? ` · 保存失败：${mutation.error.message}` : ""}
+          {project.copilotAutonomy ? copy.mgmtAutonomyOn : copy.mgmtAutonomyOff}
+          {mutation.isError ? ` · ${copy.mgmtSaveFailed(mutation.error.message)}` : ""}
         </p>
       </div>
       <Switch
         checked={project.copilotAutonomy}
         onCheckedChange={(value) => mutation.mutate(value)}
         disabled={mutation.isPending}
-        aria-label={`${project.name} Copilot 自治开关`}
+        aria-label={copy.mgmtSwitchAria(project.name)}
       />
     </div>
   );
@@ -99,14 +101,12 @@ function useProjectOverview() {
 }
 
 function ManagementSection({ overview }: { overview: OverviewQuery }) {
+  const copy = useSettingsCopy();
   return (
     <section className="space-y-3">
-      <h2 className="font-semibold">多项目进度</h2>
+      <h2 className="font-semibold">{copy.mgmtProgressTitle}</h2>
       <p className="text-xs text-muted-foreground">
-        此处是账号下的项目管理视图，不会扩大会话授权范围。CLI
-        自动下发需先在“Copilot 设置 → 常规 → 派发自主权”（或 Gateway
-        环境变量 FORGEBADGER_CLI_AUTONOMY_ADAPTERS）中为对应适配器开启；
-        未开启的适配器仍需人工在终端操作。
+        {copy.mgmtProgressDescription}
       </p>
       {overview.data?.projects.map((project) => (
         <ManagementRow
@@ -119,6 +119,7 @@ function ManagementSection({ overview }: { overview: OverviewQuery }) {
 }
 
 function ManagementRow({ project }: { project: ManagedProject }) {
+  const copy = useSettingsCopy();
   const client = useQueryClient();
   const [form, setForm] = useState(project.management);
   const mutation = useMutation({
@@ -143,26 +144,21 @@ function ManagementRow({ project }: { project: ManagedProject }) {
           {project.name}
         </a>
         <span className="text-xs">
-          {project.management.mode === "manual" ? "人工项目" : "CLI 规划"}{" · "}
-          {project.autonomy === "supervised" ? "自动执行已开启" : "人工执行"}
+          {project.management.mode === "manual" ? copy.mgmtModeManual : copy.mgmtModeCli}{" · "}
+          {project.autonomy === "supervised" ? copy.mgmtSupervised : copy.mgmtManualExec}
         </span>
       </div>
       <p className="text-xs text-muted-foreground">
-        {project.goal?.summary || "尚未设置目标"}
+        {project.goal?.summary || copy.mgmtNoGoal}
       </p>
       <p className="text-xs">
-        完成 {project.counts.done}/{project.counts.total} · 进行中{" "}
-        {project.counts.in_progress} · 阻塞 {project.counts.blocked} · 证据
-        {
-          { unknown: "时间未知", stale: "已过期", fresh: "新鲜" }[
-            project.evidenceFreshness.status
-          ]
-        }
+        {copy.mgmtProgressSummary(project.counts.done, project.counts.total, project.counts.in_progress, project.counts.blocked)}
+        {copy.mgmtEvidenceFreshness[project.evidenceFreshness.status] ?? project.evidenceFreshness.status}
       </p>
       <details>
         <summary className="cursor-pointer text-xs">
-          负责人及下一步：{project.management.ownerLabel || "未指定"} ·{" "}
-          {project.management.nextAction || "待安排"}
+          {copy.mgmtOwnerNextSummary}{project.management.ownerLabel || copy.mgmtUnassigned} ·{" "}
+          {project.management.nextAction || copy.mgmtUnplanned}
         </summary>
         <form
           className="mt-2 space-y-2"
@@ -172,7 +168,7 @@ function ManagementRow({ project }: { project: ManagedProject }) {
           }}
         >
           <label className="block">
-            管理模式
+            {copy.mgmtModeLabel}
             <select
               className="ml-2 rounded border border-border bg-background p-1"
               value={form.mode}
@@ -180,26 +176,26 @@ function ManagementRow({ project }: { project: ManagedProject }) {
                 setForm({ ...form, mode: e.target.value as "manual" | "cli" })
               }
             >
-              <option value="manual">人工</option>
-              <option value="cli">CLI 规划（仍需人工执行）</option>
+              <option value="manual">{copy.mgmtModeOptionManual}</option>
+              <option value="cli">{copy.mgmtModeOptionCli}</option>
             </select>
           </label>
           <label className="block">
-            负责人
+            {copy.mgmtOwnerLabel}
             <Input
               value={form.ownerLabel}
               onChange={(e) => setForm({ ...form, ownerLabel: e.target.value })}
             />
           </label>
           <label className="block">
-            下一步
+            {copy.mgmtNextActionLabel}
             <Input
               value={form.nextAction}
               onChange={(e) => setForm({ ...form, nextAction: e.target.value })}
             />
           </label>
           <label className="block">
-            证据有效小时
+            {copy.mgmtFreshnessLabel}
             <Input
               type="number"
               min="1"
@@ -212,7 +208,7 @@ function ManagementRow({ project }: { project: ManagedProject }) {
           </label>
           {mutation.isError && (
             <p role="alert" className="text-destructive">
-              保存失败：{mutation.error.message}
+              {copy.mgmtSaveFailed(mutation.error.message)}
               <Button
                 type="button"
                 variant="outline"
@@ -223,12 +219,12 @@ function ManagementRow({ project }: { project: ManagedProject }) {
                   })
                 }
               >
-                重新加载
+                {copy.mgmtReload}
               </Button>
             </p>
           )}
           <Button size="sm" disabled={mutation.isPending}>
-            保存管理信息
+            {copy.mgmtSave}
           </Button>
         </form>
       </details>

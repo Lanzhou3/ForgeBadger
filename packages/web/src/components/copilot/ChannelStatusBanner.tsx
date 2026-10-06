@@ -52,7 +52,7 @@ export function ChannelStatusBanner({ channel, busy, onSwitch, state, statusText
             disabled={busy}
             onClick={() => onSwitch(value)}
           >
-            {value === "feishu" ? "飞书" : "Telegram"}
+            {value === "feishu" ? copy.channelNameFeishu : copy.channelNameTelegram}
           </Button>
         ))}
       </div>

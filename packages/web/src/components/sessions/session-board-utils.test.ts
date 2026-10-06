@@ -84,6 +84,13 @@ describe("filterBoardSessions", () => {
     expect(filterBoardSessions(sessions, { ...base, statusFilter: "error" })[0]?.id).toBe("c");
   });
 
+  it("matches lost sessions only under the lost filter, not stopped", () => {
+    const base = { query: "", cliTools: new Set<string>() };
+    const withLost = [...sessions, makeSession({ id: "d", name: "ghost", status: "lost" })];
+    expect(filterBoardSessions(withLost, { ...base, statusFilter: "lost" }).map((s) => s.id)).toEqual(["d"]);
+    expect(filterBoardSessions(withLost, { ...base, statusFilter: "stopped" }).map((s) => s.id)).toEqual(["b"]);
+  });
+
   it("filters by selected CLI tools", () => {
     const cliTools = new Set(["codex", "kimi"]);
     const result = filterBoardSessions(sessions, { query: "", statusFilter: "all", cliTools });
@@ -113,9 +120,10 @@ describe("collectSessionCliTools", () => {
 });
 
 describe("sortSessionsForColumn", () => {
-  it("orders running > error > stopped, then by last activity descending", () => {
+  it("orders running > error > stopped > lost, then by last activity descending", () => {
     const now = Date.parse("2026-09-13T12:00:00.000Z");
     const sorted = sortSessionsForColumn([
+      makeSession({ id: "lost-1", status: "lost", lastActive: isoMinutesAgo(0, now) }),
       makeSession({ id: "stopped-old", status: "stopped", lastActive: isoMinutesAgo(10, now) }),
       makeSession({ id: "running-old", status: "running", lastActive: isoMinutesAgo(30, now) }),
       makeSession({ id: "error-1", status: "error", lastActive: isoMinutesAgo(5, now) }),
@@ -128,6 +136,7 @@ describe("sortSessionsForColumn", () => {
       "error-2",
       "error-1",
       "stopped-old",
+      "lost-1",
     ]);
   });
 });

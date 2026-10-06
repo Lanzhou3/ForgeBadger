@@ -7,6 +7,8 @@ import { toast } from "@/lib/toast";
 import type { ThemedToken } from "shiki";
 
 import { CliBrandChip } from "@/components/cli-brand-chip";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { formatBytes } from "@/components/projects/workspace/utils";
 import {
   highlightWorkspaceCode,
   tokenFontStyle,
@@ -89,10 +91,39 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   useEffect(() => {
     setEditing(false);
     setDraft("");
+    setCloseConfirmOpen(false);
   }, [adapter, open]);
+
+  const loadedContent = mainFileQuery.data?.content ?? "";
+  const dirty = editing && draft !== loadedContent;
+
+  function handleOpenChange(next: boolean) {
+    if (!next && dirty) {
+      setCloseConfirmOpen(true);
+      return;
+    }
+    onOpenChange(next);
+  }
+
+  function discardAndClose() {
+    setCloseConfirmOpen(false);
+    setEditing(false);
+    setDraft("");
+    onOpenChange(false);
+  }
+
+  function cancelEditing() {
+    if (dirty) {
+      setCloseConfirmOpen(true);
+      return;
+    }
+    setEditing(false);
+    setDraft("");
+  }
 
   const saveMutation = useMutation({
     mutationFn: () => writeCliConfigFile(adapter, mainFile!.relativePath, draft),
@@ -114,7 +145,7 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
   const commonFields = fieldsQuery.data?.fields ?? [];
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent side="right" className="w-full gap-0 overflow-y-auto sm:max-w-xl">
         <SheetHeader>
           <SheetTitle>{t("models.cliConfigSection")}</SheetTitle>
@@ -192,7 +223,7 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
                       <span className="flex shrink-0 gap-2">
                         <Badge variant="outline">{file.fileType}</Badge>
                         <Badge variant={file.exists ? "secondary" : "outline"}>
-                          {file.exists ? `${file.sizeBytes} B` : t("cliConfig.fileMissing")}
+                          {file.exists ? formatBytes(file.sizeBytes) : t("cliConfig.fileMissing")}
                         </Badge>
                       </span>
                     </div>
@@ -246,11 +277,16 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
                     size="sm"
                     variant="outline"
                     disabled={saveMutation.isPending}
-                    onClick={() => setEditing(false)}
+                    onClick={cancelEditing}
                   >
                     {t("common.cancel")}
                   </Button>
-                  <Button type="button" size="sm" disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={saveMutation.isPending || !dirty}
+                    onClick={() => saveMutation.mutate()}
+                  >
                     {saveMutation.isPending ? t("common.saving") : t("common.save")}
                   </Button>
                 </div>
@@ -270,6 +306,16 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
           </section>
         </div>
       </SheetContent>
+      <ConfirmDialog
+        open={closeConfirmOpen}
+        title={t("cliConfig.unsavedChangesTitle")}
+        description={t("cliConfig.unsavedChangesDescription")}
+        confirmLabel={t("common.close")}
+        destructive
+        pending={saveMutation.isPending}
+        onOpenChange={setCloseConfirmOpen}
+        onConfirm={discardAndClose}
+      />
     </Sheet>
   );
 }

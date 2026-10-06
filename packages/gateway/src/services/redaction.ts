@@ -3,18 +3,22 @@ const attachTokenPattern = /\b(?:FORGEBADGER|OPENFORGE)_ATTACH_TOKEN=([^\s,;]+)/
 const brandSecretPattern = /\b((?:FORGEBADGER|OPENFORGE)_(?:MASTER_KEY|JWT_SECRET|ATTACH_TOKEN|API_KEY|TOKEN))\s*=\s*([^\s,;]+)/gu;
 const secretKeyValuePattern = /\b(api[_-]?key|token|password|secret|private[_-]?key)\b(\s*[:=]\s*)([^\s,;]+)/giu;
 const openAiSecretPattern = /\bsk-[A-Za-z0-9_-]{6,}\b/gu;
-const privateKeyPattern = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/giu;
+const privateKeyPattern = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----|[\s\S]*$)/giu;
 const sensitiveKeyPattern = /api[_-]?key|token|password|secret|private[_-]?key/iu;
 
 /** Shared bounded redaction for integration, audit, and projection summaries. */
 export function redactText(text: string): string {
-  return text
-    .replace(privateKeyPattern, "[REDACTED PRIVATE KEY]")
+  return redactPrivateKeyBlocks(text)
     .replace(brandSecretPattern, "$1=[REDACTED]")
     .replace(attachTokenPattern, "FORGEBADGER_ATTACH_TOKEN=[REDACTED]")
     .replace(bearerPattern, "Bearer [REDACTED]")
     .replace(openAiSecretPattern, "sk-[REDACTED]")
     .replace(secretKeyValuePattern, "$1$2[REDACTED]");
+}
+
+/** Also hide an incomplete block: truncated tool output must never expose its body. */
+export function redactPrivateKeyBlocks(text: string): string {
+  return text.replace(privateKeyPattern, '[REDACTED PRIVATE KEY]');
 }
 
 /** Recursively redact secrets before a cross-boundary payload is persisted or logged. */

@@ -46,6 +46,8 @@ export interface CompressedContextOptions {
   memory?: AgentMemoryRepository;
   memoryProjectId?: string;
   memoryConversationId?: string;
+  /** Channel context recalls only its bound project/session, never owner-global memory. */
+  memoryGlobalAllowed?: boolean;
   canCommit?: () => boolean;
   signal?: AbortSignal;
   memoryRecallLimit?: number;
@@ -184,6 +186,7 @@ function buildRecallBlock(rows: AgentMessage[], options: CompressedContextOption
   const scopes: import("./memory.js").AgentMemoryScope[] = options.memoryProjectId
     ? [{ scope: "global" as const }, { scope: "project" as const, projectId: options.memoryProjectId }]
     : [{ scope: "global" as const }];
+  if (options.memoryGlobalAllowed === false) scopes.splice(0, 1);
   if (options.memoryConversationId) scopes.push({ scope: "session", conversationId: options.memoryConversationId });
   const entries = memory.searchMulti(scopes, query, limit);
   if (entries.length === 0) return undefined;

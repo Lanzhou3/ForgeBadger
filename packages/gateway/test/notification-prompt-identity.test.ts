@@ -75,10 +75,11 @@ it('matches interleaved native sessions and exact turns rather than the shared l
   assert.equal(JSON.parse(f.stop('native-A', 'missing-turn').payload!).last_prompt, undefined);
 });
 
-it('uses same-native Claude no-turn metadata, but never reuses it for an identified unknown turn', t => {
+it('does not attach mutable no-turn prompt metadata to a later completion', t => {
   const f = setup(t);
   f.submit('Claude A request', 'native-A'); f.submit('Claude B request', 'native-B');
-  assert.equal(JSON.parse(f.stop('native-A').payload!).last_prompt, 'Claude A request');
+  f.submit('Later Claude A request', 'native-A');
+  assert.equal(JSON.parse(f.stop('native-A', undefined, { last_assistant_message: 'Earlier reply' }).payload!).last_prompt, undefined);
   assert.equal(JSON.parse(f.stop('native-A', 'unknown').payload!).last_prompt, undefined);
 });
 

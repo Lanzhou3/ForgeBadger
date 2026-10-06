@@ -1,14 +1,25 @@
 "use client";
 
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Copy, Download, FileCode2, GitBranch, PackagePlus, Plus, RotateCcw, Save, Trash2, Upload } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { QueryState } from "@/components/ui/query-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { toast } from "@/lib/toast";
 import {
   cloneTemplate,
   createTemplate,
@@ -37,7 +48,7 @@ import {
   type LibraryVisibility,
   type VisibilityFilter,
 } from "@/lib/visibility";
-import { useLanguage } from "@/hooks/use-language";
+import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import { TemplateSyncPanel } from "@/components/templates/TemplateSyncPanel";
 
 const defaultFilePath = "CLAUDE.md";
@@ -50,8 +61,16 @@ const defaultTemplateContent = [
   "",
 ].join("\n");
 
+class TemplateFileSaveError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TemplateFileSaveError";
+  }
+}
+
 export default function TemplatesPage() {
   const { t } = useLanguage();
+  const locale = useUiLocale();
   const queryClient = useQueryClient();
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [newTemplateName, setNewTemplateName] = useState("");
@@ -62,6 +81,13 @@ export default function TemplatesPage() {
   const [editVisibility, setEditVisibility] = useState<LibraryVisibility>("private");
   const [editFilePath, setEditFilePath] = useState(defaultFilePath);
   const [editContent, setEditContent] = useState(defaultTemplateContent);
+  const [editBaselineContent, setEditBaselineContent] = useState<string | null>(null);
+  const [editBaselineFilePath, setEditBaselineFilePath] = useState<string | null>(null);
+  const editorEpochRef = useRef(0);
+  const editorContextRef = useRef({ templateId: selectedTemplateId, filePath: editBaselineFilePath, epoch: 0 });
+  editorContextRef.current = { templateId: selectedTemplateId, filePath: editBaselineFilePath, epoch: editorEpochRef.current };
+  const [loadedDetailsId, setLoadedDetailsId] = useState<string | null>(null);
+  const [pendingSelectId, setPendingSelectId] = useState<string | null>(null);
   const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>("all");
   const [templatePackageText, setTemplatePackageText] = useState("");
   const [catalogExpanded, setCatalogExpanded] = useState(false);
@@ -72,10 +98,12 @@ export default function TemplatesPage() {
   const [gitImportDescription, setGitImportDescription] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["templates"],
     queryFn: listTemplates,
   });
+  const [deletingTemplate, setDeletingTemplate] = useState<Template | null>(null);
+  const [restoringVersion, setRestoringVersion] = useState<{ template: Template; versionId: number; version: string } | null>(null);
 
   const templates = data?.templates ?? [];
   const filteredTemplates = filterByVisibility(templates, visibilityFilter);
@@ -135,6 +163,9 @@ export default function TemplatesPage() {
       setNewTemplateName("");
       setNewTemplateVisibility("private");
       setSelectedTemplateId(template.id);
+      setEditBaselineContent(null);
+      setEditBaselineFilePath(null);
+      setLoadedDetailsId(null);
       setEditName(template.name);
       setEditDescription(template.description ?? "");
       setEditVisibility(normalizeVisibility(template.visibility));
@@ -149,6 +180,9 @@ export default function TemplatesPage() {
       setNotice(t("templates.cloned"));
       setCloneName("");
       setSelectedTemplateId(template.id);
+      setEditBaselineContent(null);
+      setEditBaselineFilePath(null);
+      setLoadedDetailsId(null);
       setEditName(template.name);
       setEditDescription(template.description ?? "");
       setEditVisibility(normalizeVisibility(template.visibility));
@@ -161,17 +195,42 @@ export default function TemplatesPage() {
       if (!selectedTemplateId) {
         throw new Error("Template is required");
       }
+      const saved = { templateId: selectedTemplateId, filePath: editFilePath.trim(), content: editContent, editorEpoch: editorEpochRef.current };
       await updateTemplate(selectedTemplateId, {
         name: editName.trim(),
         description: editDescription.trim(),
         visibility: editVisibility,
       });
-      return updateTemplateFile(selectedTemplateId, editFilePath.trim(), editContent);
+      try {
+        await updateTemplateFile(saved.templateId, saved.filePath, saved.content);
+      } catch (fileError) {
+        const message = fileError instanceof Error ? fileError.message : String(fileError);
+        throw new TemplateFileSaveError(message);
+      }
+      return saved;
     },
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
       setNotice(t("templates.saved"));
+      // A late save owns its submitted baseline, but never a newly loaded editor.
+      if (editorContextRef.current.templateId === saved.templateId && editorEpochRef.current === saved.editorEpoch) {
+        setEditBaselineContent(saved.content);
+        setEditBaselineFilePath(saved.filePath);
+      }
       await queryClient.invalidateQueries({ queryKey: ["templates"] });
-      await queryClient.invalidateQueries({ queryKey: ["template", selectedTemplateId] });
+      await queryClient.invalidateQueries({ queryKey: ["template", saved.templateId] });
+      const context = editorContextRef.current;
+      if (context.templateId !== saved.templateId || context.epoch === saved.editorEpoch) return;
+      // A reload or restore can supersede this save. Read the current persisted
+      // file while preserving the new editor's draft and selection.
+      const refreshed = await queryClient.fetchQuery({ queryKey: ["template", saved.templateId], queryFn: () => getTemplate(saved.templateId), staleTime: 0 });
+      if (editorContextRef.current.templateId !== context.templateId || editorEpochRef.current !== context.epoch) return;
+      const file = refreshed.template.files?.find(file => file.filePath === context.filePath);
+      if (file) setEditBaselineContent(file.content);
+    },
+    onError: (error) => {
+      if (error instanceof TemplateFileSaveError) {
+        toast.error(t("templates.saveFileFailed"));
+      }
     },
   });
 
@@ -192,11 +251,34 @@ export default function TemplatesPage() {
     },
   });
 
+  function downloadTemplatePackage() {
+    const content = templatePackageText.trim();
+    if (!content) return;
+    const blob = new Blob([content], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${selectedTemplate?.name ?? "template"}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   const importMutation = useMutation({
-    mutationFn: () => importTemplate(JSON.parse(templatePackageText) as TemplatePackage),
+    mutationFn: () => {
+      let parsed: TemplatePackage;
+      try {
+        parsed = JSON.parse(templatePackageText) as TemplatePackage;
+      } catch {
+        throw new Error(t("templates.importInvalidJson"));
+      }
+      return importTemplate(parsed);
+    },
     onSuccess: async ({ template }) => {
       setNotice(t("templates.imported"));
       setSelectedTemplateId(template.id);
+      setEditBaselineContent(null);
+      setEditBaselineFilePath(null);
+      setLoadedDetailsId(null);
       setEditName(template.name);
       setEditDescription(template.description ?? "");
       setEditVisibility(normalizeVisibility(template.visibility));
@@ -210,6 +292,9 @@ export default function TemplatesPage() {
     onSuccess: async ({ template }) => {
       setNotice(t("templates.catalogInstalled"));
       setSelectedTemplateId(template.id);
+      setEditBaselineContent(null);
+      setEditBaselineFilePath(null);
+      setLoadedDetailsId(null);
       setEditName(template.name);
       setEditDescription(template.description ?? "");
       setEditVisibility(normalizeVisibility(template.visibility));
@@ -235,6 +320,9 @@ export default function TemplatesPage() {
       setGitImportName("");
       setGitImportDescription("");
       setSelectedTemplateId(result.templateId);
+      setEditBaselineContent(null);
+      setEditBaselineFilePath(null);
+      setLoadedDetailsId(null);
       setEditName(result.name);
       setEditDescription("");
       setEditVisibility("private");
@@ -252,8 +340,11 @@ export default function TemplatesPage() {
       setEditDescription(template.description ?? "");
       setEditVisibility(normalizeVisibility(template.visibility));
       if (firstFile) {
+        editorEpochRef.current++;
         setEditFilePath(firstFile.filePath);
         setEditContent(firstFile.content);
+        setEditBaselineContent(firstFile.content);
+        setEditBaselineFilePath(firstFile.filePath);
       }
       await queryClient.invalidateQueries({ queryKey: ["templates"] });
       await queryClient.invalidateQueries({ queryKey: ["template", selectedTemplateId] });
@@ -261,7 +352,17 @@ export default function TemplatesPage() {
     },
   });
 
-  function selectTemplate(templateId: string) {
+  function isEditorDirty() {
+    if (!selectedTemplate) return false;
+    if (editContent !== editBaselineContent) return true;
+    if (editFilePath.trim() !== editBaselineFilePath) return true;
+    if (editName.trim() !== (selectedTemplate.name ?? "")) return true;
+    if (editDescription.trim() !== (selectedTemplate.description ?? "")) return true;
+    return editVisibility !== normalizeVisibility(selectedTemplate.visibility);
+  }
+
+  function applySelectTemplate(templateId: string) {
+    editorEpochRef.current++;
     const template = templates.find((current) => current.id === templateId);
     setSelectedTemplateId(templateId);
     setEditName(template?.name ?? "");
@@ -269,22 +370,61 @@ export default function TemplatesPage() {
     setEditVisibility(normalizeVisibility(template?.visibility));
     setEditFilePath(defaultFilePath);
     setEditContent("");
+    setEditBaselineContent(null);
+    setEditBaselineFilePath(null);
+    setLoadedDetailsId(null);
     setTemplatePackageText("");
     setNotice(null);
+  }
+
+  function selectTemplate(templateId: string) {
+    if (templateId === selectedTemplateId) return;
+    if (!isEditorDirty()) {
+      applySelectTemplate(templateId);
+      return;
+    }
+    setPendingSelectId(templateId);
+  }
+
+  function confirmDiscardAndSwitch() {
+    const templateId = pendingSelectId;
+    setPendingSelectId(null);
+    if (templateId) applySelectTemplate(templateId);
   }
 
   function syncSelectedFile() {
     const file = selectedDetails?.template.files?.find((current) => current.filePath === editFilePath)
       ?? selectedDetails?.template.files?.[0];
     if (!file) return;
+    editorEpochRef.current++;
     setEditFilePath(file.filePath);
     setEditContent(file.content);
+    setEditBaselineContent(file.content);
+    setEditBaselineFilePath(file.filePath);
   }
+
+  useEffect(() => {
+    if (!selectedTemplateId || !selectedDetails) return;
+    if (loadedDetailsId === selectedTemplateId) return;
+    editorEpochRef.current++;
+    const file = selectedDetails.template.files?.[0];
+    setEditFilePath(file?.filePath ?? defaultFilePath);
+    setEditContent(file?.content ?? "");
+    setEditBaselineContent(file ? file.content : "");
+    setEditBaselineFilePath(file?.filePath ?? defaultFilePath);
+    setLoadedDetailsId(selectedTemplateId);
+  }, [selectedTemplateId, selectedDetails, loadedDetailsId]);
+
+  const saveDisabled =
+    selectedIsBuiltin ||
+    saveMutation.isPending ||
+    editBaselineContent === null ||
+    !isEditorDirty();
 
   const currentError =
     createMutation.error ??
     cloneMutation.error ??
-    saveMutation.error ??
+    (saveMutation.error instanceof TemplateFileSaveError ? null : saveMutation.error) ??
     deleteMutation.error ??
     exportMutation.error ??
     importMutation.error ??
@@ -295,7 +435,7 @@ export default function TemplatesPage() {
   return (
     <div className="space-y-6 p-6">
       <div>
-        <h1 className="text-2xl font-semibold">{t("templates.title")}</h1>
+        <h1 className="text-xl font-semibold tracking-tight">{t("templates.title")}</h1>
         <p className="mt-1 text-muted-foreground">{t("templates.subtitle")}</p>
       </div>
 
@@ -520,11 +660,18 @@ export default function TemplatesPage() {
                   </Button>
                 ))}
               </div>
-              {isLoading ? (
-                <div className="py-6 text-center text-sm text-muted-foreground">{t("templates.loading")}</div>
-              ) : filteredTemplates.length === 0 ? (
-                <div className="py-6 text-center text-sm text-muted-foreground">{t("templates.emptyTitle")}</div>
-              ) : (
+              <QueryState
+                isLoading={isLoading}
+                isError={isError}
+                isEmpty={filteredTemplates.length === 0}
+                onRetry={() => void refetch()}
+                loading={
+                  <div className="py-6 text-center text-sm text-muted-foreground">{t("templates.loading")}</div>
+                }
+                empty={
+                  <div className="py-6 text-center text-sm text-muted-foreground">{t("templates.emptyTitle")}</div>
+                }
+              >
                 <div className="space-y-3">
                   {governedTemplates.length > 0 && (
                     <div className="space-y-2">
@@ -549,7 +696,7 @@ export default function TemplatesPage() {
                     </div>
                   )}
                 </div>
-              )}
+              </QueryState>
             </CardContent>
           </Card>
 
@@ -578,6 +725,16 @@ export default function TemplatesPage() {
                 </Button>
                 <Button
                   type="button"
+                  variant="outline"
+                  disabled={!templatePackageText.trim()}
+                  onClick={downloadTemplatePackage}
+                >
+                  <Download className="size-4" />
+                  {t("templates.download")}
+                </Button>
+                <Button
+                  type="button"
+                  className="col-span-2"
                   disabled={!templatePackageText.trim() || importMutation.isPending}
                   onClick={() => importMutation.mutate()}
                 >
@@ -700,16 +857,14 @@ export default function TemplatesPage() {
                     className="text-destructive"
                     disabled={selectedIsBuiltin || deleteMutation.isPending}
                     onClick={() => {
-                      if (selectedTemplateId && window.confirm(t("templates.deleteConfirm"))) {
-                        deleteMutation.mutate(selectedTemplateId);
-                      }
+                      if (selectedTemplate) setDeletingTemplate(selectedTemplate);
                     }}
                   >
                     <Trash2 className="size-4" />
                     {t("common.delete")}
                   </Button>
                   <Button
-                    disabled={selectedIsBuiltin || saveMutation.isPending}
+                    disabled={saveDisabled}
                     onClick={() => saveMutation.mutate()}
                   >
                     <Save className="size-4" />
@@ -736,13 +891,11 @@ export default function TemplatesPage() {
                                   variant="outline"
                                   disabled={!selectedTemplateId || restoreMutation.isPending}
                                   onClick={() => {
-                                    if (
-                                      selectedTemplateId &&
-                                      window.confirm(t("templates.restoreConfirm"))
-                                    ) {
-                                      restoreMutation.mutate({
-                                        templateId: selectedTemplateId,
+                                    if (selectedTemplate) {
+                                      setRestoringVersion({
+                                        template: selectedTemplate,
                                         versionId: version.id,
+                                        version: version.version,
                                       });
                                     }
                                   }}
@@ -753,7 +906,7 @@ export default function TemplatesPage() {
                               </div>
                             </div>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {version.action} · {new Date(version.createdAt).toLocaleString()}
+                              {version.action} · {new Date(version.createdAt).toLocaleString(locale)}
                             </p>
                           </div>
                         ))}
@@ -766,6 +919,81 @@ export default function TemplatesPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog
+        open={pendingSelectId !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingSelectId(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base">{t("templates.discardChangesTitle")}</DialogTitle>
+            <DialogDescription>{t("templates.discardChangesDescription")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPendingSelectId(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button type="button" variant="destructive" onClick={confirmDiscardAndSwitch}>
+              {t("templates.discardChangesConfirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog
+        open={deletingTemplate !== null}
+        destructive
+        pending={deleteMutation.isPending}
+        title={t("templates.deleteConfirmTitle")}
+        description={
+          deletingTemplate
+            ? [
+                t("templates.deleteConfirmNamed").replace("{name}", deletingTemplate.name),
+                (deletingTemplate.usageCount ?? 0) > 0
+                  ? t("templates.deleteInUseWarning").replace(
+                      "{count}",
+                      String(deletingTemplate.usageCount)
+                    )
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" ")
+            : ""
+        }
+        confirmLabel={t("common.delete")}
+        onOpenChange={(open) => {
+          if (!open) setDeletingTemplate(null);
+        }}
+        onConfirm={() => {
+          if (deletingTemplate) deleteMutation.mutate(deletingTemplate.id);
+          setDeletingTemplate(null);
+        }}
+      />
+      <ConfirmDialog
+        open={restoringVersion !== null}
+        pending={restoreMutation.isPending}
+        title={t("templates.restoreConfirmTitle")}
+        description={
+          restoringVersion
+            ? t("templates.restoreConfirmNamed")
+                .replace("{name}", restoringVersion.template.name)
+                .replace("{version}", restoringVersion.version)
+            : ""
+        }
+        onOpenChange={(open) => {
+          if (!open) setRestoringVersion(null);
+        }}
+        onConfirm={() => {
+          if (restoringVersion) {
+            restoreMutation.mutate({
+              templateId: restoringVersion.template.id,
+              versionId: restoringVersion.versionId,
+            });
+          }
+          setRestoringVersion(null);
+        }}
+      />
     </div>
   );
 }

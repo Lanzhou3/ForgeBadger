@@ -82,8 +82,7 @@ export function ProjectManagerLedgerSection({
                 <Button
                   key={option.value}
                   size="sm"
-                  variant={filter === option.value ? "default" : "outline"}
-                  className={filter === option.value ? "bg-brand text-brand-foreground hover:bg-brand/90" : undefined}
+                  variant={filter === option.value ? "brand" : "outline"}
                   onClick={() => onFilterChange(option.value)}
                 >
                   {t(option.labelKey)}

@@ -6,10 +6,12 @@ import { KeyRound, LogOut, MonitorSmartphone } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { useLanguage } from "@/hooks/use-language";
+import { useLanguage, useUiLocale } from "@/hooks/use-language";
+import { useAdminCopy } from "@/components/settings/admin-copy";
 import { SettingsCardHeader } from "@/components/settings/ui";
 import { logout } from "@/lib/auth";
 import {
@@ -34,11 +36,13 @@ const EMPTY_PASSWORD_FORM: PasswordFormState = {
 
 export function AccountSecuritySettings() {
   const { t } = useLanguage();
+  const adminCopy = useAdminCopy();
   const queryClient = useQueryClient();
   const [passwordForm, setPasswordForm] = useState<PasswordFormState>(EMPTY_PASSWORD_FORM);
   const [passwordFormOpen, setPasswordFormOpen] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordNotice, setPasswordNotice] = useState<string | null>(null);
+  const [confirmRevokeOthers, setConfirmRevokeOthers] = useState(false);
 
   const {
     data: sessionData,
@@ -118,6 +122,13 @@ export function AccountSecuritySettings() {
         description={t("settings.account.description")}
       />
       <CardContent className="space-y-6">
+        {passwordNotice && (
+          // Rendered outside the form-open branch: on success the form closes
+          // immediately, so a notice placed inside it would never be seen.
+          <p className="rounded-md border border-emerald-400/40 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-400">
+            {passwordNotice}
+          </p>
+        )}
         {passwordFormOpen ? (
           <div className="space-y-3">
             <div className="flex flex-col gap-1.5">
@@ -178,11 +189,6 @@ export function AccountSecuritySettings() {
                 {passwordError}
               </p>
             )}
-            {passwordNotice && (
-              <p className="rounded-md border border-emerald-400/40 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-400">
-                {passwordNotice}
-              </p>
-            )}
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground">
                 {t("settings.account.passwordHint")}
@@ -200,7 +206,7 @@ export function AccountSecuritySettings() {
                 <Button
                   type="button"
                   size="sm"
-                  className="bg-brand text-brand-foreground hover:bg-brand/90"
+                  variant="brand"
                   disabled={
                     changePasswordMutation.isPending ||
                     !passwordForm.currentPassword ||
@@ -256,7 +262,7 @@ export function AccountSecuritySettings() {
                 variant="outline"
                 size="sm"
                 disabled={revokeOthersMutation.isPending}
-                onClick={() => revokeOthersMutation.mutate()}
+                onClick={() => setConfirmRevokeOthers(true)}
               >
                 <LogOut className="size-3.5" />
                 {revokeOthersMutation.isPending
@@ -291,6 +297,19 @@ export function AccountSecuritySettings() {
           )}
         </div>
       </CardContent>
+
+      <ConfirmDialog
+        open={confirmRevokeOthers}
+        destructive
+        pending={revokeOthersMutation.isPending}
+        title={adminCopy.revokeOthersConfirmTitle}
+        description={adminCopy.revokeOthersConfirmDescription}
+        onOpenChange={setConfirmRevokeOthers}
+        onConfirm={() => {
+          setConfirmRevokeOthers(false);
+          revokeOthersMutation.mutate();
+        }}
+      />
     </Card>
   );
 }
@@ -305,6 +324,8 @@ function SessionRow({
   onRevoke: () => void;
 }) {
   const { t } = useLanguage();
+  const locale = useUiLocale();
+  const adminCopy = useAdminCopy();
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40">
@@ -316,12 +337,18 @@ function SessionRow({
           </span>
           {session.current && <Badge>{t("settings.account.currentDevice")}</Badge>}
         </div>
-        <div className="mt-0.5 text-xs text-muted-foreground">
+        {/* Relative last-active time leads so same-UA devices (e.g. six
+            "macOS · Chrome" rows) are distinguishable at a glance; the short
+            session id disambiguates the rest. */}
+        <div className="mt-0.5 text-xs font-medium text-foreground/80">
           {t("settings.account.lastActive")}:{" "}
-          {new Date(session.lastSeenAt).toLocaleString()}
-          {" · "}
+          {formatRelativeLastActive(session.lastSeenAt, locale)}
+        </div>
+        <div className="mt-0.5 text-xs text-muted-foreground">
           {t("settings.account.signedInAt")}:{" "}
-          {new Date(session.createdAt).toLocaleString()}
+          {new Date(session.createdAt).toLocaleString(locale)}
+          {" · "}
+          {adminCopy.deviceIdPrefix} {session.id.slice(0, 8)}
         </div>
       </div>
       {!session.current && (
@@ -337,6 +364,19 @@ function SessionRow({
       )}
     </div>
   );
+}
+
+/** "3 minutes ago"-style relative time for the device last-active line. */
+function formatRelativeLastActive(value: string, locale: string): string {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return new Date(value).toLocaleString(locale);
+  const diffSeconds = Math.round((timestamp - Date.now()) / 1000);
+  const abs = Math.abs(diffSeconds);
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  if (abs < 60) return formatter.format(diffSeconds, "second");
+  if (abs < 3600) return formatter.format(Math.round(diffSeconds / 60), "minute");
+  if (abs < 86400) return formatter.format(Math.round(diffSeconds / 3600), "hour");
+  return formatter.format(Math.round(diffSeconds / 86400), "day");
 }
 
 /** Collapses a raw User-Agent string to a human-readable device label. */

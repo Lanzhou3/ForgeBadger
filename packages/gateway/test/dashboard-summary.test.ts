@@ -55,6 +55,13 @@ describe("getDashboardSummary", () => {
     assert.equal(summary.health.projectConfig.healthy, false);
     assert.equal(summary.health.models.healthy, true);
     assert.equal(summary.health.credentials.healthy, true);
+    assert.equal(summary.health.gateway.code, "ok");
+    assert.equal(summary.health.database.code, "ok");
+    assert.equal(summary.health.projectConfig.code, "create_project");
+    assert.equal(summary.health.models.code, "host_environment");
+    assert.equal(summary.health.credentials.code, "host_credentials");
+    assert.equal(summary.health.sessions.code, "create_session");
+    assert.equal(summary.health.skills.code, "create_skill");
     assert.doesNotMatch(summary.health.models.message, /stored sessions/);
     assert.doesNotMatch(summary.health.credentials.message, /stored credentials/);
     assert.equal(
@@ -116,6 +123,11 @@ describe("getDashboardSummary", () => {
     assert.equal(summary.health.credentials.healthy, true);
     assert.equal(summary.health.sessions.healthy, true);
     assert.equal(summary.health.skills.healthy, true);
+    assert.equal(summary.health.projectConfig.code, "ready");
+    assert.equal(summary.health.models.code, "ready");
+    assert.equal(summary.health.credentials.code, "ready");
+    assert.equal(summary.health.sessions.code, "ready");
+    assert.equal(summary.health.skills.code, "ready");
   });
 
   it("counts model rows without materializing model configuration payloads", () => {

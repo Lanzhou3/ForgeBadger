@@ -436,9 +436,18 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
 }
 
 // Defensive masking: the preview should already be redacted server-side, but
-// never echo token-looking values back to the UI if they slip through.
-function maskSecrets(text: string): string {
+// never echo token-looking values back to the UI if they slip through. Each
+// pattern keeps a short recognizable prefix so the shape stays identifiable.
+// Exported for unit tests; not part of the component's public API surface.
+export function maskSecrets(text: string): string {
   return text
     .replace(/\b(sk-[A-Za-z0-9_-]{2})[A-Za-z0-9_-]+/g, "$1…")
-    .replace(/((?:api[-_]?key|auth[-_]?token|token|secret)["'\s]*[:=]["'\s]*)([^\s,"']{4})[^\s,"']*/giu, "$1$2…");
+    .replace(/((?:api[-_]?key|auth[-_]?token|token|secret)["'\s]*[:=]["'\s]*)([^\s,"']{4})[^\s,"']*/giu, "$1$2…")
+    .replace(/(Bearer\s+)([A-Za-z0-9._-]{6})[A-Za-z0-9._-]+/giu, "$1$2…")
+    .replace(/\b((?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{4})[A-Za-z0-9_]+/g, "$1…")
+    .replace(/\b(github_pat_[A-Za-z0-9_]{4})[A-Za-z0-9_]+/g, "$1…")
+    .replace(/\b(xox[baprs]-[A-Za-z0-9-]{4})[A-Za-z0-9-]+/giu, "$1…")
+    .replace(/\b((?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{4})[A-Z0-9]+/g, "$1…")
+    .replace(/\b(AIza[0-9A-Za-z_-]{4})[0-9A-Za-z_-]+/g, "$1…")
+    .replace(/\b(eyJ[A-Za-z0-9_-]{4})[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "$1…");
 }

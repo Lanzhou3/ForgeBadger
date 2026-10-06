@@ -3,6 +3,7 @@ import { QueryClient,QueryClientProvider } from '@tanstack/react-query';
 import { cleanup,fireEvent,render,screen,waitFor } from '@testing-library/react';
 import { afterEach,expect,it,vi } from 'vitest';
 import { CopilotMeteringPanel } from './CopilotMeteringPanel';
+import { LanguageProvider } from '@/hooks/use-language';
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 it('shows unknown costs, saves zero as free and allows revoking a later run',async()=>{
  let runId='run1';const requests:Array<{url:string;method:string;body:string}>=[];
@@ -14,7 +15,7 @@ it('shows unknown costs, saves zero as free and allows revoking a later run',asy
   return Response.json({code:0,data,message:''});
  }));
  const cache=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});
- render(<QueryClientProvider client={cache}><CopilotMeteringPanel conversationId="conversation" modelId="model"/></QueryClientProvider>);
+ render(<LanguageProvider><QueryClientProvider client={cache}><CopilotMeteringPanel conversationId="conversation" modelId="model"/></QueryClientProvider></LanguageProvider>);
  const summary=screen.getByText('用量、计价与修复控制');const details=summary.closest('details')!;
  details.open=true;fireEvent(details,new Event('toggle'));
  await screen.findByText(/未知（已知部分/);
@@ -33,7 +34,7 @@ it('shows unknown costs, saves zero as free and allows revoking a later run',asy
 it('reports network errors without presenting zero-cost success',async()=>{
  vi.stubGlobal('fetch',vi.fn(async()=>{throw new Error('offline');}));
  const cache=new QueryClient({defaultOptions:{queries:{retry:false}}});
- render(<QueryClientProvider client={cache}><CopilotMeteringPanel conversationId="conversation" modelId="model"/></QueryClientProvider>);
+ render(<LanguageProvider><QueryClientProvider client={cache}><CopilotMeteringPanel conversationId="conversation" modelId="model"/></QueryClientProvider></LanguageProvider>);
  const details=screen.getByText('用量、计价与修复控制').closest('details')!;details.open=true;fireEvent(details,new Event('toggle'));
  await screen.findByRole('alert');expect(screen.queryByText('费率已保存。')).toBeNull();cache.clear();
 });

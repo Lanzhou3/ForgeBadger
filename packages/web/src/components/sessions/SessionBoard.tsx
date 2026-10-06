@@ -38,7 +38,7 @@ interface SessionBoardProps {
   columns: SessionBoardColumnData[];
   sessionTasks: Record<string, SessionBoardTask[]>;
   prompts: Record<string, string>;
-  now: number;
+  now: number | null;
   actionPending: boolean;
   columnWidth: number;
   onColumnWidthChange: (width: number) => void;
@@ -163,7 +163,7 @@ export function SessionBoard({
                   session={session}
                   tasks={sessionTasks[session.id] ?? []}
                   lastPrompt={prompts[session.id]}
-                  highlight={isRecentlyCreated(session, now, 120_000)}
+                  highlight={now !== null && isRecentlyCreated(session, now, 120_000)}
                   now={now}
                   actionPending={actionPending}
                   onOpen={onOpenSession}

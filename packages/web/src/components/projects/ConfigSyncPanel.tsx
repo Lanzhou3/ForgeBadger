@@ -7,6 +7,7 @@ import { FileCode2, ShieldCheck, Unlink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   applyConfigSync,
   defaultConfigConflictDecisions,
@@ -55,6 +56,7 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
   const { t } = useLanguage();
   const [configConflicts, setConfigConflicts] = useState<ConfigConflict[]>([]);
   const [configDecisions, setConfigDecisions] = useState<Record<string, ConfigDecision>>({});
+  const [confirmUnbind, setConfirmUnbind] = useState(false);
   const consumedPendingActionRef = useRef<string | null>(null);
 
   const isUntracked = templateId === null;
@@ -145,9 +147,7 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
   }, [pendingAction, isUntracked, runPreview, onPendingActionConsumed]);
 
   const handleUnbind = () => {
-    if (window.confirm(t("projects.stopTrackingConfirm"))) {
-      unbindMutation.mutate();
-    }
+    setConfirmUnbind(true);
   };
 
   if (isUntracked) {
@@ -391,6 +391,17 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
           {unbindMutation.isPending ? t("projects.unbinding") : t("projects.stopTrackingTemplate")}
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={confirmUnbind}
+        destructive
+        pending={unbindMutation.isPending}
+        title={t("projects.stopTrackingTitle")}
+        description={t("projects.stopTrackingConfirm")}
+        confirmLabel={t("projects.stopTrackingTemplate")}
+        onOpenChange={setConfirmUnbind}
+        onConfirm={() => unbindMutation.mutate()}
+      />
     </div>
   );
 });

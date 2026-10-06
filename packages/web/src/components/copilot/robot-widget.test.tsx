@@ -6,6 +6,7 @@ import { LanguageProvider } from "@/hooks/use-language";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
 import { RobotWidget } from "@/components/copilot/robot-widget";
 import type { RobotCorner } from "@/lib/pixel-robot";
+import type { PetId } from "@/lib/pet-preference";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -45,11 +46,12 @@ window.matchMedia = ((query: string) => ({
   dispatchEvent: () => false,
 })) as unknown as typeof window.matchMedia;
 
-function renderWidget(props: { onActivate?: () => void; suppressBubbles?: boolean; panelOpen?: boolean; onCornerChange?: (corner: RobotCorner) => void } = {}) {
+function renderWidget(props: { petId?: PetId; onActivate?: () => void; suppressBubbles?: boolean; panelOpen?: boolean; onCornerChange?: (corner: RobotCorner) => void } = {}) {
   const onActivate = props.onActivate ?? vi.fn();
   render(
     <LanguageProvider>
       <RobotWidget
+        petId={props.petId}
         onActivate={onActivate}
         suppressBubbles={props.suppressBubbles}
         panelOpen={props.panelOpen}
@@ -152,6 +154,29 @@ describe("RobotWidget activation", () => {
     fireEvent.pointerUp(robot, { pointerId: 1, clientX: 900, clientY: 600 });
     expect(onCornerChange).toHaveBeenLastCalledWith("bottom-right");
     expect(window.localStorage.getItem("forgebadger.robotCorner")).toBe("bottom-right");
+  });
+
+  it("anchors to the freer corner by viewport when no corner is persisted", async () => {
+    const originalWidth = window.innerWidth;
+    try {
+      Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true });
+      let onCornerChange = vi.fn();
+      renderWidget({ onCornerChange });
+      await robotButton();
+      expect(onCornerChange).toHaveBeenLastCalledWith("bottom-right");
+      cleanup();
+
+      // Mobile: the right edge hosts primary actions and copy controls, so
+      // the default resting corner moves off the content area.
+      Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });
+      window.localStorage.removeItem("forgebadger.robotCorner");
+      onCornerChange = vi.fn();
+      renderWidget({ onCornerChange });
+      await robotButton();
+      expect(onCornerChange).toHaveBeenLastCalledWith("bottom-left");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { value: originalWidth, configurable: true });
+    }
   });
 });
 
@@ -336,6 +361,58 @@ describe("RobotWidget motion budget", () => {
     expect(vi.getTimerCount()).toBe(0);
     expect(document.querySelector("[data-robot-frame]")?.getAttribute("data-robot-frame")).toBe("stand");
   });
+
+  it("plays all eight approved walk poses at 100ms and stands after release", () => {
+    renderWidget();
+    const robot = screen.getByRole("button", { name: "Copilot" });
+    fireEvent.pointerDown(robot, { button: 0, pointerId: 1, clientX: 500, clientY: 500 });
+    fireEvent.pointerMove(robot, { pointerId: 1, clientX: 520, clientY: 500 });
+    const frame = () => document.querySelector("[data-robot-frame]")?.getAttribute("data-robot-frame");
+    expect(frame()).toBe("walk1");
+    act(() => vi.advanceTimersByTime(99));
+    expect(frame()).toBe("walk1");
+    act(() => vi.advanceTimersByTime(1));
+    expect(frame()).toBe("walk2");
+    for (const next of ["walk3", "walk4", "walk5", "walk6", "walk7", "walk8", "walk1"]) {
+      act(() => vi.advanceTimersByTime(100));
+      expect(frame()).toBe(next);
+    }
+    fireEvent.pointerUp(robot, { pointerId: 1, clientX: 520, clientY: 500 });
+    expect(frame()).toBe("stand");
+  });
+
+  it("plays the six typing poses then a half/full/half blink at the asset timings", () => {
+    renderWidget();
+    const frame = () => document.querySelector("[data-robot-frame]")?.getAttribute("data-robot-frame");
+    act(() => vi.advanceTimersByTime(8000));
+    expect(frame()).toBe("sit1");
+    for (const next of ["sit2", "sit3", "sit4", "sit5", "sit6", "sit1"]) {
+      act(() => vi.advanceTimersByTime(80));
+      expect(frame()).toBe(next);
+    }
+    act(() => vi.advanceTimersByTime(1440));
+    expect(frame()).toBe("sit6");
+    for (const [duration, next] of [[120, "sitHalfBlink"], [40, "sitBlink"], [80, "sitHalfBlink"], [40, "sit6"], [120, "sit1"]] as const) {
+      act(() => vi.advanceTimersByTime(duration));
+      expect(frame()).toBe(next);
+    }
+  });
+
+  it("stops the walk timeline when reduced motion is enabled during a drag", () => {
+    renderWidget();
+    const robot = screen.getByRole("button", { name: "Copilot" });
+    fireEvent.pointerDown(robot, { button: 0, pointerId: 1, clientX: 500, clientY: 500 });
+    fireEvent.pointerMove(robot, { pointerId: 1, clientX: 520, clientY: 500 });
+    act(() => vi.advanceTimersByTime(300));
+    expect(document.querySelector("[data-robot-frame]")?.getAttribute("data-robot-frame")).toBe("walk4");
+    act(() => {
+      preference.matches = true;
+      preference.dispatchEvent(new Event("change"));
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => vi.advanceTimersByTime(1600));
+    expect(document.querySelector("[data-robot-frame]")?.getAttribute("data-robot-frame")).toBe("walk1");
+  });
 });
 
 describe("RobotWidget drag direction", () => {
@@ -348,8 +425,8 @@ describe("RobotWidget drag direction", () => {
   afterEach(cleanup);
 
   function facesRight(robot: HTMLElement) {
-    // The Blender sprite faces left natively; mirroring makes it face right.
-    return robot.querySelector("[data-robot-frame]")!.classList.contains("-scale-x-100");
+    // The default honey badger faces right natively; mirroring makes it face left.
+    return !robot.querySelector("[data-robot-frame]")!.classList.contains("-scale-x-100");
   }
 
   it("faces right when dragged right and left when dragged left", async () => {
@@ -394,5 +471,16 @@ describe("RobotWidget drag direction", () => {
       fireEvent.pointerMove(robot, { pointerId: 1, clientX: x, clientY: 550 });
     }
     expect(facesRight(robot)).toBe(true);
+  });
+
+  it("mirrors the original left-facing robot in the opposite direction", async () => {
+    renderWidget({ petId: "robot" });
+    const robot = await robotButton();
+    const mirrored = () => robot.querySelector("[data-robot-frame]")!.classList.contains("-scale-x-100");
+    fireEvent.pointerDown(robot, { button: 0, pointerId: 1, clientX: 500, clientY: 500 });
+    fireEvent.pointerMove(robot, { pointerId: 1, clientX: 540, clientY: 500 });
+    expect(mirrored()).toBe(true);
+    fireEvent.pointerMove(robot, { pointerId: 1, clientX: 460, clientY: 500 });
+    expect(mirrored()).toBe(false);
   });
 });

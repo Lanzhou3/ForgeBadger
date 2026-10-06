@@ -50,7 +50,7 @@ export function PetSettings() {
                 )}
               >
                 <span className="shrink-0 rounded-md bg-muted/40 p-1" aria-hidden="true">
-                  <RobotSprite frame="stand" size={80} />
+                  <RobotSprite petId={pet.id} frame="stand" size={80} />
                 </span>
                 <span className="min-w-0 flex-1 space-y-1">
                   <span id={nameId} className="block text-sm font-medium">{t(pet.nameKey)}</span>

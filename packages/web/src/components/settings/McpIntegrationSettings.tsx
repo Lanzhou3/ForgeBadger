@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -20,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/hooks/use-auth";
-import { useLanguage } from "@/hooks/use-language";
+import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import {
   createMcpToken,
   GatewayApiError,
@@ -58,6 +59,7 @@ export function McpIntegrationSettings() {
   const [expiresInHours, setExpiresInHours] = useState<number | null>(null);
   const [plaintextToken, setPlaintextToken] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<McpToken | null>(null);
+  const [confirmEnable, setConfirmEnable] = useState(false);
 
   const status = useQuery({ queryKey: mcpStatusKey, queryFn: getMcpStatus, retry: false });
   const enabled = status.data?.enabled === true;
@@ -79,10 +81,20 @@ export function McpIntegrationSettings() {
     onSuccess: (_data, next) => {
       void queryClient.invalidateQueries({ queryKey: runtimeSettingsQueryKey });
       void queryClient.invalidateQueries({ queryKey: mcpStatusKey });
-      toast.success(next ? t("settings.restartRequired") : t("settings.instanceSaved"));
+      // The route mount only changes on restart: enabling takes effect after
+      // one, and until then a disable leaves /mcp mounted — say so honestly.
+      toast.success(next ? t("settings.restartRequired") : t("settings.mcpDisablePendingRestart"));
     },
     onError: () => toast.error(t("settings.instanceSaveError")),
   });
+
+  function handleMcpSwitch(checked: boolean) {
+    if (checked) {
+      setConfirmEnable(true);
+      return;
+    }
+    mcpSwitchMutation.mutate(false);
+  }
   const tokens = useQuery({
     queryKey: mcpTokensKey,
     queryFn: listMcpTokens,
@@ -165,7 +177,7 @@ export function McpIntegrationSettings() {
             {showMcpSwitch && (
               <Switch
                 checked={mcpSwitch}
-                onCheckedChange={(checked) => mcpSwitchMutation.mutate(checked)}
+                onCheckedChange={handleMcpSwitch}
                 disabled={mcpSwitchMutation.isPending}
                 aria-label={t("settings.mcpToggle")}
               />
@@ -209,6 +221,18 @@ export function McpIntegrationSettings() {
       </CardContent>
 
       <McpPlaintextDialog endpoint={endpoint} plaintext={plaintextToken} onClose={() => setPlaintextToken(null)} onCopy={copyText} />
+      <ConfirmDialog
+        open={confirmEnable}
+        pending={mcpSwitchMutation.isPending}
+        title={t("settings.mcpEnableConfirmTitle")}
+        description={t("settings.mcpEnableConfirmDescription")}
+        confirmLabel={t("settings.mcpToggle")}
+        onOpenChange={setConfirmEnable}
+        onConfirm={() => {
+          setConfirmEnable(false);
+          mcpSwitchMutation.mutate(true);
+        }}
+      />
       <Dialog open={revoking !== null} onOpenChange={(open) => !open && setRevoking(null)}>
         <DialogContent>
           <DialogHeader>
@@ -233,8 +257,7 @@ export function McpIntegrationSettings() {
   );
 }
 
-function McpTokensSection({
-  endpoint,
+function McpTokensSection({  endpoint,
   scopes,
   onToggleScope,
   onCreate,
@@ -274,7 +297,19 @@ function McpTokensSection({
   error: boolean;
   onRevoke: (token: McpToken) => void;
 }) {
+  const locale = useUiLocale();
   const { t } = useLanguage();
+  // A silently-disabled submit button is a dead end: name every missing input.
+  const expiryInvalid =
+    expiresInHours !== null &&
+    (!Number.isInteger(expiresInHours) || expiresInHours < 1 || expiresInHours > 87600);
+  const blockers: string[] = [];
+  if (!name.trim()) blockers.push(t("settings.mcpFormMissingName"));
+  if (projectIds.length === 0) blockers.push(t("settings.mcpFormMissingProjects"));
+  if (projectsLoading) blockers.push(t("common.loading"));
+  if (projectsError) blockers.push(t("settings.mcpFormProjectsUnavailable"));
+  if (expiryInvalid) blockers.push(t("settings.mcpFormInvalidExpiry"));
+  const cannotCreateReason = blockers.join("、");
   return (
     <div className="space-y-3">
       <form onSubmit={onCreate} className="space-y-2.5">
@@ -317,12 +352,18 @@ function McpTokensSection({
               type="submit"
               size="sm"
               className="h-8"
-              disabled={creating || !name.trim() || projectIds.length === 0 || projectsLoading || projectsError || (expiresInHours !== null && (!Number.isInteger(expiresInHours) || expiresInHours < 1 || expiresInHours > 87600))}
+              disabled={creating || blockers.length > 0}
+              title={blockers.length > 0 ? t("settings.mcpFormCannotCreate").replace("{reasons}", cannotCreateReason) : undefined}
             >
               {creating ? t("common.loading") : t("settings.mcpCreate")}
             </Button>
           </div>
         </div>
+        {blockers.length > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {t("settings.mcpFormCannotCreate").replace("{reasons}", cannotCreateReason)}
+          </p>
+        ) : null}
         <McpProjectPicker projects={projects} loading={projectsLoading} error={projectsError} selected={projectIds} onChange={onProjectIdsChange} />
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
@@ -362,13 +403,13 @@ function McpTokensSection({
                 {token.projectIds && <span className="text-xs text-muted-foreground">{token.projectIds.map(id => projects.find(project => project.id === id)?.name ?? t("settings.mcpUnavailableProject")).join("、")}</span>}
                 {!token.projectIds && !token.allowedRoot && <span className="text-xs text-muted-foreground">{t("settings.mcpLegacyAccess")}</span>}
                 {token.allowedRoot && <span className="truncate text-xs text-muted-foreground">{token.allowedRoot}</span>}
-                <span className="text-xs text-muted-foreground">{token.expiresAt ? `${t("settings.mcpExpiresAt")}: ${new Date(token.expiresAt).toLocaleString()}` : t("settings.mcpPermanent")}</span>
+                <span className="text-xs text-muted-foreground">{token.expiresAt ? `${t("settings.mcpExpiresAt")}: ${new Date(token.expiresAt).toLocaleString(locale)}` : t("settings.mcpPermanent")}</span>
                 {token.revoked && (
                   <Badge variant="destructive">{t("settings.mcpRevoked")}</Badge>
                 )}
                 <span className="ml-auto text-xs text-muted-foreground">
                   {token.lastUsedAt
-                    ? `${t("settings.mcpLastUsed")}: ${new Date(token.lastUsedAt).toLocaleString()}`
+                    ? `${t("settings.mcpLastUsed")}: ${new Date(token.lastUsedAt).toLocaleString(locale)}`
                     : t("settings.mcpNeverUsed")}
                 </span>
                 {!token.revoked && (

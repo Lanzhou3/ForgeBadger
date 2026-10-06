@@ -137,8 +137,8 @@ export function initColorMode(): () => void {
   const stored = readStoredColorMode();
   const resolved = applyColorMode(stored);
   setColorModeState({ mode: stored, resolved });
-  if (stored !== "system") return () => {};
   return watchSystemColorMode((nextResolved) => {
+    if (colorModeState.mode !== "system") return;
     applyColorMode("system");
     setColorModeState({ mode: "system", resolved: nextResolved });
   });

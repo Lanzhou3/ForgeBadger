@@ -49,16 +49,18 @@ export function parseTerminalFont(value: string | null | undefined): TerminalFon
   }
 }
 
-export function readStoredTerminalFont(storage: BrandStorage = window.localStorage): TerminalFontSettings {
-  return parseTerminalFont(storage.getItem(TERMINAL_FONT_STORAGE_KEY));
+export function readStoredTerminalFont(storage?: BrandStorage): TerminalFontSettings {
+  try { return parseTerminalFont((storage ?? window.localStorage).getItem(TERMINAL_FONT_STORAGE_KEY)); }
+  catch { return DEFAULT_TERMINAL_FONT; }
 }
 
-export function writeTerminalFont(settings: TerminalFontSettings, storage: BrandStorage = window.localStorage): void {
+export function writeTerminalFont(settings: TerminalFontSettings, storage?: BrandStorage): void {
   const sanitized: TerminalFontSettings = {
     fontFamily: settings.fontFamily.trim().length > 0 ? settings.fontFamily.trim() : DEFAULT_TERMINAL_FONT.fontFamily,
     fontSize: clampFontSize(settings.fontSize),
   };
-  storage.setItem(TERMINAL_FONT_STORAGE_KEY, JSON.stringify(sanitized));
+  try { (storage ?? window.localStorage).setItem(TERMINAL_FONT_STORAGE_KEY, JSON.stringify(sanitized)); }
+  catch { /* Keep live terminal preferences usable when browser storage is blocked or full. */ }
 }
 
 // --- Reactive store (for useSyncExternalStore) -------------------------------

@@ -93,17 +93,10 @@ export function createAgentLlmClient(input: {
 }) {
   const resolveHost = input.resolveHost ?? lookup;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  // Per-client resolution cache. The client is constructed per user per stack,
-  // so a cached resolution lives only for the current turn/stack — this avoids
-  // re-decrypting credentials across the step loop and the summarize/title/
-  // curation calls that each resolve independently.
-  const resolutionCache = new Map<string, AgentLlmProviderResolution>();
-
   /** Resolve a model profile to a concrete provider resolution. */
   function resolveProvider(modelId?: string): AgentLlmProviderResolution {
     const repo = input.modelProviderRepository;
     let profile: ModelProfile | undefined;
-    let fromPreference = false;
     if (modelId) {
       profile = repo.getModelProfile(modelId);
     } else {
@@ -114,7 +107,6 @@ export function createAgentLlmClient(input: {
         const preferred = repo.getModelProfile(preferredModelId);
         if (preferred && preferred.status === "active") {
           profile = preferred;
-          fromPreference = true;
         }
       }
       if (!profile) {
@@ -122,7 +114,6 @@ export function createAgentLlmClient(input: {
         profile = profiles.find((m) => m.isDefault) ?? profiles[0];
       }
     }
-    const cacheKey = modelId ?? "__default__";
     if (!profile) throw new AgentError("AGENT_NO_MODEL", "No model provider configured");
     if (profile.status !== "active") throw new AgentError("AGENT_MODEL_INACTIVE", "Model is not active");
     const provider = repo.getProviderProfile(profile.providerProfileId);
@@ -133,14 +124,11 @@ export function createAgentLlmClient(input: {
       throw new AgentError('AGENT_MODEL_NOT_CHAT', 'Model does not support chat');
     if (!['anthropic','openai','openai-compatible','local'].includes(provider.apiFormat))
       throw new AgentError('AGENT_MODEL_TRANSPORT_UNSUPPORTED', 'Provider protocol is not supported by Copilot');
-    const credentials = repo.listCredentials(profile.providerProfileId);
-    const credential = credentials[0];
-    if (!credential || credential.status !== "active") throw new AgentError("AGENT_NO_CREDENTIAL", "No active provider credential");
-    if (!fromPreference) {
-      const cached = resolutionCache.get(cacheKey);
-      if (cached?.modelProfileId === profile.id && cached.apiFormat === provider.apiFormat) return cached;
-    }
-    const apiKey = repo.decryptCredential(credential.id);
+    // Resolve current authorization on every request, including auxiliary calls.
+    // A completed request does not authorize reuse of rotated credentials/config.
+    const credential = provider.authType === 'none' ? undefined : repo.listCredentials(profile.providerProfileId).find(row => row.status === 'active');
+    if (provider.authType !== 'none' && !credential) throw new AgentError("AGENT_NO_CREDENTIAL", "No active provider credential");
+    const apiKey = credential ? repo.decryptCredential(credential.id) : '';
     const baseUrl = pickBaseUrl(provider.apiFormat, provider.anthropicBaseUrl ?? profile.baseUrl, provider.openaiBaseUrl ?? profile.baseUrl);
     if (!baseUrl) throw new AgentError("AGENT_NO_BASE_URL", "Provider has no base URL");
     const resolution: AgentLlmProviderResolution = {
@@ -156,7 +144,6 @@ export function createAgentLlmClient(input: {
       allowPlaintextHttp: provider.allowPlaintextHttp,
       allowPrivateNetworks: provider.allowPrivateNetworks
     };
-    if (!fromPreference) resolutionCache.set(cacheKey, resolution);
     return resolution;
   }
 
@@ -397,7 +384,7 @@ async function streamAnthropic(
     redirect: "error",
     headers: {
       "content-type": "application/json",
-      "x-api-key": resolution.apiKey,
+      ...(resolution.authType !== 'none' ? { 'x-api-key': resolution.apiKey } : {}),
       "anthropic-version": "2023-06-01",
       ...authHeaders(resolution),
       ...resolution.defaultHeaders

@@ -53,11 +53,7 @@ describe("pickAvailableShell", () => {
     ).toBe("pwsh");
   });
 
-  it("keeps the current selection when no platform shell is installed (stale/cross-platform probe)", () => {
-    // Probe data only lists POSIX shells while the platform order is Windows
-    // (e.g. a stale cache across an OS switch): nothing in the order is
-    // installed, so keep whatever the user currently sees rather than
-    // swapping to a shell that is not installed either.
-    expect(pickAvailableShell("cmd", ["pwsh", "powershell", "cmd"], ["bash", "zsh"])).toBe("cmd");
+  it("uses an installed Gateway shell when browser and host platforms differ", () => {
+    expect(pickAvailableShell("cmd", ["pwsh", "powershell", "cmd"], ["bash", "zsh"])).toBe("bash");
   });
 });

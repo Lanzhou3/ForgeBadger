@@ -3,6 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+// Lazy conversation creation commits the new id with flushSync; flag the
+// environment so React does not warn about the synchronous commit in tests.
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 import { LanguageProvider } from "@/hooks/use-language";
 import { CopilotChat } from "@/components/copilot/copilot-chat";
 import { LAST_COPILOT_CONVERSATION_KEY } from "@/lib/copilot-conversation-storage";
@@ -11,6 +15,7 @@ import type { CopilotPreferences } from "@/lib/copilot-api";
 import { GatewayApiError } from "@/lib/api";
 
 const {
+  queueFollowupMock,
   pushMock,
   toastErrorMock,
   listConversationsMock,
@@ -29,6 +34,7 @@ const {
   getCopilotPreferencesMock,
   updateCopilotPreferencesMock,
 } = vi.hoisted(() => ({
+  queueFollowupMock: vi.fn(),
   pushMock: vi.fn(),
   toastErrorMock: vi.fn(),
   listConversationsMock: vi.fn(),
@@ -62,6 +68,7 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
   return {
     ...actual,
     listFollowups: vi.fn().mockResolvedValue({ followups: [] }),
+    queueFollowup: queueFollowupMock,
     listConversations: listConversationsMock,
     listMessages: listMessagesMock,
     createConversation: createConversationMock,
@@ -202,6 +209,15 @@ async function pickOption(name: string, option: string) {
 }
 
 describe("CopilotChat console layout", () => {
+  it("renders the conversation title as the page's semantic h1", async () => {
+    listConversationsMock.mockResolvedValue({ conversations: [baseConversation] });
+    renderChat();
+    await waitForConversationLoaded();
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading.textContent).toContain("测试对话");
+    expect(heading.className).toContain("text-sm");
+  });
+
   it("restores the last selected conversation when returning from settings", async () => {
     listConversationsMock.mockResolvedValue({ conversations: [baseConversation, { ...baseConversation, id: "conv-2", title: "上次阅读" }] });
     window.localStorage.setItem(LAST_COPILOT_CONVERSATION_KEY, "conv-2");
@@ -763,6 +779,161 @@ describe("CopilotChat console layout", () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "停止" }));
     await waitFor(() => expect(cancelRunMock).toHaveBeenCalledWith("run-1"));
+  });
+
+  it("preserves the newly selected conversation draft after a late enqueue response", async () => {
+    const response = deferred<{ followup: { id: string; status: string; runId: null } }>();
+    queueFollowupMock.mockReturnValueOnce(response.promise);
+    listConversationsMock.mockResolvedValue({ conversations: [baseConversation, { ...baseConversation, id: 'conv-2', title: '第二个会话' }] });
+    getRunMock.mockResolvedValue({ run: { id: 'run-1', conversationId: 'conv-1', status: 'running' }, pendingActions: [] });
+    listRunsMock.mockImplementation(async (id: string) => ({ runs: [], activeRun: id === 'conv-1' ? { id: 'run-1' } : null }));
+    renderChat();
+    const input = await screen.findByPlaceholderText("执行中，发送将加入队列…");
+    fireEvent.change(input, { target: { value: 'queue A' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(queueFollowupMock).toHaveBeenCalled());
+    fireEvent.click(screen.getByText('第二个会话'));
+    const nextInput = await screen.findByPlaceholderText("输入消息……");
+    fireEvent.change(nextInput, { target: { value: 'B draft' } });
+    await act(async () => { response.resolve({ followup: { id: 'q1', status: 'queued', runId: null } }); });
+    expect((nextInput as HTMLTextAreaElement).value).toBe('B draft');
+  });
+
+  describe("empty state lazy conversation creation", () => {
+    const newConversation = { ...baseConversation, id: "conv-new", title: null };
+
+    function renderEmptyChat() {
+      listConversationsMock.mockResolvedValue({ conversations: [] });
+      listMessagesMock.mockResolvedValue({ messages: [] });
+      return renderChat();
+    }
+
+    it("sends from the empty state by lazily creating a conversation", async () => {
+      const blockedSend = deferred<{ runId: string }>();
+      createConversationMock.mockResolvedValue({ conversation: newConversation });
+      sendMessageMock.mockReturnValue(blockedSend.promise);
+      renderEmptyChat();
+
+      // The composer is live without any selected conversation.
+      const input = screen.getByPlaceholderText("输入消息……");
+      fireEvent.change(input, { target: { value: "帮我看看进度" } });
+      const sendButton = screen.getByRole("button", { name: "发送" });
+      expect(sendButton.hasAttribute("disabled")).toBe(false);
+      fireEvent.click(sendButton);
+
+      await waitFor(() => expect(createConversationMock).toHaveBeenCalledTimes(1));
+      await waitFor(() =>
+        expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "帮我看看进度", undefined,
+          expect.objectContaining({ clientRequestId: expect.any(String) })));
+      // The optimistic bubble renders while the run POST is in flight, and the
+      // new id is shared with the robot panel's storage.
+      expect(screen.getByText("帮我看看进度")).toBeTruthy();
+      expect(window.localStorage.getItem(LAST_COPILOT_CONVERSATION_KEY)).toBe("conv-new");
+
+      await act(async () => {
+        blockedSend.resolve({ runId: "run-1" });
+      });
+      // The lazily created conversation is auto-titled from the first message.
+      await waitFor(() => expect(renameConversationMock).toHaveBeenCalledWith("conv-new", "帮我看看进度"));
+    });
+
+    it("lazily creates a conversation from a welcome suggestion chip", async () => {
+      createConversationMock.mockResolvedValue({ conversation: newConversation });
+      renderEmptyChat();
+
+      fireEvent.click(await screen.findByRole("button", { name: "项目整体进展如何？" }));
+
+      await waitFor(() => expect(createConversationMock).toHaveBeenCalledTimes(1));
+      await waitFor(() =>
+        expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "项目整体进展如何？", undefined,
+          expect.objectContaining({ clientRequestId: expect.any(String) })));
+      expect(screen.queryByText("你好，我是 Copilot")).toBeNull();
+    });
+
+    it("sends the submitted text and preserves a later draft during lazy creation", async () => {
+      const blockedCreate = deferred<{ conversation: typeof newConversation }>();
+      const blockedSend = deferred<{ runId: string }>();
+      createConversationMock.mockReturnValue(blockedCreate.promise);
+      sendMessageMock.mockReturnValue(blockedSend.promise);
+      renderEmptyChat();
+      const input = screen.getByPlaceholderText("输入消息……") as HTMLTextAreaElement;
+      fireEvent.change(input, { target: { value: "submitted A" } });
+      fireEvent.click(screen.getByRole("button", { name: "发送" }));
+      fireEvent.change(input, { target: { value: "draft B" } });
+      await act(async () => { blockedCreate.resolve({ conversation: newConversation }); });
+      await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "submitted A", undefined,
+        expect.objectContaining({ clientRequestId: expect.any(String) })));
+      expect(input.value).toBe("draft B");
+      await act(async () => { blockedSend.resolve({ runId: "run-1" }); });
+      expect(input.value).toBe("draft B");
+    });
+
+    it("clears only the unchanged submitted draft after lazy creation accepts a send", async () => {
+      const blockedCreate = deferred<{ conversation: typeof newConversation }>();
+      const blockedSend = deferred<{ runId: string }>();
+      createConversationMock.mockReturnValue(blockedCreate.promise);
+      sendMessageMock.mockReturnValue(blockedSend.promise);
+      renderEmptyChat();
+      const input = screen.getByPlaceholderText("输入消息……") as HTMLTextAreaElement;
+      fireEvent.change(input, { target: { value: "submitted A" } });
+      fireEvent.click(screen.getByRole("button", { name: "发送" }));
+      await act(async () => { blockedCreate.resolve({ conversation: newConversation }); });
+      await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+      expect(input.value).toBe("");
+      await act(async () => { blockedSend.resolve({ runId: "run-1" }); });
+    });
+
+    it("creates only one conversation when Enter is pressed twice during lazy creation", async () => {
+      const blockedCreate = deferred<{ conversation: typeof newConversation }>();
+      const blockedSend = deferred<{ runId: string }>();
+      createConversationMock.mockReturnValue(blockedCreate.promise);
+      sendMessageMock.mockReturnValue(blockedSend.promise);
+      renderEmptyChat();
+
+      const input = screen.getByPlaceholderText("输入消息……");
+      fireEvent.change(input, { target: { value: "双击发送" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      // Second Enter lands while createConversation is still in flight and the
+      // controller's sending guard is not armed yet — it must be dropped.
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(createConversationMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        blockedCreate.resolve({ conversation: newConversation });
+      });
+
+      await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+      expect(createConversationMock).toHaveBeenCalledTimes(1);
+      expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "双击发送", undefined,
+        expect.objectContaining({ clientRequestId: expect.any(String) }));
+      // A single optimistic bubble, not two. (The send POST stays in flight so
+      // the post-send refresh cannot replace the transcript before we assert.)
+      expect(screen.getAllByText("双击发送")).toHaveLength(1);
+      await act(async () => {
+        blockedSend.resolve({ runId: "run-1" });
+      });
+    });
+
+    it("keeps the typed draft and allows retrying when conversation creation fails", async () => {
+      createConversationMock.mockRejectedValueOnce(new Error("offline"));
+      renderEmptyChat();
+
+      const input = screen.getByPlaceholderText("输入消息……");
+      fireEvent.change(input, { target: { value: "保留的草稿" } });
+      fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+      await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("加载失败，请检查 Gateway 服务。"));
+      expect(createConversationMock).toHaveBeenCalledTimes(1);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect((input as HTMLTextAreaElement).value).toBe("保留的草稿");
+
+      // The Gateway recovers: retrying with the preserved draft succeeds.
+      createConversationMock.mockResolvedValueOnce({ conversation: newConversation });
+      fireEvent.click(screen.getByRole("button", { name: "发送" }));
+      await waitFor(() =>
+        expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "保留的草稿", undefined,
+          expect.objectContaining({ clientRequestId: expect.any(String) })));
+    });
   });
 
 });

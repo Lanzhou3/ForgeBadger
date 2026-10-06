@@ -24,7 +24,7 @@ it('snapshots a bounded redacted recent user prompt without generating a notific
     const bus = new ForgeBadgerEventBus(); attachNotificationPersistence({ db, eventBus: bus });
     const notices = new NotificationRepository(db, user.id);
     const hook = (event: Record<string, unknown>, token = 'fixture') => handleClaudeNotificationHook(db, bus,
-      { session_id: 'native-session', ...event, adapter: 'codex' }, token, session.id, createNotificationDeduper());
+      { session_id: 'native-session', turn_id: 'round-1', ...event, adapter: 'codex' }, token, session.id, createNotificationDeduper());
     assert.equal(hook({ hook_event_name: 'UserPromptSubmit', prompt: 'unauthorized' }, 'wrong').status, 401);
     assert.equal(sessions.getById(session.id)?.lastPrompt, null);
     hook({ hook_event_name: 'UserPromptSubmit', prompt: '检查远程通知 sk-SECRET123456789 ' + '甲'.repeat(1500) });
@@ -34,7 +34,7 @@ it('snapshots a bounded redacted recent user prompt without generating a notific
     hook({ hook_event_name: 'Stop' });
     const saved = notices.list()[0]!;
     assert.match(JSON.parse(saved.payload!).last_prompt, /检查远程通知/);
-    hook({ hook_event_name: 'UserPromptSubmit', prompt: '第二个请求' });
+    hook({ hook_event_name: 'UserPromptSubmit', turn_id: 'round-2', prompt: '第二个请求' });
     assert.equal(notices.get(saved.id)?.payload, saved.payload);
     hook({ hook_event_name: 'UserPromptSubmit', agent_id: 'child', prompt: '子代理内部指令' });
     assert.equal(sessions.getById(session.id)?.lastPrompt, '第二个请求');

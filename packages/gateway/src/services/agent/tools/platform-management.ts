@@ -15,6 +15,6 @@ export function createPlatformManagementTools(): AgentTool[] {
         { name: 'dispatch_task_to_session', description: 'Programmatically submit a task message to a running CLI session (bracketed paste + single Enter) with delivery confirmation. Requires the session adapter to be autonomy-enabled (FORGEBADGER_CLI_AUTONOMY_ADAPTERS) and the composer to be ready.', schema: z.object({ sessionId: z.string().min(1).max(128), message: z.string().min(1).max(4000) }).strict() }
     ];
     return [{ name: 'pm_overview', description: 'Read project progress, manual/CLI planning mode, owner, next action and evidence freshness.', risk: 'read', requiresApproval: false, inputSchema: z.object({}).strict(), async execute(_input, ctx) {
-                return projectManagementOverview({ db: ctx.db, userId: ctx.userId });
+                return projectManagementOverview({ db: ctx.db, userId: ctx.userId }, Array.isArray(ctx.allowedProjectIds) ? ctx.allowedProjectIds as string[] : undefined);
             } }, ...writes.map(v => ({ name: v.name, description: v.description, risk: 'operate' as const, requiresApproval: true, inputSchema: v.schema, execute: (input: unknown, ctx: Parameters<typeof executeAgentAction>[2]) => executeAgentAction(v.name, input, ctx) }))];
 }

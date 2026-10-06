@@ -18,30 +18,49 @@ interface SetupState {
 
 export interface SetupBlocker { message: string; step: 'connection' | 'pairing' | 'authorization'; action: string }
 
+/** Localized strings consumed by channelSetupBlocker; supplied by the copy module. */
+export interface ChannelSetupCopy {
+  connectionAction: string;
+  pairingAction: string;
+  authorizationAction: string;
+  secretRequired: string;
+  configChecking: string;
+  configLoadFailed: string;
+  channelDisabled: string;
+  selectIdentity: string;
+  identityClaimed: string;
+  identityPending: string;
+  identityStale: string;
+  pairFirst: string;
+  existingRoute: string;
+  projectsLoading: string;
+  projectsError: string;
+  noAutonomyProjects: string;
+  selectProject: string;
+}
+
 /** Explains UI prerequisites; the Gateway remains the authority for every mutation. */
-export function channelSetupBlocker(state: SetupState): SetupBlocker | undefined {
-  const connection = (message: string): SetupBlocker => ({ message, step: 'connection', action: '前往应用接入' });
-  const pairing = (message: string): SetupBlocker => ({ message, step: 'pairing', action: '前往身份配对' });
-  const authorization = (message: string): SetupBlocker => ({ message, step: 'authorization', action: '前往项目授权' });
-  if (!state.account?.secretConfigured) return connection('请先在第 1 步保存机器人凭证并连接渠道。');
-  if (state.configLoading) return connection('正在核查渠道配置，请稍候。');
-  if (state.configError || !state.config) return connection('渠道配置加载失败，请重新加载后再授权。');
+export function channelSetupBlocker(state: SetupState, copy: ChannelSetupCopy): SetupBlocker | undefined {
+  const connection = (message: string): SetupBlocker => ({ message, step: 'connection', action: copy.connectionAction });
+  const pairing = (message: string): SetupBlocker => ({ message, step: 'pairing', action: copy.pairingAction });
+  const authorization = (message: string): SetupBlocker => ({ message, step: 'authorization', action: copy.authorizationAction });
+  if (!state.account?.secretConfigured) return connection(copy.secretRequired);
+  if (state.configLoading) return connection(copy.configChecking);
+  if (state.configError || !state.config) return connection(copy.configLoadFailed);
   if (!state.account.enabled || !state.config.enabled || state.config.emergencyDisabled) {
-    return connection('渠道已停用或紧急停止，请先在第 1 步保存并连接。');
+    return connection(copy.channelDisabled);
   }
   if (!state.identity) {
-    if (state.identities.length) return pairing('请选择要授权的已确认私聊身份。');
-    if (state.pairing?.status === 'claimed') return pairing('私聊已认领，请在第 2 步核对并确认身份。');
-    if (state.pairing?.status === 'pending') return pairing('请向机器人私聊发送第 2 步的配对命令，然后返回确认身份。');
-    return pairing(state.staleIdentity
-      ? '身份已失效，请先在第 2 步重新配对并确认身份。'
-      : '请先在第 2 步生成配对码，完成私聊认领并确认身份。');
+    if (state.identities.length) return pairing(copy.selectIdentity);
+    if (state.pairing?.status === 'claimed') return pairing(copy.identityClaimed);
+    if (state.pairing?.status === 'pending') return pairing(copy.identityPending);
+    return pairing(state.staleIdentity ? copy.identityStale : copy.pairFirst);
   }
-  if (state.existingRoute) return authorization('该身份已有渠道绑定；如需重新绑定或更换项目，请先撤销下方原绑定。');
-  if (state.projectsLoading) return authorization('正在加载项目，请稍候。');
-  if (state.projectsError) return authorization('项目加载失败，请重新加载后再授权。');
-  if (!state.projectCount) return authorization('请先打开下方项目 Copilot 自治开关，再选择项目。');
-  if (!state.selectedProject) return authorization('请选择要授权的项目。');
+  if (state.existingRoute) return authorization(copy.existingRoute);
+  if (state.projectsLoading) return authorization(copy.projectsLoading);
+  if (state.projectsError) return authorization(copy.projectsError);
+  if (!state.projectCount) return authorization(copy.noAutonomyProjects);
+  if (!state.selectedProject) return authorization(copy.selectProject);
   return undefined;
 }
 
@@ -53,12 +72,36 @@ export type ChannelOverallState =
   | 'stopped'
   | 'unknown';
 
+/**
+ * Semantic states for an active channel route. Display labels live in the
+ * copy module (routeStates); consumers must compare these keys, never labels.
+ */
+export type ChannelRouteStateKey =
+  | 'authorized'
+  | 'pending_review'
+  | 'identity_inactive'
+  | 'config_changed'
+  | 'channel_disabled'
+  | 'project_missing'
+  | 'autonomy_off'
+  | 'authority_revoked';
+
+/** Route states that render as destructive badges. */
+export const DESTRUCTIVE_ROUTE_STATES: readonly ChannelRouteStateKey[] = [
+  'identity_inactive',
+  'config_changed',
+  'channel_disabled',
+  'project_missing',
+  'autonomy_off',
+  'authority_revoked',
+];
+
 interface OverallStateInput {
   /** Any of the status queries failed or is still loading core inputs. */
   loadPending: boolean;
-  /** At least one route reports 权限有效. */
+  /** At least one route is authorized. */
   authorized: boolean;
-  /** At least one route reports 授权状态待核查. */
+  /** At least one route reports pending review. */
   pendingReview: boolean;
   /** Account is connected but disabled or emergency-stopped. */
   stopped: boolean;
@@ -75,18 +118,6 @@ export function channelOverallState(state: OverallStateInput): ChannelOverallSta
   if (state.blocker.step === 'pairing') return 'pairing';
   if (state.blocker.step === 'authorization') return 'authorization';
   return 'not_connected';
-}
-
-const stateLabels: Record<string, string> = {
-  pending: '待处理', claimed: '等待确认', confirmed: '已确认', cancelled: '已取消',
-  active: '有效', revoked: '已撤销', sending: '发送中', delivered: '渠道已接收',
-  failed: '发送失败', unknown: '结果不确定', connected: '已连接', connecting: '连接中',
-  reconnecting: '重新连接中', unhealthy: '连接异常', stopped: '已停止', disabled: '未启用',
-};
-
-/** Localized label for channel/pairing/delivery states (zh defaults). */
-export function channelStateLabel(state: string): string {
-  return stateLabels[state] ?? state;
 }
 
 /** Semantic badge classes for a raw connection/health state. */

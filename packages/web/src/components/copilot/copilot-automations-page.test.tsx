@@ -168,7 +168,7 @@ it("runs an automation immediately from the row action", async () => {
 
 it("accepts and dismisses suggested automations", async () => {
   vi.mocked(api.listAutomationSuggestions).mockResolvedValue({
-    suggestions: [{ id: "s1", source: "history", status: "pending", jobSpec: JSON.stringify({ name: "Morning report", prompt: "Compile status" }) }],
+    suggestions: [{ id: "s1", source: "history", dedupKey: "history:morning-report", status: "pending", jobSpec: JSON.stringify({ name: "Morning report", prompt: "Compile status" }) }],
   });
   mount();
   expect(await screen.findByText("Morning report")).toBeTruthy();
@@ -176,4 +176,37 @@ it("accepts and dismisses suggested automations", async () => {
   await waitFor(() => expect(api.acceptAutomationSuggestion).toHaveBeenCalledWith("s1", expect.any(Object)));
   fireEvent.click(screen.getByRole("button", { name: "忽略" }));
   await waitFor(() => expect(api.dismissAutomationSuggestion).toHaveBeenCalledWith("s1", expect.any(Object)));
+});
+
+it("gives the suggestions and automations cards their own descriptions", async () => {
+  vi.mocked(api.listAutomationSuggestions).mockResolvedValue({
+    suggestions: [{ id: "s1", source: "history", dedupKey: "history:morning-report", status: "pending", jobSpec: JSON.stringify({ name: "Morning report", prompt: "Compile status" }) }],
+  });
+  mount();
+  // Wait until the suggestions card has actually rendered.
+  await screen.findByText("Morning report");
+  // The page subtitle is no longer repeated on both cards: it renders exactly
+  // once (in the shell header), with a dedicated description per card.
+  expect(screen.getAllByText("创建按计划自动运行的 Copilot 任务，结果投递到会话与通知。").length).toBe(1);
+  expect(screen.getByText("根据使用历史推荐的可复用任务，接受后会加入下方自动化列表。")).toBeTruthy();
+  expect(screen.getByText("已创建的定时任务；可暂停、启用、立即运行或删除。")).toBeTruthy();
+});
+it("localizes catalog suggestions by dedupKey instead of showing the stored Chinese jobSpec", async () => {
+  vi.mocked(api.listAutomationSuggestions).mockResolvedValue({
+    suggestions: [
+      { id: "s2", source: "catalog", dedupKey: "catalog:daily-briefing", status: "pending", jobSpec: JSON.stringify({ name: "每日项目简报", prompt: "汇总今天所有项目的进展" }) },
+      { id: "s3", source: "catalog", dedupKey: "catalog:future-item", status: "pending", jobSpec: JSON.stringify({ name: "Stored name", prompt: "Stored prompt" }) },
+    ],
+  });
+  window.localStorage.setItem("forgebadger-language", "en");
+  try {
+    mount();
+    // Known catalog key: copy-module English text wins over the stored Chinese jobSpec.
+    expect(await screen.findByText("Daily project briefing")).toBeTruthy();
+    expect(screen.queryByText("每日项目简报")).toBeNull();
+    // Unknown catalog key: falls back to the raw stored jobSpec.
+    expect(screen.getByText("Stored name")).toBeTruthy();
+  } finally {
+    window.localStorage.removeItem("forgebadger-language");
+  }
 });

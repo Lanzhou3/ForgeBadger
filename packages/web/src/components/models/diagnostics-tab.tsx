@@ -13,6 +13,7 @@ import {
   type ProviderProfile,
 } from "@/lib/api";
 
+import { useUiLocale } from "@/hooks/use-language";
 import { formatCheckedAt, type Translate } from "./shared";
 
 interface DiagnosticsTabProps {
@@ -22,6 +23,7 @@ interface DiagnosticsTabProps {
 
 /** Endpoint latency diagnostics. The result stays rendered until the provider changes. */
 export function DiagnosticsTab({ provider, t }: DiagnosticsTabProps) {
+  const locale = useUiLocale();
   const [endpointHealth, setEndpointHealth] = useState<ModelProviderEndpointHealth | null>(null);
 
   useEffect(() => {
@@ -78,7 +80,7 @@ export function DiagnosticsTab({ provider, t }: DiagnosticsTabProps) {
               {endpointHealth.latencyMs} ms
               {endpointHealth.statusCode ? ` · HTTP ${endpointHealth.statusCode}` : ""}
               {" · "}
-              {formatCheckedAt(endpointHealth.checkedAt)}
+              {formatCheckedAt(endpointHealth.checkedAt, locale)}
             </span>
             {endpointHealth.error ? (
               <span className="text-destructive">{endpointHealth.error}</span>

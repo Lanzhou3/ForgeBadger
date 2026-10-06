@@ -15,6 +15,7 @@ import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
 import { admitDevelopmentRepair, revokeDevelopmentRepairs, recoverDevelopmentRepairs } from '../src/services/agent/development-repair.js';
 import { assertRepairPlan, reserveRepairSubmission, repairJob, validateRepairJob } from '../src/services/development/repair-scope.js';
 import { assertDevelopmentAuthority } from '../src/services/development/authority.js';
+import { canonical } from '../src/services/platform-commands/actions.js';
 import { prepareSource, hashText } from '../src/services/development/workspace.js';
 import type { DevelopmentPlan } from '../src/services/development/contracts.js';
 import { sandboxCapability, runSandboxChecks } from '../src/services/development/sandbox.js';
@@ -24,6 +25,11 @@ import { createCopilotOrchestrator } from '../src/services/agent/orchestrator.js
 import { createAgentToolRegistry } from '../src/services/agent/tool-registry.js';
 import { createPlatformTools } from '../src/services/agent/tools/index.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
+import { TelegramChannelRepository } from '../src/db/repositories/telegram-channel-repository.js';
+import { TelegramIntegrationRepository } from '../src/db/repositories/telegram-integration-repository.js';
+import { ChannelIdentityService, type TrustedChannelPeer } from '../src/services/channels/channel-identity-service.js';
+import { assertChannelToolScope } from '../src/services/channels/channel-run-scope.js';
+import { agentActions } from '../src/services/platform-commands/agent-actions.js';
 
 function fixture(t:TestContext) {
  const root=mkdtempSync(join(tmpdir(),'fb-repair-')),db=new Database(':memory:');db.pragma('foreign_keys=ON');
@@ -42,7 +48,8 @@ function fixture(t:TestContext) {
   ledger.startStep(claim,step);
   if(repairJob(db,userId,runId))reserveRepairSubmission(db,userId,runId,step.id,next);
   const prepared=prepareSource(root,next),actions=new PlatformActionRepository(db,userId),tasks=new DevelopmentTaskRepository(db,userId);
-  const intent=actions.create({actor_user_id:userId,grant_id:null,grant_revision:null,authority:'owner_action',command_id:'development.task.submit',input_json:JSON.stringify(next),digest:'a'.repeat(64),resources_json:'{}',policy_version:1,expires_at:Date.now()+900000,idempotency_key:step.id,status:'approved'},{kind:'copilot',runId,stepId:step.id});
+  const resources={projectIds:[next.projectId],rootPaths:[prepared.root],revision:hashText(JSON.stringify([prepared.root,prepared.sourceDigest,prepared.outputDigest,prepared.recipeDigest]))};
+  const intent=actions.create({actor_user_id:userId,grant_id:null,grant_revision:null,authority:'owner_action',command_id:'development.task.submit',input_json:canonical(next),digest:hashText(canonical({commandId:'development.task.submit',input:next,resources,policyVersion:1})),resources_json:canonical(resources),policy_version:1,expires_at:Date.now()+900000,idempotency_key:step.id,status:'approved'},{kind:'copilot',runId,stepId:step.id});
   actions.start(intent.id,'worker',Date.now()+120000);
   const taskInput={project_id:project.id,goal:next.goal,plan_json:JSON.stringify(next),recipe_digest:prepared.recipeDigest,source_digest:prepared.sourceDigest,output_digest:prepared.outputDigest,intent_id:intent.id,origin_run_id:runId,origin_step_id:step.id,project_root:prepared.root};
   // Simulate an imported historical DB beyond today's 100-task create limit.
@@ -135,4 +142,37 @@ it('rotates past 100 unreportable jobs to publish later terminal results',t=>{
  }
  recoverDevelopmentRepairs(f.db,f.userId);recoverDevelopmentRepairs(f.db,f.userId);
  assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_repair_jobs WHERE report_message_id IS NOT NULL').get() as {n:number}).n,1);
+});
+
+it('confirmed root remains repairable after admission expiry while live autonomy is still required',t=>{
+ const f=fixture(t),task=f.failed(f.runId),row=new DevelopmentTaskRepository(f.db,f.userId).get(task)!;
+ f.db.prepare('UPDATE platform_action_intents SET expires_at=0 WHERE id=?').run(row.intent_id);
+ const child=admitDevelopmentRepair(f.db,f.userId,task)!;assert.ok(child);assertRepairPlan(f.db,f.userId,child,randomUUID(),f.plan);
+ f.projects.setCopilotAutonomy(f.project.id,false);assert.throws(()=>assertRepairPlan(f.db,f.userId,child,randomUUID(),f.plan),/AUTONOMY/);
+});
+
+it('inherits the durable channel repair mode through PlatformActions preview', { skip: !sandboxCapability().available }, t => {
+ const f = fixture(t), key = 'a'.repeat(64);
+ const account = new TelegramChannelRepository(f.db, f.userId, key).upsertAccount({ name: 'repair', botToken: '123:synthetic', enabled: true });
+ new TelegramIntegrationRepository(f.db, f.userId).upsertConfig({ enabled: true, allowedChatIds: ['123'] });
+ const identityService = new ChannelIdentityService(f.db, f.userId, key);
+ const peer: TrustedChannelPeer = { channel: 'telegram', accountId: account.id, accountRevision: account.configRevision,
+  externalUserId: '123', chatId: '123', chatType: 'p2p' };
+ const pairing = identityService.createPairing({ channel: 'telegram', accountId: account.id });
+ const claimed = identityService.claimPairing(pairing.token, peer);
+ const identity = identityService.confirmPairing(claimed.id, { revision: claimed.revision, externalUserId: '123', chatId: '123' });
+ const route = identityService.createRoute({ identityId: identity.id, projectId: f.project.id });
+ // Valid historical confirmed submission/check-failure fixture; no new remote
+ // direct-development authority is granted by this setup or the repair mode.
+ const origin = f.ledger.admit({ userId: f.userId, conversationId: route.conversationId, projectId: f.project.id, userText: 'Fix', repairFailedChecks: true }, 6);
+ const child = admitDevelopmentRepair(f.db, f.userId, f.failed(origin))!;
+ const turn = JSON.parse(f.ledger.get(child)!.input_json);
+ f.ledger.validateScope(turn);
+ const step = f.ledger.addStep(child, { kind: 'tool', toolName: 'submit_development_task', toolCallId: 'repair', inputJson: JSON.stringify(f.plan), effect: 'write' });
+ reserveRepairSubmission(f.db, f.userId, child, step.id, f.plan);
+ const context = { db: f.db, userId: f.userId, masterKey: key, source: 'user' as const, executionMode: 'repair' as const,
+  runId: child, stepId: step.id, conversationId: turn.conversationId, projectId: f.project.id };
+ assertChannelToolScope(context, 'submit_development_task', f.plan);
+ assert.doesNotThrow(() => agentActions(context).preview({ commandId: 'development.task.submit', input: f.plan, idempotencyKey: step.id }));
+ assert.throws(() => assertChannelToolScope({ ...context, executionMode: undefined }, 'submit_development_task', f.plan), /CHANNEL_AUTHORITY_REJECTED/);
 });

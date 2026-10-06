@@ -3,6 +3,8 @@
 import type { ReactNode } from "react";
 
 import { useLanguage } from "@/hooks/use-language";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { brandAssets } from "@/lib/brand-assets";
 import type { Language, TranslationKey } from "@/lib/i18n";
 
@@ -71,11 +73,11 @@ export function AuthShell({
                   title={option.label}
                   aria-label={option.label}
                   aria-pressed={language === option.code}
-                  className={`rounded px-1.5 py-1 text-[10px] font-medium transition-colors ${
-                    language === option.code
-                      ? "bg-brand text-brand-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
+                  className={cn(
+                    buttonVariants({ variant: language === option.code ? "brand" : "ghost" }),
+                    "rounded px-1.5 py-1 text-[10px] font-medium",
+                    language !== option.code && "text-muted-foreground"
+                  )}
                   onClick={() => setLanguage(option.code)}
                 >
                   {option.shortLabel}

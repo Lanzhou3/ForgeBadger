@@ -41,7 +41,7 @@ export function ancestorPaths(path: string): string[] {
   return ancestors;
 }
 
-export function formatWorkspaceTime(value: string): string {
+export function formatWorkspaceTime(value: string, locale: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale);
 }

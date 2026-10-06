@@ -13,8 +13,8 @@
  * so they inherit the project-level `copilot_autonomy` switch, intent/receipt
  * idempotency, and restricted-run gating automatically. While a command
  * runs, the workspace writer lease makes the browser terminal read-only;
- * the owner can take over at any time, which aborts the command with
- * userTookOver=true.
+ * the owner can take over at any time, which transfers control with
+ * userTookOver=true. A persistent command may still be running.
  */
 import { z } from "zod";
 import type { AgentTool } from "../tool-registry.js";
@@ -48,7 +48,8 @@ export function createTerminalTools(): AgentTool[] {
         "multi-step work (install then build, cd then test). " +
         "Requires project Copilot autonomy to be enabled. " +
         "Avoid commands that block on interactive input; if the user takes over the terminal " +
-        "mid-command, the result is userTookOver=true and you may retry once they are done. " +
+        "mid-command, userTookOver=true means the command may still be running; do not retry automatically. " +
+        "A timeout stops the shell; reopen a persistent shell before continuing. " +
         "Output is redacted and capped; prefer focused commands over long pipelines.",
       risk: "operate",
       requiresApproval: true,

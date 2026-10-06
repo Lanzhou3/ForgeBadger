@@ -178,7 +178,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const copilotRuntime = startCopilotRuntime(copilotAgent);
   const recoveryReady = copilotRuntime.ready;
   const feishuChannelRuntime = options.feishuChannelRuntime ?? createNativeFeishuRuntime(options.db,options.masterKey,options.nativeFeishuIO,
-    (userId,input)=>buildAgentStack(copilotAgent,userId).orchestrator.recordApprovalDecision({userId,...input}));
+    (userId,input)=>buildAgentStack(copilotAgent,userId).orchestrator.recordApprovalDecision({userId,...input,decisionOrigin:'channel'}));
   const telegramChannelRuntime = options.telegramChannelRuntime ?? createNativeTelegramRuntime(options.db,options.masterKey,options.nativeTelegramIO);
 
   const app = createServer({

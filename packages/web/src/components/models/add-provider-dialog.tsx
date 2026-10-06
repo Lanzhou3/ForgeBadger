@@ -92,12 +92,16 @@ export function AddProviderDialog({
   const hasEndpoint = customProviderHasEndpoint(customProvider);
   const hasPlaintextHttp = hasEndpoint && customProviderHasPlaintextHttp(customProvider);
   const hasPrivateNetwork = hasEndpoint && customProviderHasPrivateNetworkUrl(customProvider);
-  const canSubmit =
-    !isCreating &&
-    customProvider.name.trim().length > 0 &&
-    customProvider.providerKey.trim().length > 0 &&
-    hasEndpoint &&
-    customProvider.supportedAdapters.length > 0;
+  // A disabled save button with no explanation is a dead end: name every
+  // missing field (also replaces the red "base URL required" error that used
+  // to appear before the user typed anything).
+  const submitBlockers: string[] = [];
+  if (customProvider.name.trim().length === 0) submitBlockers.push(t("models.providerFormMissingName"));
+  if (customProvider.providerKey.trim().length === 0) submitBlockers.push(t("models.providerFormMissingKey"));
+  if (!hasEndpoint) submitBlockers.push(t("models.providerFormMissingEndpoint"));
+  if (customProvider.supportedAdapters.length === 0) submitBlockers.push(t("models.supportedAdapters"));
+  const cannotSubmitReason = submitBlockers.join("、");
+  const canSubmit = !isCreating && submitBlockers.length === 0;
 
   function handleNameChange(name: string) {
     onCustomProviderChange({
@@ -138,6 +142,7 @@ export function AddProviderDialog({
                 value={presetQuery}
                 onChange={(event) => setPresetQuery(event.target.value)}
                 placeholder={t("models.searchProviderPlaceholder")}
+                aria-label={t("models.searchProviderPlaceholder")}
                 className="h-9 pl-9"
               />
             </div>
@@ -266,9 +271,11 @@ export function AddProviderDialog({
             </div>
           </div>
 
-          {!hasEndpoint && (
-            <p className="text-xs text-destructive">{t("models.baseUrlRequired")}</p>
-          )}
+          {submitBlockers.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {t("models.providerFormCannotSave").replace("{reasons}", cannotSubmitReason)}
+            </p>
+          ) : null}
 
           {hasPlaintextHttp && (
             <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3">
@@ -356,7 +363,11 @@ export function AddProviderDialog({
           ))}
 
           <DialogFooter>
-            <Button type="submit" disabled={!canSubmit}>
+            <Button
+              type="submit"
+              disabled={!canSubmit}
+              title={submitBlockers.length > 0 ? t("models.providerFormCannotSave").replace("{reasons}", cannotSubmitReason) : undefined}
+            >
               {isCreating ? (
                 <RefreshCw className="size-4 animate-spin" />
               ) : editing ? (

@@ -25,6 +25,9 @@ interface CodexHookGroup {
 // from ~/.kimi-code/config.toml (or $KIMI_CODE_HOME), never from a project
 // config. Keep this lifecycle set aligned with Kimi's documented event names.
 const kimiHookEvents = [
+  "UserPromptSubmit",
+  "TurnStarted",
+  "PostToolUse",
   "PermissionRequest",
   "Stop",
   "Interrupt",
@@ -32,7 +35,7 @@ const kimiHookEvents = [
   "SessionEnd",
   "Notification"
 ] as const;
-const codexEvents = ["UserPromptSubmit", "PermissionRequest", "Stop", "SessionEnd"] as const;
+const codexEvents = ["UserPromptSubmit", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd"] as const;
 
 /**
  * Materialize the project-local Codex hook bundle without replacing user
@@ -170,9 +173,29 @@ export default function (pi) {
     }
   };
 
-  pi.on("agent_settled", (_event, context) => {
+  let finalReply = "";
+  let active = false;
+  pi.on("message_end", (event, context) => {
+    if (context?.hasUI !== true || !active || event.message?.role !== "assistant") return;
+    const content = event.message.content;
+    const text = Array.isArray(content) ? content.filter(part => part?.type === "text" && typeof part.text === "string")
+      .map(part => part.text).join("\\n") : "";
+    // Drop an oversized field as a whole. Never truncate a credential before
+    // Gateway normalization/redaction, and never collect reasoning blocks.
+    finalReply = Buffer.byteLength(text, "utf8") <= 256 * 1024 ? text : "";
+  });
+  pi.on("agent_settled", async (_event, context) => {
     if (context?.hasUI !== true) return;
-    post("Stop");
+    const reply = finalReply;
+    finalReply = ""; active = false;
+    await post("Stop", reply ? { last_assistant_message: reply } : {});
+  });
+
+  pi.on("agent_start", async (_event, context) => {
+    if (context?.hasUI !== true) return;
+    if (!active) finalReply = "";
+    active = true;
+    await post("TaskStarted");
   });
 
   pi.on("ui_prompt_start", (event, context) => {
@@ -185,6 +208,7 @@ export default function (pi) {
   });
 
   pi.on("session_shutdown", async () => {
+    finalReply = ""; active = false;
     // Awaited: pi waits for session_shutdown handlers before process exit, so
     // the report lands instead of dying with the in-flight fetch.
     await post("SessionEnd");

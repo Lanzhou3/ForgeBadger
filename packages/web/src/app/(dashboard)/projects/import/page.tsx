@@ -231,7 +231,7 @@ export default function ImportProjectPage() {
                   <Button
                     type="submit"
                     size="sm"
-                    className="bg-brand text-brand-foreground hover:bg-brand/90"
+                    variant="brand"
                     disabled={scanMutation.isPending}
                   >
                     {scanMutation.isPending ? t("projects.scanning") : t("projects.scanDirectory")}
@@ -279,7 +279,7 @@ export default function ImportProjectPage() {
                 </Button>
                 <Button
                   size="sm"
-                  className="bg-brand text-brand-foreground hover:bg-brand/90"
+                  variant="brand"
                   onClick={() => setStep("confirm")}
                   disabled={!scanResult.exists || !scanResult.isDirectory}
                 >
@@ -333,7 +333,7 @@ export default function ImportProjectPage() {
                   <Button
                     type="submit"
                     size="sm"
-                    className="bg-brand text-brand-foreground hover:bg-brand/90"
+                    variant="brand"
                     disabled={importMutation.isPending}
                   >
                     {importMutation.isPending ? t("projects.importing") : t("projects.importTitle")}

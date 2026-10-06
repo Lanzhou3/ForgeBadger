@@ -102,7 +102,7 @@ export function ProjectManagerGoalBanner({
               {t("projects.projectManagerCancel")}
             </Button>
             <Button
-              className="bg-brand text-brand-foreground hover:bg-brand/90"
+              variant="brand"
               onClick={onSave}
               disabled={isSaving}
             >
@@ -129,7 +129,7 @@ export function ProjectManagerGoalBanner({
           </div>
           <Button
             size="sm"
-            className="shrink-0 bg-brand text-brand-foreground hover:bg-brand/90"
+            variant="brand" className="shrink-0"
             disabled={!canEdit} onClick={onEdit}
           >
             {t("projects.projectManagerEditGoal")}

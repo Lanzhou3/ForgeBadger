@@ -100,6 +100,18 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
         <CardDescription className="mt-1">{t("models.cliStatusDescription")}</CardDescription>
       </CardHeader>
       <CardContent>
+        {appliedQuery.isLoading ? (
+          // Skeleton while the applied-state probe resolves so the grid does
+          // not flash "not configured" for every CLI.
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="cli-status-skeleton">
+            {CLI_ADAPTERS.map((adapter) => (
+              <div
+                key={adapter}
+                className="h-28 animate-pulse rounded-md border border-border/70 bg-muted/20 px-3 py-2.5"
+              />
+            ))}
+          </div>
+        ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {CLI_ADAPTERS.map((adapter) => {
             const brand = getCliBrand(adapter);
@@ -150,7 +162,8 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
                   {applied ? (
                     <div className="min-w-0">
                       <div className={`truncate font-medium ${activeHere ? "text-emerald-700 dark:text-emerald-300" : ""}`}>
-                        {applied.providerName ?? applied.providerProfileId}
+                        {applied.providerName ??
+                          `${t("models.cliStatusUnknownProvider")} · ${applied.providerProfileId.slice(0, 8)}`}
                         {activeHere ? ` · ${t("models.cliStatusActiveHere")}` : ""}
                       </div>
                       <div className="truncate text-muted-foreground">
@@ -226,6 +239,7 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
             );
           })}
         </div>
+        )}
         {appliedQuery.isError ? (
           <p className="mt-2 text-xs text-muted-foreground">{t("models.cliStatusLoadFailed")}</p>
         ) : null}

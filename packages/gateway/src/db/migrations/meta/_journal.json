@@ -869,6 +869,34 @@
       "when": 1790667599356,
       "tag": "0124_user_adapter_order",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1791092848037,
+      "tag": "0125_copilot_approval_clock",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1791092848038,
+      "tag": "0126_development_execution_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1791092848039,
+      "tag": "0127_cli_observation_summaries",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1791092848040,
+      "tag": "0128_feishu_builtin_summaries",
+      "breakpoints": true
     }
   ]
 }

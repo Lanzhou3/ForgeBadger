@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import SkillsPage from "./page";
+import { createSkill } from "@/lib/api";
 import { LanguageProvider } from "@/hooks/use-language";
 
 vi.mock("@/lib/api", async (importOriginal) => ({
@@ -52,4 +53,24 @@ it("shows provenance badges, update-available state, and remote update actions",
   expect(screen.getByText("检查全部更新")).toBeTruthy();
   expect(screen.getAllByText("检查更新")).toHaveLength(2);
   expect(screen.getByText("更新")).toBeTruthy();
+});
+
+
+it("submits the create form and validates required fields inline", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { container } = render(<LanguageProvider><QueryClientProvider client={client}><SkillsPage /></QueryClientProvider></LanguageProvider>);
+
+  // Empty submit: per-field errors appear next to the fields, no API call.
+  const form = container.querySelector("form")!;
+  expect(form).toBeTruthy();
+  fireEvent.submit(form);
+  expect((await screen.findAllByText("此字段为必填项")).length).toBe(2);
+  expect(screen.getByLabelText(/名称/).getAttribute("aria-invalid")).toBe("true");
+  expect(vi.mocked(createSkill)).not.toHaveBeenCalled();
+
+  // Fill required fields and submit (Enter in a real browser posts the form).
+  fireEvent.change(screen.getByLabelText(/名称/), { target: { value: "safe-review" } });
+  fireEvent.change(screen.getByLabelText(/内容/), { target: { value: "# Safe review" } });
+  fireEvent.submit(form);
+  await waitFor(() => expect(vi.mocked(createSkill)).toHaveBeenCalledTimes(1));
 });

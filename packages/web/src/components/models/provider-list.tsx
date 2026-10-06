@@ -53,6 +53,7 @@ export function ProviderList({
             value={queryText}
             onChange={(event) => onQueryTextChange(event.target.value)}
             placeholder={t("models.searchConfiguredProviders")}
+            aria-label={t("models.searchConfiguredProviders")}
             className="pl-9"
           />
         </div>

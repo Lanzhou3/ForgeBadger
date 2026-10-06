@@ -111,7 +111,7 @@ export function CopilotAutomationsPage() {
             <SettingsCardHeader
               icon={<Lightbulb className="size-4" />}
               title={copy.suggestions}
-              description={copy.description}
+              description={copy.suggestionsDescription}
             />
             <CardContent className="space-y-2">
               {suggestionsList.map((suggestion) => (
@@ -131,7 +131,7 @@ export function CopilotAutomationsPage() {
           <SettingsCardHeader
             icon={<CalendarClock className="size-4" />}
             title={copy.list}
-            description={copy.description}
+            description={copy.listDescription}
             action={
               <Button size="sm" variant="outline" onClick={() => setCreating((v) => !v)}>
                 {creating ? t("common.cancel") : <><Plus className="size-4" />{copy.create}</>}
@@ -303,12 +303,17 @@ function SuggestionRow({ suggestion, pending, onAccept, onDismiss }: {
   onDismiss: () => void;
 }) {
   const copy = useAutomationsCopy();
-  const spec = parseJobSpec(suggestion.jobSpec);
+  const raw = parseJobSpec(suggestion.jobSpec);
+  // Catalog suggestions ship a stable dedupKey; localized card text comes from
+  // the copy module, with the stored jobSpec as the fallback for unknown keys.
+  const catalog = copy.catalogSuggestions[suggestion.dedupKey];
+  const name = catalog?.name ?? raw.name;
+  const prompt = catalog?.prompt ?? raw.prompt;
   return (
     <div className="flex items-center gap-3 rounded-md border border-border/70 bg-card px-3 py-2">
       <div className="min-w-0 flex-1">
-        <p className="break-all text-sm font-medium">{spec.name}</p>
-        <p className="truncate text-xs text-muted-foreground">{spec.prompt}</p>
+        <p className="break-all text-sm font-medium">{name}</p>
+        <p className="truncate text-xs text-muted-foreground">{prompt}</p>
       </div>
       <Button size="sm" variant="outline" disabled={pending} onClick={onAccept}>{copy.accept}</Button>
       <Button size="sm" variant="ghost" disabled={pending} onClick={onDismiss}>{copy.dismiss}</Button>

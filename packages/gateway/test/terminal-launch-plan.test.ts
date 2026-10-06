@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   createTerminalLaunchPlan,
   defaultTerminalShell,
+  resolveAvailableTerminalShell,
   normalizeSessionKind,
   type TerminalShell
 } from "../src/services/session-launch-plan.js";
@@ -114,4 +115,25 @@ describe("createTerminalLaunchPlan", () => {
     });
     assert.equal(plan.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
   });
+});
+
+// Availability is an external dependency; exercise preference and real fallback decisions.
+it("falls back to Windows PowerShell when PowerShell 7 is absent", async () => {
+  const seen: string[] = [];
+  const shell = await resolveAvailableTerminalShell("win32", {}, async command => {
+    seen.push(command);
+    return { exitCode: command === "powershell.exe" ? 0 : 1, stdout: "", stderr: "missing" };
+  });
+  assert.equal(shell, "powershell");
+  assert.deepEqual(seen, ["pwsh", "powershell.exe"]);
+});
+it("falls back to cmd when both PowerShell versions are absent", async () => {
+  assert.equal(await resolveAvailableTerminalShell("win32", {}, async command => ({
+    exitCode: command === "cmd.exe" ? 0 : 1, stdout: "", stderr: "missing"
+  })), "cmd");
+});
+it("rejects launching when no supported shell is installed", async () => {
+  await assert.rejects(resolveAvailableTerminalShell("win32", {}, async () => ({
+    exitCode: 1, stdout: "", stderr: "missing"
+  })), /TERMINAL_SHELL_UNAVAILABLE/);
 });

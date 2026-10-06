@@ -118,8 +118,12 @@ it('disabled takeover after pending approval has no effect',async()=>{
     f.projects.setCopilotAutonomy(f.project.id,true);
     let disabled=false;const r=await takeoverRun(f,{disabled:()=>disabled});const action=r.ledger.log.listPendingActions(r.runId)[0]!;
     assert.ok(action);disabled=true;
-    await r.orchestrator.resumeAfterApproval({userId:f.user.id,runId:r.runId,actionId:action.id,approved:true});
+    await assert.rejects(r.orchestrator.resumeAfterApproval({userId:f.user.id,runId:r.runId,actionId:action.id,approved:true}),
+      {code:'COPILOT_TOOL_DISABLED'});
     assert.equal(f.takenOver(),0);
+    assert.equal(r.ledger.get(r.runId)?.status,'awaiting_approval');
+    assert.equal(r.ledger.log.getPendingAction(action.id)?.status,'pending');
+    assert.equal(f.db.prepare('SELECT intent_id FROM platform_action_receipts WHERE user_id=?').all(f.user.id).length,0);
   }finally{f.db.close();}
 });
 

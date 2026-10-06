@@ -2,11 +2,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApplyToCliDialog } from "./apply-to-cli-dialog";
+import { ApplyToCliDialog, maskSecrets } from "./apply-to-cli-dialog";
 import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { applyCliConfigToAdapter, getClaudeRoute, previewCliConfigApply, setClaudeRoute, type ModelProfile, type ProviderProfile } from "@/lib/api";
 
-vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) => key }) }));
+vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) => key }), useUiLocale: () => "en-US" }));
 vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 vi.mock("@/lib/api", () => ({
   discoverAdapters: vi.fn(async () => ({ adapters: [] })),
@@ -144,5 +144,28 @@ describe("Codex wire API blocker", () => {
       ).toBeTruthy()
     );
     expect(screen.queryByText("models.codexWireApiBlocked")).toBeNull();
+  });
+});
+
+describe("maskSecrets", () => {
+  it("masks existing and extended token shapes while leaving normal text alone", () => {
+    expect(maskSecrets("key: sk-abc1234567890")).toBe("key: sk-ab…");
+    expect(maskSecrets("Authorization: Bearer abcdef1234567890")).toBe("Authorization: Bearer abcdef…");
+    expect(maskSecrets("token ghp_abcd1234567890")).toBe("token ghp_abcd…");
+    expect(maskSecrets("pat github_pat_abcd1234567890")).toBe("pat github_pat_abcd…");
+    expect(maskSecrets("slack xoxb-1234-5678-9012")).toBe("slack xoxb-1234…");
+    expect(maskSecrets("aws AKIAIOSFODNN7EXAMPLE")).toBe("aws AKIAIOSF…");
+    expect(maskSecrets("google AIzaSyD4iE7xn0xABC123DEF")).toBe("google AIzaSyD4…");
+    expect(maskSecrets("jwt eyJhbGciOiJIUzI1NiJ9.payload.signature")).toBe("jwt eyJhbGc…");
+
+    // Non-secret text passes through untouched.
+    expect(maskSecrets("model: claude-sonnet-4-5")).toBe("model: claude-sonnet-4-5");
+    expect(maskSecrets("baseUrl: https://api.example.com/v1")).toBe("baseUrl: https://api.example.com/v1");
+  });
+
+  it("keeps a recognizable prefix so the shape stays identifiable", () => {
+    const masked = maskSecrets("api_key=sk-live2eQ7wTy9");
+    expect(masked.startsWith("api_key=sk-li…".slice(0, 10))).toBe(true);
+    expect(masked).not.toContain("2eQ7wTy9");
   });
 });

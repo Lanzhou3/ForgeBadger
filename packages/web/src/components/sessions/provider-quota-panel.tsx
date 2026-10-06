@@ -17,7 +17,7 @@ import {
   quotaTextToneClass,
   quotaUsagePercent,
 } from "@/components/sessions/provider-quota";
-import { useLanguage } from "@/hooks/use-language";
+import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import {
   checkProviderBalance,
   CLI_ACCOUNT_ADAPTERS,
@@ -42,6 +42,7 @@ const KNOWN_TOOLS = new Set<string>(runtimeAdapterIds);
 
 export function ProviderQuotaPanel({ aiTool }: Props) {
   const { t } = useLanguage();
+  const locale = useUiLocale();
   const knownTool = KNOWN_TOOLS.has(aiTool);
   // Only CLIs with a native login/quota surface are probed by the gateway.
   // Derived from one list so a new adapter does not need a second edit here
@@ -184,7 +185,7 @@ export function ProviderQuotaPanel({ aiTool }: Props) {
               </ul>
               <p className="mt-2 text-right text-[10px] text-muted-foreground/60 tabular-nums">
                 {t("sessions.providerQuotaCheckedAt")}{" "}
-                {new Date(balance.checkedAt).toLocaleTimeString()}
+                {new Date(balance.checkedAt).toLocaleTimeString(locale)}
                 {refreshing && " ·…"}
               </p>
             </>
@@ -228,8 +229,7 @@ function QuotaBlock({ label, children }: { label: string | null; children: React
  * Native login quota body. Never surfaces gateway error text — failures
  * collapse back to the neutral empty state.
  */
-function NativeQuotaBody({
-  adapter,
+function NativeQuotaBody({  adapter,
   login,
   quota,
   failed,
@@ -241,6 +241,7 @@ function NativeQuotaBody({
   failed: boolean;
   t: Translate;
 }) {
+  const locale = useUiLocale();
   if (!login) {
     return (
       <p className="mt-2 text-xs text-muted-foreground">
@@ -269,7 +270,7 @@ function NativeQuotaBody({
             <CliQuotaSummary quota={quota} t={t} />
           </div>
           <p className="mt-2 text-right text-[10px] text-muted-foreground/60 tabular-nums">
-            {t("sessions.providerQuotaCheckedAt")} {new Date(quota.fetchedAt).toLocaleTimeString()}
+            {t("sessions.providerQuotaCheckedAt")} {new Date(quota.fetchedAt).toLocaleTimeString(locale)}
           </p>
         </>
       );
@@ -287,6 +288,7 @@ function NativeQuotaBody({
 
 function ProviderQuotaRow({ entry }: { entry: ProviderBalanceEntry }) {
   const { t } = useLanguage();
+  const locale = useUiLocale();
   const percent = quotaUsagePercent(entry);
   return (
     <li className="rounded-md border border-border/70 bg-muted/10 px-2.5 py-2">
@@ -337,7 +339,7 @@ function ProviderQuotaRow({ entry }: { entry: ProviderBalanceEntry }) {
           )}
           {entry.resetsAt && (
             <span className="shrink-0 tabular-nums">
-              {t("sessions.providerQuotaResetAt")}: {new Date(entry.resetsAt).toLocaleString()}
+              {t("sessions.providerQuotaResetAt")}: {new Date(entry.resetsAt).toLocaleString(locale)}
             </span>
           )}
         </div>

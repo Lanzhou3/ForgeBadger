@@ -144,4 +144,14 @@ describe("CopilotAutonomyPanel", () => {
     const readonlyPi = await screen.findByLabelText("pi");
     expect((readonlyPi as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("pins the save action to the bottom of the settings scroll container", async () => {
+    renderPanel();
+    const save = await screen.findByRole("button", { name: "保存" });
+    const row = save.parentElement!;
+    // Sticky row inside the scroll container: the save button stays visible
+    // and clickable in the first viewport instead of being clipped.
+    expect(row.className).toContain("sticky");
+    expect(row.className).toContain("-bottom-6");
+  });
 });

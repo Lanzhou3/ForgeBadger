@@ -6,6 +6,7 @@ import { assertChannelConversationAuthority } from '../channels/channel-run-auth
 import { assertDevelopmentAuthority } from './authority.js';
 import { developmentPlanSchema, type DevelopmentEvidence } from './contracts.js';
 import { prepareSource, hashText } from './workspace.js';
+import { assertChannelRunScope } from '../channels/channel-run-scope.js';
 
 export interface RepairJob { id:string; user_id:string; root_task_id:string; failed_task_id:string; origin_run_id:string;
   child_run_id:string; attempt:number; evidence_digest:string; submission_step_id:string|null; submitted_task_id:string|null; report_message_id:string|null }
@@ -27,6 +28,7 @@ export function validateRepairJob(db:Database,userId:string,job:RepairJob) {
     .get(userId,parent.conversation_id,origin.userText,job.origin_run_id,origin.editMessageId??null);
   if(!authorization)throw new Error('COPILOT_REPAIR_ORIGIN_REVOKED');
   assertChannelConversationAuthority(db,userId,parent.conversation_id);
+  assertChannelRunScope(db,userId,origin,{projectIds:[root.project_id],rootPaths:[root.project_root]});
   if(!new ProjectRepository(db,userId).getCopilotAutonomy(root.project_id)) throw new Error('COPILOT_REPAIR_AUTONOMY_OFF');
   if(job.attempt===1 && root.id!==failed.id)throw new Error('COPILOT_REPAIR_CHAIN_MISMATCH');
   if(job.attempt===2) {

@@ -3,6 +3,7 @@ import { hasDeliveryHistory } from '../db/repositories/managed-project-access.js
 import { PlatformActions } from "../services/platform-commands/actions.js";
 import { createPlatformCommands } from "../services/platform-commands/catalog.js";
 import { Router } from "express";
+import { CliObservationRepository } from '../db/repositories/cli-observation-repository.js';
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
@@ -29,7 +30,7 @@ import {
   createLaunchPlan,
   createTerminalLaunchPlan,
   checkTerminalShell,
-  defaultTerminalShell,
+  resolveAvailableTerminalShell,
   normalizeAdapter,
   normalizeSessionKind,
   prepareAdapterLaunchExtras,
@@ -75,6 +76,20 @@ export function createSessionRoutes(
 ): Router {
   const router = Router();
   router.use(authenticate);
+
+  // Snapshot repairs missed events after navigation or event-stream reconnect.
+  // This is observational runtime state; no prompts or terminal history are stored.
+  router.get("/work-state", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const snapshotAt = Date.now();
+    const states = new SessionRepository(db, userId).list().map(session => {
+      const tracked = eventBus?.getSessionWorkState(userId, session.id);
+      return session.status === "running"
+        ? tracked ?? { sessionId: session.id, state: "unknown" as const, updatedAt: snapshotAt }
+        : { sessionId: session.id, state: "idle" as const, updatedAt: snapshotAt };
+    });
+    res.json({ code: 0, data: { states, snapshotAt }, message: "" });
+  });
 
   router.get("/", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
@@ -136,8 +151,14 @@ export function createSessionRoutes(
     }
     const isTerminal = kind === "terminal";
 
+    let chosenShell = shell;
     if (isTerminal) {
-      const chosenShell = shell ?? defaultTerminalShell();
+      try {
+        chosenShell = shell ?? await resolveAvailableTerminalShell(undefined, undefined, adapterCommandRunner);
+      } catch (error) {
+        res.status(409).json({ code: 1, message: error instanceof Error ? error.message : "No supported shell is installed" });
+        return;
+      }
       const shellStatus = await checkTerminalShell(chosenShell, undefined, undefined, adapterCommandRunner);
       if (!shellStatus.available) {
         res.status(409).json({
@@ -189,7 +210,7 @@ export function createSessionRoutes(
         launchPlan = createTerminalLaunchPlan({
           projectRoot: project.path,
           sessionId: dbSession.id,
-          ...(shell ? { shell } : {})
+          ...(chosenShell ? { shell: chosenShell } : {})
         });
       } else {
         const adapter = kind;
@@ -282,7 +303,19 @@ export function createSessionRoutes(
         };
       })
     );
-    res.json({ code: 0, data: { shells }, message: "" });
+    res.json({ code: 0, data: { platform: process.platform, shells }, message: "" });
+  });
+
+  router.get("/:id/summary", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const session = new SessionRepository(db, userId).getById(req.params.id);
+    if (!session) { res.status(404).json({ code: 1, message: 'Session not found' }); return; }
+    const records = new CliObservationRepository(db, userId);
+    res.json({ code: 0, data: {
+      summary: records.current(session.id, session.attachToken) ?? null,
+      latestResult: records.latestResult(session.id) ?? null,
+      workState: eventBus?.getSessionWorkState(userId, session.id)?.state ?? 'unknown',
+    }, message: '' });
   });
 
   router.get("/:id", (req, res) => {

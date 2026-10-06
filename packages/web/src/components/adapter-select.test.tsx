@@ -26,6 +26,7 @@ vi.mock("@/hooks/use-language", () => ({
     setLanguage: vi.fn(),
     t: (key: string) => key,
   }),
+  useUiLocale: () => "en-US",
 }));
 
 function makeAdapter(
@@ -49,7 +50,7 @@ function makeAdapter(
 const CLAUDE = makeAdapter("claude", { label: "Claude Code", version: "2.0.0" });
 const OPENCODE = makeAdapter("opencode", { label: "OpenCode" });
 const CODEX = makeAdapter("codex", {
-  label: "Codex CLI",
+  label: "Codex",
   available: false,
   status: "missing",
   error: "codex not found",
@@ -93,7 +94,7 @@ describe("AdapterSelect", () => {
     expect(screen.getByRole("option", { name: "OpenCode" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "Kimi Code" })).toBeTruthy();
     const missingOption = screen.getByRole("option", {
-      name: "Codex CLI (projects.runtimeUnavailable)",
+      name: "Codex (projects.runtimeUnavailable)",
     });
     expect(missingOption.getAttribute("aria-disabled")).toBe("true");
   });
@@ -119,7 +120,7 @@ describe("AdapterSelect", () => {
     await openAdapterSelect();
 
     await screen.findByRole("option", { name: "Claude Code" });
-    expect(screen.queryByRole("option", { name: /Codex CLI/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /Codex/ })).toBeNull();
   });
 
   it("labels a failed probe as detection failed rather than missing", async () => {

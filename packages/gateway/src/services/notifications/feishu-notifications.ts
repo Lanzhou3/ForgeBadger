@@ -7,7 +7,8 @@ import { FeishuNotificationRepository, type FeishuNotificationConfig, type Feish
 import type { Notification } from '../../db/repositories/notification-repository.js';
 
 const types=z.enum(['attention','failure','completion','lifecycle','app_action','automation']);
-const configSchema=z.object({enabled:z.boolean(),targetId:z.string().min(1).max(160).nullable().optional(),identityId:z.string().min(1).max(128).nullable().optional(),types:z.array(types).max(6),
+// Accept retired clients' field without making basic result content optional.
+const configSchema=z.object({enabled:z.boolean(),contentLevel:z.enum(['status','summary']).default('summary').transform(()=>'summary' as const),targetId:z.string().min(1).max(160).nullable().optional(),identityId:z.string().min(1).max(128).nullable().optional(),types:z.array(types).max(6),
   webBaseUrl:z.string().trim().max(2048).transform(value=>{
     if(!value)return '';
     let url:URL;
@@ -39,7 +40,7 @@ export class FeishuNotifications {
       const previous=this.records.config();
       if(previous.revision!==next.revision)throw new FeishuNotificationError('CONFIG_CONFLICT');
       if(next.enabled){if(!next.types.length)throw new FeishuNotificationError('TYPES_REQUIRED');this.authority(next);}
-      if(previous.enabled===next.enabled && previous.targetId===next.targetId && previous.webBaseUrl===next.webBaseUrl
+      if(previous.enabled===next.enabled && previous.targetId===next.targetId && previous.webBaseUrl===next.webBaseUrl && previous.contentLevel===next.contentLevel
         && [...previous.types].sort().join(',')===next.types.join(','))return this.state();
       this.records.save(next);return this.state();
     }).immediate();

@@ -4,6 +4,7 @@ import type { Database } from '../../db/types.js';
 import type { AgentLlmClient } from './orchestrator-types.js';
 import type { LlmUsage } from './llm-response.js';
 import { AgentError } from './types.js';
+import { runDuration } from './approval-clock.js';
 
 export type RunPhase = 'queued' | 'context' | 'summarizing' | 'model' | 'tool' | 'awaiting_approval' | 'finished';
 export interface RunUsage { chargedTokens: number; reportedTokens: number; estimatedCalls: number; calls: number; costUsd: number | null; knownCostUsd: number; unpricedCalls: number }
@@ -30,11 +31,15 @@ export class RunGovernance {
       .all(this.userId,this.runId,this.userId,this.runId) as Array<{id:string;run_id:string;kind:string;status:string;charged_tokens:number;usage_json:string|null;model_json:string|null;pricing_json:string|null;cost_nanousd:number|null;created_at:number;completed_at:number|null}>;
   }
 
+  remainingDurationMs(now = Date.now()): number {
+    return runDuration(this.db, this.userId, this.runId, now).remainingMs;
+  }
+
   check(additionalTokens = 0, includeParent = true, includeTime = true): void {
-    const run = this.db.prepare('SELECT started_at,token_budget,max_duration_ms FROM copilot_runs WHERE user_id=? AND id=?')
-      .get(this.userId, this.runId) as { started_at: number | null; token_budget: number; max_duration_ms: number } | undefined;
+    const run = this.db.prepare('SELECT token_budget FROM copilot_runs WHERE user_id=? AND id=?')
+      .get(this.userId, this.runId) as { token_budget: number } | undefined;
     if (!run) throw new AgentError('COPILOT_NOT_FOUND', 'Run not found');
-    if (includeTime && run.started_at && Date.now() - run.started_at >= run.max_duration_ms)
+    if (includeTime && this.remainingDurationMs() <= 0)
       throw new AgentError('COPILOT_TIME_BUDGET', 'Run elapsed-time budget exhausted');
     const parent = includeParent ? this.db.prepare('SELECT origin_run_id FROM copilot_research_jobs WHERE user_id=? AND child_run_id=?').get(this.userId, this.runId) as { origin_run_id: string } | undefined : undefined;
     if (parent) {

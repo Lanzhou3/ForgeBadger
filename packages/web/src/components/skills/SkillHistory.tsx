@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLanguage } from "@/hooks/use-language";
+import { useTrilingual } from "@/hooks/use-trilingual";
 import {
   listSkillRevisions,
   type PreviewInput,
@@ -14,7 +15,7 @@ interface Props {
 }
 export function SkillHistory({ skillId }: Props) {
   const { language } = useLanguage();
-  const en = language === "en";
+  const pick = useTrilingual();
   const [review, setReview] = useState<PreviewInput | null>(null);
   const history = useQuery({
     queryKey: ["skill-revisions", skillId],
@@ -23,10 +24,10 @@ export function SkillHistory({ skillId }: Props) {
   return (
     <div className="mt-3 space-y-2">
       <h3 className="text-sm font-medium">
-        {en ? "Retained versions" : "保留的版本"}
+        {pick("保留的版本", "保留的版本", "Retained versions")}
       </h3>
       {history.isPending ? (
-        <p className="text-xs">{en ? "Loading…" : "加载中…"}</p>
+        <p className="text-xs">{pick("加载中…", "載入中…", "Loading…")}</p>
       ) : history.error ? (
         <p role="alert" className="text-xs text-destructive">
           {history.error.message}
@@ -46,15 +47,17 @@ export function SkillHistory({ skillId }: Props) {
               size="sm"
               onClick={() => setReview({ skillId, revisionId: revision.id })}
             >
-              {en ? "Review restore" : "预览恢复"}
+              {pick("预览恢复", "預覽復原", "Review restore")}
             </Button>
           </div>
         ))
       ) : (
         <p className="text-xs text-muted-foreground">
-          {en
-            ? "A version will be retained at the next update."
-            : "下次更新时会保留当前版本。"}
+          {pick(
+            "下次更新时会保留当前版本。",
+            "下次更新時會保留目前版本。",
+            "A version will be retained at the next update.",
+          )}
         </p>
       )}
       {review ? (

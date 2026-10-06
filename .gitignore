@@ -94,6 +94,10 @@ packages/web/*probe.mjs
 # Superseded local branding exploration; retained locally, never shipped.
 Runtra-Icon-Pack/
 
+# Design sources, experiments, previews, and exports stay local.
+# Runtime pet assets are versioned under packages/web/public/pets/.
+/design/
+
 # Local macOS metadata and generated CodeGraph indexes are never repository inputs.
 .DS_Store
 .codegraph/

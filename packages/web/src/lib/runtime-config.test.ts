@@ -44,4 +44,36 @@ describe("getGatewayBaseUrl", () => {
 
     expect(getGatewayBaseUrl()).toBe("http://env.example:48731");
   });
+
+  it("lets the env override win in development, where the placeholder runtime config is served", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    try {
+      vi.stubGlobal("window", {
+        __FORGEBADGER_RUNTIME__: {
+          gatewayBaseUrl: "http://runtime.example:48731",
+        },
+      });
+      process.env.NEXT_PUBLIC_GATEWAY_URL = "http://env.example:48731";
+
+      expect(getGatewayBaseUrl()).toBe("http://env.example:48731");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("keeps the runtime config winning outside development", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      vi.stubGlobal("window", {
+        __FORGEBADGER_RUNTIME__: {
+          gatewayBaseUrl: "http://runtime.example:48731",
+        },
+      });
+      process.env.NEXT_PUBLIC_GATEWAY_URL = "http://env.example:48731";
+
+      expect(getGatewayBaseUrl()).toBe("http://runtime.example:48731");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });

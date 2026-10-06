@@ -36,10 +36,11 @@ export interface CopilotChatControllerOptions {
 export interface CopilotChatController {
   input: string;
   setInput: (value: string) => void;
+  captureDraft: (submittedText: string) => () => void;
   sending: boolean;
   /** True when the last submission failed; keeps the inline retry action alive. */
   sendFailed: boolean;
-  send: (textOverride?: string, retry?: boolean) => Promise<void>;
+  send: (textOverride?: string, retry?: boolean, onStarted?: () => void) => Promise<void>;
   stopRun: () => Promise<void>;
   editingMessageId: string | null;
   editDraft: string;
@@ -100,6 +101,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
   const conversationIdRef = useRef<string | null>(null);
   const selectionEpochRef = useRef(0);
   const messageSerialRef = useRef(0);
+  const inputVersion = useRef(0);
   const inputRef = useRef(input);
   inputRef.current = input;
 
@@ -107,7 +109,22 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
   optionsRef.current = options;
   const { messages, active } = options;
 
-  const setInput = useCallback((value: string) => setInputState(value), []);
+  const setInput = useCallback((value: string) => {
+    inputVersion.current++;
+    inputRef.current = value;
+    setInputState(value);
+  }, []);
+
+  // A queued response only owns the exact draft that was submitted, even if
+  // the user changes it back to the same text or revisits this conversation.
+  const captureDraft = useCallback((submittedText: string) => {
+    const epoch = selectionEpochRef.current;
+    const version = inputVersion.current;
+    const text = inputRef.current;
+    return () => {
+      if (epoch === selectionEpochRef.current && version === inputVersion.current && text === inputRef.current && text.trim() === submittedText) setInput("");
+    };
+  }, [setInput]);
 
   const resetInteractionState = useCallback(() => {
     sendingRef.current = false;
@@ -123,7 +140,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
 
   const advanceSelectionEpoch = useCallback(() => ++selectionEpochRef.current, []);
 
-  const send = useCallback(async (textOverride?: string, retry = false) => {
+  const send = useCallback(async (textOverride?: string, retry = false, onStarted?: () => void) => {
     const opts = optionsRef.current;
     const prior = retry ? lastSentRef.current : null;
     const text = (prior?.text ?? textOverride ?? inputRef.current).trim();
@@ -143,6 +160,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     // Show the "thinking" pulse immediately; the first run event can lag the
     // POST while the Gateway starts the model turn.
     opts.markPending(id);
+    onStarted?.();
     try {
       await opts.startRun(id, text, request.modelId, { ...(request.projectId ? { projectId: request.projectId } : {}), clientRequestId: request.clientRequestId, ...(request.repairFailedChecks ? { repairFailedChecks: true } : {}), ...(request.reviewTaskResults ? { reviewTaskResults: true } : {}) });
       if (epoch !== selectionEpochRef.current) return;
@@ -246,6 +264,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
   return {
     input,
     setInput,
+    captureDraft,
     sending,
     sendFailed,
     send,

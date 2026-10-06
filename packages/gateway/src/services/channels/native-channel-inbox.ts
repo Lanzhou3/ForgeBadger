@@ -3,11 +3,14 @@ import { z } from 'zod';
 import { encryptSecret, decryptSecret, type EncryptedSecret } from '../../crypto/secret-box.js';
 import type { Database } from '../../db/types.js';
 import { ChannelMessageRepository } from '../../db/repositories/channel-message-repository.js';
+import { ChannelDeliveryRepository } from '../../db/repositories/channel-delivery-repository.js';
 import { ChannelIdentityService, ChannelIdentityError, type TrustedChannelPeer } from './channel-identity-service.js';
 import { CopilotRunLedger } from '../agent/run-ledger.js';
 import { normalizeFeishuEvent } from '../integrations/feishu-event-normalizer.js';
 import { ChannelCommands, parseChannelCommand } from './channel-commands.js';
 import { executionControl } from '../agent/execution-control.js';
+import { assertChannelRunScope } from './channel-run-scope.js';
+import type { TurnInput } from '../agent/run-ledger.js';
 
 const id=z.string().min(1).max(128);
 const messageSchema=z.object({eventId:id,messageId:id,text:z.string().min(1).max(32000)}).strict();
@@ -66,7 +69,16 @@ export class NativeChannelInbox {
       this.messages.bindConversation(item.id,admission.conversationId);
       const modelId=this.authority.records.session(item.route_id,input.peer)?.modelProfileId;
       // Snapshot the explicit choice; an invalid/deleted profile fails in execution with a terminal reply.
-      const runId=new CopilotRunLedger(this.db,this.userId).admit({userId:this.userId,conversationId:admission.conversationId,userText:input.text,...(modelId?{modelId}:{})},16);
+      let runId:string;
+      try {
+        runId=new CopilotRunLedger(this.db,this.userId).admit({userId:this.userId,conversationId:admission.conversationId,userText:input.text,...(modelId?{modelId}:{})},16);
+      } catch(error) {
+        if(!(error instanceof ChannelIdentityError))throw error;
+        this.messages.reject(item.id);
+        const notice='当前对话的权限记录已失效，消息未执行。请发送 /new 开始新对话，旧历史将保留；如仍无法开始，请在 Web 检查渠道绑定。';
+        new ChannelDeliveryRepository(this.db,this.userId).enqueue(item.id,'admission_rejected',JSON.stringify(encryptSecret(notice,{key:this.masterKey})));
+        return {status:'rejected'} as const;
+      }
       this.messages.adopt(item.id,runId);
       return {status:'adopted',runId,messageId:item.id} as const;
       }
@@ -82,6 +94,7 @@ export class NativeChannelInbox {
     const ledger=new CopilotRunLedger(this.db,this.userId);
     const run=item.run_id?ledger.get(item.run_id):undefined;
     if (run && run.conversation_id !== admission.conversationId) throw new ChannelIdentityError();
+    if (run) assertChannelRunScope(this.db, this.userId, JSON.parse(run.input_json) as TurnInput);
     return {messageId:item.id,status:run?.status??item.status,runId:item.run_id,
       messages:run?ledger.log.listRunMessages(run.id):[],pendingActions:run?ledger.log.listPendingActions(run.id):[]};
   }

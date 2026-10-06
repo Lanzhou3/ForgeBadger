@@ -6,6 +6,7 @@ import { DevelopmentTaskRepository } from '../../db/repositories/development-tas
 import { developmentPlanSchema,developmentId,sha256Schema,taskSummary,type DevelopmentEvidence } from './contracts.js';
 import { prepareSource,assertWorkspace,hashText } from './workspace.js';
 import { sandboxCapability } from './sandbox.js';
+import { assertDevelopmentAuthority } from './authority.js';
 import type { CommandContext,PlatformCommand } from '../platform-commands/types.js';
 
 export const developmentTaskInput=z.object({projectId:developmentId,taskId:developmentId}).strict();
@@ -32,6 +33,7 @@ function taskResources(ctx:CommandContext,raw:unknown) {
 function verifyEvidence(ctx:CommandContext,raw:unknown) {
  const v=developmentAcceptInput.parse(raw),row=new DevelopmentTaskRepository(ctx.db,ctx.userId).get(v.taskId,v.projectId);
  if(!row||row.status!=='checks_passed'||row.artifact_digest!==v.artifactDigest||!row.evidence_json||!row.workspace_path)throw new Error('DEVELOPMENT_ACCEPTANCE_STALE');
+ assertDevelopmentAuthority(ctx.db,row);
  if(hashText(row.evidence_json)!==v.artifactDigest)throw new Error('DEVELOPMENT_ARTIFACT_DRIFT');
  const evidence=JSON.parse(row.evidence_json) as DevelopmentEvidence;
  if(!evidence.checks.length||evidence.checks.some(c=>c.exitCode!==0||c.cancelled||c.timedOut))throw new Error('DEVELOPMENT_CHECKS_NOT_PASSED');

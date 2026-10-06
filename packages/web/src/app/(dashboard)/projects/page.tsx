@@ -6,18 +6,23 @@ import { ArrowUpRight, Download, FolderOpen, Plus, GitBranch, Trash2 } from "luc
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { listProjects, deleteProject, getProjectGitChanges } from "@/lib/api";
 import { getProjectTaskContext } from "@/lib/project-task-api";
 import { collaborationApi } from "@/lib/collaboration-api";
 import { ErrorNotice } from "@/components/workspaces/WorkspaceShared";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
+import { projectStatusLabel, useProjectCopy } from "@/components/projects/project-copy";
+import { useState } from "react";
 
 export default function ProjectsPage() {
   const { t } = useLanguage();
+  const projectCopy = useProjectCopy();
   const {user} = useAuth();
   const client = useQueryClient();
   const deletion = useMutation({mutationFn: deleteProject, onSuccess: async () => {await client.invalidateQueries({queryKey: ["projects"]}); await client.invalidateQueries({queryKey: ["collaboration", "projects"]});}});
+  const [deletingProject, setDeletingProject] = useState<{ id: string; name: string } | null>(null);
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["projects", user?.id],
     enabled: !!user,
@@ -38,7 +43,7 @@ export default function ProjectsPage() {
           <p className="mt-1 text-sm text-muted-foreground">{t("projects.subtitle")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+          <Button asChild size="sm" variant="brand">
             <Link href="/projects/new">
               <Plus className="size-4" />
               {t("projects.new")}
@@ -72,7 +77,7 @@ export default function ProjectsPage() {
                 {t("projects.emptyDescription")}
               </p>
             </div>
-            <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+            <Button asChild size="sm" variant="brand">
               <Link href="/projects/new">
                 <Plus className="size-4" />
                 {t("projects.create")}
@@ -103,15 +108,35 @@ export default function ProjectsPage() {
                 </div>
                 {branches[index]?.data?.branch && <span className="hidden items-center gap-1 text-xs text-muted-foreground sm:inline-flex"><GitBranch className="size-3" />{branches[index]?.data?.branch}</span>}
                 <span className="hidden w-20 shrink-0 truncate text-right text-xs text-muted-foreground sm:inline">
-                  {project.status ?? "—"}
+                  {projectStatusLabel(projectCopy, project.status ?? "—")}
                 </span>
                 <ArrowUpRight className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-brand" />
               </Link>
-              {contexts[index]?.data?.privateDetailAllowed && <Button variant="ghost" size="icon-sm" disabled={deletion.isPending} aria-label={`${t("projects.deleteRecord")} ${project.name}`} onClick={() => {if(window.confirm(t("projects.deleteConfirm"))) deletion.mutate(project.id);}}><Trash2 className="size-4" /></Button>}
+              {contexts[index]?.data?.privateDetailAllowed && <Button variant="ghost" size="icon-sm" disabled={deletion.isPending} aria-label={`${t("projects.deleteRecord")} ${project.name}`} onClick={() => setDeletingProject({ id: project.id, name: project.name })}><Trash2 className="size-4" /></Button>}
             </div>
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={deletingProject !== null}
+        destructive
+        pending={deletion.isPending}
+        title={t("projects.deleteConfirmTitle")}
+        description={
+          deletingProject
+            ? t("projects.deleteConfirmNamed").replace("{name}", deletingProject.name)
+            : ""
+        }
+        confirmLabel={t("common.delete")}
+        onOpenChange={(open) => {
+          if (!open) setDeletingProject(null);
+        }}
+        onConfirm={() => {
+          if (deletingProject) deletion.mutate(deletingProject.id);
+          setDeletingProject(null);
+        }}
+      />
     </div>
   );
 }

@@ -6,6 +6,8 @@ import { ChannelIdentityService, ChannelIdentityError } from '../channels/channe
 import type { TurnInput } from './run-ledger.js';
 import type { AgentLlmMessage } from './orchestrator-types.js';
 import { redactAgentText } from './redaction.js';
+import { assertChannelRunScope } from '../channels/channel-run-scope.js';
+import { SessionRepository } from '../../db/repositories/session-repository.js';
 
 const eventTypes = new Set(['task_completed', 'task_failed', 'session_ended', 'task_interrupted', 'permission_prompt', 'permission_denied', 'attention']);
 const shortText = (value: unknown, limit: number) => typeof value === 'string'
@@ -20,6 +22,12 @@ export function notificationContext(db: Database, input: TurnInput): AgentLlmMes
   const seen = new Set<string>();
   for (const notice of notices) {
     if (!notice.sessionId || seen.has(notice.sessionId)) continue;
+    if (input.channelScope) {
+      const session = new SessionRepository(db, input.userId).getById(notice.sessionId);
+      if (!session) continue;
+      try { assertChannelRunScope(db, input.userId, input, { projectIds: [session.projectId], rootPaths: [session.workingDir] }); }
+      catch { continue; }
+    }
     let payload: Record<string, unknown>;
     try { payload = JSON.parse(notice.payload ?? '{}'); } catch { continue; }
     if (!payload || typeof payload !== 'object' || !eventTypes.has(String(payload.notification_type))) continue;
@@ -36,6 +44,8 @@ export function notificationContext(db: Database, input: TurnInput): AgentLlmMes
 }
 
 function notificationProjects(db: Database, input: TurnInput): string[] {
+  const scope = assertChannelRunScope(db, input.userId, input);
+  if (scope) return input.projectId ? [input.projectId] : scope.projectIds;
   const channels = new ChannelIdentityRepository(db, input.userId);
   const route = channels.conversationRoute(input.conversationId);
   let candidates: string[];

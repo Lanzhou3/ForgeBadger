@@ -154,13 +154,46 @@ describe("AccountSecuritySettings", () => {
     await waitFor(() => expect(listAuthSessionsMock).toHaveBeenCalledTimes(2));
   });
 
-  it("signs out other devices in bulk from the header action", async () => {
+  it("signs out other devices in bulk only after confirmation", async () => {
     revokeOtherAuthSessionsMock.mockResolvedValue({ revoked: 1 });
     renderPanel();
 
     const bulkButton = await screen.findByRole("button", { name: "退出其他设备" });
     fireEvent.click(bulkButton);
 
+    // One-click bulk revoke must be confirmed first.
+    expect(revokeOtherAuthSessionsMock).not.toHaveBeenCalled();
+    const confirmButton = await screen.findByRole("button", { name: "确认" });
+    fireEvent.click(confirmButton);
+
     await waitFor(() => expect(revokeOtherAuthSessionsMock).toHaveBeenCalled());
+  });
+
+  it("cancelling the bulk revoke leaves sessions untouched", async () => {
+    renderPanel();
+
+    const bulkButton = await screen.findByRole("button", { name: "退出其他设备" });
+    fireEvent.click(bulkButton);
+    fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+
+    expect(revokeOtherAuthSessionsMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the password-changed notice before the redirect", async () => {
+    changePasswordMock.mockResolvedValue({});
+    renderPanel();
+
+    await waitFor(() => expect(screen.getByText("macOS · Chrome")).toBeTruthy());
+    openPasswordForm();
+    fireEvent.change(screen.getByLabelText("当前密码"), { target: { value: "old-password" } });
+    fireEvent.change(screen.getByLabelText("新密码"), { target: { value: "new-password-123" } });
+    fireEvent.change(screen.getByLabelText("确认新密码"), { target: { value: "new-password-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "修改密码" }));
+
+    // The notice renders outside the (now closed) form so it is actually
+    // visible during the pre-redirect window.
+    await waitFor(() =>
+      expect(screen.getByText("密码已修改，正在跳转到登录页…")).toBeTruthy()
+    );
   });
 });

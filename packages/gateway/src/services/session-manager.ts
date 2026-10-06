@@ -165,6 +165,7 @@ export interface WriterLeaseHandle {
 }
 
 export class InMemorySessionManager {
+  private readonly stoppingSessions = new Set<string>();
   private readonly db: Database | undefined;
   private readonly writerLeases: SessionWriterLeases;
   private readonly writerGenerations = new Map<string, number>();
@@ -400,8 +401,19 @@ export class InMemorySessionManager {
     return { available: true };
   }
 
-  async stopSession(id: string, runtimeSessionName?: string, userId?: string): Promise<GateASession> {
+  async stopSession(id: string, runtimeSessionName?: string, userId?: string, writerLease?: WriterLeaseHandle): Promise<GateASession> {
     const session = this.sessions.get(id);
+    if (writerLease) {
+      this.assertWriterLeaseCurrent(writerLease);
+      if (writerLease.sessionId !== id || writerLease.userId !== userId
+        || session && session.runtimeSessionName !== runtimeSessionName) throw new Error('SESSION_WRITER_FENCE_STALE');
+    }
+    if (writerLease && this.db && userId) {
+      const record = new SessionRuntimeConfirmationRepository(this.db, userId).get(id);
+      if (record && record.runtimeName !== runtimeSessionName) throw new Error('SESSION_WRITER_FENCE_STALE');
+    }
+    if (writerLease) this.stoppingSessions.add(id);
+    try {
     const owner=userId??session?.userId;
     if(this.db&&owner&&new SessionRuntimeConfirmationRepository(this.db,owner).get(id)){
       if(!await this.confirmSessionExecutionStopped(owner,id,true))throw new Error('SESSION_RUNTIME_STOP_UNCONFIRMED');
@@ -436,12 +448,14 @@ export class InMemorySessionManager {
     // nothing left to kill — skip instead of failing the delete with the
     // daemon's "Session not found".
     if (await this.backend.hasSession(runtimeSessionName as string)) {
+      if (writerLease) this.assertWriterLeaseCurrent(writerLease);
       await this.backend.killSession(runtimeSessionName as string);
     }
     if (userId) {
       await this.recoveryStore.removeSession(id, userId);
     }
     return fallbackStoppedSession(id, runtimeSessionName as string, userId);
+    } finally { if (writerLease) this.stoppingSessions.delete(id); }
   }
 
   /**
@@ -692,6 +706,14 @@ export class InMemorySessionManager {
     await this.backend.stageProgrammaticInput(session.runtimeSessionName, data);
   }
 
+  /** Stage one shell line without bracketed paste (bash 3/readline compatibility). */
+  async stageShellCommand(id: string, data: string): Promise<void> {
+    if (/[\r\n\x00-\x1f\x7f]/.test(data)) throw new Error("SHELL_INPUT_MUST_BE_SINGLE_LINE");
+    const session = this.requireSession(id);
+    if (!this.backend.sendInput) throw new Error("terminal backend shell input is not supported");
+    await this.backend.sendInput(session.runtimeSessionName, data);
+  }
+
   /** Press Enter on a session (submit staged input). */
   async pressEnter(id: string): Promise<void> {
     const session = this.requireSession(id);
@@ -835,12 +857,14 @@ export class InMemorySessionManager {
   }
 
   assertManualInputAllowed(userId: string, id: string): void {
+    if (this.stoppingSessions.has(id)) throw new Error('SESSION_STOP_IN_PROGRESS');
     const session = this.requireOwnedSession(userId, id);
     if(this.db) assertManagedSessionAccess(this.db,userId,id,session.launchPlan.cwd);
     this.writerLeases.assertManualInputAllowed({ userId, sessionId: id, workspace: session.launchPlan.cwd });
   }
 
   takeoverSession(userId: string, id: string): void {
+    if (this.stoppingSessions.has(id)) throw new Error('SESSION_STOP_IN_PROGRESS');
     const session = this.requireOwnedSession(userId, id);
     this.writerLeases.takeover({ userId, sessionId: id, workspace: session.launchPlan.cwd });
     this.invalidateWriter(session);
@@ -854,6 +878,7 @@ export class InMemorySessionManager {
   }
 
   cancelProgrammaticInput(userId: string, id: string): void {
+    if (this.stoppingSessions.has(id)) throw new Error('SESSION_STOP_IN_PROGRESS');
     this.invalidateWriter(this.requireOwnedSession(userId, id));
   }
 

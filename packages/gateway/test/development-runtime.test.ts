@@ -38,7 +38,8 @@ function fixture(testContent="const {test}=require('node:test');const a=require(
  // On hosts without a sandbox the submit API now fails fast; seed the exact post-submit
  // state so platform-independent lifecycle logic stays covered on every platform.
  const seedSubmit=()=>{const p=prepareSource(root,plan),key=crypto.randomUUID();
-  const intent=actions.intents.create({actor_user_id:user.id,grant_id:null,grant_revision:null,authority:'owner_action',command_id:'development.task.submit',input_json:canonical(plan),digest:'a'.repeat(64),resources_json:canonical({projectIds:[plan.projectId],rootPaths:[p.root],revision:hashText(JSON.stringify([p.root,p.sourceDigest,p.outputDigest,p.recipeDigest]))}),policy_version:1,expires_at:Date.now()+15*60000,idempotency_key:key,status:'approved'},{kind:'owner_api'});
+  const resources={projectIds:[plan.projectId],rootPaths:[p.root],revision:hashText(JSON.stringify([p.root,p.sourceDigest,p.outputDigest,p.recipeDigest]))};
+  const intent=actions.intents.create({actor_user_id:user.id,grant_id:null,grant_revision:null,authority:'owner_action',command_id:'development.task.submit',input_json:canonical(plan),digest:hashText(canonical({commandId:'development.task.submit',input:plan,resources,policyVersion:1})),resources_json:canonical(resources),policy_version:1,expires_at:Date.now()+15*60000,idempotency_key:key,status:'approved'},{kind:'owner_api'});
   actions.intents.start(intent.id,crypto.randomUUID(),Date.now()+30000);
   const task=repo.create({project_id:plan.projectId,goal:plan.goal,plan_json:JSON.stringify(plan),recipe_digest:p.recipeDigest,source_digest:p.sourceDigest,output_digest:p.outputDigest,intent_id:intent.id,origin_run_id:null,origin_step_id:null,project_root:p.root});
   actions.intents.finish(intent.id,'confirmed',{taskId:task.id,recipeDigest:task.recipe_digest});
@@ -81,12 +82,12 @@ it('queued task/receipt survive database reopen and admission deduplicates',asyn
  const reopened=new Database(path.join(f.dir,'test.db'));try{assert.equal(new DevelopmentTaskRepository(reopened,f.user.id).get(row.id)?.status,'queued');}finally{reopened.close();}
  assert.equal(new DevelopmentTaskRepository(f.db,f.other.id).get(row.id),undefined);
 }finally{f.close();}});
-it('revoked actor, disabled tool, expired approval and tampered receipt cannot execute a queued job',async()=>{const f=fixture();try{
+it('revoked actor, disabled tool and tampered receipt cannot execute a queued job after admission TTL',async()=>{const f=fixture();try{
  const {taskId}=await f.submit(),row=f.repo.get(taskId)!;
  new CopilotToolPreferenceRepository(f.db,f.user.id).setEnabled('submit_development_task',false);assert.throws(()=>assertDevelopmentAuthority(f.db,row),/DISABLED/);
  new CopilotToolPreferenceRepository(f.db,f.user.id).setEnabled('submit_development_task',true);
  f.db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(f.user.id);assert.throws(()=>assertDevelopmentAuthority(f.db,row),/ACTOR/);f.db.prepare("UPDATE users SET status='active' WHERE id=?").run(f.user.id);
- f.db.prepare('UPDATE platform_action_intents SET expires_at=0 WHERE id=?').run(row.intent_id);assert.throws(()=>assertDevelopmentAuthority(f.db,row),/EXPIRED/);
+ f.db.prepare('UPDATE platform_action_intents SET expires_at=0 WHERE id=?').run(row.intent_id);assertDevelopmentAuthority(f.db,row);f.db.prepare("UPDATE platform_action_receipts SET outcome='unknown' WHERE intent_id=?").run(row.intent_id);assert.throws(()=>assertDevelopmentAuthority(f.db,row),/RECEIPT/);
 }finally{f.close();}});
 it('lease recovery never repeats uncertain execution or releases its concurrency slot',async()=>{const f=fixture();try{
  const {taskId}=await f.submit();assert.equal(f.repo.claim('first')?.id,taskId);assert.equal(f.repo.claim('second'),undefined);

@@ -116,7 +116,7 @@ export function QuickStartSessionDialog({
             {t("projects.projectManagerCancel")}
           </Button>
           <Button
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            variant="brand"
             onClick={() => selectedAdapter && onConfirm(selectedAdapter as RuntimeAdapterId)}
             disabled={isStarting || !hasSelection}
           >

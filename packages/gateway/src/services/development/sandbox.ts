@@ -3,12 +3,14 @@ import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { SANDBOX_SUPERVISOR_SOURCE } from './sandbox-supervisor.js';
+import { identifySupervisor,type ExecutionIdentity,type ExecutionReservation } from './execution-identity.js';
 
 const MAX_TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_BYTES = 64 * 1024;
 const SYSTEM_READ_ROOTS = ['/System', '/private/preboot/Cryptexes/OS', '/usr/lib', '/usr/share/icu', '/private/var/db/dyld'];
-export interface SandboxCheckResult { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled: boolean; durationMs: number }
-interface SandboxCheckInput { workspace: string; checks: string[]; signal: AbortSignal; timeoutMs?: number }
+export interface SandboxCheckResult { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled: boolean; durationMs: number;executionUncertain?:boolean }
+interface SandboxCheckInput { workspace: string; checks: string[]; signal: AbortSignal; timeoutMs?: number;
+  execution?:{reservation:ExecutionReservation;onReady(identity:ExecutionIdentity):void} }
 
 function minimalEnv(scratch: string): Record<string, string> {
   return { PATH: '/usr/bin:/bin', HOME: scratch, TMPDIR: scratch, LANG: 'C', LC_ALL: 'C' };
@@ -75,24 +77,41 @@ export async function runSandboxChecks(input: SandboxCheckInput): Promise<Sandbo
   const node = realpathSync(process.execPath);
   try {
     if (input.signal.aborted) return { exitCode: null, stdout: '', stderr: '', timedOut: false, cancelled: true, durationMs: Date.now() - started };
-    return await supervise({ node, workspace, checks, scratch, timeoutMs, signal: input.signal, started });
+    return await supervise({ node, workspace, checks, scratch, timeoutMs, signal: input.signal, started,execution:input.execution });
   } finally { await rm(scratch, { recursive: true, force: true }); }
 }
 
-function supervise(input: { node: string; workspace: string; checks: string[]; scratch: string; timeoutMs: number; signal: AbortSignal; started: number }): Promise<SandboxCheckResult> {
+function supervise(input: { node: string; workspace: string; checks: string[]; scratch: string; timeoutMs: number; signal: AbortSignal; started: number;execution?:SandboxCheckInput['execution'] }): Promise<SandboxCheckResult> {
   const config = JSON.stringify({ node: input.node, workspace: input.workspace, checks: input.checks, timeoutMs: input.timeoutMs,
-    policy: policy(input.node, input.workspace, input.scratch), env: minimalEnv(input.scratch) });
+    policy: policy(input.node, input.workspace, input.scratch), env: minimalEnv(input.scratch),reservation:input.execution?.reservation });
   return new Promise(resolve => {
     const helper = spawn(input.node, ['--max-old-space-size=32', '-e', SANDBOX_SUPERVISOR_SOURCE, config], {
       cwd: input.scratch, env: minimalEnv(input.scratch), detached: true, stdio: ['pipe', 'pipe', 'pipe']
     });
-    let output = ''; let diagnostic = ''; let expired = false;
-    const abort = () => { helper.stdin.end('cancel\n'); };
+    let output = ''; let diagnostic = ''; let expired = false;let identity:ExecutionIdentity|undefined;let authorized=!input.execution;let readinessConsumed=!input.execution;
+    const abort = () => { helper.stdin.end(JSON.stringify({kind:'cancel'})+'\n'); };
     helper.stdin.on('error', () => undefined);
     const watchdog = setTimeout(() => { expired = true; killGroup(helper.pid); }, input.timeoutMs + 1_500);
     input.signal.addEventListener('abort', abort, { once: true });
     if (input.signal.aborted) abort();
-    helper.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); if (Buffer.byteLength(output) > 128 * 1024) killGroup(helper.pid); });
+    helper.once('spawn',()=>{
+      if(!input.execution)return;
+      try {identity=identifySupervisor(helper.pid!,input.execution.reservation);helper.stdin.write(JSON.stringify({kind:'identity',identity})+'\n');}
+      catch {diagnostic='Sandbox supervisor identity unavailable';abort();}
+    });
+    helper.stdout.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+      if(!readinessConsumed&&output.includes('\n')) {
+        readinessConsumed=true;
+        const end=output.indexOf('\n'),line=output.slice(0,end);output=output.slice(end+1);
+        try {
+          const ready=JSON.parse(line) as {ready?:boolean;nonce?:string};
+          if(!identity||ready.ready!==true||ready.nonce!==identity.nonce||input.signal.aborted)throw new Error('Sandbox grant cancelled');
+          input.execution!.onReady(identity);authorized=true;helper.stdin.write(JSON.stringify({kind:'start'})+'\n');
+        }catch{diagnostic='Sandbox execution grant was not persisted';abort();}
+      }
+      if (Buffer.byteLength(output) > 128 * 1024) killGroup(helper.pid);
+    });
     helper.stderr.on('data', (chunk: Buffer) => { if (diagnostic.length < 2048) diagnostic += chunk.toString().slice(0, 2048 - diagnostic.length); });
     helper.on('error', () => { diagnostic = 'Sandbox supervisor failed to start'; });
     helper.once('close', code => {
@@ -102,7 +121,8 @@ function supervise(input: { node: string; workspace: string; checks: string[]; s
       if (code === 0) { try { result = decodeResult(JSON.parse(output) as unknown); } catch { /* fail closed */ } }
       resolve(result ? { ...result, cancelled: result.cancelled || input.signal.aborted, durationMs: Date.now() - input.started }
         : { exitCode: null, stdout: '', stderr: diagnostic || 'Sandbox supervisor exited unexpectedly', timedOut: expired,
-          cancelled: input.signal.aborted, durationMs: Date.now() - input.started });
+          cancelled: input.signal.aborted, durationMs: Date.now() - input.started,
+          ...(input.execution&&authorized?{executionUncertain:true}:{}) });
     });
   });
 }

@@ -107,6 +107,17 @@ it("explains the macOS sandbox requirement instead of showing only the raw code"
   mount();
   expect(await screen.findByText(/Seatbelt/)).toBeTruthy();
 });
+it("renders Traditional Chinese copy for zh-TW instead of falling back to English", async () => {
+  window.localStorage.setItem("forgebadger-language", "zh-TW");
+  try {
+    mount();
+    expect(await screen.findByRole("heading", { name: "受控開發任務" })).toBeTruthy();
+    expect(screen.queryByText("受控开发任务")).toBeNull();
+    expect(screen.queryByText("Controlled development tasks")).toBeNull();
+  } finally {
+    window.localStorage.removeItem("forgebadger-language");
+  }
+});
 it("shows a localized explanation and the raw code for sandbox task failures", async () => {
   const failed = { ...task, status: "failed" as const, error: "DEVELOPMENT_SANDBOX_REQUIRES_MACOS", artifactDigest: null };
   vi.mocked(api.listDevelopmentTasks).mockResolvedValue({ tasks: [failed] });
@@ -158,3 +169,11 @@ it("polls active tasks every five seconds and stops after a terminal result", as
   expect(api.listDevelopmentTasks).toHaveBeenCalledTimes(listCount);
   expect(api.getDevelopmentTask).toHaveBeenCalledTimes(detailCount);
 }, 15000);
+
+it("links the empty project state to the project import flow", async () => {
+  vi.mocked(listProjects).mockResolvedValue({ projects: [] });
+  mount();
+  const link = await screen.findByRole("link", { name: "导入项目" });
+  expect(link.getAttribute("href")).toBe("/projects/import");
+  expect(screen.getByText("暂无项目。")).toBeTruthy();
+});

@@ -74,7 +74,7 @@ describe("Copilot playbook boundary", () => {
     let finish!: (value: { playbooks: CopilotPlaybook[] }) => void;
     mocks.list.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
     renderCard();
-    expect(screen.getByText("加载中...")).toBeTruthy();
+    expect(screen.getByText("加载中…")).toBeTruthy();
     expect(screen.queryByText("暂无操作手册")).toBeNull();
     finish({ playbooks: [] });
     expect(await screen.findByText("暂无操作手册")).toBeTruthy();

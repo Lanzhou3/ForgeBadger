@@ -11,7 +11,7 @@ export class PublicTextStream {
   push(delta: string): void {
     this.pending += delta;
     if (this.frozen) return;
-    if (this.pending.length > 16_384 || /sk-|Bearer|ChatGPT-Account-Id/i.test(this.pending)
+    if (this.pending.length > 16_384 || /sk-|Bearer|ChatGPT-Account-Id|-----BEGIN/i.test(this.pending)
       || [...this.pending.matchAll(/[A-Za-z][A-Za-z0-9_-]*/g)].some(match => isCredentialField(match[0]))) {
       this.frozen = true; return;
     }

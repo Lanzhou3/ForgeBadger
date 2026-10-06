@@ -10,6 +10,7 @@ import {
   getTerminalFontState,
   parseTerminalFont,
   readStoredTerminalFont,
+  initTerminalFont,
   setTerminalFont,
   writeTerminalFont,
 } from "./terminal-font";
@@ -25,6 +26,15 @@ class MemoryStorage implements Pick<Storage, "getItem" | "setItem"> {
 }
 
 describe("terminal font", () => {
+  it("keeps font controls usable when browser storage is unavailable", () => {
+    const read = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new DOMException("blocked", "SecurityError"); });
+    const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("full", "QuotaExceededError"); });
+    try {
+      expect(() => initTerminalFont()).not.toThrow();
+      expect(() => setTerminalFont({ fontFamily: "monospace", fontSize: 18 })).not.toThrow();
+      expect(getTerminalFontState().fontSize).toBe(18);
+    } finally { read.mockRestore(); write.mockRestore(); setTerminalFont(DEFAULT_TERMINAL_FONT); }
+  });
   it("defaults to the bundled Nerd Font family and 14px", () => {
     expect(DEFAULT_TERMINAL_FONT.fontFamily).toContain("ForgeBadger Nerd");
     expect(DEFAULT_TERMINAL_FONT.fontSize).toBe(14);

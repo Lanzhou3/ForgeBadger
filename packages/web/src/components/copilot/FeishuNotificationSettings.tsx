@@ -108,6 +108,7 @@ export function FeishuNotificationSettings({available}:Props) {
         <Button variant="outline" disabled={busy||!available} onClick={()=>void refresh()}>{copy.notifyRefreshTargets}</Button>
         <p className="text-xs text-muted-foreground">{copy.notifyPrivateHint}</p>
         {selectedTarget?.kind==='group'&&<p role="note" className="break-words text-sm">{copy.notifyGroupNotice(selectedTarget.name)}</p>}
+        <p role="note" className="text-xs text-muted-foreground">{copy.notifyContentHint}</p>
         <fieldset disabled={busy||query.isError} className="grid gap-2 sm:grid-cols-2"><legend className="mb-2 text-sm">{copy.notifyTypesLegend}</legend>
           {choices.map(choice=><label key={choice.type} className="flex items-center gap-2 text-sm"><Checkbox aria-label={choice.label} checked={config.types.includes(choice.type)}
             onCheckedChange={(checked)=>patch({types:checked===true?[...config.types,choice.type]:config.types.filter(t=>t!==choice.type)})}/>{choice.label}</label>)}

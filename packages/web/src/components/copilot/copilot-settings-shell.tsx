@@ -54,8 +54,11 @@ export function CopilotSettingsShell({
   const router = useRouter();
   const items = useNavItems();
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-5 overflow-y-auto p-4 md:p-6">
-      <header className="forgebadger-animate-in flex items-start gap-2 pl-12 md:pl-0">
+    // p-4 keeps the gutters; pt-16 reserves the mobile top band for the fixed
+    // hamburger trigger (same pattern as the members page), md:p-6 restores
+    // desktop padding.
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-5 overflow-y-auto p-4 pt-16 md:p-6">
+      <header className="forgebadger-animate-in flex items-start gap-2">
         <Button
           variant="ghost"
           size="icon"
@@ -71,11 +74,14 @@ export function CopilotSettingsShell({
         </div>
       </header>
       <div className="flex min-h-0 flex-col gap-5 lg:flex-row lg:gap-8">
-        <nav
-          aria-label={copy.navAriaLabel}
-          className="forgebadger-animate-in flex shrink-0 gap-1 overflow-x-auto pb-1 lg:w-[200px] lg:flex-col lg:overflow-visible lg:pb-0"
-          style={{ animationDelay: "60ms" }}
-        >
+        <div className="relative min-w-0 lg:w-[200px] lg:shrink-0">
+          {/* Right-edge fade hints that the chip row scrolls horizontally on
+              small screens (removed on desktop where the nav is a column). */}
+          <nav
+            aria-label={copy.navAriaLabel}
+            className="forgebadger-animate-in flex shrink-0 gap-1 overflow-x-auto pb-1 [mask-image:linear-gradient(to_right,black_80%,transparent)] lg:flex-col lg:overflow-visible lg:pb-0 lg:[mask-image:none]"
+            style={{ animationDelay: "60ms" }}
+          >
           {items.map((item) => {
             const Icon = item.icon;
             const isActive = item.key === active;
@@ -95,7 +101,8 @@ export function CopilotSettingsShell({
               </Link>
             );
           })}
-        </nav>
+          </nav>
+        </div>
         <div className="min-w-0 max-w-3xl flex-1">{children}</div>
       </div>
     </div>

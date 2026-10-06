@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useUiLocale } from "@/hooks/use-language";
 import { Check, Copy, KeyRound } from "lucide-react";
 
 import { SettingsCardHeader } from "@/components/settings/ui";
@@ -11,7 +12,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type { ChannelPlatform } from "@/lib/api";
 import type { ChannelIdentity, ChannelPairing } from "@/lib/copilot-channels-api";
-import { channelStateLabel } from "./channel-setup";
 import { useSettingsCopy } from "./settings-copy";
 
 export interface IssuedPairingToken {
@@ -49,6 +49,7 @@ export function ChannelPairingStep({
   onRevokeIdentity, whitelistIdsText, whitelistLoading, whitelistError, onSaveWhitelist,
 }: Props) {
   const copy = useSettingsCopy();
+  const locale = useUiLocale();
   const [ack, setAck] = useState("");
   const [whitelistDraft, setWhitelistDraft] = useState<string | null>(null);
   const [editingWhitelist, setEditingWhitelist] = useState(false);
@@ -74,14 +75,14 @@ export function ChannelPairingStep({
     <Card id="channel-pairing" className="forgebadger-animate-in">
       <SettingsCardHeader
         icon={<KeyRound className="size-4" />}
-        title="2. 确认私聊身份"
-        description="连接成功后，还需确认哪个私聊用户可以操作项目。发送配对命令后，请回到此处确认身份。"
+        title={copy.pairingTitle}
+        description={copy.pairingDescription}
       />
       <CardContent className="space-y-3">
-        <Button disabled={busy || !canPair || queriesError} onClick={onCreatePairing}>生成新的配对码</Button>
+        <Button disabled={busy || !canPair || queriesError} onClick={onCreatePairing}>{copy.createPairingCode}</Button>
         {token && (
           <div className="space-y-2 rounded-md border border-border/70 p-3">
-            <p className="text-sm">向{channelName}机器人私聊发送以下命令，请勿转发。到期：{new Date(token.expiresAt).toLocaleTimeString()}</p>
+            <p className="text-sm">{copy.pairingCommandHint(channelName, new Date(token.expiresAt).toLocaleTimeString(locale))}</p>
             <div className="flex flex-wrap items-center gap-2">
               <code className="block min-w-0 flex-1 break-all select-all rounded bg-muted/40 px-2 py-1.5 font-mono text-xs">/pair {token.value}</code>
               <Button type="button" variant="outline" size="sm" onClick={() => void copyCommand()}>
@@ -91,35 +92,35 @@ export function ChannelPairingStep({
             </div>
           </div>
         )}
-        {!pairing && <p className="text-sm text-muted-foreground">没有待确认配对。新配对码会使旧码失效。</p>}
+        {!pairing && <p className="text-sm text-muted-foreground">{copy.noPendingPairing}</p>}
         {pairing?.status === "pending" && (
           <p role="status" className="flex flex-wrap items-center gap-2 text-sm">
-            <Badge variant="secondary" className="bg-amber-500/15 text-amber-400">待处理</Badge>
-            等待{channelName}私聊认领… 配对码仅在生成时显示，刷新页面后可重新生成。
+            <Badge variant="secondary" className="bg-amber-500/15 text-amber-400">{copy.pairingStatusPending}</Badge>
+            {copy.waitingClaim(channelName)}
           </p>
         )}
         {pairing?.status === "claimed" && (
           <div className="space-y-3 rounded-md border border-border/70 p-3">
-            <p className="text-sm">请核对认领者，勾选后确认；系统不会自动绑定身份。</p>
+            <p className="text-sm">{copy.claimReviewHint}</p>
             <dl className="break-all text-sm">
-              <dt>{channel === "feishu" ? "飞书用户 ID" : "Telegram 用户 ID"}</dt>
+              <dt>{channel === "feishu" ? copy.userIdLabelFeishu : copy.userIdLabelTelegram}</dt>
               <dd>{pairing.externalUserId}</dd>
-              <dt className="mt-2">{channel === "feishu" ? "私聊 ID" : "会话 ID"}</dt>
+              <dt className="mt-2">{channel === "feishu" ? copy.chatIdLabelFeishu : copy.chatIdLabelTelegram}</dt>
               <dd>{pairing.chatId}</dd>
             </dl>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
-                aria-label={`我确认这是自己的${channelName}私聊`}
+                aria-label={copy.ackLabel(channelName)}
                 checked={ack === candidate}
                 onCheckedChange={(checked) => setAck(checked === true ? candidate : "")}
               />
-              我确认这是自己的{channelName}私聊
+              {copy.ackLabel(channelName)}
             </label>
-            <Button disabled={busy || !canPair || queriesError || ack !== candidate} onClick={() => onConfirmPairing(pairing)}>确认身份</Button>
+            <Button disabled={busy || !canPair || queriesError || ack !== candidate} onClick={() => onConfirmPairing(pairing)}>{copy.confirmIdentity}</Button>
           </div>
         )}
         {pairing && (
-          <Button variant="outline" disabled={busy} onClick={() => { setAck(""); onCancelPairing(pairing.id); }}>取消本次配对</Button>
+          <Button variant="outline" disabled={busy} onClick={() => { setAck(""); onCancelPairing(pairing.id); }}>{copy.cancelPairing}</Button>
         )}
         {accountIdentities.length === 0 && (
           <p className="text-sm text-muted-foreground">{copy.identitiesEmpty}</p>
@@ -127,21 +128,21 @@ export function ChannelPairingStep({
         {accountIdentities.map((identity) => (
           <div key={identity.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 p-3 text-sm">
             <span className="break-all">
-              {identity.externalUserId} · {identity.status === "active" && identity.accountRevision !== accountRevision ? "已失效，需重新配对" : channelStateLabel(identity.status)}
+              {identity.externalUserId} · {identity.status === "active" && identity.accountRevision !== accountRevision ? copy.identityStale : (copy.channelStates[identity.status] ?? identity.status)}
             </span>
-            <Button variant="outline" size="sm" disabled={busy || identity.status !== "active"} onClick={() => onRevokeIdentity(identity.id)}>撤销身份</Button>
+            <Button variant="outline" size="sm" disabled={busy || identity.status !== "active"} onClick={() => onRevokeIdentity(identity.id)}>{copy.revokeIdentity}</Button>
           </div>
         ))}
         <div id="channel-chat-allowlist" className="space-y-2 rounded-md border border-border/70 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm">聊天白名单（群聊与私聊）</p>
+            <p className="text-sm">{copy.allowlistTitle}</p>
             {!editingWhitelist && (
               <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setEditingWhitelist(true)}>
                 {whitelistIdsText ? copy.editAllowlist : copy.setAllowlist}
               </Button>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">群聊默认拒绝；加入白名单后，机器人在该群内被 @ 才会响应。注意：白名单非空时，不在名单内的私聊也会被拒绝，需要把自己的私聊 ID 一并加入。</p>
+          <p className="text-xs text-muted-foreground">{copy.allowlistHint}</p>
           {!editingWhitelist ? (
             whitelistIdsText ? (
               <p className="break-all font-mono text-xs text-muted-foreground">{whitelistIdsText}</p>
@@ -150,7 +151,7 @@ export function ChannelPairingStep({
             )
           ) : (
             <>
-              <label className="block space-y-1 text-sm">群聊与私聊 ID（逗号分隔，最多 50 个）<Input aria-label="群聊白名单" value={whitelistValue} placeholder={channel === "feishu" ? "例如：oc_群聊ID,oc_私聊ID" : "例如：-1001234567890,123456789"} onChange={(e) => setWhitelistDraft(e.target.value)} /></label>
+              <label className="block space-y-1 text-sm">{copy.allowlistInputLabel}<Input aria-label={copy.allowlistAria} value={whitelistValue} placeholder={channel === "feishu" ? copy.allowlistPlaceholderFeishu : copy.allowlistPlaceholderTelegram} onChange={(e) => setWhitelistDraft(e.target.value)} /></label>
               <div className="flex gap-2">
                 <Button
                   type="button"
@@ -176,13 +177,13 @@ export function ChannelPairingStep({
                     });
                   }}
                 >
-                  保存白名单
+                  {copy.saveAllowlist}
                 </Button>
               </div>
             </>
           )}
-          {whitelistIds.length > 50 && <p role="alert">最多允许 50 个聊天 ID，请减少后再保存。</p>}
-          {whitelistError && <p role="alert">白名单加载失败，请稍后重试。</p>}
+          {whitelistIds.length > 50 && <p role="alert">{copy.allowlistTooMany}</p>}
+          {whitelistError && <p role="alert">{copy.allowlistLoadError}</p>}
         </div>
       </CardContent>
     </Card>

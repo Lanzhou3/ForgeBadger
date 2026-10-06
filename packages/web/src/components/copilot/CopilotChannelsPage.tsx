@@ -14,7 +14,7 @@ import { ChannelPairingStep, type IssuedPairingToken } from './ChannelPairingSte
 import { ChannelStatusBanner } from './ChannelStatusBanner';
 import { CopilotSettingsShell } from './copilot-settings-shell';
 import { useSettingsCopy } from './settings-copy';
-import { channelOverallState, channelStateLabel, channelSetupBlocker } from './channel-setup';
+import { channelOverallState, channelSetupBlocker, type ChannelRouteStateKey } from './channel-setup';
 import { FeishuNotificationSettings } from './FeishuNotificationSettings';
 
 const channelKey=['copilot-channels'];
@@ -44,7 +44,7 @@ export function CopilotChannelsPage() {
   const data=query.data && accountQuery.data ? {...query.data,...accountQuery.data} : undefined;
   const account=(channel==='feishu'?data?.account:data?.telegramAccount)??null;
   const health=(channel==='feishu'?data?.health:data?.telegramHealth)??null;
-  const channelName=channel==='feishu'?'飞书':'Telegram';
+  const channelName=channel==='feishu'?copy.channelNameFeishu:copy.channelNameTelegram;
   const accountId=account?.id;
   const accountRevision=account?.configRevision;
   const pairing=data?.pairings.find(p=>p.accountId===accountId && p.accountRevision===accountRevision && ['pending','claimed'].includes(p.status) && p.expiresAt>now);
@@ -70,36 +70,39 @@ export function CopilotChannelsPage() {
   const blocker=channelSetupBlocker({account,configLoading:integrationConfig.isPending,configError:integrationConfig.isError,
     config:integrationConfig.data,identities,identity,pairing,staleIdentity:accountIdentities.some(i=>i.accountRevision!==accountRevision),
     projectsLoading:projects.isPending,projectsError:projects.isError,projectCount:autonomyProjects.length,selectedProject:!!project,
-    existingRoute:routes.find(r=>r.identityId===identity?.id&&r.status==='active')});
+    existingRoute:routes.find(r=>r.identityId===identity?.id&&r.status==='active')},copy.channelSetup);
   const tokenVisible=!!token && token.expiresAt>now && (data?.pairings.some(p=>p.id===token.id && p.accountId===accountId)??false);
   const queriesError=!!(query.isError||accountQuery.isError);
   function switchChannel(value:ChannelPlatform){setChannel(value);setToken(null);setIdentityId('');setProjectId('');setError('');setSuccess('');}
-  function routeState(route:channels.ChannelRoute):string {
-    if(route.status!=='active')return channelStateLabel(route.status);
+  function routeStateKey(route:channels.ChannelRoute):ChannelRouteStateKey|null {
+    if(route.status!=='active')return null;
     const owner=data?.identities.find(i=>i.id===route.identityId);
-    if(!owner || owner.status!=='active')return '身份已失效';
-    if(owner.accountId!==accountId || owner.accountRevision!==accountRevision)return '配置已更新，需要重新绑定';
-    if(!account?.enabled)return '渠道已停用';
-    if(integrationConfig.isPending || integrationConfig.isError)return '授权状态待核查';
-    if(!integrationConfig.data?.enabled || integrationConfig.data.emergencyDisabled)return '渠道已停用';
-    if(projects.isPending || projects.isError)return '授权状态待核查';
+    if(!owner || owner.status!=='active')return 'identity_inactive';
+    if(owner.accountId!==accountId || owner.accountRevision!==accountRevision)return 'config_changed';
+    if(!account?.enabled)return 'channel_disabled';
+    if(integrationConfig.isPending || integrationConfig.isError)return 'pending_review';
+    if(!integrationConfig.data?.enabled || integrationConfig.data.emergencyDisabled)return 'channel_disabled';
+    if(projects.isPending || projects.isError)return 'pending_review';
     const bound=projects.data?.projects.find(p=>p.id===route.projectId);
-    if(!bound)return '项目不存在';
-    if(!bound.copilotAutonomy)return '项目 Copilot 自治未开启';
-    if(route.authorityValid===false)return '授权已失效，请撤销后重新绑定';
-    if(route.authorityValid!==true)return '授权状态待核查';
-    return '权限有效';
+    if(!bound)return 'project_missing';
+    if(!bound.copilotAutonomy)return 'autonomy_off';
+    if(route.authorityValid===false)return 'authority_revoked';
+    if(route.authorityValid!==true)return 'pending_review';
+    return 'authorized';
   }
+  const authorized=routes.some(r=>routeStateKey(r)==='authorized');
+  const pendingReview=routes.some(r=>routeStateKey(r)==='pending_review');
   const statusText=query.isError||accountQuery.isError||projects.isPending||projects.isError
-    ? '远程操作状态待核查。'
-    : routes.some(r=>routeState(r)==='权限有效')
-      ? `${channelName}远程操作已授权；具体聊天仍需符合白名单，实际收发还需连接正常。`
-      : routes.some(r=>routeState(r)==='授权状态待核查')?'远程操作状态待核查。'
-        : `${channelName}远程操作尚未启用。${blocker?.message??'配置已就绪，请在第 3 步确认启用。'}`;
+    ? copy.channelStatusPending
+    : authorized
+      ? copy.channelStatusAuthorized(channelName)
+      : pendingReview
+        ? copy.channelStatusPending
+        : copy.channelStatusNotEnabled(channelName,blocker?.message??copy.channelReadyHint);
   const overall=channelOverallState({
     loadPending:queriesError||projects.isPending||projects.isError,
-    authorized:routes.some(r=>routeState(r)==='权限有效'),
-    pendingReview:routes.some(r=>routeState(r)==='授权状态待核查'),
+    authorized,
+    pendingReview,
     stopped:!!account?.secretConfigured&&(!account.enabled||!!integrationConfig.data?.emergencyDisabled),
     blocker,
   });
@@ -108,17 +111,17 @@ export function CopilotChannelsPage() {
   async function perform(action:()=>Promise<unknown>):Promise<boolean>{
     setBusy(true);setError('');setSuccess('');
     try {await action();await refresh();return true;}
-    catch {setError('操作未完成。请刷新状态后重试；身份、授权或连接状态可能已变化。');setToken(null);return false;}
+    catch {setError(copy.actionFailedError);setToken(null);return false;}
     finally{setBusy(false);}
   }
   const handleFailedCount=useCallback((count:number)=>setFailedChecks(count),[]);
   const projectName=(projectId:string)=>projects.data?.projects.find(p=>p.id===projectId)?.name??projectId;
-  const activationReason=queriesError?'渠道状态加载失败，请重新加载后再授权。':blocker?.message??'已选择身份与项目，点击按钮后授予远程操作权限。';
+  const activationReason=queriesError?copy.activationLoadError:blocker?.message??copy.activationReady;
   return (
     <CopilotSettingsShell active="channels" title={copy.channelsCardTitle} description={copy.channelsCardDescription}>
       <div className="flex flex-col gap-4">
-        {(query.isPending || accountQuery.isPending) && <p role="status">正在加载渠道…</p>}
-        {(query.isError || accountQuery.isError || projects.isError || integrationConfig.isError) && <div role="alert">加载失败。<Button variant="outline" onClick={()=>void refresh()}>重新加载</Button></div>}
+        {(query.isPending || accountQuery.isPending) && <p role="status">{copy.channelsLoading}</p>}
+        {(query.isError || accountQuery.isError || projects.isError || integrationConfig.isError) && <div role="alert">{copy.loadFailed}<Button variant="outline" onClick={()=>void refresh()}>{copy.reloadAction}</Button></div>}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         {success && <p role="status" className="text-sm">{success}</p>}
         <ChannelStatusBanner
@@ -188,10 +191,10 @@ export function CopilotChannelsPage() {
             showBlockerLink={!!blocker&&blocker.step!=='authorization'}
             onActivate={()=>void perform(async()=>{
               await channels.createChannelRoute(identity!.id,project!.id);
-              setSuccess('渠道绑定已创建；请以上方实时状态为准，状态正常后发送一条新消息。');
+              setSuccess(copy.bindingCreated);
             })}
             routes={routes}
-            routeState={routeState}
+            routeState={routeStateKey}
             projectName={projectName}
             onRevokeRoute={(id)=>void perform(()=>channels.revokeChannelRoute(id))}
           />

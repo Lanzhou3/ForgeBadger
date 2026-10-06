@@ -313,7 +313,7 @@ export function ProjectManagerWorkItemDetailSheet({
               <div className="flex justify-end">
                 <Button
                   size="sm"
-                  className="bg-brand text-brand-foreground hover:bg-brand/90"
+                  variant="brand"
                   onClick={onAttachEvidence}
                   disabled={isEvidenceSaving}
                 >
@@ -556,7 +556,7 @@ function ProjectManagerTaskPacketSection({
           {!taskPacket.sessionLink && (
             <Button
               size="sm"
-              className="w-fit bg-brand text-brand-foreground hover:bg-brand/90"
+              variant="brand" className="w-fit"
               onClick={onStart}
               disabled={!canStartTask}
             >
@@ -590,7 +590,7 @@ function ProjectManagerTaskPacketSection({
             </select>
             <Button
               size="sm"
-              className="bg-brand text-brand-foreground hover:bg-brand/90"
+              variant="brand"
               onClick={onSessionLink}
               disabled={!canLinkSession}
             >

@@ -59,8 +59,9 @@ export function attachNotificationPersistence(options: NotificationPersistenceOp
       if (event.type === 'claude_notification') {
         try {
           const native = nativePromptIdentity(event.nativeSessionId, event.nativeTurnId);
-          const prompt = native && !event.nativeSubagent
-            ? new SessionNotificationPromptRepository(options.db, event.userId).find(event.sessionId, native) : undefined;
+          const prompt = event.cliSummary?.identityQuality === 'exact_turn' ? event.cliSummary.request
+            : native?.turnId && !event.cliSummary && !event.nativeSubagent
+              ? new SessionNotificationPromptRepository(options.db, event.userId).find(event.sessionId, native) : undefined;
           if (prompt && input.payload && typeof input.payload === 'object') {
             input.payload = { ...input.payload, last_prompt: prompt };
           }
@@ -109,6 +110,7 @@ export function notificationInputFromEvent(event: ForgeBadgerEvent): CreateNotif
           notification_type: safe(event.notificationType),
           message: safe(event.message),
           adapter,
+          ...(event.cliSummary ? { cli_summary: event.cliSummary } : {}),
           ...(event.title ? { title: safe(event.title) } : {}),
           ...(event.toolName ? { tool_name: safe(event.toolName) } : {})
         }

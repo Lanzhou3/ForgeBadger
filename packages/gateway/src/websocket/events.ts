@@ -145,6 +145,8 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
 function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
   const notificationMeta = buildNotificationMeta(event);
   switch (event.type) {
+    case "session_work_state_changed":
+      return { session_id: event.sessionId, state: event.state, updated_at: event.updatedAt };
     case "session_status_changed":
       return {
         session_id: event.sessionId,
@@ -239,6 +241,7 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
 }
 
 function buildNotificationMeta(event: ForgeBadgerEvent): Record<string, unknown> {
+  if (event.type === "session_work_state_changed") return {};
   if (
     event.type === "activity_created"
     || event.type === "copilot_run_updated"

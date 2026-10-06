@@ -153,7 +153,12 @@ export function CopilotAutonomyPanel() {
                 setDirty(true);
               }}
             />
-            <div className="flex justify-end">
+            {/* Sticky so the save action stays visible at the bottom of the
+                settings scroll container instead of being clipped below the
+                first viewport. -bottom-6 matches the Card's py-6 bottom
+                padding so the row settles into its natural rest position
+                without a jump when the scroll reaches the end. */}
+            <div className="sticky -bottom-6 z-10 -mx-6 flex justify-end border-t border-border/70 bg-card/95 px-6 py-2.5 backdrop-blur-sm">
               <Button
                 size="sm"
                 className="h-8"

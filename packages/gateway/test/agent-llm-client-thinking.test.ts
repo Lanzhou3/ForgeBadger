@@ -314,9 +314,9 @@ describe("copilot llm preferences", () => {
         // First attempt carries reasoning_effort and the stub model rejects it;
         // the degraded retry (no thinking params) succeeds.
         if (body.reasoning_effort !== undefined) {
-          return Promise.resolve({ ok: false, status: 400, json: async () => ({ error: "reasoning_effort is not supported" }) } as Response);
+          return Promise.resolve(new Response(JSON.stringify({ error: "reasoning_effort is not supported" }), { status: 400 }));
         }
-        return Promise.resolve({ ok: true, status: 200, json: async () => openaiResponse } as Response);
+        return Promise.resolve(new Response(JSON.stringify(openaiResponse), { status: 200 }));
       }) as typeof fetch);
       preferences.set({ thinkingEffort: "high" });
       const result = await client.stream({ messages: [{ role: "user", content: "think" }], tools: [], onEvent: () => {} });

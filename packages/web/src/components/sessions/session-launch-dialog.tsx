@@ -57,7 +57,9 @@ export function SessionLaunchDialog({ projectId, open, onOpenChange, onCreated, 
   // (e.g. Windows without PowerShell 7 → Windows PowerShell 5.1) and missing
   // options can be greyed out. A failed probe just keeps the static default.
   const shellAvailability = useQuery({ queryKey: TERMINAL_SHELLS_QUERY_KEY, queryFn: listTerminalShells, enabled: open });
-  const isWindows = isWindowsPlatform();
+  const isWindows = shellAvailability.data
+    ? shellAvailability.data.platform === "win32"
+    : isWindowsPlatform();
   const shellOrder = useMemo(() => platformShellOrder(isWindows), [isWindows]);
 
   useEffect(() => {
@@ -69,6 +71,7 @@ export function SessionLaunchDialog({ projectId, open, onOpenChange, onCreated, 
     setShell((current) => pickAvailableShell(current, shellOrder, installed));
   }, [open, shellAvailability.data, shellOrder]);
 
+  // Offer shells for the Gateway host, including when it runs inside WSL.
   // Only offer shells that can plausibly exist on this platform — zsh/bash
   // never show up on Windows, pwsh/cmd never on POSIX. The availability probe
   // below additionally greys out platform-plausible shells that are missing.
@@ -190,7 +193,9 @@ export function SessionLaunchDialog({ projectId, open, onOpenChange, onCreated, 
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
           <Button
             type="button"
-            disabled={loading || (mode === "cli" && cliDisabled) || createMutation.isPending}
+            disabled={loading || (mode === "cli" && cliDisabled) ||
+              (mode === "terminal" && (shellAvailability.isLoading ||
+                !shellOptions.some((option) => option.value === shell && !option.disabled))) || createMutation.isPending}
             onClick={() => createMutation.mutate()}
           >
             {createMutation.isPending ? t("projects.creating") : t("projects.newSession")}

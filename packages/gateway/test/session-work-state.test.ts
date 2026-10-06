@@ -1,0 +1,136 @@
+import assert from 'node:assert/strict';
+import { it } from 'node:test';
+import Sqlite from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { fileURLToPath } from 'node:url';
+import { UserRepository } from '../src/db/repositories/user-repository.js';
+import { ProjectRepository } from '../src/db/repositories/project-repository.js';
+import { SessionRepository } from '../src/db/repositories/session-repository.js';
+import { ForgeBadgerEventBus, type ForgeBadgerEvent } from '../src/services/event-bus.js';
+import { handleClaudeNotificationHook } from '../src/routes/session-hooks.js';
+import { createNotificationDeduper } from '../src/services/notification-dedupe.js';
+import express from 'express';
+import http from 'node:http';
+import { WebSocket } from 'ws';
+import { signJwt } from '../src/auth/jwt.js';
+import { InMemorySessionManager } from '../src/services/session-manager.js';
+import { RuntimeAuthorizationInvalidator } from '../src/services/runtime-authorization-invalidation.js';
+import { createSessionRoutes } from '../src/routes/sessions.js';
+import { attachEventsWebSocket } from '../src/websocket/events.js';
+
+it('tracks authenticated root CLI work independently of process status and notifications', t => {
+  const db = new Sqlite(':memory:'); t.after(() => db.close());
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
+  const user = new UserRepository(db).create('work-state@test.dev', 'hash');
+  const project = new ProjectRepository(db, user.id).create({ name: 'Project', path: '/tmp/work-state', aiTool: 'codex' });
+  const session = new SessionRepository(db, user.id).create({ projectId: project.id, name: 'Session', aiTool: 'codex', workingDir: project.path, attachToken: 'fixture' });
+  const bus = new ForgeBadgerEventBus(); const events: ForgeBadgerEvent[] = [];
+  bus.on('event', event => events.push(event));
+  const hook = (name: string, extra: Record<string, unknown> = {}, token = 'fixture') => handleClaudeNotificationHook(db, bus,
+    { hook_event_name: name, session_id: 'native', turn_id: 'turn-1', ...extra }, token, session.id, createNotificationDeduper());
+
+  hook('UserPromptSubmit', { prompt: 'Work' }, 'wrong');
+  hook('UserPromptSubmit', { prompt: 'Child', agent_id: 'child' });
+  assert.equal(bus.getSessionWorkState(user.id, session.id), undefined);
+  hook('UserPromptSubmit', { prompt: 'Work' });
+  assert.equal(bus.getSessionWorkState(user.id, session.id)?.state, 'working');
+  assert.equal(bus.getSessionWorkState('other-user', session.id), undefined);
+  assert.equal(events.filter(event => event.type === 'claude_notification').length, 0);
+  hook('Stop', { agent_id: 'child' });
+  hook('Stop', { turn_id: 'older-turn' });
+  assert.equal(bus.getSessionWorkState(user.id, session.id)?.state, 'working');
+  hook('Stop');
+  assert.equal(bus.getSessionWorkState(user.id, session.id)?.state, 'idle');
+  hook('UserPromptSubmit', { turn_id: 'turn-2' });
+  hook('Interrupt', { turn_id: 'turn-2' });
+  assert.equal(bus.getSessionWorkState(user.id, session.id)?.state, 'idle');
+  hook('TaskStarted');
+  hook('StopFailure');
+  assert.equal(bus.getSessionWorkState(user.id, session.id)?.state, 'idle');
+  hook('TaskStarted');
+  bus.emitEvent({ type: 'session_status_changed', userId: user.id, sessionId: session.id, oldStatus: 'running', newStatus: 'lost' });
+  assert.equal(bus.getSessionWorkState(user.id, session.id)?.state, 'idle');
+  bus.emitEvent({ type: 'session_deleted', userId: user.id, sessionId: session.id });
+  assert.equal(bus.getSessionWorkState(user.id, session.id), undefined);
+
+  const sharedDeduper = createNotificationDeduper();
+  const repeated = (hook_event_name: string) => handleClaudeNotificationHook(db, bus,
+    { hook_event_name }, 'fixture', session.id, sharedDeduper);
+  repeated('UserPromptSubmit'); repeated('Stop');
+  repeated('UserPromptSubmit');
+  assert.equal(bus.getSessionWorkState(user.id, session.id)?.state, 'working');
+  repeated('Stop'); // Notification deduplication must still clear work state.
+  assert.equal(bus.getSessionWorkState(user.id, session.id)?.state, 'idle');
+});
+
+it('repairs missed work events via authenticated snapshots and scopes HTTP and WS to the owner', async t => {
+  const db = new Sqlite(':memory:');
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
+  const users = new UserRepository(db);
+  const owner = users.create('owner-work@test.dev', 'hash'), other = users.create('other-work@test.dev', 'hash');
+  const project = new ProjectRepository(db, owner.id).create({ name: 'Project', path: '/tmp/work-route', aiTool: 'codex' });
+  const sessions = new SessionRepository(db, owner.id);
+  const session = sessions.create({ projectId: project.id, name: 'Session', aiTool: 'codex', workingDir: project.path });
+  sessions.update(session.id, { status: 'running' });
+  const bus = new ForgeBadgerEventBus(), invalidator = new RuntimeAuthorizationInvalidator();
+  const manager = new InMemorySessionManager({ async createSession() {}, async killSession() {}, async capturePane() { return ''; }, async listSessions() { return []; } });
+  const jwtSecret = '0123456789abcdef0123456789abcdef', masterKey = 'abcdef0123456789abcdef0123456789';
+  const app = express(); app.locals.db = db; app.locals.jwtSecret = jwtSecret;
+  app.use('/api/v1/sessions', createSessionRoutes(db, masterKey, manager, invalidator, bus));
+  const server = http.createServer(app);
+  const sockets: WebSocket[] = [];
+  attachEventsWebSocket({ server, db, eventBus: bus, jwtSecret });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    for (const socket of sockets) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    db.close();
+  });
+  const address = server.address(); assert.ok(address && typeof address !== 'string');
+  const base = `http://127.0.0.1:${address.port}`;
+  const ownerToken = signJwt({ userId: owner.id, email: owner.email }, jwtSecret);
+  const otherToken = signJwt({ userId: other.id, email: other.email }, jwtSecret);
+  const summaryUrl = `${base}/api/v1/sessions/${session.id}/summary`;
+  assert.equal((await fetch(summaryUrl)).status, 401);
+  assert.equal((await fetch(summaryUrl, {headers:{Authorization:`Bearer ${otherToken}`}})).status, 404);
+  sessions.update(session.id, {attachToken:'summary-fixture'});
+  const notify = (hook_event_name:string,turn_id:string,extra:Record<string,unknown>={}) => handleClaudeNotificationHook(db,bus,
+    {adapter:'codex',session_id:'native',hook_event_name,turn_id,...extra},'summary-fixture',session.id,createNotificationDeduper());
+  notify('UserPromptSubmit','A',{prompt:'Old request'});
+  notify('UserPromptSubmit','B',{prompt:'Current request'});
+  notify('Stop','A',{last_assistant_message:'Historical result'});
+  const response = await fetch(summaryUrl,{headers:{Authorization:`Bearer ${ownerToken}`}});
+  const detail = await response.json() as {data:{summary:{request:string};latestResult:{result:{text:string}};workState:string}};
+  assert.equal(detail.data.summary.request,'Current request');
+  assert.equal(detail.data.latestResult.result.text,'Historical result');
+  assert.equal(detail.data.workState,'working');
+  assert.doesNotMatch(JSON.stringify(detail),/summary-fixture|token_fingerprint/);
+  bus.emitEvent({type:'session_status_changed',userId:owner.id,sessionId:session.id,oldStatus:'stopped',newStatus:'running'});
+  const snapshot = async (token: string) => {
+    const res = await fetch(`${base}/api/v1/sessions/work-state`, { headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(res.status, 200);
+    return (await res.json() as { data: { states: Array<{ sessionId: string; state: string }> } }).data.states;
+  };
+  assert.equal((await fetch(`${base}/api/v1/sessions/work-state`)).status, 401);
+  assert.deepEqual(await snapshot(otherToken), []);
+  assert.equal((await snapshot(ownerToken))[0]?.state, 'unknown');
+  const socket = new WebSocket(`${base.replace('http:', 'ws:')}/ws/events`, ['forgebadger-events', ownerToken]);
+  const otherSocket = new WebSocket(`${base.replace('http:', 'ws:')}/ws/events`, ['forgebadger-events', otherToken]);
+  sockets.push(socket, otherSocket);
+  await Promise.all([socket, otherSocket].map(ws => new Promise<void>(resolve => ws.once('open', resolve))));
+  const ownerFrames: Array<{ type: string; payload: Record<string, unknown> }> = [], otherFrames: unknown[] = [];
+  socket.on('message', data => ownerFrames.push(JSON.parse(String(data))));
+  otherSocket.on('message', data => otherFrames.push(JSON.parse(String(data))));
+  const received = new Promise<void>(resolve => socket.once('message', () => resolve()));
+  bus.setSessionWorkState({ userId: owner.id, sessionId: session.id, state: 'working' });
+  assert.equal((await snapshot(ownerToken))[0]?.state, 'working');
+  await received;
+  assert.equal(ownerFrames[0]?.type, 'session_work_state_changed');
+  assert.equal(ownerFrames[0]?.payload.state, 'working');
+  assert.deepEqual(otherFrames, []);
+  sessions.update(session.id, { status: 'stopped' });
+  assert.equal((await snapshot(ownerToken))[0]?.state, 'idle');
+  users.update(owner.id, { status: 'disabled' });
+  assert.equal((await fetch(`${base}/api/v1/sessions/work-state`, { headers: { Authorization: `Bearer ${ownerToken}` } })).status, 401);
+});

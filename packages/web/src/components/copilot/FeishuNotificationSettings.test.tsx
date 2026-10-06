@@ -34,6 +34,14 @@ async function selectTarget(name:string){
   const option=await screen.findByRole('option',{name});
   fireEvent.pointerDown(option,{button:0});fireEvent.pointerUp(option,{button:0});fireEvent.click(option);
 }
+it('provides result summaries as built-in notification content without a separate choice',async()=>{
+  await mount();
+  expect(screen.queryByRole('combobox',{name:'卡片内容'})).toBeNull();
+  expect(screen.getByText(/通知默认包含/)).toBeTruthy();
+  expect(screen.getByText(/所选私聊或群聊成员均可看到/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'保存通知设置'}));
+  await waitFor(()=>expect(api.saveFeishuNotificationSettings).toHaveBeenCalledWith(expect.objectContaining({enabled:false,revision:0})));
+});
 it('enables personal notifications without any project or remote route',async()=>{
   await mount();const toggle=screen.getByRole('switch',{name:'接收 ForgeBadger 通知'});
   expect(toggle.getAttribute('aria-checked')).toBe('false');expect(toggle).toHaveProperty('disabled',false);
@@ -95,7 +103,7 @@ it('requires explicit selection of a group and explains who receives its notific
   fireEvent.click(toggle());
   expect(screen.getByRole('button',{name:'保存通知设置'})).toHaveProperty('disabled',true);
   await selectTarget('群聊 · 开发群');
-  expect(screen.getByRole('note').textContent).toContain('群成员均可查看');
+  expect(screen.getByText(/所选通知将发送到群/).textContent).toContain('群成员均可查看');
   fireEvent.click(screen.getByRole('button',{name:'保存通知设置'}));
   await waitFor(()=>expect(api.saveFeishuNotificationSettings).toHaveBeenCalledWith(expect.objectContaining({enabled:true,targetId:'group:g',identityId:null})));
 });

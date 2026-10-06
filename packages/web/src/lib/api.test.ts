@@ -852,7 +852,7 @@ describe("api client", () => {
       },
       {
         id: "codex",
-        label: "Codex CLI",
+        label: "Codex",
         command: "codex",
         supportLevel: "prototype",
         launchEnabled: true,

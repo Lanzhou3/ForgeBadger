@@ -35,7 +35,7 @@ it("replaces duplicate managed Kimi hooks while retaining custom hooks and confi
     assert.equal(next.default_model, "custom");
     assert.ok(Array.isArray(next.hooks));
     assert.deepEqual(next.hooks.slice(0, 3), userHooks);
-    assert.equal(next.hooks.length, userHooks.length + 6);
+    assert.equal(next.hooks.length, userHooks.length + 9);
     assert.equal((await ensureKimiNotificationSettings(project)).changed, false);
   } finally {
     if (previousHome === undefined) delete process.env.KIMI_CODE_HOME; else process.env.KIMI_CODE_HOME = previousHome;

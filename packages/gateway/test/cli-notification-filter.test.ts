@@ -93,12 +93,24 @@ it('Pi suppresses headless subagent events while preserving interactive completi
     const generated=await ensurePiNotificationSettings();const file=join(root,'notify.mjs');await writeFile(file,await readFile(generated.path,'utf8'));
     const module=await import(pathToFileURL(file).href) as {default:(api:unknown)=>void};
     module.default({on:(name:string,handler:typeof handlers extends Map<string,infer H>?H:never)=>handlers.set(name,handler)});
-    for(const name of ['agent_settled','ui_prompt_start']){
+    for(const name of ['agent_start','agent_settled','ui_prompt_start']){
       await handlers.get(name)!({kind:'confirm'},{hasUI:false});assert.equal(sent.length,0);
     }
+    await handlers.get('agent_start')!({}, {hasUI:true});
+    assert.ok(handlers.has('message_end'));
+    await handlers.get('message_end')!({message:{role:'assistant',content:[{type:'thinking',thinking:'private reasoning'},{type:'text',text:'Final fixture reply'}]}}, {hasUI:true});
+    assert.equal(sent.length,1, 'a finalized message alone is not settled completion');
     await handlers.get('agent_settled')!({}, {hasUI:true});
     await handlers.get('ui_prompt_start')!({kind:'confirm'}, {hasUI:true});
-    assert.deepEqual(sent.map(event=>event.hook_event_name),['Stop','PermissionRequest']);
+    assert.deepEqual(sent.map(event=>event.hook_event_name),['TaskStarted','Stop','PermissionRequest']);
+    assert.equal(sent[1]!.last_assistant_message,'Final fixture reply');
+    assert.doesNotMatch(JSON.stringify(sent),/private reasoning/);
+    await handlers.get('agent_start')!({}, {hasUI:true});
+    await handlers.get('message_end')!({message:{role:'assistant',content:[{type:'text',text:'Old session reply'}]}}, {hasUI:true});
+    await handlers.get('session_shutdown')!({}, {hasUI:true});
+    await handlers.get('agent_start')!({}, {hasUI:true});
+    await handlers.get('agent_settled')!({}, {hasUI:true});
+    assert.equal(sent.at(-1)!.last_assistant_message,undefined);
   }finally{
     globalThis.fetch=originalFetch;
     for(const key of ['PI_CODING_AGENT_DIR','FORGEBADGER_GATEWAY_URL','FORGEBADGER_SESSION_ID','FORGEBADGER_ATTACH_TOKEN']){if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];}

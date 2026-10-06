@@ -656,4 +656,35 @@ describe("RobotChatPanel", () => {
     // the placeholder tells the user their next message will wait.
     await waitFor(() => expect(screen.getByPlaceholderText("执行中，发送将加入队列…")).toBeTruthy());
   });
+  it("preserves a newer draft when an earlier enqueue response arrives", async () => {
+    const response = deferred<{ followup: { id: string; status: string; runId: null } }>();
+    queueFollowupMock.mockReturnValueOnce(response.promise);
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "start" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    const input = await screen.findByPlaceholderText("执行中，发送将加入队列…");
+    fireEvent.change(input, { target: { value: "queued A" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(queueFollowupMock).toHaveBeenCalled());
+    fireEvent.change(input, { target: { value: "new draft B" } });
+    await act(async () => { response.resolve({ followup: { id: 'q1', status: 'queued', runId: null } }); });
+    expect((input as HTMLTextAreaElement).value).toBe("new draft B");
+  });
+
+  it("keeps a retyped identical draft after an earlier queue request completes", async () => {
+    const response = deferred<{ followup: { id: string; status: string; runId: null } }>();
+    queueFollowupMock.mockReturnValueOnce(response.promise);
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "start" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    const input = await screen.findByPlaceholderText("执行中，发送将加入队列…");
+    fireEvent.change(input, { target: { value: "queued A" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(queueFollowupMock).toHaveBeenCalled());
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.change(input, { target: { value: "queued A" } });
+    await act(async () => { response.resolve({ followup: { id: 'q1', status: 'queued', runId: null } }); });
+    expect((input as HTMLTextAreaElement).value).toBe("queued A");
+  });
+
 });

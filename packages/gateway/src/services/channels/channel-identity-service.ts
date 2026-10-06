@@ -168,7 +168,7 @@ export class ChannelIdentityService {
       requireAuthority(identity.channel === peer.channel && identity.accountId === peer.accountId
         && identity.accountRevision === peer.accountRevision && identity.externalUserId === peer.externalUserId
         && (peer.chatType === 'group' || identity.chatId === peer.chatId));
-      if (scope) requireAuthority(scope.projectIds.includes(route!.projectId));
+      if (scope) requireAuthority(scope.projectIds.every(projectId => projectId === route.projectId));
       let session = this.records.session(routeId, peer);
       if (!session) {
         const conversation = this.conversations.createConversation(peer.chatType === 'group' ? 'Channel group' : 'Channel topic');

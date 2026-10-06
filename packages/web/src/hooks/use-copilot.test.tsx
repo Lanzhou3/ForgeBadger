@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import type { ReactNode } from "react";
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FORGEBADGER_GATEWAY_EVENT, FORGEBADGER_GATEWAY_CONNECTED } from "@/lib/gateway-events";
+import { getTranslation } from "@/lib/i18n";
 import { LanguageProvider } from "@/hooks/use-language";
 import { RUN_STALE_TIMEOUT_MS, useCopilotRun } from "@/hooks/use-copilot";
 import type { CopilotPendingAction } from "@/lib/copilot-api";
+
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -162,6 +165,60 @@ describe("useCopilotRun streaming reliability", () => {
     expect(result.current.active?.status).toBe("awaiting_approval");
     expect(result.current.active?.pendingAction?.id).toBe("act-1");
     expect(result.current.active?.pendingAction?.tool).toBe("run_terminal");
+  });
+
+  it("maps a known gateway error code to user-readable text without the raw code", async () => {
+    window.localStorage.setItem("forgebadger-language", "en");
+    getRunMock.mockResolvedValue({
+      run: { ...runningRun, status: "failed", error: "AGENT_NO_MODEL" },
+      pendingActions: [],
+    });
+    const { result } = renderHook(() => useCopilotRun(), { wrapper });
+
+    await act(async () => {
+      await result.current.startRun("conv-1", "hi");
+    });
+
+    expect(result.current.active?.status).toBe("failed");
+    expect(result.current.active?.error).toBe(getTranslation("en", "copilot.error.noModel"));
+    expect(result.current.active?.error).not.toContain("AGENT_NO_MODEL");
+    expect(result.current.active?.errorCode).toBeUndefined();
+    window.localStorage.removeItem("forgebadger-language");
+  });
+
+  it("falls back to generic text and keeps the raw code for unknown codes", async () => {
+    window.localStorage.setItem("forgebadger-language", "en");
+    getRunMock.mockResolvedValue({
+      run: { ...runningRun, status: "failed", error: "SOME_FUTURE_CODE" },
+      pendingActions: [],
+    });
+    const { result } = renderHook(() => useCopilotRun(), { wrapper });
+
+    await act(async () => {
+      await result.current.startRun("conv-1", "hi");
+    });
+
+    expect(result.current.active?.error).toBe(getTranslation("en", "copilot.error.unknown"));
+    expect(result.current.active?.error).not.toContain("SOME_FUTURE_CODE");
+    expect(result.current.active?.errorCode).toBe("SOME_FUTURE_CODE");
+    window.localStorage.removeItem("forgebadger-language");
+  });
+
+  it("uses the default failure text when the run carries no reason", async () => {
+    window.localStorage.setItem("forgebadger-language", "en");
+    getRunMock.mockResolvedValue({
+      run: { ...runningRun, status: "failed" },
+      pendingActions: [],
+    });
+    const { result } = renderHook(() => useCopilotRun(), { wrapper });
+
+    await act(async () => {
+      await result.current.startRun("conv-1", "hi");
+    });
+
+    expect(result.current.active?.error).toBe(getTranslation("en", "copilot.terminal.failedDefault"));
+    expect(result.current.active?.errorCode).toBeUndefined();
+    window.localStorage.removeItem("forgebadger-language");
   });
 
   it("retains facts and marks an unreachable run as awaiting synchronization", async () => {
@@ -402,4 +459,48 @@ describe("durable conversation restoration", () => {
     expect(result.current.active?.text).toBe('replacement next');unmount();
   });
 
+});
+
+it('does not fetch REST state per unchanged-status delta and coalesces state transitions', async () => {
+  getRunMock.mockResolvedValue({ run: { ...runningRun, revision: 1 }, pendingActions: [] });
+  sendMessageMock.mockResolvedValue({ runId: 'run-1' });
+  const { result } = renderHook(() => useCopilotRun(), { wrapper });
+  await act(async () => { await result.current.startRun('conv-1','hi'); });
+  getRunMock.mockClear();
+  for(let sequence=1;sequence<=100;sequence++) dispatchRunUpdated({ run_id:'run-1',status:'running',revision:1,text_step_id:'step',text_fence:1,text_sequence:sequence,text_delta:'a' });
+  await act(async () => {});
+  expect(result.current.active?.text).toBe('a'.repeat(100));
+  expect(getRunMock).not.toHaveBeenCalled();
+  getRunMock.mockResolvedValue({ run: {...runningRun,status:'awaiting_approval',revision:2},pendingActions:[pendingAction] });
+  for(let i=0;i<20;i++) dispatchRunUpdated({run_id:'run-1',status:'awaiting_approval',revision:2,pending_action_id:pendingAction.id});
+  await act(async () => {});
+  expect(getRunMock).toHaveBeenCalledTimes(1);
+  expect(result.current.active?.pendingAction?.id).toBe(pendingAction.id);
+});
+
+it('reconciles a sequence gap with the safe server snapshot and keeps streaming', async () => {
+  getRunMock.mockResolvedValue({ run: { ...runningRun, revision: 1 }, pendingActions: [] });
+  sendMessageMock.mockResolvedValue({ runId: 'run-1' });
+  const { result } = renderHook(() => useCopilotRun(), { wrapper });
+  await act(async () => { await result.current.startRun('conv-1','hi'); });
+  getRunMock.mockClear();
+  getRunMock.mockResolvedValue({run:{...runningRun,revision:1},pendingActions:[],provisionalText:{steps:[{stepId:'step',fence:1,sequence:2,text:'one two '}]} });
+  dispatchRunUpdated({run_id:'run-1',status:'running',revision:1,text_step_id:'step',text_fence:1,text_sequence:1,text_delta:'one '});
+  dispatchRunUpdated({run_id:'run-1',status:'running',revision:1,text_step_id:'step',text_fence:1,text_sequence:3,text_delta:'three '});
+  await act(async () => {});
+  expect(getRunMock).toHaveBeenCalledTimes(1);
+  expect(result.current.active?.text).toBe('one two three ');
+  dispatchRunUpdated({run_id:'run-1',status:'running',revision:1,text_step_id:'step',text_fence:1,text_sequence:4,text_delta:'four'});
+  expect(result.current.active?.text).toBe('one two three four');
+});
+
+it('coalesces reactive conversation-list updates rather than refreshing per text chunk', async () => {
+  const onReactiveUpdate=vi.fn();
+  getRunMock.mockResolvedValue({run:{...runningRun,revision:1},pendingActions:[]});
+  sendMessageMock.mockResolvedValue({runId:'run-1'});
+  const { result }=renderHook(()=>useCopilotRun({onReactiveUpdate}),{wrapper});
+  await act(async()=>{await result.current.startRun('conv-1','hi');});
+  for(let sequence=1;sequence<=100;sequence++)dispatchRunUpdated({run_id:'run-1',source:'reactive',status:'running',revision:1,text_step_id:'step',text_fence:1,text_sequence:sequence,text_delta:'a'});
+  await act(async()=>{});
+  expect(onReactiveUpdate).toHaveBeenCalledTimes(1);
 });

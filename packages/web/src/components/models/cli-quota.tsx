@@ -5,6 +5,7 @@ import {
   quotaBarToneClass,
   quotaTextToneClass,
 } from "@/components/sessions/provider-quota";
+import { useUiLocale } from "@/hooks/use-language";
 import {
   type CliAccountAdapter,
   type CliQuotaEntry,
@@ -77,6 +78,7 @@ export function CliQuotaSummary({ quota, t }: { quota: CliQuotaResult | undefine
 }
 
 function CliQuotaRow({ entry, t }: { entry: CliQuotaEntry; t: Translate }) {
+  const locale = useUiLocale();
   const percent = cliQuotaUsedPercent(entry);
   return (
     <div className="min-w-0">
@@ -124,7 +126,7 @@ function CliQuotaRow({ entry, t }: { entry: CliQuotaEntry; t: Translate }) {
           )}
           {entry.resetsAt ? (
             <span className="shrink-0">
-              {t("models.cliAccountQuotaResets")} {formatQuotaResetTime(entry.resetsAt)}
+              {t("models.cliAccountQuotaResets")} {formatQuotaResetTime(entry.resetsAt, locale)}
             </span>
           ) : null}
         </div>
@@ -152,8 +154,8 @@ function clampPercent(value: number): number {
 }
 
 /** Short reset-time rendering, e.g. "Jul 26, 14:30"; falls back to the raw value. */
-function formatQuotaResetTime(iso: string): string {
+function formatQuotaResetTime(iso: string, locale: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleString(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }

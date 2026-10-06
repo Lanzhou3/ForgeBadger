@@ -3,36 +3,27 @@
 import { useState } from "react";
 
 import { PixelRobot } from "@/components/copilot/pixel-robot";
-import { ROBOT_SIZE_PX, type RobotFrameKey } from "@/lib/pixel-robot";
+import { ROBOT_SIZE_PX } from "@/lib/pixel-robot";
+import { DEFAULT_PET_ID, type PetId } from "@/lib/pet-preference";
+import { PET_SPRITES, petSpriteFrame, pixelFallbackFrame, type PetFrameKey } from "@/lib/pet-sprites";
 import { cn } from "@/lib/utils";
 
 interface Props {
-  frame: RobotFrameKey;
-  /** Source images face left; flip mirrors them to face right. */
+  frame: PetFrameKey;
+  petId?: PetId;
+  /** Mirrors the selected pet's native facing direction. */
   flip?: boolean;
   size?: number;
 }
 
-const FRAMES: Record<RobotFrameKey, { sheet: string; index: number; count: number }> = {
-  stand: { sheet: "stand", index: 0, count: 2 },
-  blink: { sheet: "stand", index: 1, count: 2 },
-  walk1: { sheet: "walk", index: 0, count: 2 },
-  walk2: { sheet: "walk", index: 1, count: 2 },
-  sit1: { sheet: "sit", index: 0, count: 3 },
-  sit2: { sheet: "sit", index: 1, count: 3 },
-  sitBlink: { sheet: "sit", index: 2, count: 3 },
-};
-
-const asset = (sheet: string) => `/pets/fb01/${sheet}.webp`;
-
-/** Blender-rendered frames: no canvas, WebGL context, or per-frame fetches. */
-export function RobotSprite({ frame, flip = false, size = ROBOT_SIZE_PX }: Props) {
-  const { sheet, index, count } = FRAMES[frame];
+/** Each action reuses one pre-rendered strip without per-frame image requests. */
+export function RobotSprite({ frame, petId = DEFAULT_PET_ID, flip = false, size = ROBOT_SIZE_PX }: Props) {
+  const { src, index, count } = petSpriteFrame(petId, frame);
   const [loadedSheet, setLoadedSheet] = useState<string | null>(null);
   const [failedSheet, setFailedSheet] = useState<string | null>(null);
 
-  if (failedSheet === sheet) {
-    return <PixelRobot frame={frame} flip={flip} size={size} />;
+  if (failedSheet === src) {
+    return <PixelRobot frame={pixelFallbackFrame(frame)} flip={flip} size={size} />;
   }
 
   return (
@@ -44,14 +35,14 @@ export function RobotSprite({ frame, flip = false, size = ROBOT_SIZE_PX }: Props
         width: size,
         height: size,
         // Keep a standing pose visible until the requested action is decoded.
-        backgroundImage: loadedSheet === sheet ? undefined : `url(${asset("stand")})`,
+        backgroundImage: loadedSheet === src ? undefined : `url(${PET_SPRITES[petId].assetBase}/stand.webp)`,
         backgroundSize: "200% 100%",
         backgroundRepeat: "no-repeat",
       }}
     >
       <img
-        key={sheet}
-        src={asset(sheet)}
+        key={src}
+        src={src}
         alt=""
         draggable={false}
         decoding="async"
@@ -62,10 +53,10 @@ export function RobotSprite({ frame, flip = false, size = ROBOT_SIZE_PX }: Props
           width: size * count,
           height: size,
           transform: `translateX(-${(index * 100) / count}%)`,
-          visibility: loadedSheet === sheet ? "visible" : "hidden",
+          visibility: loadedSheet === src ? "visible" : "hidden",
         }}
-        onLoad={() => setLoadedSheet(sheet)}
-        onError={() => setFailedSheet(sheet)}
+        onLoad={() => setLoadedSheet(src)}
+        onError={() => setFailedSheet(src)}
       />
     </span>
   );

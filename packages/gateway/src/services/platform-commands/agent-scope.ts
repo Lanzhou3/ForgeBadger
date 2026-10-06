@@ -1,8 +1,10 @@
 import { assertRestrictedTool } from '../agent/restricted-runs.js';
 import { SessionRepository } from '../../db/repositories/session-repository.js';
 import type { AgentToolContext } from '../agent/tool-registry.js';
+import { assertChannelToolScope } from '../channels/channel-run-scope.js';
 const INTERACTIVE_OWNER_TOOLS = new Set(['takeover_session', 'submit_development_task', 'cancel_development_task', 'accept_development_task']);
 export function checkAgentScope(context: AgentToolContext, name: string, raw: unknown) {
+    assertChannelToolScope(context, name, raw);
     if (context.executionMode === 'repair') assertRestrictedTool(context,name,raw);
     if (!INTERACTIVE_OWNER_TOOLS.has(name))
         return;

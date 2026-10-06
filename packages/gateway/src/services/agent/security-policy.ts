@@ -46,7 +46,10 @@ export function createSecurityPolicy(context?: SecurityPolicyContext) {
 
   function evaluate(input: SecurityPolicyInput): SecurityDecision {
     // Global denylist first: traversal or known-dangerous patterns in any input.
-    const dangerous = detectDangerousInput(executableInput(input.toolName, input.input));
+    const script = input.toolName === 'terminal_run' && input.input && typeof input.input === 'object'
+      && 'command' in input.input && typeof input.input.command === 'string' ? input.input.command.trim() : undefined;
+    const dangerous = detectDangerousInput(executableInput(input.toolName, input.input))
+      ?? (script && containsDangerousShellCommand(script, 0, 'script') ? 'input contains potentially destructive shell pattern' : undefined);
     if (dangerous) {
       return { action: "deny", reason: dangerous, riskClass: "high" };
     }

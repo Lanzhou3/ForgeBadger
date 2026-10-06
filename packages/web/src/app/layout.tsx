@@ -36,7 +36,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    // Server markup and the first client render both use the default language
+    // (zh-CN); LanguageProvider updates document.documentElement.lang after
+    // hydration once the stored/system preference is known.
+    <html lang="zh-CN" suppressHydrationWarning>
       <body>
         <Script src="/forgebadger-runtime.js" strategy="beforeInteractive" />
         {/* Restore the accent theme before first paint to avoid a color flash. */}

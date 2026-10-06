@@ -3,6 +3,7 @@ import { assertRestrictedTool } from "./restricted-runs.js";
 import { zodToJsonSchema } from "./tool-schema.js";
 import { redactAgentErrorMessage, redactAgentValue } from "./redaction.js";
 import { checkAgentScope } from "../platform-commands/agent-scope.js";
+import { channelToolContext } from '../channels/channel-run-scope.js';
 import { executeAgentAction, TOOL_COMMANDS } from "../platform-commands/agent-actions.js";
 /**
  * Tool registry for the Copilot harness.
@@ -88,12 +89,16 @@ export async function executeAgentTool(
     throw new AgentToolValidationError(tool.inputSchema.safeParse(rawInput).error?.message ?? "Tool input is invalid");
   }
   try {
+    context = channelToolContext(context);
     if (context.executionMode && tool.risk !== 'read' && !(context.executionMode === 'repair' && tool.name === 'submit_development_task')) throw new Error('COPILOT_RESTRICTED_TOOL: read-only tools required');
     assertRestrictedTool(context, tool.name, parsed.data);
     checkAgentScope(context, tool.name, parsed.data);
     const output = tool.risk === "operate" && TOOL_COMMANDS[tool.name]
       ? await executeAgentAction(tool.name, parsed.data, context)
 : await tool.execute(parsed.data, context);
+    // Awaited reads can outlive a route revocation or root change. Revalidate
+    // before returning evidence to the transcript/provider/delivery path.
+    checkAgentScope(context, tool.name, parsed.data);
     const redacted = redactAgentValue(output);
     const serialized = JSON.stringify(redacted);
     const eligible = tool.risk === 'read' && ARCHIVABLE_TOOLS.has(tool.name);

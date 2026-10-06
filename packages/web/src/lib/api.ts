@@ -1201,6 +1201,8 @@ export interface DashboardStats {
 export interface DashboardHealthItem {
   healthy: boolean;
   count?: number;
+  /** Stable machine key for the current state; map via dashboard-copy. Optional for older Gateways. */
+  code?: string;
   message: string;
 }
 
@@ -1265,39 +1267,40 @@ export function apiUrl(path: string): string {
 }
 
 export async function fetchJson<T = unknown>(path: string, options: ApiRequestOptions = {}) {
-  const token = getToken();
-  const { request, cleanup } = buildApiRequest(options, token);
-  const res = await fetch(apiUrl(path), request).catch(normalizeFetchError).finally(cleanup);
-  const envelope = await readApiEnvelope<T>(res);
-  if (!res.ok) {
-    handleUnauthorized(path, token !== null, res.status);
-    throw errorFromResponse(res, envelope);
-  }
-  if (!envelope) {
-    throw new GatewayApiError("API request failed", res.status);
-  }
-  if (envelope.code !== 0) {
-    throw errorFromEnvelope(envelope, res.status);
-  }
-  return envelope.data as T;
+  return (await fetchEnvelope<T>(path, options)).data as T;
 }
 
 export async function fetchEnvelope<T = unknown>(path: string, options: ApiRequestOptions = {}) {
   const token = getToken();
   const { request, cleanup } = buildApiRequest(options, token);
-  const res = await fetch(apiUrl(path), request).catch(normalizeFetchError).finally(cleanup);
-  const envelope = await readApiEnvelope<T>(res);
-  if (!res.ok) {
-    handleUnauthorized(path, token !== null, res.status);
-    throw errorFromResponse(res, envelope);
+  try {
+    return await awaitApiRequest(async () => {
+      const res = await fetch(apiUrl(path), request);
+      const envelope = await readApiEnvelope<T>(res);
+      request.signal!.throwIfAborted();
+      if (!res.ok) {
+        handleUnauthorized(path, token !== null, res.status);
+        throw errorFromResponse(res, envelope);
+      }
+      if (!envelope) throw new GatewayApiError("API request failed", res.status);
+      if (envelope.code !== 0) throw errorFromEnvelope(envelope, res.status);
+      return envelope;
+    }, request.signal!);
+  } catch (error) {
+    normalizeFetchError(error);
+  } finally {
+    cleanup();
   }
-  if (!envelope) {
-    throw new GatewayApiError("API request failed", res.status);
-  }
-  if (envelope.code !== 0) {
-    throw errorFromEnvelope(envelope, res.status);
-  }
-  return envelope;
+}
+
+/** The deadline includes headers, body consumption and envelope validation. */
+function awaitApiRequest<T>(read: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    read().then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
 
 function buildApiRequest(options: ApiRequestOptions, token: string | null): {
@@ -1305,14 +1308,22 @@ function buildApiRequest(options: ApiRequestOptions, token: string | null): {
   cleanup: () => void;
 } {
   const { timeoutMs = DEFAULT_API_TIMEOUT_MS, ...requestOptions } = options;
-  const controller = requestOptions.signal ? undefined : new AbortController();
-  const timeout = controller
-    ? setTimeout(() => controller.abort(), timeoutMs)
-    : undefined;
+  const controller = new AbortController();
+  const caller = requestOptions.signal;
+  const cancel = () => controller.abort(new GatewayApiError(
+    "Gateway request cancelled. Sync the operation status before retrying.",
+    undefined, { code: "GATEWAY_REQUEST_CANCELLED" }
+  ));
+  if (caller?.aborted) cancel();
+  else caller?.addEventListener("abort", cancel, { once: true });
+  const timeout = setTimeout(() => controller.abort(new GatewayApiError(
+    "Gateway request timed out. Check that the Gateway service is running.",
+    undefined, { code: "GATEWAY_REQUEST_TIMEOUT" }
+  )), timeoutMs);
   return {
     request: {
       ...requestOptions,
-      signal: requestOptions.signal ?? controller?.signal,
+      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -1320,9 +1331,8 @@ function buildApiRequest(options: ApiRequestOptions, token: string | null): {
       },
     },
     cleanup: () => {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
+      clearTimeout(timeout);
+      caller?.removeEventListener("abort", cancel);
     },
   };
 }
@@ -2836,6 +2846,16 @@ export async function generateConfig(
 }
 
 // Sessions
+export interface SessionWorkState {
+  sessionId: string;
+  state: "working" | "idle" | "unknown";
+  updatedAt: number;
+}
+
+export function getSessionWorkStates(): Promise<{ states: SessionWorkState[]; snapshotAt: number }> {
+  return fetchJson("/api/v1/sessions/work-state") as Promise<{ states: SessionWorkState[]; snapshotAt: number }>;
+}
+
 export function listSessions(): Promise<{ sessions: Session[] }>;
 export function listSessions(params: { projectId?: string }): Promise<{ sessions: Session[] }>;
 export async function listSessions(params: { projectId?: string } = {}): Promise<{ sessions: Session[] }> {
@@ -2868,8 +2888,8 @@ export interface TerminalShellAvailability {
 }
 
 /** Probe which shells are installed on this host (launch-dialog defaults). */
-export async function listTerminalShells(): Promise<{ shells: TerminalShellAvailability[] }> {
-  return fetchJson("/api/v1/sessions/shells") as Promise<{ shells: TerminalShellAvailability[] }>;
+export async function listTerminalShells(): Promise<{ platform: string; shells: TerminalShellAvailability[] }> {
+  return fetchJson("/api/v1/sessions/shells") as Promise<{ platform: string; shells: TerminalShellAvailability[] }>;
 }
 
 export async function createSession(data: {
@@ -3489,6 +3509,8 @@ export interface TemplateSyncWriteOutcome {
   skippedFiles: string[];
   failedFiles: string[];
   conflicts: ConfigConflict[];
+  /** Directory holding per-file backups taken before writing. */
+  backupPath?: string;
 }
 
 export interface TemplateSyncProjectResult {

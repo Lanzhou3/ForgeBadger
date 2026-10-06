@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLanguage } from "@/hooks/use-language";
+import { useTrilingual } from "@/hooks/use-trilingual";
 import {
   listSkillRegistrySources,
   refreshSkillRegistrySource,
@@ -13,7 +14,7 @@ import { SkillNavigation } from "./SkillNavigation";
 
 export function SkillSourcesPage() {
   const { language } = useLanguage();
-  const en = language === "en";
+  const pick = useTrilingual();
   const client = useQueryClient();
   const [repo, setRepo] = useState("");
   const sources = useQuery({
@@ -44,36 +45,32 @@ export function SkillSourcesPage() {
   const busy = add.isPending || remove.isPending;
   const status = (value: string) =>
     value === "active"
-      ? en
-        ? "Synced"
-        : "已同步"
+      ? pick("已同步", "已同步", "Synced")
       : value === "syncing"
-        ? en
-          ? "Synchronizing…"
-          : "同步中…"
+        ? pick("同步中…", "同步中…", "Synchronizing…")
         : value === "disabled"
-          ? en
-            ? "Disabled"
-            : "已停用"
+          ? pick("已停用", "已停用", "Disabled")
           : value.startsWith("partial:")
-            ? en
-              ? `Partial · ${value.split(":")[1]} skipped`
-              : `部分可用 · 跳过 ${value.split(":")[1]} 项`
+            ? pick(
+                `部分可用 · 跳过 ${value.split(":")[1]} 项`,
+                `部分可用 · 略過 ${value.split(":")[1]} 項`,
+                `Partial · ${value.split(":")[1]} skipped`,
+              )
             : value === "error"
-              ? en
-                ? "Sync failed · previous results retained"
-                : "同步失败 · 保留原结果"
+              ? pick("同步失败 · 保留原结果", "同步失敗 · 保留原結果", "Sync failed · previous results retained")
               : value;
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-4 pt-16 md:p-6">
       <div>
         <h1 className="text-xl font-semibold">
-          {en ? "Skill sources" : "Skill 来源管理"}
+          {pick("Skill 来源管理", "Skill 來源管理", "Skill sources")}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {en
-            ? "Sync public GitHub repositories. ClawHub is searched on demand."
-            : "同步公开 GitHub 仓库；ClawHub 在搜索时实时检索。"}
+          {pick(
+            "同步公开 GitHub 仓库；ClawHub 在搜索时实时检索。",
+            "同步公開 GitHub 倉庫；ClawHub 在搜尋時即時檢索。",
+            "Sync public GitHub repositories. ClawHub is searched on demand.",
+          )}
         </p>
       </div>
       <SkillNavigation />
@@ -87,19 +84,15 @@ export function SkillSourcesPage() {
         <Input
           required
           className="min-w-0 flex-1 basis-64"
-          aria-label={en ? "Repository source" : "仓库来源"}
+          aria-label={pick("仓库来源", "倉庫來源", "Repository source")}
           placeholder="owner/repo"
           value={repo}
           onChange={(e) => setRepo(e.target.value)}
         />
         <Button disabled={busy} type="submit">
           {add.isPending
-            ? en
-              ? "Synchronizing…"
-              : "同步中…"
-            : en
-              ? "Add & sync"
-              : "添加并同步"}
+            ? pick("同步中…", "同步中…", "Synchronizing…")
+            : pick("添加并同步", "新增並同步", "Add & sync")}
         </Button>
       </form>
       {add.error || remove.error ? (
@@ -111,11 +104,11 @@ export function SkillSourcesPage() {
         <div role="alert">
           {sources.error.message}
           <Button variant="link" onClick={() => sources.refetch()}>
-            {en ? "Retry" : "重试"}
+            {pick("重试", "重試", "Retry")}
           </Button>
         </div>
       ) : sources.isPending ? (
-        <p role="status">{en ? "Loading…" : "加载中…"}</p>
+        <p role="status">{pick("加载中…", "載入中…", "Loading…")}</p>
       ) : (
         <div className="divide-y divide-border/70 rounded-lg border border-border bg-card">
           {sources.data?.sources.map((source) => (
@@ -149,12 +142,8 @@ export function SkillSourcesPage() {
                   }
                 >
                   {source.status === "disabled"
-                    ? en
-                      ? "Enable & sync"
-                      : "启用并同步"
-                    : en
-                      ? "Refresh"
-                      : "刷新"}
+                    ? pick("启用并同步", "啟用並同步", "Enable & sync")
+                    : pick("刷新", "重新整理", "Refresh")}
                 </Button>
                 <Button
                   size="sm"
@@ -166,24 +155,28 @@ export function SkillSourcesPage() {
                   }
                   onClick={() => remove.mutate(source.sourceId)}
                 >
-                  {en ? "Disable" : "停用"}
+                  {pick("停用", "停用", "Disable")}
                 </Button>
               </div>
             </div>
           ))}
           {!sources.data?.sources.length ? (
             <p className="p-8 text-center text-sm text-muted-foreground">
-              {en
-                ? "Visit Discover to load curated sources, or add a repository above."
-                : "进入「发现」加载精选来源，或在上方添加仓库。"}
+              {pick(
+                "进入「发现」加载精选来源，或在上方添加仓库。",
+                "進入「發現」載入精選來源，或在上方新增倉庫。",
+                "Visit Discover to load curated sources, or add a repository above.",
+              )}
             </p>
           ) : null}
         </div>
       )}
       <p className="text-xs text-muted-foreground">
-        {en
-          ? "Disabling a source removes its search results and keeps installed Skills. Sources publish instructions and resources; review them before use."
-          : "停用来源会移除其搜索结果，保留已安装的 Skill。来源提供指令与资源，使用前请审阅。"}
+        {pick(
+          "停用来源会移除其搜索结果，保留已安装的 Skill。来源提供指令与资源，使用前请审阅。",
+          "停用來源會移除其搜尋結果，保留已安裝的 Skill。來源提供指令與資源，使用前請審閱。",
+          "Disabling a source removes its search results and keeps installed Skills. Sources publish instructions and resources; review them before use.",
+        )}
       </p>
     </div>
   );

@@ -1,5 +1,5 @@
-const MAX_TERMINAL_COLS = 500;
-const MAX_TERMINAL_ROWS = 200;
+export const MAX_TERMINAL_COLS = 500;
+export const MAX_TERMINAL_ROWS = 200;
 
 export function createTerminalInputMessage(data: string): string {
   return JSON.stringify({ type: "terminal_input", payload: { data } });

@@ -29,6 +29,27 @@ function makeStorage() {
 }
 
 describe("color mode", () => {
+  it.each(["system", "dark"] as const)("keeps OS listening across mode changes from %s", (initial) => {
+    let handler: ((event: MediaQueryListEvent) => void) | undefined;
+    const mql = { matches: false, addEventListener: (_: string, fn: typeof handler) => { handler = fn; }, removeEventListener: vi.fn() };
+    vi.spyOn(window, "matchMedia").mockReturnValue(mql as unknown as MediaQueryList);
+    window.localStorage.setItem(COLOR_MODE_STORAGE_KEY, initial);
+    const stop = initColorMode();
+    try {
+      setColorMode("light");
+      mql.matches = true;
+      handler?.({ matches: true } as MediaQueryListEvent);
+      expect(getColorModeState()).toEqual({ mode: "light", resolved: "light" });
+      expect(window.localStorage.getItem(COLOR_MODE_STORAGE_KEY)).toBe("light");
+      setColorMode("system");
+      mql.matches = false;
+      handler?.({ matches: false } as MediaQueryListEvent);
+      expect(getColorModeState()).toEqual({ mode: "system", resolved: "light" });
+    } finally {
+      stop();
+      vi.restoreAllMocks();
+    }
+  });
   it("defaults to system", () => {
     expect(DEFAULT_COLOR_MODE).toBe("system");
     expect(readStoredColorMode(makeStorage())).toBe("system");

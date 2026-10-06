@@ -32,5 +32,5 @@ export function pickAvailableShell(
   if (!installed || installed.length === 0) return current;
   const available = new Set(installed);
   if (available.has(current)) return current;
-  return order.find((candidate) => available.has(candidate)) ?? current;
+  return order.find((candidate) => available.has(candidate)) ?? installed[0] ?? current;
 }

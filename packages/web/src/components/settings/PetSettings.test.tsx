@@ -21,13 +21,13 @@ it("saves the robot selection and restores it after remount", () => {
   cleanup();
   renderSettings();
   expect(screen.getByRole("radio", { name: "机器人" }).getAttribute("aria-checked")).toBe("true");
-  expect(screen.getAllByRole("radio")).toHaveLength(1);
+  expect(screen.getAllByRole("radio")).toHaveLength(2);
 });
 
-it("falls back to the robot for an unsupported stored pet", () => {
+it("falls back to the honey badger for an unsupported stored pet", () => {
   window.localStorage.setItem(PET_STORAGE_KEY, "removed-pet");
   renderSettings();
-  expect(screen.getByRole("radio", { name: "机器人" }).getAttribute("aria-checked")).toBe("true");
+  expect(screen.getByRole("radio", { name: "科技蜜獾" }).getAttribute("aria-checked")).toBe("true");
   expect(screen.queryByRole("status")).toBeNull();
 });
 

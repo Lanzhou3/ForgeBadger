@@ -441,11 +441,12 @@ for(const removeOrigin of [false,true]) {
     try {
       const admittedMessage=f.inbox.receive(f.peer,incoming('1'));const adopted=f.inbox.adoptNext();assert.equal(adopted.status,'adopted');if(adopted.status!=='adopted')return;
       const ledger=new CopilotRunLedger(f.db,f.user.id);
-      const step=ledger.addStep(adopted.runId,{kind:'tool',toolName:'test',toolCallId:'test-call',inputJson:'{}',effect:'write'});
+      const input={projectId:f.project.id};
+      const step=ledger.addStep(adopted.runId,{kind:'tool',toolName:'update_project',toolCallId:'test-call',inputJson:JSON.stringify(input),effect:'write'});
       let effects=0;
-      const command:PlatformCommand={id:'test',capability:'project.update',effect:'database',inputSchema:z.object({}),resolve:()=>({projectIds:[f.project.id],revision:'1'}),execute:()=>{effects++;return {};}};
-      const actions=new PlatformActions({db:f.db,userId:f.user.id,actionOrigin:{kind:'copilot',runId:adopted.runId,stepId:step.id}},new Map([['test',command]]));
-      const intent=actions.preview({commandId:'test',input:{},idempotencyKey:step.id});
+      const command:PlatformCommand={id:'project.metadata.update',capability:'project.update',effect:'database',inputSchema:z.object({projectId:z.string()}),resolve:()=>({projectIds:[f.project.id],revision:'1'}),execute:()=>{effects++;return {};}};
+      const actions=new PlatformActions({db:f.db,userId:f.user.id,actionOrigin:{kind:'copilot',runId:adopted.runId,stepId:step.id}},new Map([[command.id,command]]));
+      const intent=actions.preview({commandId:command.id,input,idempotencyKey:step.id});
       assert.equal(intent.channel_conversation_id,f.route.conversationId);
       if(removeOrigin)f.db.prepare('DELETE FROM copilot_run_steps WHERE user_id=? AND id=?').run(f.user.id,step.id);
       else f.service.revokeRoute(f.route.id);
@@ -560,12 +561,13 @@ it('rechecks authority at an external command fence after an await',async()=>{
   const f=inboxFixture();
   try {
     f.inbox.receive(f.peer,incoming('1'));const adopted=f.inbox.adoptNext();if(adopted.status!=='adopted')return assert.fail('admission required');
-    const step=new CopilotRunLedger(f.db,f.user.id).addStep(adopted.runId,{kind:'tool',toolName:'external',toolCallId:'external',inputJson:'{}',effect:'write'});
+    const input={projectId:f.project.id};
+    const step=new CopilotRunLedger(f.db,f.user.id).addStep(adopted.runId,{kind:'tool',toolName:'update_project',toolCallId:'external',inputJson:JSON.stringify(input),effect:'write'});
     let release!:()=>void;let started!:()=>void;const waiting=new Promise<void>(resolve=>{release=resolve;});const began=new Promise<void>(resolve=>{started=resolve;});let effects=0;
-    const command:PlatformCommand={id:'test',capability:'project.update',effect:'external',inputSchema:z.object({}),resolve:()=>({projectIds:[f.project.id],revision:'1'}),
+    const command:PlatformCommand={id:'project.metadata.update',capability:'project.update',effect:'external',inputSchema:z.object({projectId:z.string()}),resolve:()=>({projectIds:[f.project.id],revision:'1'}),
       execute:async context=>{started();await waiting;context.authorize?.();effects++;return {};}};
-    const actions=new PlatformActions({db:f.db,userId:f.user.id,actionOrigin:{kind:'copilot',runId:adopted.runId,stepId:step.id}},new Map([['test',command]]));
-    const intent=actions.preview({commandId:'test',input:{},idempotencyKey:step.id});
+    const actions=new PlatformActions({db:f.db,userId:f.user.id,actionOrigin:{kind:'copilot',runId:adopted.runId,stepId:step.id}},new Map([[command.id,command]]));
+    const intent=actions.preview({commandId:command.id,input,idempotencyKey:step.id});
     const executing=actions.execute(intent.id);const rejected=assert.rejects(executing);await began;
     f.service.revokeRoute(f.route.id);release();await rejected;assert.equal(effects,0);
   }finally{f.db.close();}

@@ -3,6 +3,7 @@ import { createCopilotMeteringRoutes } from './copilot-metering.js';
 import { RunGovernance } from "../services/agent/run-governance.js";
 import { publicModelResponse } from "../db/repositories/copilot-model-response-repository.js";
 import { createCopilotDevelopmentRoutes } from './copilot-development.js';
+import { provisionalText, clearProvisionalText } from '../services/agent/provisional-text.js';
 import { createCopilotSkillRoutes } from "./copilot-skills.js";
 import { createCopilotConnectionRoutes } from "./copilot-connections.js";
 import { createCopilotPlaybookRoutes } from "./copilot-playbooks.js";
@@ -265,7 +266,8 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     const { log } = buildAgentStack(deps, userId(req));
     const run = log.getRun(id);
     if (!run) return notFound(res);
-    res.json(ok({ run: { ...run, usage: new RunGovernance(deps.db, userId(req), id).usage() }, pendingActions: log.listPendingActions(id).map(a=>({...a,platformIntentId:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)?.id??null:null,platformIntent:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)??null:null})), steps: new CopilotRunLedger(deps.db,userId(req)).steps(id).map(step => step.kind === 'model' ? { ...step, result_json: publicModelResponse(step.result_json) } : step) }));
+    if (!['pending', 'running', 'awaiting_approval'].includes(run.status)) clearProvisionalText(deps.db, id);
+    res.json(ok({ provisionalText: provisionalText(deps.db, userId(req), id), run: { ...run, usage: new RunGovernance(deps.db, userId(req), id).usage() }, pendingActions: log.listPendingActions(id).map(a=>({...a,platformIntentId:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)?.id??null:null,platformIntent:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)??null:null})), steps: new CopilotRunLedger(deps.db,userId(req)).steps(id).map(step => step.kind === 'model' ? { ...step, result_json: publicModelResponse(step.result_json) } : step) }));
   });
 
   router.post("/runs/:id/cancel", async (req, res) => {
@@ -286,6 +288,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
           runId,
           actionId,
           approved: value.approved,
+          decisionOrigin: 'web',
           async: true
         });
         res.json(ok(result));
@@ -364,6 +367,11 @@ function domainError(res: Response, error: unknown): void {
     return;
   }
   if(error instanceof AgentError && error.code === "COPILOT_NOT_FOUND")return notFound(res);
-  const code = error instanceof Error ? error.message : "COPILOT_OPERATION_FAILED";
+  const message = error instanceof Error ? error.message : '';
+  const code = error instanceof AgentError ? error.code
+    : /^(?:COPILOT_|DEVELOPMENT_|SHELL_|SESSION_|PLATFORM_)[A-Z0-9_]+/.exec(message)?.[0]
+      ?? (/expired/i.test(message) ? 'COPILOT_APPROVAL_EXPIRED'
+        : /stale|revision|mismatch/i.test(message) ? 'COPILOT_APPROVAL_CHANGED'
+          : /not approved|denied|disabled|authority|not active/i.test(message) ? 'COPILOT_APPROVAL_DENIED' : 'COPILOT_OPERATION_FAILED');
   res.status(400).json({ code: 1, message: "Copilot operation rejected", details: { code } });
 }
