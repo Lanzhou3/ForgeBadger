@@ -286,26 +286,10 @@ const zh = {
   mgmtFreshnessLabel: "证据有效小时",
   mgmtReload: "重新加载",
   mgmtSave: "保存管理信息",
-  // Metering panel: usage, token rates, repair revocation
-  meterTitle: "用量、计价与修复控制",
-  meterLoadError: "用量或费率读取失败，请重试。",
-  meterLoadingUsage: "读取用量…",
-  meterUsageEstimated: (reported: number, estimated: number, known: string, unpriced: number) =>
-    `供应商报告 ${reported} tokens；${estimated} 次调用仍为估算。费用：未知（已知部分 $${known}，${unpriced} 次未计价）。`,
-  meterUsageCost: (reported: number, estimated: number, cost: string) =>
-    `供应商报告 ${reported} tokens；${estimated} 次调用仍为估算。费用：$${cost}。`,
-  meterNoUsage: "当前尚无执行用量。",
-  meterRatesHint: "以下为所选模型每百万 tokens 的美元费率，最多六位小数。空白表示未知，0 表示免费；历史调用保留原费率。这是按配置计算的费用，不是供应商账单。",
-  meterInputRate: "输入费率",
-  meterOutputRate: "输出费率",
-  meterCachedRate: "缓存读取费率",
-  meterCacheWriteRate: "缓存写入费率",
-  meterSave: "保存费率",
-  meterSaveError: "费率保存失败，请检查输入。",
-  meterSaved: "费率已保存。",
-  meterRevoke: "停止本次执行的后续修复",
-  meterRevoked: "已停止后续修复",
-  meterRevokeError: "停止修复失败，请重试。",
+  // Repair revocation kill-switch in the run options sheet
+  repairRevoke: "停止本次执行的后续修复",
+  repairRevoked: "已停止后续修复",
+  repairRevokeError: "停止修复失败，请重试。",
 };
 const en: typeof zh = {
   navAriaLabel: "Copilot settings navigation",
@@ -591,26 +575,10 @@ const en: typeof zh = {
   mgmtFreshnessLabel: "Evidence validity (hours)",
   mgmtReload: "Reload",
   mgmtSave: "Save management info",
-  // Metering panel: usage, token rates, repair revocation
-  meterTitle: "Usage, pricing & repair controls",
-  meterLoadError: "Failed to load usage or rates; retry.",
-  meterLoadingUsage: "Reading usage…",
-  meterUsageEstimated: (reported: number, estimated: number, known: string, unpriced: number) =>
-    `Provider reported ${reported} tokens; ${estimated} calls are still estimated. Cost: unknown (known part $${known}, ${unpriced} calls unpriced).`,
-  meterUsageCost: (reported: number, estimated: number, cost: string) =>
-    `Provider reported ${reported} tokens; ${estimated} calls are still estimated. Cost: $${cost}.`,
-  meterNoUsage: "No run usage yet.",
-  meterRatesHint: "Rates below are USD per million tokens for the selected model, up to six decimal places. Blank means unknown, 0 means free; historical calls keep their original rates. This is a configuration-based estimate, not the provider's bill.",
-  meterInputRate: "Input rate",
-  meterOutputRate: "Output rate",
-  meterCachedRate: "Cache read rate",
-  meterCacheWriteRate: "Cache write rate",
-  meterSave: "Save rates",
-  meterSaveError: "Failed to save rates; check the input.",
-  meterSaved: "Rates saved.",
-  meterRevoke: "Stop later repairs of this run",
-  meterRevoked: "Later repairs stopped",
-  meterRevokeError: "Failed to stop repairs; retry.",
+  // Repair revocation kill-switch in the run options sheet
+  repairRevoke: "Stop later repairs of this run",
+  repairRevoked: "Later repairs stopped",
+  repairRevokeError: "Failed to stop repairs; retry.",
 };
 const zhTW: typeof zh = {
   ...zh,
@@ -897,25 +865,9 @@ const zhTW: typeof zh = {
   mgmtFreshnessLabel: "證據有效小時",
   mgmtReload: "重新載入",
   mgmtSave: "儲存管理資訊",
-  // Metering panel: usage, token rates, repair revocation
-  meterTitle: "用量、計價與修復控制",
-  meterLoadError: "用量或費率讀取失敗，請重試。",
-  meterLoadingUsage: "讀取用量…",
-  meterUsageEstimated: (reported: number, estimated: number, known: string, unpriced: number) =>
-    `供應商回報 ${reported} tokens；${estimated} 次呼叫仍為估算。費用：未知（已知部分 $${known}，${unpriced} 次未計價）。`,
-  meterUsageCost: (reported: number, estimated: number, cost: string) =>
-    `供應商回報 ${reported} tokens；${estimated} 次呼叫仍為估算。費用：$${cost}。`,
-  meterNoUsage: "目前尚無執行用量。",
-  meterRatesHint: "以下為所選模型每百萬 tokens 的美元費率，最多六位小數。空白表示未知，0 表示免費；歷史呼叫保留原費率。這是按配置計算的費用，不是供應商帳單。",
-  meterInputRate: "輸入費率",
-  meterOutputRate: "輸出費率",
-  meterCachedRate: "快取讀取費率",
-  meterCacheWriteRate: "快取寫入費率",
-  meterSave: "儲存費率",
-  meterSaveError: "費率儲存失敗，請檢查輸入。",
-  meterSaved: "費率已儲存。",
-  meterRevoke: "停止本次執行的後續修復",
-  meterRevoked: "已停止後續修復",
-  meterRevokeError: "停止修復失敗，請重試。",
+  // Repair revocation kill-switch in the run options sheet
+  repairRevoke: "停止本次執行的後續修復",
+  repairRevoked: "已停止後續修復",
+  repairRevokeError: "停止修復失敗，請重試。",
 };
 export function useSettingsCopy() { const { language } = useLanguage(); return language === "en" ? en : language === "zh-TW" ? zhTW : zh; }

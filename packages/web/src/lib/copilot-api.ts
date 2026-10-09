@@ -189,6 +189,11 @@ export function listConversationRuns(conversationId: string) {
   );
 }
 
+/** Revoke the repair authorization chain of a run; later repair attempts are rejected. */
+export function revokeRunRepairs(runId: string) {
+  return fetchJson<{ revoked: boolean }>(`/api/v1/copilot/runs/${encodeURIComponent(runId)}/repairs`, { method: "DELETE" });
+}
+
 export function getRun(runId: string) {
   return fetchJson<{ run: CopilotRun; pendingActions: CopilotPendingAction[]; provisionalText?: import("@/lib/copilot-text-stream").CopilotProvisionalText }>(
     `/api/v1/copilot/runs/${encodeURIComponent(runId)}`

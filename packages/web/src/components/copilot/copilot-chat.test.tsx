@@ -31,6 +31,7 @@ const {
   listProjectsMock,
   getRunMock,
   listRunsMock,
+  revokeRunRepairsMock,
   getCopilotPreferencesMock,
   updateCopilotPreferencesMock,
 } = vi.hoisted(() => ({
@@ -50,6 +51,7 @@ const {
   listProjectsMock: vi.fn(),
   getRunMock: vi.fn(),
   listRunsMock: vi.fn(),
+  revokeRunRepairsMock: vi.fn(),
   getCopilotPreferencesMock: vi.fn(),
   updateCopilotPreferencesMock: vi.fn(),
 }));
@@ -80,6 +82,7 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     getCopilotCapabilities: getCopilotCapabilitiesMock,
     getRun: getRunMock,
     listConversationRuns: listRunsMock,
+    revokeRunRepairs: revokeRunRepairsMock,
     getCopilotPreferences: getCopilotPreferencesMock,
     updateCopilotPreferences: updateCopilotPreferencesMock,
   };
@@ -260,6 +263,28 @@ describe("CopilotChat console layout", () => {
       expect.objectContaining({ reviewTaskResults: true, repairFailedChecks: true })));
     fireEvent.click(screen.getByRole("button", { name: "执行选项" }));
     expect((screen.getByRole("checkbox", { name: /测试失败后尝试修复/ }) as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("stops later repairs of the latest run from the run options sheet", async () => {
+    listRunsMock.mockResolvedValue({
+      runs: [{ id: "run-9", conversationId: "conv-1", userId: "user-1", status: "completed", steps: 3 }],
+      activeRun: null,
+    });
+    revokeRunRepairsMock.mockResolvedValue({ revoked: true });
+    renderChat();
+    await waitForConversationLoaded();
+    fireEvent.click(screen.getByRole("button", { name: "执行选项" }));
+    fireEvent.click(await screen.findByRole("button", { name: "停止本次执行的后续修复" }));
+    await waitFor(() => expect(revokeRunRepairsMock).toHaveBeenCalledWith("run-9"));
+    await screen.findByText("已停止后续修复");
+  });
+
+  it("hides the repair kill-switch when the conversation has no runs", async () => {
+    renderChat();
+    await waitForConversationLoaded();
+    fireEvent.click(screen.getByRole("button", { name: "执行选项" }));
+    await screen.findByRole("checkbox", { name: /任务结束后自动只读复核/ });
+    expect(screen.queryByRole("button", { name: "停止本次执行的后续修复" })).toBeNull();
   });
 
   it("retains project and request identity when retrying an uncertain submission", async () => {

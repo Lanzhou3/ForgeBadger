@@ -644,7 +644,7 @@ export function CopilotChat() {
               </SelectContent>
             </Select>
             <CopilotRunOptions
-              conversationId={conversationId} modelId={modelId}
+              conversationId={conversationId}
               disabled={isBusy || controller.sending}
               reviewTaskResults={reviewTaskResults} onReviewChange={setReviewTaskResults}
               repairFailedChecks={repairFailedChecks} onRepairChange={setRepairFailedChecks}

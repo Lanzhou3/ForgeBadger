@@ -1,14 +1,15 @@
 "use client";
 
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useLanguage } from "@/hooks/use-language";
-import { CopilotMeteringPanel } from "./CopilotMeteringPanel";
+import { listConversationRuns, revokeRunRepairs } from "@/lib/copilot-api";
+import { useSettingsCopy } from "./settings-copy";
 
 interface Props {
   conversationId: string | null;
-  modelId: string | null;
   disabled: boolean;
   reviewTaskResults: boolean;
   repairFailedChecks: boolean;
@@ -17,7 +18,7 @@ interface Props {
 }
 
 /** Optional execution controls must not consume transcript height. */
-export function CopilotRunOptions({ conversationId, modelId, disabled, reviewTaskResults, repairFailedChecks, onReviewChange, onRepairChange }: Props) {
+export function CopilotRunOptions({ conversationId, disabled, reviewTaskResults, repairFailedChecks, onReviewChange, onRepairChange }: Props) {
   const { t } = useLanguage();
   const title = t("copilot.runOptions");
   const enabledCount = Number(reviewTaskResults) + Number(repairFailedChecks);
@@ -49,9 +50,26 @@ export function CopilotRunOptions({ conversationId, modelId, disabled, reviewTas
               <span className="mt-1 block text-xs text-muted-foreground">{t("copilot.runOptionsRepairHint")}</span>
             </span>
           </label>
+          {conversationId ? <RepairRevokeControl conversationId={conversationId} /> : null}
         </div>
-        <CopilotMeteringPanel conversationId={conversationId} modelId={modelId} />
       </SheetContent>
     </Sheet>
+  );
+}
+
+/** Mounted inside the sheet so its queries only fire while the sheet is open. */
+function RepairRevokeControl({ conversationId }: { conversationId: string }) {
+  const copy = useSettingsCopy();
+  const runs = useQuery({ queryKey: ["copilot", "runs", conversationId], queryFn: () => listConversationRuns(conversationId) });
+  const runId = runs.data?.runs[0]?.id;
+  const revoke = useMutation({ mutationFn: () => revokeRunRepairs(runId!) });
+  if (!runId) return null;
+  return (
+    <div className="border-t border-border/70 pt-4">
+      <Button variant="outline" size="sm" disabled={revoke.isPending || revoke.isSuccess} onClick={() => revoke.mutate()}>
+        {revoke.isSuccess ? copy.repairRevoked : copy.repairRevoke}
+      </Button>
+      {revoke.isError ? <p role="alert" className="mt-2 text-xs text-destructive">{copy.repairRevokeError}</p> : null}
+    </div>
   );
 }
