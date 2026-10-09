@@ -1,12 +1,12 @@
 import type { Database } from '../../db/types.js';
 import type { TurnInput } from '../agent/run-ledger.js';
 import { DevelopmentTaskRepository } from '../../db/repositories/development-task-repository.js';
-import { ProjectRepository } from '../../db/repositories/project-repository.js';
 import { assertChannelConversationAuthority } from '../channels/channel-run-authority.js';
 import { assertDevelopmentAuthority } from './authority.js';
 import { developmentPlanSchema, type DevelopmentEvidence } from './contracts.js';
 import { prepareSource, hashText } from './workspace.js';
 import { assertChannelRunScope } from '../channels/channel-run-scope.js';
+import { hasUserMessageAuthorization, projectAutonomyEnabled } from '../agent/run-authorization.js';
 
 export interface RepairJob { id:string; user_id:string; root_task_id:string; failed_task_id:string; origin_run_id:string;
   child_run_id:string; attempt:number; evidence_digest:string; submission_step_id:string|null; submitted_task_id:string|null; report_message_id:string|null }
@@ -21,15 +21,11 @@ export function validateRepairJob(db:Database,userId:string,job:RepairJob) {
     ||!['running','completed','awaiting_approval'].includes(parent.status)||root.origin_run_id!==job.origin_run_id
     ||root.project_id!==failed.project_id||origin.projectId&&origin.projectId!==root.project_id
     ||job.attempt<1||job.attempt>2) throw new Error('COPILOT_REPAIR_ORIGIN_REVOKED');
-  const authorization=db.prepare(`SELECT m.id FROM copilot_messages m
-    JOIN copilot_conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
-    WHERE m.user_id=? AND m.conversation_id=? AND c.status='active' AND m.role='user' AND m.kind='text'
-      AND m.content=? AND (m.run_id=? OR m.id=?) LIMIT 1`)
-    .get(userId,parent.conversation_id,origin.userText,job.origin_run_id,origin.editMessageId??null);
-  if(!authorization)throw new Error('COPILOT_REPAIR_ORIGIN_REVOKED');
+  if(!hasUserMessageAuthorization(db,userId,parent.conversation_id,origin.userText??'',job.origin_run_id,origin.editMessageId))
+    throw new Error('COPILOT_REPAIR_ORIGIN_REVOKED');
   assertChannelConversationAuthority(db,userId,parent.conversation_id);
   assertChannelRunScope(db,userId,origin,{projectIds:[root.project_id],rootPaths:[root.project_root]});
-  if(!new ProjectRepository(db,userId).getCopilotAutonomy(root.project_id)) throw new Error('COPILOT_REPAIR_AUTONOMY_OFF');
+  if(!projectAutonomyEnabled(db,userId,root.project_id)) throw new Error('COPILOT_REPAIR_AUTONOMY_OFF');
   if(job.attempt===1 && root.id!==failed.id)throw new Error('COPILOT_REPAIR_CHAIN_MISMATCH');
   if(job.attempt===2) {
     const previous=failed.origin_run_id?repairJob(db,userId,failed.origin_run_id):undefined;

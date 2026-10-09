@@ -7,7 +7,8 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { ModelProviderRepository, type ProviderApiFormat } from "../src/db/repositories/model-provider-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createAgentLlmClient, type AgentLlmStreamEvent } from "../src/services/agent/llm-client.js";
-import { buildCompressedContext, MAX_CONTEXT_CHARS } from "../src/services/agent/context.js";
+import { buildCompressedContext, MAX_CONTEXT_TOKENS } from "../src/services/agent/context.js";
+import { estimateJsonTokens } from "../src/services/agent/token-estimate.js";
 import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
 
 function setup(t: TestContext, format: ProviderApiFormat, response: Response, timeoutMs?: number) {
@@ -212,7 +213,7 @@ it("rejects the actual OpenAI wire expansion of complete historical tool batches
   const conversation = log.createConversation();
   const goal = "x".repeat(32_000);
   log.appendMessage(conversation.id, { role: "user", kind: "text", content: goal });
-  for (let batch = 0; batch < 15; batch++) {
+  for (let batch = 0; batch < 6; batch++) {
     for (let offset = 0; offset < 32; offset++) log.appendMessage(conversation.id, {
       role: "assistant", kind: "tool_call", content: "", toolCallId: `tc${batch * 32 + offset}`, toolName: "list_projects", toolInputJson: "{}"
     });
@@ -220,8 +221,8 @@ it("rejects the actual OpenAI wire expansion of complete historical tool batches
       role: "tool", kind: "tool_result", content: "{}", toolCallId: `tc${batch * 32 + offset}`, toolName: "list_projects"
     });
   }
-  const context = await buildCompressedContext(log, conversation.id, client, undefined, { tools: [], reservedChars: 8192 });
-  assert.ok(JSON.stringify({ messages: context.messages, tools: [] }).length + 8192 < MAX_CONTEXT_CHARS,
+  const context = await buildCompressedContext(log, conversation.id, client, undefined, { tools: [] });
+  assert.ok(estimateJsonTokens({ messages: context.messages, tools: [] }) < MAX_CONTEXT_TOKENS,
     "the abstract projection admits this history, so the final serializer must still enforce the bound");
   const before = JSON.stringify(context.messages);
   await assert.rejects(client.stream({ messages: context.messages, tools: [], onEvent() {} }), { code: "COPILOT_CONTEXT_TOO_LARGE" });
@@ -249,9 +250,11 @@ for (const format of ["openai-compatible", "anthropic"] as const) {
     const { client, requests } = setup(t, format, { ok: true, json: async () => format === "openai-compatible" ? { choices: [{ message: { content: "okay" } }] } : { content: [{ type: "text", text: "okay" }] } } as Response);
     await client.stream({ messages: [{ role: "user", content: "g" }], tools: [], onEvent() {} });
     const overhead = (requests[0]!.body as string).length - 1;
-    const content = "g".repeat(MAX_CONTEXT_CHARS - overhead);
+    // 60k Latin chars * 6/15 = exactly MAX_CONTEXT_TOKENS estimated tokens.
+    const targetChars = 60_000;
+    const content = "g".repeat(targetChars - overhead);
     await client.stream({ messages: [{ role: "user", content }], tools: [], onEvent() {} });
-    assert.equal((requests[1]!.body as string).length, MAX_CONTEXT_CHARS);
+    assert.equal((requests[1]!.body as string).length, targetChars);
     assert.ok((requests[1]!.body as string).includes(content));
     await assert.rejects(client.stream({ messages: [{ role: "user", content: content + "g" }], tools: [], onEvent() {} }), { code: "COPILOT_CONTEXT_TOO_LARGE" });
     assert.equal(requests.length, 2);

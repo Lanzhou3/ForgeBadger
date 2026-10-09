@@ -9,6 +9,8 @@ import { DENIED_ROOTS, validateProjectRoot } from '../../lib/safe-resolve.js';
 import { AgentError } from '../agent/types.js';
 import type { TurnInput } from '../agent/run-ledger.js';
 import type { AgentToolContext } from '../agent/tool-registry.js';
+import { loadRunFacts, ParentChainDepthError, parseRunInput, runAncestry } from '../agent/run-authorization.js';
+import { CHANNEL_TOOLS } from '../agent/tool-surface.js';
 import { ChannelIdentityError, ChannelIdentityService } from './channel-identity-service.js';
 
 const id = z.string().min(1).max(128);
@@ -29,7 +31,7 @@ function canonicalRoot(value: string): string {
 }
 function parentInput(db: Database, userId: string, runId: string): TurnInput {
   const row = db.prepare('SELECT input_json FROM copilot_runs WHERE user_id=? AND id=?').get(userId, runId) as { input_json: string } | undefined;
-  requireScope(row); return JSON.parse(row.input_json) as TurnInput;
+  requireScope(row); return parseRunInput(row);
 }
 function currentScope(db: Database, userId: string, conversationId: string): ChannelRunScope | undefined {
   const records = new ChannelIdentityRepository(db, userId);
@@ -60,7 +62,7 @@ export function prepareChannelAdmission(db: Database, userId: string, input: Tur
       // identity and root authority; any drift fails closed below.
       const previous = db.prepare('SELECT input_json FROM copilot_runs WHERE user_id=? AND conversation_id=? ORDER BY created_at DESC,id DESC LIMIT 1')
         .get(userId, input.conversationId) as { input_json: string } | undefined;
-      snapshot = previous ? assertChannelRunScope(db, userId, JSON.parse(previous.input_json) as TurnInput) : current;
+      snapshot = previous ? assertChannelRunScope(db, userId, parseRunInput(previous)) : current;
     }
   }
   let projectId = input.projectId;
@@ -77,13 +79,14 @@ export function prepareChannelAdmission(db: Database, userId: string, input: Tur
   return result;
 }
 
-/** Durable snapshot AND current route/identity/root authority must agree. */
-export function assertChannelRunScope(db: Database, userId: string, input: Pick<TurnInput, 'conversationId' | 'channelScope' | 'parentRunId' | 'projectId'>,
-  resources?: ChannelResources, depth = 0): ChannelRunScope | undefined {
-  requireScope(depth < 8);
+/** Durable snapshot AND current route/identity/root authority must agree; every
+ *  ancestor must carry the same snapshot. The walk is the shared iterative,
+ *  depth-8-capped runAncestry (was an uncapped-style recursion capped only here). */
+function assertChannelLevel(db: Database, userId: string,
+  input: Pick<TurnInput, 'conversationId' | 'channelScope' | 'parentRunId' | 'projectId'>,
+  resources: ChannelResources | undefined, inherited: ChannelRunScope | undefined): ChannelRunScope | undefined {
   const current = currentScope(db, userId, input.channelScope?.conversationId ?? input.conversationId);
-  const inherited = input.parentRunId ? assertChannelRunScope(db, userId, parentInput(db, userId, input.parentRunId), undefined, depth + 1) : undefined;
-  if (!current && !inherited && !input.channelScope) return;
+  if (!current && !inherited && !input.channelScope) return undefined;
   requireScope(current && input.channelScope);
   const parsed = scopeSchema.safeParse(input.channelScope); requireScope(parsed.success);
   const snapshot = parsed.data;
@@ -102,23 +105,32 @@ export function assertChannelRunScope(db: Database, userId: string, input: Pick<
   return snapshot;
 }
 
-/** Explicit catalog: global data and new/extension tools remain closed until audited. */
-const CHANNEL_TOOLS = new Set(['list_projects', 'get_project', 'list_sessions', 'get_session', 'get_session_output', 'get_session_writer',
-  'pm_overview', 'pm_get_goal', 'pm_get_work_item', 'pm_list_ledger', 'pm_get_management', 'pm_list_task_packets', 'pm_get_task_packet',
-  'pm_get_task_progress', 'pm_close_task', 'pm_create_work_item', 'pm_update_work_item', 'pm_update_management', 'update_project', 'start_session', 'stop_session',
-  'dispatch_task_to_session', 'pm_prepare_task_packet', 'pm_execute_task_packet', 'search_memory', 'list_memory', 'write_memory',
-  'list_project_files', 'read_project_file', 'search_project_files', 'get_project_git_status', 'read_project_diff',
-  'project_graph_search', 'project_graph_symbol_detail', 'project_graph_impact', 'project_graph_affected_paths',
-  'list_development_tasks', 'get_development_task', 'research_project', 'discover_tools', 'read_tool_result']);
-export function channelToolAllowed(input: TurnInput, name: string): boolean {
-  return !input.channelScope || CHANNEL_TOOLS.has(name) || input.executionMode === 'repair' && name === 'submit_development_task';
+export function assertChannelRunScope(db: Database, userId: string, input: Pick<TurnInput, 'conversationId' | 'channelScope' | 'parentRunId' | 'projectId'>,
+  resources?: ChannelResources): ChannelRunScope | undefined {
+  // Farthest ancestor first, like the old recursion: each level's snapshot must
+  // equal the inherited one, so the deepest level anchors the conversationId check.
+  const levels: TurnInput[] = [];
+  try {
+    for (const level of runAncestry(db, userId, input as TurnInput)) levels.push(level);
+  } catch (error) {
+    if (error instanceof ParentChainDepthError) throw new ChannelIdentityError();
+    throw error;
+  }
+  // A parentRunId without a row must fail closed like parentInput's requireScope.
+  if (levels.at(-1)?.parentRunId) throw new ChannelIdentityError();
+  let inherited: ChannelRunScope | undefined;
+  for (let index = levels.length - 1; index >= 0; index -= 1)
+    inherited = assertChannelLevel(db, userId, levels[index]!, index === 0 ? resources : undefined, inherited);
+  return inherited;
 }
+
+export { channelToolAllowed } from '../agent/tool-surface.js';
 
 function contextScope(context: AgentToolContext): ChannelRunScope | undefined {
   if (typeof context.runId === 'string') {
-    const row = context.db.prepare('SELECT input_json FROM copilot_runs WHERE user_id=? AND id=?').get(context.userId, context.runId) as { input_json: string } | undefined;
-    if (row) {
-      const input = JSON.parse(row.input_json) as TurnInput;
+    const facts = loadRunFacts(context.db, context.userId, context.runId);
+    if (facts) {
+      const input = facts.input;
       requireScope(input.userId === context.userId && (context.conversationId === undefined || input.conversationId === context.conversationId));
       return assertChannelRunScope(context.db, context.userId, input);
     }

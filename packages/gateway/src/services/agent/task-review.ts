@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentStackDeps } from './agent-stack.js';
 import { CopilotRunLedger, type TurnInput } from './run-ledger.js';
+import { parseRunInput } from './run-authorization.js';
 import { redactAgentText } from './redaction.js';
 
 export interface TaskReviewOrigin { projectId: string; workItemId: string; attemptId: string; notificationId: string; intentId: string }
@@ -9,7 +10,7 @@ export interface TaskReviewOrigin { projectId: string; workItemId: string; attem
 export function admitTaskReview(ledger: CopilotRunLedger, originRunId: string, origin: TaskReviewOrigin, report: string): void {
   const parent = ledger.get(originRunId);
   if (!parent) return;
-  const input = JSON.parse(parent.input_json) as TurnInput;
+  const input = parseRunInput(parent);
   if (!input.reviewTaskResults || input.executionMode || (input.source && input.source !== 'user')) return;
   // A selected context is stricter than ordinary owner dispatch. Optional review
   // must not suppress a valid deterministic completion report for another project.

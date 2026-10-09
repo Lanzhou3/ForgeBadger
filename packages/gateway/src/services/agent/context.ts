@@ -2,10 +2,10 @@
  * Model-visible context construction for the Copilot harness.
  *
  * The conversation log is the source of truth; this module projects a
- * budget-bounded view of it for the LLM. When the text history exceeds
- * MAX_CONTEXT_CHARS, the older messages are folded into a rolling summary
- * (persisted on copilot_conversations) and only the recent tail is sent in
- * full. The serialized application budget includes tools and immutable context.
+ * budget-bounded view of it for the LLM. When the estimated token footprint
+ * exceeds MAX_CONTEXT_TOKENS, the older messages are folded into a rolling
+ * summary (persisted on copilot_conversations) and only the recent tail is
+ * sent in full. The estimate includes tools and immutable context.
  * Summarize failures fall back to bounded projection.
  *
  * Memory recall: when a memory repository is provided, a `[相关记忆]` block
@@ -18,8 +18,9 @@ import type { CopilotConversationLog } from "./conversation-log.js";
 import type { AgentMessage } from "./types.js";
 import { AgentError } from './types.js';
 import type { AgentMemoryRepository } from "./memory.js";
+import { estimateJsonTokens, estimateTextTokens, MAX_CONTEXT_TOKENS, messageWireTokens } from './token-estimate.js';
 
-export const MAX_CONTEXT_CHARS = 96_000;
+export { MAX_CONTEXT_TOKENS } from './token-estimate.js';
 const MAX_RECALL_QUERY_CHARS = 512;
 const DEFAULT_RECALL_LIMIT = 3;
 const DEFAULT_RECALL_BUDGET_CHARS = 2_000;
@@ -35,11 +36,12 @@ export interface CompressedContextOptions {
   observations?: AgentLlmMessage[];
   /** Overflow recovery must stop if summarization cannot preserve the old head. */
   strictCompression?: boolean;
-  /** Serialized application-character bound, not a model token guarantee. */
-  maxContextChars?: number;
+  /** Estimated-token bound, not a provider token guarantee. */
+  maxContextTokens?: number;
   /** Internal complete assistant responses, keyed by their persisted transcript rows. */
   assistantMessages?: ReadonlyMap<string, AgentLlmMessage>;
-  reservedChars?: number;
+  /** Reserved token allowance for immutable request overhead. */
+  reservedTokens?: number;
   tools?: unknown[];
   /** Immutable system-adjacent Skills/project context; returned in messages. */
   prefixMessages?: AgentLlmMessage[];
@@ -99,8 +101,8 @@ async function buildBaseContext(
   // Fail before calling the summarizer if immutable instructions or the current
   // user goal cannot fit. No user instruction is silently cut.
   boundedProjection(rows, prefix, options);
-  const split = splitAtBudget(rows, Math.max(0, (options.maxContextChars ?? MAX_CONTEXT_CHARS)
-    - requestSize(prefix, options) - 4096), options.assistantMessages);
+  const split = splitAtBudget(rows, Math.max(0, (options.maxContextTokens ?? MAX_CONTEXT_TOKENS)
+    - requestSize(prefix, options) - 1024), options.assistantMessages);
   if (split === 0) return { messages: boundedProjection(rows, prefix, options, recall), compressed: true };
   const head = rows.slice(0, split);
   const tail = rows.slice(split);
@@ -120,8 +122,8 @@ async function buildBaseContext(
           ? [{ role: 'user', content: `Previous summary:\n${summary.slice(0, 4096)}` }]
           : batch[0]?.role !== 'user' ? [{ role: 'user', content: 'Conversation start.' }] : [];
         const messages = boundedProjection(batch, prefix, {
-          maxContextChars: options.maxContextChars ?? MAX_CONTEXT_CHARS,
-          reservedChars: Math.max(options.reservedChars ?? 0, 4096)
+          maxContextTokens: options.maxContextTokens ?? MAX_CONTEXT_TOKENS,
+          reservedTokens: Math.max(options.reservedTokens ?? 0, 1024)
         });
         const next = await llm.summarize({ messages, ...(modelId !== undefined ? { modelId } : {}),
           ...(options.signal ? { signal: options.signal } : {}) });
@@ -160,12 +162,12 @@ function summaryBatches(rows: AgentMessage[], options: CompressedContextOptions)
     if (!turns.length || (row.role === 'user' && row.kind === 'text')) turns.push([]);
     turns[turns.length - 1]!.push(row);
   }
-  const budget = Math.max(1, (options.maxContextChars ?? MAX_CONTEXT_CHARS)
-    - Math.max(options.reservedChars ?? 0, 4096) - 8192);
+  const budget = Math.max(1, (options.maxContextTokens ?? MAX_CONTEXT_TOKENS)
+    - Math.max(options.reservedTokens ?? 0, 1024) - 2048);
   const batches: AgentMessage[][] = [];
   let batch: AgentMessage[] = [];
   for (const turn of turns) {
-    if (batch.length && JSON.stringify(projectTranscript([...batch, ...turn])).length > budget) {
+    if (batch.length && estimateTextTokens(JSON.stringify(projectTranscript([...batch, ...turn]))) > budget) {
       batches.push(batch); batch = [];
     }
     batch.push(...turn);
@@ -218,12 +220,6 @@ function recentUserText(rows: AgentMessage[]): string | undefined {
   return undefined;
 }
 
-function estimateChars(messages: AgentMessage[]): number {
-  let total = 0;
-  for (const message of messages) total += message.content.length + (message.toolInputJson?.length ?? 0) + 8;
-  return total;
-}
-
 /** Index of the first message to keep in the tail; everything before it is the head. */
 function splitAtBudget(messages: AgentMessage[], budget: number, assistants?: ReadonlyMap<string, AgentLlmMessage>): number {
   const counted = new Set<AgentLlmMessage>();
@@ -233,13 +229,14 @@ function splitAtBudget(messages: AgentMessage[], budget: number, assistants?: Re
     const message = messages[index]!;
     const original = assistants?.get(message.id);
     if (original) {
-      if (!counted.has(original)) used += JSON.stringify(original).length;
+      if (!counted.has(original)) used += messageWireTokens(original);
       counted.add(original);
-    } else used += message.content.length + (message.toolInputJson?.length ?? 0) + 8;
+    } else used += messageWireTokens(toLlmMessage(message));
     // Only split at complete user turns. Keep the newest turn even when it
     // alone exceeds the budget; never sever a tool invocation from its result.
+    // Compare in margin-adjusted token units so the tail fits under fits().
     if (message.role === "user" && message.kind === "text") {
-      if (used > budget && split < messages.length) return split;
+      if (Math.ceil((used * 6) / 5) > budget && split < messages.length) return split;
       split = index;
     }
   }
@@ -297,10 +294,11 @@ function historicalObservation(row: AgentMessage): AgentLlmMessage {
 }
 
 function requestSize(messages: AgentLlmMessage[], options: CompressedContextOptions): number {
-  return JSON.stringify({ messages, tools: options.tools ?? [] }).length + (options.reservedChars ?? 0);
+  // Serialized-form estimate, matching the final wire guard's unit of measure.
+  return estimateJsonTokens({ messages, tools: options.tools ?? [] }) + (options.reservedTokens ?? 0);
 }
 function fits(messages: AgentLlmMessage[], options: CompressedContextOptions): boolean {
-  return requestSize(messages, options) <= (options.maxContextChars ?? MAX_CONTEXT_CHARS);
+  return requestSize(messages, options) <= (options.maxContextTokens ?? MAX_CONTEXT_TOKENS);
 }
 /** Drop only whole turns; compact content, never tool argument JSON or call IDs. */
 function boundedProjection(rows: AgentMessage[], prefix: AgentLlmMessage[], options: CompressedContextOptions,

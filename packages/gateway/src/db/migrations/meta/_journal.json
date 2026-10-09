@@ -925,6 +925,13 @@
       "when": 1791511237807,
       "tag": "0132_api_format_protocol_values",
       "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1791600000000,
+      "tag": "0133_copilot_run_trace",
+      "breakpoints": true
     }
   ]
 }

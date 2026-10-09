@@ -6,13 +6,12 @@ import { hasNoProgress } from './no-progress.js';
 import { reserveRepairSubmission } from '../development/repair-scope.js';
 import { CopilotToolArtifactRepository } from '../../db/repositories/copilot-tool-artifact-repository.js';
 import { setTimeout as delay } from 'node:timers/promises';
-import { restrictedToolAllowed } from "./restricted-runs.js";
 import { readSource } from "../development/workspace.js";
 import { RunGovernance, meteredLlm } from "./run-governance.js";
 import { CopilotModelResponseRepository } from "../../db/repositories/copilot-model-response-repository.js";
 import type { LlmResult } from "./llm-response.js";
 import { listAvailableCopilotSkillSummaries } from "./skills/copilot-skill-service.js";
-import { visibleToolSchemas, toolUnavailableReason } from "./tool-availability.js";
+import { computeToolSurface, type ToolSurface } from "./tool-surface.js";
 import { projectActionReceipt } from "../platform-commands/receipt-projection.js";
 import { agentActions, agentActionInput, TOOL_COMMANDS } from "../platform-commands/agent-actions.js";
 import { checkAgentScope } from "../platform-commands/agent-scope.js";
@@ -31,12 +30,13 @@ import { containsSensitiveAgentValue, redactAgentValue, redactAgentText, redactA
 import { createSecurityPolicy, logSecurityDecision } from "./security-policy.js";
 import { AgentError } from "./types.js";
 import { CopilotRunLedger, inputDigest, type TurnInput, type Claim, type RunStep } from "./run-ledger.js";
+import { loadRunFacts } from "./run-authorization.js";
 import { executionControl } from "./execution-control.js";
 import { selectDiscoveredTools } from './tool-discovery.js';
 import { PublicTextStream } from './public-text-stream.js';
 import { appendProvisionalText, clearProvisionalText } from './provisional-text.js';
 import { nextReadBatch } from './read-batch.js';
-import { channelToolAllowed } from '../channels/channel-run-scope.js';
+import { traceRunEvent } from './run-trace.js';
 export interface CopilotOrchestratorDependencies {
     db: import("../../db/types.js").Database;
     masterKey: string;
@@ -79,10 +79,11 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             ...(extra.message !== undefined ? { message: redactAgentText(extra.message) } : {}),
             ...(extra.toolName !== undefined ? { toolName: redactAgentText(extra.toolName) } : {}), occurredAt: new Date() });
     }
-    const allVisibleTools = (input: TurnInput) => visibleToolSchemas(deps.toolRegistry, {
-        hasSessionManager: !!deps.sessionManager, isToolDisabled: deps.isToolDisabled,
-        scheduled: input.source === "scheduled", reactive: input.source === "reactive"
-    }).filter(tool => channelToolAllowed(input, tool.name) && restrictedToolAllowed(input, tool.name) && (!input.executionMode || deps.toolRegistry.tools.get(tool.name)?.risk === 'read' || input.executionMode === 'repair' && tool.name === 'submit_development_task'));
+    // Plane A tool surface: the catalog and the execution-time gate below are
+    // projections of one computeToolSurface call.
+    const toolSurface = (input: TurnInput): ToolSurface => computeToolSurface(input, {
+        registry: deps.toolRegistry, hasSessionManager: !!deps.sessionManager, isToolDisabled: deps.isToolDisabled });
+    const allVisibleTools = (input: TurnInput) => toolSurface(input).visible;
     const effect = (name: string) => deps.toolRegistry.tools.get(name)?.risk === "operate" || name === "write_memory" ? "write" as const : "read" as const;
     function enqueue(input: TurnInput): string {
         if (control.stopped)
@@ -173,7 +174,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         return promise;
     }
     async function drive(ledger: CopilotRunLedger, c: Claim, signal: AbortSignal): Promise<void> {
-        const input = JSON.parse(ledger.get(c.runId)!.input_json) as TurnInput;
+        const input = loadRunFacts(deps.db, ledger.userId, c.runId)!.input;
         const meter = new RunGovernance(deps.db, input.userId, c.runId);
         const llm = meteredLlm(deps.llm, meter, phase => {
             if (ledger.commit(c, () => meter.phase(phase))) emit(ledger, c.runId);
@@ -209,6 +210,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             }
             if (!ledger.startStep(c, step))
                 break;
+            traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'step_started', { kind: 'model', phase: 'model' }, step.id);
             const command = ledger.get(c.runId)!.steps === 1 ? resolveLocalCommandReply(input.userText, () => {
                 const availableToolNames = allVisibleTools(input).map(tool => tool.name);
                 if (!availableToolNames.includes("list_playbooks")) return [];
@@ -264,9 +266,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     assistantMessages: modelResponses.list(input.conversationId),
                     ...(!input.executionMode ? { memory: new AgentMemoryRepository(deps.db, input.userId) } : {}), memoryConversationId: input.conversationId, signal,
                     ...(input.projectId ? { memoryProjectId: input.projectId } : {}), memoryGlobalAllowed: !input.channelScope, canCommit: live,
-                    tools, prefixMessages, reservedChars: 8192,
-                    ...(deps.llm.contextBudget ? { maxContextChars: deps.llm.contextBudget(modelId) } : {}),
-                    ...(recoveryBudget === undefined ? {} : {maxContextChars:recoveryBudget,strictCompression:true})
+                    tools, prefixMessages, reservedTokens: 4096,
+                    ...(deps.llm.contextBudget ? { maxContextTokens: deps.llm.contextBudget(modelId) } : {}),
+                    ...(recoveryBudget === undefined ? {} : {maxContextTokens:recoveryBudget,strictCompression:true})
                 });
                 if (!live()) return;
                 response = await streamWithContextRecovery({llm, ledger, claim:c, step, signal, live, tools, buildContext,
@@ -304,6 +306,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             ledger.commit(c, () => {
                 if (response?.assistant) modelResponses.complete(input.conversationId, c.runId, step.id, response);
                 else ledger.completeStep(step.id, text);
+                traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'step_completed', { kind: 'model', phase: 'model' }, step.id);
                 if (command !== null)
                     deps.db.prepare("UPDATE copilot_runs SET steps=0 WHERE user_id=? AND id=?").run(ledger.userId, c.runId);
                 if (text || calls.length === 0)
@@ -332,41 +335,53 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         signal.throwIfAborted();
         emit(ledger, c.runId);
     }
+    /** Ordering is behavior: the visibility gates below keep their historical
+     *  check order and rejection strings; each condition is a projection of the
+     *  shared computeToolSurface layers (see tool-surface.ts). */
     async function toolStep(ledger: CopilotRunLedger, c: Claim, step: RunStep, input: TurnInput, live: () => boolean): Promise<void> {
         if (!live())
             return;
         const tool = deps.toolRegistry.tools.get(step.tool_name!);
         const raw = parse(step.input_json!);
         const action = ledger.log.listPendingActions(c.runId).find(a => a.stepId === step.id);
+        const surface = toolSurface(input);
         let rejection: string | undefined;
+        let rejectionLayer: string | undefined;
         if (!tool)
             rejection = `Unknown tool: ${step.tool_name}`;
-        else if (!restrictedToolAllowed(input, tool.name) || (input.executionMode && tool.risk !== 'read' && !(input.executionMode === 'repair' && tool.name === 'submit_development_task')))
+        else if (surface.excluded(tool.name, 'restricted-mode')) {
             rejection = 'Read-only project task cannot execute this tool';
-        else if (toolUnavailableReason(tool.name, !!deps.sessionManager))
-            rejection = `Tool unavailable: ${toolUnavailableReason(tool.name, !!deps.sessionManager)}`;
-        else if (deps.isToolDisabled?.(tool.name))
+            rejectionLayer = 'restricted-mode';
+        } else if (surface.unavailableReason(tool.name)) {
+            rejection = `Tool unavailable: ${surface.unavailableReason(tool.name)}`;
+            rejectionLayer = surface.exclusion(tool.name)!.layer;
+        } else if (surface.excluded(tool.name, 'owner-disabled')) {
             rejection = `Tool disabled by owner: ${tool.name}`;
-        else if (tool.name.startsWith("mcp_") && (input.source && input.source !== "user"))
+            rejectionLayer = 'owner-disabled';
+        } else if (surface.excluded(tool.name, 'mcp-source')) {
             rejection = "External tools require direct owner authority";
-        else if (input.source === "scheduled" && effect(tool.name) === "write")
+            rejectionLayer = 'mcp-source';
+        } else if (input.source === "scheduled" && effect(tool.name) === "write") {
             rejection = "Scheduled runs are read only";
-        else if (inputDigest(step.input_json!) !== step.input_digest || (action && action.inputDigest !== step.input_digest))
+            rejectionLayer = 'scheduled-readonly';
+        } else if (inputDigest(step.input_json!) !== step.input_digest || (action && action.inputDigest !== step.input_digest))
             rejection = "Tool input digest mismatch";
         else if (!tool.inputSchema.safeParse(raw).success)
             rejection = "Invalid tool input";
         else if (action?.status === "rejected")
             rejection = "Action rejected by owner";
-        const availableToolSchemas = allVisibleTools(input);
+        const availableToolSchemas = surface.visible;
         const context: AgentToolContext = { signal: control.active.get(c.runId)?.controller.signal, executionMode: input.executionMode, runResearch: (research: { projectId: string; goal: string }) => runResearch(ledger, c, step, research), source: input.source ?? "user", runId: c.runId, stepId: step.id, externalActionId: action?.id, checkExecutionAuthority: live, userId: input.userId, db: deps.db, masterKey: deps.masterKey, conversationId: input.conversationId,
             availableToolNames: availableToolSchemas.map(tool => tool.name), availableToolSchemas,
             ...(input.projectId ? { projectId: input.projectId } : {}), ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}), ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}), ...(deps.eventBus ? { eventBus: deps.eventBus } : {}) };
+        let policyReason: string | null = null;
         if (!rejection && tool) {
             try { checkAgentScope(context, tool.name, raw); } catch (error) { rejection = error instanceof Error ? error.message : "Tool scope rejected"; }
             if (!rejection && input.executionMode === 'repair' && tool.name === 'submit_development_task') {
                 try { reserveRepairSubmission(deps.db,input.userId,c.runId,step.id,raw); } catch(error) { rejection=error instanceof Error?error.message:'Repair scope rejected'; }
             }
             const decision = policy.evaluate({ userId: input.userId, toolName: tool.name, toolRisk: tool.risk, requiresApproval: tool.requiresApproval, input: raw });
+            policyReason = decision.reason;
             const autoApproved = (input.source ?? "user") === "user" && decision.action === "auto_approve";
             logSecurityDecision({ db: deps.db, userId: input.userId, operation: tool.name, input: raw, action: decision.action, reason: decision.reason });
             if (decision.action === "deny") rejection = `Denied by security policy: ${decision.reason}`;
@@ -378,6 +393,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     context.platformIntentId = intent.id;
                     if (intent.status === "pending" || (!autoApproved && action?.status !== "approved")) {
                         ledger.waitApproval(c, step);
+                        traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'tool_gate', { toolName: tool.name, decision: 'approval_required', reason: policyReason }, step.id);
                         const pending = ledger.log.listPendingActions(c.runId).find(a => a.stepId === step.id);
                         emit(ledger, c.runId, { toolName: tool.name, ...(pending ? { pendingActionId: pending.id } : {}) });
                         return;
@@ -386,12 +402,18 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 } catch (error) { rejection = error instanceof Error ? error.message : "Platform action rejected"; }
             } else if (!rejection && tool.risk === "operate" && action?.status !== "approved") {
                 ledger.waitApproval(c, step);
+                traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'tool_gate', { toolName: tool.name, decision: 'approval_required', reason: policyReason }, step.id);
                 return;
             }
         }
         ledger.commit(c, () => new RunGovernance(deps.db, input.userId, c.runId).phase('tool'));
         emit(ledger, c.runId, { toolName: step.tool_name! });
         if (!ledger.startStep(c, step)) return;
+        traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'step_started', { kind: 'tool', toolName: step.tool_name! }, step.id);
+        traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'tool_gate',
+            rejection
+                ? { toolName: step.tool_name!, decision: 'rejected', reason: rejectionLayer ?? rejection }
+                : { toolName: step.tool_name!, decision: 'allowed', reason: policyReason }, step.id);
         if (rejection) { ledger.receipt(c, step, rejection.startsWith("Denied by security policy:") ? rejection : `Denied by security policy: ${rejection}`); return; }
         const result = await executeAgentTool(tool!, raw, context);
         const platformActions=typeof context.platformIntentId==="string"?agentActions(context):undefined;
@@ -408,6 +430,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 return JSON.stringify({ ...JSON.parse(preview), artifact });
             } catch { return preview; } // Optional storage failure must never replay a completed operation.
         } : undefined);
+        traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'step_completed', { kind: 'tool', toolName: step.tool_name! }, step.id);
         if (live())
             emit(ledger, c.runId, { toolName: step.tool_name!, message: result.ok ? "ok" : "error" });
     }
@@ -449,27 +472,28 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         return { runId: childId, status: child?.status, report: report ?? 'Research has no final report yet.', evidence: 'Read-only analysis; not owner acceptance or independent test execution.' };
     }
     function revalidateApproval(ledger: CopilotRunLedger, runId: string, actionId: string, decisionOrigin: 'web' | 'channel') {
-        const run = ledger.get(runId)!;
+        const facts = loadRunFacts(deps.db, ledger.userId, runId);
+        const run = facts?.run;
+        const origin = facts?.input;
         const pending = ledger.log.getPendingAction(actionId)!;
         const step = ledger.steps(runId).find(row => row.id === pending.stepId);
         if (!step || step.status !== 'awaiting_approval' || step.tool_name !== pending.tool
             || step.tool_call_id !== pending.toolCallId || step.input_json !== pending.inputJson
             || step.input_digest !== pending.inputDigest || inputDigest(pending.inputJson) !== pending.inputDigest)
             throw new AgentError('COPILOT_APPROVAL_CHANGED', 'Approval input or tool checkpoint changed; create a fresh request.');
-        const origin = JSON.parse(run.input_json) as TurnInput;
-        if (origin.userId !== ledger.userId || origin.conversationId !== run.conversation_id
+        if (!run || !origin || origin.userId !== ledger.userId || origin.conversationId !== run.conversation_id
             || (origin.source ?? 'user') !== run.source)
             throw new AgentError('COPILOT_APPROVAL_SCOPE', 'The stored run identity or source changed.');
         ledger.validateScope(origin);
         const tool = deps.toolRegistry.tools.get(pending.tool);
-        if (!tool || toolUnavailableReason(tool.name, !!deps.sessionManager))
+        const surface = toolSurface(origin);
+        if (!tool || surface.unavailableReason(tool.name))
             throw new AgentError('COPILOT_TOOL_UNAVAILABLE', 'This tool is no longer available. Reject the old action and create a new request.');
-        if (deps.isToolDisabled?.(tool.name))
+        if (surface.excluded(tool.name, 'owner-disabled'))
             throw new AgentError('COPILOT_TOOL_DISABLED', 'This tool was disabled by its owner.');
-        if (!restrictedToolAllowed(origin, tool.name)
-            || (origin.executionMode && tool.risk !== 'read' && !(origin.executionMode === 'repair' && tool.name === 'submit_development_task'))
+        if (surface.excluded(tool.name, 'restricted-mode')
             || (origin.source === 'scheduled' && effect(tool.name) === 'write')
-            || (tool.name.startsWith('mcp_') && origin.source && origin.source !== 'user'))
+            || surface.excluded(tool.name, 'mcp-source'))
             throw new AgentError('COPILOT_APPROVAL_SCOPE', 'This run cannot execute the requested tool.');
         const raw = parse(pending.inputJson);
         if (!tool.inputSchema.safeParse(raw).success)
@@ -516,6 +540,10 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     }) {
         const resumed = recordApprovalDecision(input);
         if (resumed) {
+            const ledger = ledgerFor(input.userId);
+            const pending = ledger.log.getPendingAction(input.actionId);
+            traceRunEvent(deps.db, input.userId, input.runId, ledger.get(input.runId)?.fence ?? 0,
+                'tool_gate', { toolName: pending?.tool ?? null, decision: 'approval_resumed' }, pending?.stepId ?? undefined);
             if (input.async)
                 queueRun(input.userId, input.runId);
             else

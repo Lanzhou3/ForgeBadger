@@ -13,6 +13,7 @@ import { ProjectRepository } from '../../db/repositories/project-repository.js';
 import { validateProjectRoot, DENIED_ROOTS } from '../../lib/safe-resolve.js';
 import type { CommandContext, PlatformCommand, CommandResources, CopilotApprovalRevalidation } from './types.js';
 import type { TurnInput } from '../agent/run-ledger.js';
+import { parseRunInput, projectAutonomyEnabled } from '../agent/run-authorization.js';
 export function canonical(value: unknown): string {
     if (value instanceof Date)
         return JSON.stringify(value.toISOString());
@@ -86,7 +87,7 @@ export class PlatformActions {
             reason = 'COPILOT_GLOBAL_ACTION_REQUIRES_WEB: 请在 Web 控制台手动执行';
         const projects = new ProjectRepository(this.context.db, this.context.userId);
         for (const id of resources.projectIds) {
-            if (projects.getCopilotAutonomy(id)) continue;
+            if (projectAutonomyEnabled(this.context.db, this.context.userId, id)) continue;
             const name = projects.getById(id)?.name ?? id;
             reason = `COPILOT_PROJECT_AUTONOMY_OFF: 项目「${name}」未开启 Copilot 自治，请在 Web 控制台项目设置中开启后重试`;
             break;
@@ -141,7 +142,7 @@ export class PlatformActions {
         const step = this.context.db.prepare('SELECT r.id,r.input_json FROM copilot_runs r JOIN copilot_run_steps s ON s.user_id=r.user_id AND s.run_id=r.id WHERE s.user_id=? AND s.id=?')
             .get(this.context.userId, key) as { id: string; input_json: string } | undefined;
         if (!step) { if (conversationId) assertChannelConversationAuthority(this.context.db,this.context.userId,conversationId); return; }
-        const turn = JSON.parse(step.input_json) as TurnInput;
+        const turn = parseRunInput(step);
         const scope = assertChannelRunScope(this.context.db, this.context.userId, turn, resources);
         if (scope && commandId) {
             const name = Object.entries(TOOL_COMMANDS).find(([, command]) => command === commandId)?.[0];

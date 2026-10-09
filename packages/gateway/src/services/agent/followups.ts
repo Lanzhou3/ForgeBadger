@@ -4,6 +4,7 @@ import { CopilotRunLedger, inputDigest, type TurnInput } from './run-ledger.js';
 import { AgentError } from './types.js';
 import { redactAgentText } from './redaction.js';
 import { prepareChannelAdmission } from '../channels/channel-run-scope.js';
+import { traceRunEvent } from './run-trace.js';
 
 export interface Followup { id: string; conversation_id: string; status: string; run_id: string | null; error: string | null; created_at: number; input_json: string }
 
@@ -63,6 +64,7 @@ export class CopilotFollowups {
           ledger.validateScope(input);
           if (ledger.log.listRuns(input.conversationId).some(run => ['pending', 'running', 'awaiting_approval'].includes(run.status))) return;
           const id = ledger.admit(input, 16);
+          traceRunEvent(this.db, this.userId, id, ledger.get(id)?.fence ?? 0, 'followup_promoted', { source: input.source ?? 'user' });
           this.db.prepare("UPDATE copilot_followups SET status='started',run_id=? WHERE user_id=? AND id=? AND status='queued'")
             .run(id, this.userId, row.id);
           return id;

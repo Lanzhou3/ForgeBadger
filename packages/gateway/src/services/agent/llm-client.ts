@@ -22,7 +22,7 @@ import { createAgentPublicFetch, type ConnectionProgress } from "./llm-public-fe
 import { readOpenAiCompletion } from "./llm-openai.js";
 import { readAnthropicCompletion } from "./llm-anthropic.js";
 import { withAbort, type LlmResult, type LlmUsage } from "./llm-response.js";
-import { MAX_CONTEXT_CHARS } from "./context.js";
+import { contextTokenBudget, estimateJsonTokens } from "./token-estimate.js";
 
 export interface AgentLlmMessage {
   role: "user" | "assistant" | "tool";
@@ -292,7 +292,7 @@ export function createAgentLlmClient(input: {
 
   return { resolveProvider, stream, summarize, generateTitle, proposeMemory,
     modelInfo: (modelId?: string) => { const r=resolveProvider(modelId); return {modelProfileId:r.modelProfileId,modelId:r.modelId,apiFormat:r.apiFormat}; },
-    contextBudget: (modelId?: string) => contextCharacterBudget(resolveProvider(modelId).contextWindow) };
+    contextBudget: (modelId?: string) => contextTokenBudget(resolveProvider(modelId).contextWindow) };
 }
 
 const SUMMARY_SYSTEM_PROMPT = [
@@ -392,7 +392,7 @@ async function streamAnthropic(
       ...authHeaders(resolution),
       ...resolution.defaultHeaders
     },
-    body: serializeProviderRequest(body, contextCharacterBudget(resolution.contextWindow)),
+    body: serializeProviderRequest(body, contextTokenBudget(resolution.contextWindow)),
     signal
   }), signal);
   if (!response.ok) throw await providerRejection(response, signal);
@@ -451,7 +451,7 @@ async function streamOpenAi(
       ...authHeaders(resolution),
       ...resolution.defaultHeaders
     },
-    body: serializeProviderRequest(body, contextCharacterBudget(resolution.contextWindow)),
+    body: serializeProviderRequest(body, contextTokenBudget(resolution.contextWindow)),
     signal
   }), signal);
   if (!response.ok) throw await providerRejection(response, signal);
@@ -493,16 +493,12 @@ const SYSTEM_PROMPT = [
 ].join("\n");
 
 /** Final wire guard: provider envelopes and JSON escaping can exceed projection estimates. */
-export function contextCharacterBudget(contextWindow?: number | null): number {
-  // A conservative application-character estimate; provider tokens remain authoritative.
-  return contextWindow ? Math.max(1024, Math.min(384_000, (contextWindow - Math.min(16_384, contextWindow / 4)) * 2)) : MAX_CONTEXT_CHARS;
-}
-
 function serializeProviderRequest(body: Record<string, unknown>, budget: number): string {
   const serialized = JSON.stringify(body);
-  if (serialized.length > budget) {
+  const estimated = estimateJsonTokens(body);
+  if (estimated > budget) {
     throw new AgentError("COPILOT_CONTEXT_TOO_LARGE",
-      `Final provider request exceeds ${budget} application characters (${serialized.length})`);
+      `Final provider request exceeds ${budget} estimated tokens (${estimated})`);
   }
   return serialized;
 }

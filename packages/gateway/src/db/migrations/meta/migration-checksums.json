@@ -130,5 +130,6 @@
   "0129_session_notification_type.sql": "da549542c3e555b46a863ee7f086399d72f5437d06a435345981d3811d2ca748",
   "0130_template_adapter_backfill.sql": "ab90ad2d59cebfd5c73a0a6cd0814e8ff11785e1f51b20052d8a49ef11261da1",
   "0131_single_project_autonomy.sql": "d281707868512beb8804217d64215c5b6ca9c56068a2a865f3e0d04f576b0222",
-  "0132_api_format_protocol_values.sql": "8ae33fe12ec2c9a53e137fc16a1e7bc571ab34c082a39128f2c73e350d380eb4"
+  "0132_api_format_protocol_values.sql": "8ae33fe12ec2c9a53e137fc16a1e7bc571ab34c082a39128f2c73e350d380eb4",
+  "0133_copilot_run_trace.sql": "0846e50134901d62a0dc6855358fbf33bc2e47c49c171670a624e190c8e8f082"
 }

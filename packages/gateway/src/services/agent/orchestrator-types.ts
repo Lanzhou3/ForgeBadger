@@ -33,6 +33,7 @@ export interface AgentToolCall {
 
 export interface AgentLlmClient {
   modelInfo?(modelId?: string): { modelProfileId: string; modelId: string; apiFormat: string };
+  /** Estimated-token projection budget for this model (see token-estimate). */
   contextBudget?(modelId?: string): number;
   stream(request: {
     messages: AgentLlmMessage[];

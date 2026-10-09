@@ -30,6 +30,7 @@ import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { buildAgentStack, type AgentStackDeps } from "../services/agent/agent-stack.js";
 import { createPlatformTools } from "../services/agent/tools/index.js";
 import { CopilotRunLedger } from "../services/agent/run-ledger.js";
+import { listRunTrace } from "../services/agent/run-trace.js";
 import { AgentError } from "../services/agent/types.js";
 import { CopilotToolPreferenceRepository } from "../db/repositories/copilot-tool-preference-repository.js";
 import { CopilotPreferencesRepository } from "../db/repositories/copilot-preferences-repository.js";
@@ -268,6 +269,12 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     if (!run) return notFound(res);
     if (!['pending', 'running', 'awaiting_approval'].includes(run.status)) clearProvisionalText(deps.db, id);
     res.json(ok({ provisionalText: provisionalText(deps.db, userId(req), id), run: { ...run, usage: new RunGovernance(deps.db, userId(req), id).usage() }, pendingActions: log.listPendingActions(id).map(a=>({...a,platformIntentId:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)?.id??null:null,platformIntent:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)??null:null})), steps: new CopilotRunLedger(deps.db,userId(req)).steps(id).map(step => step.kind === 'model' ? { ...step, result_json: publicModelResponse(step.result_json) } : step) }));
+  });
+
+  router.get("/runs/:id/trace", (req, res) => {
+    const id = parseId(req.params.id, res); if (!id) return;
+    if (!new CopilotRunLedger(deps.db, userId(req)).get(id)) return notFound(res);
+    res.json(ok({ events: listRunTrace(deps.db, userId(req), id) }));
   });
 
   router.post("/runs/:id/cancel", async (req, res) => {

@@ -2102,6 +2102,15 @@ export const copilotModelCalls = sqliteTable('copilot_model_calls', {
 }, table => ({ run: index('idx_copilot_model_calls_run').on(table.userId, table.runId),
   tenant: foreignKey({ columns: [table.userId, table.runId], foreignColumns: [copilotRuns.userId, copilotRuns.id] }).onDelete('cascade') }));
 
+export const copilotRunTrace = sqliteTable('copilot_run_trace', {
+  id: text('id').primaryKey(), userId: text('user_id').notNull(), runId: text('run_id').notNull(),
+  seq: integer('seq').notNull(), fence: integer('fence').notNull(),
+  stepId: text('step_id'), event: text('event').notNull(), detailJson: text('detail_json'),
+  createdAt: integer('created_at').notNull(),
+}, table => ({ run: index('idx_copilot_run_trace_run').on(table.userId, table.runId, table.createdAt),
+  sequence: uniqueIndex('idx_copilot_run_trace_seq').on(table.runId, table.seq),
+  tenant: foreignKey({ columns: [table.userId, table.runId], foreignColumns: [copilotRuns.userId, copilotRuns.id] }).onDelete('cascade') }));
+
 export const copilotFollowups = sqliteTable('copilot_followups', {
   id: text('id').primaryKey(), userId: text('user_id').notNull(), conversationId: text('conversation_id').notNull(),
   requestKey: text('request_key').notNull(), requestDigest: text('request_digest').notNull(), inputJson: text('input_json').notNull(),

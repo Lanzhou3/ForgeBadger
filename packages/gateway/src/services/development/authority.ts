@@ -9,6 +9,7 @@ import { developmentPlanSchema,type DevelopmentTaskRow } from './contracts.js';
 import { canonical } from '../platform-commands/actions.js';
 import { realpathSync } from 'node:fs';
 import type { TurnInput } from '../agent/run-ledger.js';
+import { hasUserMessageAuthorization, projectAutonomyEnabled } from '../agent/run-authorization.js';
 import { assertChannelRunScope } from '../channels/channel-run-scope.js';
 
 /** Cheap liveness/revocation probe for the 500ms lease timer: indexed DB reads only — no plan
@@ -21,7 +22,7 @@ export function assertDevelopmentAuthorityCheap(db:Database,row:DevelopmentTaskR
  if(!live||live.status!=='running'||live.owner!==row.owner||live.cancel_requested||(live.lease_expires_at??0)<=Date.now())throw new Error('DEVELOPMENT_LEASE_LOST');
  if(!new CopilotToolPreferenceRepository(db,row.user_id).isEnabled('submit_development_task'))throw new Error('DEVELOPMENT_TOOL_DISABLED');
  if(row.origin_run_id&&row.origin_step_id) {
-  if(!new ProjectRepository(db,row.user_id).getCopilotAutonomy(row.project_id))throw new Error('DEVELOPMENT_AUTONOMY_OFF');
+  if(!projectAutonomyEnabled(db,row.user_id,row.project_id))throw new Error('DEVELOPMENT_AUTONOMY_OFF');
   const origin=db.prepare("SELECT s.status step_status,r.status run_status FROM copilot_run_steps s JOIN copilot_runs r ON r.id=s.run_id AND r.user_id=s.user_id WHERE s.user_id=? AND s.id=? AND r.id=?").get(row.user_id,row.origin_step_id,row.origin_run_id) as {step_status:string;run_status:string}|undefined;
   if(!origin||!['running','completed'].includes(origin.step_status)||!['running','completed','awaiting_approval'].includes(origin.run_status))throw new Error('DEVELOPMENT_ORIGIN_REVOKED');
  } else if(row.origin_run_id||row.origin_step_id)throw new Error('DEVELOPMENT_ORIGIN_MISSING');
@@ -48,7 +49,7 @@ export function assertDevelopmentAuthority(db:Database,row:DevelopmentTaskRow,ch
   const input=JSON.parse(origin.run_input_json) as TurnInput;
   if(input.userId!==row.user_id||input.conversationId!==origin.conversation_id||(input.source??'user')!==origin.source
     ||!['user','reactive','scheduled'].includes(origin.source)||input.projectId&&input.projectId!==row.project_id)throw new Error('DEVELOPMENT_ORIGIN_MISMATCH');
-  if(origin.source==='user'&&!input.executionMode&&!db.prepare("SELECT id FROM copilot_messages WHERE user_id=? AND conversation_id=? AND role='user' AND kind='text' AND content=? AND (run_id=? OR id=?) LIMIT 1").get(row.user_id,origin.conversation_id,input.userText,row.origin_run_id,input.editMessageId??null))throw new Error('DEVELOPMENT_ORIGIN_REVOKED');
+  if(origin.source==='user'&&!input.executionMode&&!hasUserMessageAuthorization(db,row.user_id,origin.conversation_id,input.userText,row.origin_run_id!,input.editMessageId))throw new Error('DEVELOPMENT_ORIGIN_REVOKED');
   assertChannelConversationAuthority(db,row.user_id,origin.conversation_id);
   assertChannelRunScope(db,row.user_id,input,{projectIds:[row.project_id],rootPaths:[row.project_root]});
   const repair=repairJob(db,row.user_id,row.origin_run_id!);
@@ -58,7 +59,7 @@ export function assertDevelopmentAuthority(db:Database,row:DevelopmentTaskRow,ch
  } else if(intent.origin_kind!=='owner_api'||row.origin_run_id||row.origin_step_id)throw new Error('DEVELOPMENT_ORIGIN_MISSING');
  const projects=new ProjectRepository(db,row.user_id),project=projects.getById(row.project_id);
  if(!project)throw new Error('DEVELOPMENT_PROJECT_MISSING');
- if(intent.origin_kind==='copilot'&&!projects.getCopilotAutonomy(row.project_id))throw new Error('DEVELOPMENT_AUTONOMY_OFF');
+ if(intent.origin_kind==='copilot'&&!projectAutonomyEnabled(db,row.user_id,row.project_id))throw new Error('DEVELOPMENT_AUTONOMY_OFF');
  if(realpathSync(project.path)!==row.project_root)throw new Error('DEVELOPMENT_SOURCE_DRIFT');
  if(checkSource){const current=prepareSource(project.path,JSON.parse(row.plan_json));
   if(current.root!==row.project_root||current.sourceDigest!==row.source_digest||current.outputDigest!==row.output_digest||current.recipeDigest!==row.recipe_digest)throw new Error('DEVELOPMENT_SOURCE_DRIFT');

@@ -43,7 +43,7 @@ it('strict overflow recovery does not silently discard history on failed summari
   const {db,userId}=fixture(t),log=new CopilotConversationLog(db,userId),conv=log.createConversation();
   for(let i=0;i<12;i++)log.appendMessage(conv.id,{role:i%2?'assistant':'user',kind:'text',content:'history '.repeat(500)});
   log.appendMessage(conv.id,{role:'user',kind:'text',content:'keep exact current goal'});
-  await assert.rejects(buildCompressedContext(log,conv.id,llm,undefined,{maxContextChars:16000,strictCompression:true}),/summary unavailable/);
+  await assert.rejects(buildCompressedContext(log,conv.id,llm,undefined,{maxContextTokens:12000,strictCompression:true}),/summary unavailable/);
   assert.equal(log.getConversation(conv.id)?.summary_covered_sequence ?? 0,0);
 });
 for(const strictCompression of [false,true])it(`lease takeover stops all subsequent summary calls, strict=${strictCompression}`,async t=>{
@@ -53,7 +53,7 @@ for(const strictCompression of [false,true])it(`lease takeover stops all subsequ
   const claim=ledger.claim(runId,'worker',60000)!;let calls=0;
   await assert.rejects(buildCompressedContext(ledger.log,conv.id,{...llm,async summarize(){
     calls++;db.prepare('UPDATE copilot_runs SET fence=fence+1 WHERE id=?').run(runId);return 'summary';
-  }},undefined,{maxContextChars:16000,strictCompression,canCommit:()=>ledger.owns(claim)}),/COPILOT_LEASE_LOST/);
+  }},undefined,{maxContextTokens:12000,strictCompression,canCommit:()=>ledger.owns(claim)}),/COPILOT_LEASE_LOST/);
   assert.equal(calls,1);assert.equal(ledger.log.getConversation(conv.id)?.summary,null);
 });
 for(const apiFormat of ['anthropic','openai-compatible'] as const)it(`${apiFormat}: explicit cache only marks stable Anthropic system blocks`,async t=>{

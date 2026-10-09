@@ -206,11 +206,11 @@ it('counts private replay in compression and summarizes older turns using public
   const first = [...originals.values()][0]!;
   first.providerReplay!.reasoningContent = 'private-large-reasoning'.repeat(1000);
   await assert.rejects(buildCompressedContext(f.ledger.log, f.conversation.id, f.llm, undefined,
-    { maxContextChars: 6000, assistantMessages: originals }), /COPILOT_CONTEXT_TOO_LARGE/);
+    { maxContextTokens: 6000, assistantMessages: originals }), /COPILOT_CONTEXT_TOO_LARGE/);
   f.ledger.log.appendMessage(f.conversation.id, { role: 'user', kind: 'text', content: 'Continue from the observed state.' });
   const count = f.requests.length;
   const context = await buildCompressedContext(f.ledger.log, f.conversation.id, f.llm, undefined,
-    { maxContextChars: 6000, assistantMessages: originals });
+    { maxContextTokens: 6000, assistantMessages: originals });
   assert.equal(f.requests.length, count + 1, 'old turn must be summarized, not silently dropped');
   assert.equal(JSON.stringify(f.requests.at(-1)).includes('private-large-reasoning'), false);
   assert.ok(context.messages.some(m => m.content.includes('[会话摘要]')));

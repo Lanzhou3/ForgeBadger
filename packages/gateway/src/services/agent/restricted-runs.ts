@@ -1,11 +1,9 @@
 import { assertRepairPlan, repairJob } from '../development/repair-scope.js';
+import { PROJECT_READS } from './tool-surface.js';
 import type { AgentToolContext } from './tool-registry.js';
 import type { TurnInput } from './run-ledger.js';
 
-const PROJECT_READS = new Set(['get_project_git_status', 'read_project_diff', 'read_tool_result', 'get_project', 'list_project_files', 'read_project_file', 'search_project_files',
-  'project_graph_search', 'project_graph_symbol_detail', 'project_graph_impact', 'project_graph_affected_paths',
-  'get_development_task', 'list_development_tasks', 'pm_get_task_progress']);
-
+/** Read-only project task gate: the restricted-mode layer of computeToolSurface. */
 export function restrictedToolAllowed(input: TurnInput, name: string): boolean {
   return !input.executionMode || PROJECT_READS.has(name) || (input.executionMode === 'repair' && name === 'submit_development_task');
 }

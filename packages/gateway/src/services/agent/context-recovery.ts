@@ -2,6 +2,7 @@ import type { AgentLlmClient, AgentLlmStreamEvent, AgentLlmToolSchema } from './
 import type { CompressedContext } from './context.js';
 import type { CopilotRunLedger, Claim, RunStep } from './run-ledger.js';
 import { AgentError } from './types.js';
+import { estimateJsonTokens } from './token-estimate.js';
 
 export async function streamWithContextRecovery(input: {
   llm: AgentLlmClient; ledger: CopilotRunLedger; claim: Claim; step: RunStep;
@@ -24,12 +25,12 @@ export async function streamWithContextRecovery(input: {
   catch (error) {
     if (!(error instanceof AgentError) || error.code !== 'AGENT_CONTEXT_OVERFLOW' || acceptedOutput) throw error;
     input.signal.throwIfAborted();
-    const before = JSON.stringify({messages:context.messages,tools:input.tools}).length;
-    // A smaller application projection is a bounded recovery attempt, not a token estimate.
-    const budget = Math.floor((before + 8192) * .6);
+    const before = estimateJsonTokens({ messages: context.messages, tools: input.tools });
+    // A smaller token projection is a bounded recovery attempt, not a token estimate.
+    const budget = Math.floor((before + 2048) * .6);
     if (!input.live() || !input.ledger.claimContextRecovery(input.claim,input.step.id,input.modelId,budget)) throw error;
     context = await input.buildContext(budget);
-    if (JSON.stringify({messages:context.messages,tools:input.tools}).length >= before)
+    if (estimateJsonTokens({ messages: context.messages, tools: input.tools }) >= before)
       throw new AgentError('COPILOT_CONTEXT_RECOVERY_NO_GAIN','Context cannot shrink while preserving the current goal and tool evidence');
     return await invoke(); // Deliberately outside any retry loop; a second rejection stops.
   }

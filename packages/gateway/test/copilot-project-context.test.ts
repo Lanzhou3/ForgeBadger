@@ -13,7 +13,7 @@ import { createAgentLlmClient } from '../src/services/agent/llm-client.js';
 import { createAgentToolRegistry } from '../src/services/agent/tool-registry.js';
 import { createPlatformTools } from '../src/services/agent/tools/index.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
-import { MAX_CONTEXT_CHARS } from '../src/services/agent/context.js';
+import { MAX_CONTEXT_TOKENS, estimateJsonTokens } from '../src/services/agent/token-estimate.js';
 for(const apiFormat of ['openai-compatible','anthropic'] as const)it(`selected project without memory and huge tool turn fit complete ${apiFormat} wire body`,async()=>{
   const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations',import.meta.url))});
   try{
@@ -35,7 +35,7 @@ for(const apiFormat of ['openai-compatible','anthropic'] as const)it(`selected p
     const orchestrator=createCopilotOrchestrator({db,masterKey:'a'.repeat(32),eventBus:new ForgeBadgerEventBus(),llm,toolRegistry:createAgentToolRegistry(tools)});
     const runId=await orchestrator.runTurn({userId:user.id,conversationId:c.id,userText:'Keep this exact current goal.',projectId:project.id,skipUserMessage:true});
     assert.equal(ledger.get(runId)?.status,'completed');assert.equal(bodies.length,1);
-    assert.ok(bodies[0]!.length<=MAX_CONTEXT_CHARS,`wire request length ${bodies[0]!.length}`);
+    assert.ok(estimateJsonTokens(JSON.parse(bodies[0]!))<=MAX_CONTEXT_TOKENS,`wire request estimate over budget`);
     assert.ok(bodies[0]!.includes(project.id));assert.ok(bodies[0]!.includes(project.name));
     assert.ok(bodies[0]!.includes('Keep this exact current goal.'));assert.ok(bodies[0]!.includes('read_tool_result'));
     const outsider=new UserRepository(db).create('foreign-project-context@test.dev','hash');

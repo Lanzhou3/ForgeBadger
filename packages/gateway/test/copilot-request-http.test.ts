@@ -12,7 +12,7 @@ import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
 import { InMemorySessionManager } from '../src/services/session-manager.js';
 import { InMemoryApiKeyStore } from '../src/secrets/api-key-store.js';
 import { signJwt } from '../src/auth/jwt.js';
-import { MAX_CONTEXT_CHARS } from '../src/services/agent/context.js';
+import { MAX_CONTEXT_TOKENS, estimateJsonTokens } from '../src/services/agent/token-estimate.js';
 /**
  * The removed copilot grant model is replaced by the per-project autonomy
  * switch. Three request-lifecycle variants share the same HTTP assertions:
@@ -93,7 +93,7 @@ for(const variant of ['read','autonomy-off','autonomy-on'] as const) it(`HTTP de
     if(variant==='read')assert.equal((f.db.prepare('SELECT count(*) n FROM platform_action_intents WHERE user_id=?').get(f.user.id) as {n:number}).n,0,'read tool creates no platform intent');
     const wire=JSON.parse(f.requests[0]!) as {messages:{content:string}[]};
     assert.ok(wire.messages.some(m=>m.content.includes(f.project.id)&&m.content.includes(f.project.name)),'selected project must exist without memories');
-    for(const request of f.requests)assert.ok(request.length<=MAX_CONTEXT_CHARS,'complete provider JSON fits the application bound');
+    for(const request of f.requests)assert.ok(estimateJsonTokens(JSON.parse(request))<=MAX_CONTEXT_TOKENS,'complete provider JSON fits the application bound');
     f.db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(f.user.id);
     assert.equal((await f.post(payload)).status,401);assert.equal(f.requests.length,2);
   }finally{f.release();await f.app.close();}

@@ -5,6 +5,7 @@ import type { AgentLlmClient } from './orchestrator-types.js';
 import type { LlmUsage } from './llm-response.js';
 import { AgentError } from './types.js';
 import { runDuration } from './approval-clock.js';
+import { traceRunEvent } from './run-trace.js';
 
 export type RunPhase = 'queued' | 'context' | 'summarizing' | 'model' | 'tool' | 'awaiting_approval' | 'finished';
 export interface RunUsage { chargedTokens: number; reportedTokens: number; estimatedCalls: number; calls: number; costUsd: number | null; knownCostUsd: number; unpricedCalls: number }
@@ -69,8 +70,12 @@ export class RunGovernance {
       const result = await invoke();
       const usage = resultUsage?.(result);
       const tokens = reportedTokens(usage);
-      if (this.db.open) this.db.prepare("UPDATE copilot_model_calls SET status='completed',charged_tokens=?,usage_json=?,cost_nanousd=?,completed_at=? WHERE user_id=? AND run_id=? AND id=?")
-        .run(tokens ?? reservation + Buffer.byteLength(JSON.stringify(result) ?? '', 'utf8'), tokens === undefined ? null : JSON.stringify(usage), modelCostNanoUsd(usage,rates), Date.now(), this.userId, this.runId, id);
+      if (this.db.open) this.db.transaction(() => {
+        this.db.prepare("UPDATE copilot_model_calls SET status='completed',charged_tokens=?,usage_json=?,cost_nanousd=?,completed_at=? WHERE user_id=? AND run_id=? AND id=?")
+          .run(tokens ?? reservation + Buffer.byteLength(JSON.stringify(result) ?? '', 'utf8'), tokens === undefined ? null : JSON.stringify(usage), modelCostNanoUsd(usage,rates), Date.now(), this.userId, this.runId, id);
+        const fence = (this.db.prepare('SELECT fence FROM copilot_runs WHERE user_id=? AND id=?').get(this.userId, this.runId) as { fence: number } | undefined)?.fence ?? 0;
+        traceRunEvent(this.db, this.userId, this.runId, fence, 'llm_call_completed', { kind, chargedTokens: tokens ?? null, reported: tokens !== undefined });
+      }).immediate();
       return result;
     } catch (error) {
       if (this.db.open) this.db.prepare('UPDATE copilot_model_calls SET status=\'unknown\',completed_at=? WHERE user_id=? AND run_id=? AND id=?')
