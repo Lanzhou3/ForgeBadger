@@ -37,7 +37,7 @@ describe("OpenCode notification settings", () => {
     assert.equal(result.path, expectedPluginPath(root));
     assert.equal(result.changed, true);
     const content = await readFile(result.path, "utf8");
-    assert.match(content, /\/api\/v1\/session-hooks\/claude-notification/);
+    assert.match(content, /\/api\/v1\/session-hooks\/cli-notification/);
     assert.match(content, /FORGEBADGER_ATTACH_TOKEN/);
     assert.match(content, /FORGEBADGER_GATEWAY_URL/);
     assert.match(content, /FORGEBADGER_SESSION_ID/);

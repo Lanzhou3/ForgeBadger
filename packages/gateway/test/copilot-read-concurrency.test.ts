@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -20,7 +21,7 @@ it('runs at most three real Git reads, serializes intervening writes and preserv
  let timer:ReturnType<typeof setInterval>|undefined;
  try {
   execFileSync('git',['init','-q',root]);writeFileSync(join(root,'a.ts'),'export const a=1;\n');
-  migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+  migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
   const userId=new UserRepository(db).create('parallel@test.dev','hash').id;
   const project=new ProjectRepository(db,userId).create({name:'P',path:root,aiTool:'codex'});
   new ProjectRepository(db,userId).setCopilotAutonomy(project.id,true);
@@ -55,7 +56,7 @@ for(const interruption of ['cancel','fence','read-error'] as const) it(`settles 
  let timer:ReturnType<typeof setInterval>|undefined;
  try {
   execFileSync('git',['init','-q',root]);writeFileSync(join(root,'a.ts'),'export const a=1;\n');
-  migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+  migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
   const userId=new UserRepository(db).create('boundary@test.dev','hash').id;
   const project=new ProjectRepository(db,userId).create({name:'P',path:root,aiTool:'codex'});
   const ledger=new CopilotRunLedger(db,userId),conversationId=ledger.log.createConversation().id;

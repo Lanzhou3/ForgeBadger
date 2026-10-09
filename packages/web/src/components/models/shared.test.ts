@@ -48,7 +48,7 @@ describe("balanceEntryUsedPercent", () => {
 
 describe("apiFormatLabel", () => {
   it("maps known formats to i18n keys instead of raw enums", () => {
-    expect(apiFormatLabel("openai-compatible", identityT)).toBe("models.apiFormatOpenaiCompatible");
+    expect(apiFormatLabel("openai-compatible", identityT)).toBe("models.apiFormatOpenaiChat");
     expect(apiFormatLabel("anthropic", identityT)).toBe("models.apiFormatAnthropic");
   });
 

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -16,10 +17,10 @@ for(const scenario of [
   {status:400,error:{message:'context parameter invalid'},expected:'AGENT_HTTP_ERROR'},
 ])it(`classifies ${scenario.status}/${JSON.stringify(scenario.error)} without leaking body`,async t=>{
   const db=new Database(':memory:');t.after(()=>db.close());
-  migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+  migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
   const userId=new UserRepository(db).create('overflow@test.invalid','hash').id;
   const repo=new ModelProviderRepository(db,userId,'a'.repeat(64));
-  const p=repo.createProviderProfile({name:'P',providerKey:'fixture',baseUrl:'https://provider.example',authType:'api_key',apiFormat:'openai',supportedAdapters:['codex']});
+  const p=repo.createProviderProfile({name:'P',providerKey:'fixture',baseUrl:'https://provider.example',authType:'api_key',apiFormat:'openai-compatible',supportedAdapters:['codex']});
   repo.createModelProfile({providerProfileId:p.id,name:'M',modelId:'fixture',isDefault:true,capabilities:['chat']});
   repo.createCredential({providerProfileId:p.id,label:'fixture',plaintextSecret:'fixture'});
   const client=createAgentLlmClient({modelProviderRepository:repo,resolveHost:async()=>[{address:'93.184.216.34',family:4}],fetchImpl:async()=>Response.json({error:scenario.error},{status:scenario.status})});

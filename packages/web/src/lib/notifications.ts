@@ -6,7 +6,7 @@ export type NotificationEventType =
   | "session_created"
   | "session_status_changed"
   | "session_deleted"
-  | "claude_notification"
+  | "session_notification"
   | "app_action_notification";
 
 export interface GatewayEvent {
@@ -59,7 +59,7 @@ export function createNotificationFromEvent(
   if (event.type === "app_action_notification") {
     return createAppActionNotification(event, now);
   }
-  if (event.type !== "claude_notification") {
+  if (event.type !== "session_notification") {
     return null;
   }
   const notificationType = getString(event.payload, "notification_type");

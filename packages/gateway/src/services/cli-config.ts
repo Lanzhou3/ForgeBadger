@@ -240,7 +240,7 @@ export async function upsertCliProvider(
           const api = piApiNameForProtocol(input.protocol);
           if (api === undefined) {
             throw new Error(
-              `PI models.json has no file-based API for the '${input.protocol}' protocol; PI does not support Bedrock providers`
+              `PI models.json has no file-based API for the '${input.protocol}' protocol; PI supports Anthropic Messages, OpenAI Responses, OpenAI Chat Completions, and Gemini providers`
             );
           }
           next.api = api;
@@ -763,9 +763,10 @@ function piApiNameForProtocol(protocol: string | undefined): string | undefined 
   switch (protocol) {
     case "anthropic":
       return "anthropic-messages";
+    case "openai-responses":
+      return "openai-responses";
     case "openai":
     case "openai-compatible":
-    case "local":
       return "openai-completions";
     case "google":
       return "google-generative-ai";

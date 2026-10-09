@@ -7,6 +7,7 @@ import { TerminalView } from "./terminal-view";
 
 const fitMock = vi.hoisted(() => vi.fn());
 const toolbarToast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
+const writerState = vi.hoisted(() => ({ readOnly: false }));
 vi.mock("sonner", () => ({ toast: toolbarToast }));
 
 const terminal = vi.hoisted(() => ({
@@ -15,7 +16,7 @@ const terminal = vi.hoisted(() => ({
   loadAddon: vi.fn(), open: vi.fn(), input: vi.fn(), element: null as HTMLElement | null,
   modes: { mouseTrackingMode: "none" },
   options: {} as Record<string, unknown>,
-  dispose: vi.fn(), onData: vi.fn(() => ({ dispose: vi.fn() })),
+  dispose: vi.fn(), onData: vi.fn((_listener: (data: string) => void) => ({ dispose: vi.fn() })),
   onScroll: vi.fn(() => ({ dispose: vi.fn() })), onSelectionChange: vi.fn((listener: () => void) => ({ dispose: vi.fn(), listener })),
   scrollToBottom: vi.fn(), clear: vi.fn(), selectAll: vi.fn(), clearSelection: vi.fn(),
   getSelection: vi.fn(() => ""), hasSelection: vi.fn(() => false),
@@ -30,7 +31,7 @@ const terminal = vi.hoisted(() => ({
 }));
 vi.mock("@xterm/xterm", () => ({ Terminal: class { constructor() { return terminal; } } }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { fit() { fitMock(); } } }));
-vi.mock("@/hooks/use-terminal-writer", () => ({ useTerminalWriter: () => ({ readOnly: false, refresh: vi.fn() }) }));
+vi.mock("@/hooks/use-terminal-writer", () => ({ useTerminalWriter: () => ({ readOnly: writerState.readOnly, refresh: vi.fn() }) }));
 vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) => key, language: "zh-CN", useUiLocale: () => "en-US" })}));
 vi.mock("@/components/sessions/session-output-history", () => ({ SessionOutputHistory: () => null }));
 class Socket extends EventTarget {
@@ -45,6 +46,7 @@ class Socket extends EventTarget {
 beforeEach(() => {
   vi.clearAllMocks();
   fitMock.mockReset();
+  writerState.readOnly = false;
   terminal.scrollToBottom.mockImplementation(() => { terminal.buffer.active.viewportY = terminal.buffer.active.baseY; });
   terminal.cols = 80; terminal.rows = 24;
   terminal.resize.mockImplementation((cols: number, rows: number) => { terminal.cols = cols; terminal.rows = rows; });
@@ -113,6 +115,71 @@ it("keeps other mouse-reporting CLIs on xterm's existing wheel path", async () =
   // Act / Assert
   expect(handleWheel(new WheelEvent("wheel", { deltaY: -120 }))).toBe(true);
   expect(terminal.input).not.toHaveBeenCalled();
+});
+
+function mountPiWheelHost(): void {
+  const host = screen.getByTestId("terminal-host");
+  const xtermScreen = document.createElement("div");
+  xtermScreen.className = "xterm-screen";
+  xtermScreen.getBoundingClientRect = () => ({ left: 100, top: 200, width: 800, height: 600 } as DOMRect);
+  host.appendChild(xtermScreen);
+  terminal.element = host;
+}
+
+it("sends one SGR wheel report to PI even when attach replay left mouse reporting off", async () => {
+  // Arrange: the replayed snapshot restores only the rendered screen, so the
+  // browser terminal sits on the normal buffer with mouse reporting off —
+  // the desynced state where xterm's native wheel does nothing useful.
+  await start("pi");
+  mountPiWheelHost();
+  const handleWheel = terminal.attachCustomWheelEventHandler.mock.calls[0]![0] as (event: WheelEvent) => boolean;
+  const event = new WheelEvent("wheel", { deltaY: -120, clientX: 500, clientY: 500, cancelable: true });
+
+  // Act
+  const allowed = handleWheel(event);
+
+  // Assert: handled locally with exactly one report (PI accelerates itself,
+  // so no codex-style amplification) and xterm's native wheel path suppressed.
+  expect(allowed).toBe(false);
+  expect(event.defaultPrevented).toBe(true);
+  expect(terminal.input).toHaveBeenCalledWith("\x1b[<64;41;13M", false);
+});
+
+it("keeps PI on one report per gesture when the terminal is live in the alternate buffer", async () => {
+  // Arrange: the live state — xterm would already forward the wheel as one
+  // SGR report; the branch must not double it.
+  await start("pi");
+  mountPiWheelHost();
+  terminal.buffer.active.type = "alternate";
+  terminal.modes.mouseTrackingMode = "any";
+  const handleWheel = terminal.attachCustomWheelEventHandler.mock.calls[0]![0] as (event: WheelEvent) => boolean;
+
+  // Act
+  const allowed = handleWheel(new WheelEvent("wheel", { deltaY: -120, clientX: 500, clientY: 500, cancelable: true }));
+
+  // Assert
+  expect(allowed).toBe(false);
+  expect(terminal.input).toHaveBeenCalledTimes(1);
+  expect(terminal.input).toHaveBeenCalledWith("\x1b[<64;41;13M", false);
+});
+
+it("forwards wheel reports but blocks keystrokes while the copilot holds the writer", async () => {
+  // Arrange: the writer hook reports the copilot's automated lease.
+  writerState.readOnly = true;
+  await start();
+  const onData = terminal.onData.mock.calls.at(-1)![0];
+  const socket = Socket.instances[0]!;
+
+  // Act: a scroll gesture plus a plain keystroke land on the input listener.
+  onData("\x1b[<64;41;13M");
+  onData("echo hi");
+
+  // Assert: only the SGR wheel report reaches the session; the key is dropped
+  // so the copilot's prompt is never polluted while watching.
+  const inputCalls = socket.send.mock.calls
+    .map(call => JSON.parse(call[0]))
+    .filter(message => message.type === "terminal_input");
+  expect(inputCalls).toEqual([{ type: "terminal_input", payload: { data: "\x1b[<64;41;13M" } }]);
 });
 it("ACKs replay frames at receipt and live frames after xterm consumption", async () => {
   const { view, socket } = await start();

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -23,7 +24,7 @@ import { hashText, prepareSource, writeWorkspace } from '../src/services/develop
 
 function fixture(t: TestContext, copilot = true, check='require("node:assert/strict").equal(require("./source.cjs"),1);') {
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'fb-development-authority-')),db=new Database(':memory:');
- db.pragma('foreign_keys=ON');migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+ db.pragma('foreign_keys=ON');migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
  const userId=new UserRepository(db).create('authority@test.local','hash').id;
  const projects=new ProjectRepository(db,userId),project=projects.create({name:'P',path:root,aiTool:'codex'});
  projects.setCopilotAutonomy(project.id,true);

@@ -34,6 +34,7 @@ import { formatRelativeTime } from "@/lib/session-status";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
+  getLatestRunningTab,
   groupSessionTabs,
   readCollapsedSessionTabGroups,
   reorderSessionTab,
@@ -206,7 +207,12 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
       return;
     }
 
-    const nextActive = nextTabs.find((tab) => tab.id !== sessionId);
+    // Never land on a dead tab: an exited session leaves a stale localStorage
+    // tab whose page would show the not-found card (e.g. Copilot-command
+    // sessions are auto-deleted server-side once their command finishes).
+    // Prefer the most recently used running session; fall back to the session
+    // list when nothing is running anymore.
+    const nextActive = getLatestRunningTab(nextTabs);
     router.push(nextActive ? `/sessions/${nextActive.id}` : "/sessions");
   }, [activeSessionId, router]);
 

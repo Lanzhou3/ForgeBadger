@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { fileURLToPath } from "node:url";
 import express from 'express';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -10,7 +11,7 @@ import { createCopilotRoutes } from '../src/routes/copilot.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { signJwt } from '../src/auth/jwt.js';
 it('returns retryable indexing status instead of partial success, and rejects oversized explicit queries',async()=>{
- const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+ const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
  const users=new UserRepository(db),owner=users.create('memory-http@example.invalid','hash'),other=users.create('memory-other@example.invalid','hash');
  const memory=new AgentMemoryRepository(db,owner.id);
  for(let i=0;i<65;i++)memory.create({scope:'global',kind:'fact',text:`用户私有记忆 item${i}`});

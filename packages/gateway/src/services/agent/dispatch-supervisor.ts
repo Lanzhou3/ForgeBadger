@@ -13,7 +13,7 @@ export function attachDispatchSupervisor(deps: { db: Database; eventBus: ForgeBa
       try { reconcilePendingTaskDispatches(deps.db); } catch { /* The next durable sweep retries transient DB failures. */ }
     };
     const onEvent = (event: ForgeBadgerEvent) => {
-      if (event.type === 'claude_notification' && ['task_completed', 'task_failed'].includes(event.notificationType)) reconcile();
+      if (event.type === 'session_notification' && ['task_completed', 'task_failed'].includes(event.notificationType)) reconcile();
     };
     deps.eventBus.on('event', onEvent);
     // The persistent sweep covers fast hooks before receipt commit and process restarts.

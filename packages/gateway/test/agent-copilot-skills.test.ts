@@ -74,7 +74,7 @@ describe('Copilot playbook boundary',()=>{
   const pm=BUILTIN_COPILOT_SKILLS.find(s=>s.name==='autonomous-work-item-loop')!;
   assert.match(pm.body,/pm_execute_task_packet/);assert.match(pm.body,/Project autonomy, tenant scope and exact action receipts/);assert.doesNotMatch(pm.body,/Grant/);
   const dispatch=BUILTIN_COPILOT_SKILLS.find(s=>s.name==='session-dispatch')!;
-  assert.match(dispatch.body,/dispatch_task_to_session/);assert.match(dispatch.body,/ADAPTER_AUTONOMY_UNVERIFIED/);
+  assert.match(dispatch.body,/dispatch_task_to_session/);assert.match(dispatch.body,/COPILOT_PROJECT_AUTONOMY_OFF/);
  });
  it('keeps frontmatter parsing for CLI callers',()=>{
   assert.equal(stripFrontmatter('---\nname: x\n---\n# X'),'# X');

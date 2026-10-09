@@ -27,7 +27,7 @@ const createTemplateSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   version: z.string().optional(),
-  adapter: z.enum(adapterIds).optional(),
+  adapter: z.enum(adapterIds),
   visibility: z.enum(["private", "shared", "admin"]).optional(),
   files: z.array(templateFileSchema).optional()
 });
@@ -36,7 +36,7 @@ const updateTemplateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   version: z.string().optional(),
-  adapter: z.enum(adapterIds).nullable().optional(),
+  adapter: z.enum(adapterIds).optional(),
   visibility: z.enum(["private", "shared", "admin"]).optional(),
   status: z.string().optional()
 });
@@ -49,7 +49,7 @@ const templatePackageSchema = z.object({
   name: z.string().min(1),
   description: z.string().nullable().optional(),
   version: z.string().min(1),
-  adapter: z.string().nullable().optional(),
+  adapter: z.enum(adapterIds),
   files: z.array(templateFileSchema).min(1),
   exportedAt: z.string().optional()
 });

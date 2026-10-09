@@ -149,7 +149,7 @@ export default function (pi) {
     try {
       const url =
         gatewayUrl.replace(/\\/+$/u, "") +
-        "/api/v1/session-hooks/claude-notification/" +
+        "/api/v1/session-hooks/cli-notification/" +
         encodeURIComponent(sessionId);
       const response = await fetch(url, {
         method: "POST",
@@ -342,7 +342,7 @@ process.stdin.on("end", async () => {
   };
   try {
     const response = await fetch(
-      gatewayUrl.replace(/\\/+$/u, "") + "/api/v1/session-hooks/claude-notification/" + encodeURIComponent(sessionId),
+      gatewayUrl.replace(/\\/+$/u, "") + "/api/v1/session-hooks/cli-notification/" + encodeURIComponent(sessionId),
       {
         method: "POST",
         headers: {

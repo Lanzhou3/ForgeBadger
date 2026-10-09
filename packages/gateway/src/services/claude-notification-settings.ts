@@ -193,7 +193,7 @@ function normalizeHookGroups(value: unknown): ClaudeHookGroup[] {
 function buildForgeBadgerHttpHook(gatewayUrl: string): ClaudeHttpHook {
   return {
     type: "http",
-    url: `${gatewayUrl.replace(/\/+$/u, "")}/api/v1/session-hooks/claude-notification`,
+    url: `${gatewayUrl.replace(/\/+$/u, "")}/api/v1/session-hooks/cli-notification`,
     headers: {
       "x-forgebadger-session-id": "$FORGEBADGER_SESSION_ID",
       "x-forgebadger-session-token": "$FORGEBADGER_ATTACH_TOKEN"
@@ -207,9 +207,9 @@ function forgeBadgerHookUrlAllowlist(gatewayUrl: string): string {
   const trimmed = gatewayUrl.replace(/\/+$/u, "");
   try {
     const url = new URL(trimmed);
-    return `${url.origin}/api/v1/session-hooks/claude-notification*`;
+    return `${url.origin}/api/v1/session-hooks/cli-notification*`;
   } catch {
-    return `${trimmed}/api/v1/session-hooks/claude-notification*`;
+    return `${trimmed}/api/v1/session-hooks/cli-notification*`;
   }
 }
 
@@ -245,18 +245,24 @@ function isSameForgeBadgerHook(
   return false;
 }
 
+// Managed-hook detection must match BOTH the current route and the retired
+// Claude-named route: hook entries written by older Gateway versions point at
+// the legacy URL and must be replaced (not duplicated) on the next ensure.
+const SESSION_HOOK_ROUTE_MARKERS = [
+  "/api/v1/session-hooks/cli-notification",
+  "/api/v1/session-hooks/claude-notification"
+] as const;
+
+function mentionsSessionHookRoute(url: string): boolean {
+  return SESSION_HOOK_ROUTE_MARKERS.some((marker) => url.includes(marker));
+}
+
 function isForgeBadgerNotificationHook(value: ClaudeForgeBadgerHook | Record<string, unknown>): boolean {
   if (value.type === "command") {
-    return (
-      typeof value.command === "string" &&
-      value.command.includes("/api/v1/session-hooks/claude-notification")
-    );
+    return typeof value.command === "string" && mentionsSessionHookRoute(value.command);
   }
   if (value.type === "http") {
-    return (
-      typeof value.url === "string" &&
-      value.url.includes("/api/v1/session-hooks/claude-notification")
-    );
+    return typeof value.url === "string" && mentionsSessionHookRoute(value.url);
   }
   return false;
 }

@@ -22,7 +22,6 @@ const project = {
   copilotAutonomy: false,
   management: {
     projectId: "p1",
-    mode: "manual" as const,
     ownerLabel: "",
     nextAction: "",
     freshnessHours: 24,
@@ -39,7 +38,6 @@ const project = {
     cancelled: 0,
   },
   goal: null,
-  autonomy: "manual_only" as const,
   evidenceFreshness: {
     status: "unknown" as const,
     fresh: 0,
@@ -115,12 +113,12 @@ it("surfaces loading errors with retry controls", async () => {
   mount();
   expect(await screen.findByText("项目加载失败")).toBeTruthy();
 });
-it("saves management using the observed revision and preserves manual defaults", async () => {
+it("saves management using the observed revision without any mode field", async () => {
   vi.mocked(api.updateProjectManagement).mockResolvedValue({
     management: project.management,
   });
   mount();
-  await screen.findByText("人工项目 · 人工执行");
+  await screen.findByText("人工执行");
   fireEvent.change(screen.getByLabelText("负责人"), {
     target: { value: "张三" },
   });
@@ -130,7 +128,6 @@ it("saves management using the observed revision and preserves manual defaults",
   fireEvent.submit(screen.getByLabelText("负责人").closest("form")!);
   await waitFor(() =>
     expect(api.updateProjectManagement).toHaveBeenCalledWith("p1", {
-      mode: "manual",
       ownerLabel: "张三",
       nextAction: "检查验收",
       freshnessHours: 24,

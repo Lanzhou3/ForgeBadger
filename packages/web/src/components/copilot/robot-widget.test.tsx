@@ -77,7 +77,7 @@ function dispatchCliNotification(notificationId = "notif-1", message = "Build fi
     window.dispatchEvent(
       new CustomEvent(FORGEBADGER_GATEWAY_EVENT, {
         detail: {
-          type: "claude_notification",
+          type: "session_notification",
           payload: {
             notification_type: "task_completed",
             session_id: "sess-1",

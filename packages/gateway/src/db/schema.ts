@@ -1777,7 +1777,7 @@ export const platformActionReceipts = sqliteTable('platform_action_receipts', {
  intentId:text('intent_id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),outcome:text('outcome').notNull(),resultJson:text('result_json').notNull(),createdAt:integer('created_at').notNull()
 },t=>({intent:foreignKey({columns:[t.userId,t.intentId],foreignColumns:[platformActionIntents.userId,platformActionIntents.id]}).onDelete('cascade')}));
 export const projectManagerManagement=sqliteTable('project_manager_management',{
- projectId:text('project_id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),mode:text('mode').notNull().default('manual'),ownerLabel:text('owner_label').notNull().default(''),nextAction:text('next_action').notNull().default(''),freshnessHours:integer('freshness_hours').notNull().default(72),revision:integer('revision').notNull().default(1),updatedAt:integer('updated_at').notNull()
+ projectId:text('project_id').primaryKey(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),ownerLabel:text('owner_label').notNull().default(''),nextAction:text('next_action').notNull().default(''),freshnessHours:integer('freshness_hours').notNull().default(72),revision:integer('revision').notNull().default(1),updatedAt:integer('updated_at').notNull()
 },t=>({project:foreignKey({columns:[t.userId,t.projectId],foreignColumns:[projects.userId,projects.id]}).onDelete('cascade')}));
 
 export const sessionWriterLeases=sqliteTable('session_writer_leases',{

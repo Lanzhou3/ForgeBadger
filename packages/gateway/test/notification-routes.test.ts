@@ -71,7 +71,7 @@ describe("notification routes", () => {
 
   function seedNotifications(targetUserId: string): void {
     eventBus.emitEvent({
-      type: "claude_notification",
+      type: "session_notification",
       userId: targetUserId,
       sessionId: "session-1",
       hookEventName: "Notification",
@@ -137,7 +137,7 @@ describe("notification routes", () => {
     const body = res.body as ListBody;
     assert.equal(body.data?.notifications.length, 1);
     assert.equal(body.data?.notifications[0]?.category, "session_event");
-    assert.equal(body.data?.notifications[0]?.type, "claude_notification");
+    assert.equal(body.data?.notifications[0]?.type, "session_notification");
   });
 
   it("rejects an unknown category filter", async () => {

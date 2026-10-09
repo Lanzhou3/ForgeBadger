@@ -26,13 +26,11 @@ it("blocks while loading/automated and unlocks only after confirmed takeover and
   vi.mocked(api.getSessionWriter).mockResolvedValue({
     sessionId: "s1",
     mode: "automated",
-    autonomy: "manual_only",
   });
   vi.mocked(api.takeoverSession).mockImplementation(async () => {
     vi.mocked(api.getSessionWriter).mockResolvedValue({
       sessionId: "s1",
       mode: "manual",
-      autonomy: "manual_only",
     });
     return { sessionId: "s1", takenOver: true };
   });
@@ -48,7 +46,6 @@ it("retains read-only and failure feedback after failed takeover", async () => {
   vi.mocked(api.getSessionWriter).mockResolvedValue({
     sessionId: "s1",
     mode: "automated",
-    autonomy: "manual_only",
   });
   vi.mocked(api.takeoverSession).mockRejectedValue(
     new Error("takeover denied"),

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -17,7 +18,7 @@ const bundled = getCopilotSkill(old.name)!;
 const options = { availableToolNames: [...bundled.requiredTools] };
 function fixture(content = old.body, enabled = true) {
   const db = new Database(':memory:');
-  migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations/', import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations/', import.meta.url)) });
   const user = new UserRepository(db).create('upgrade@test.dev', 'hash');
   const repo = new SkillRepository(db, user.id, 'copilot');
   const row = repo.create({ name: old.name, description: old.description, content, version: old.version, source: 'builtin', isEnabled: enabled });

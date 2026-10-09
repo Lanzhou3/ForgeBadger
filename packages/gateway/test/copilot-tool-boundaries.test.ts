@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from "node:url";
 import { createPlatformTools } from '../src/services/agent/tools/index.js';
 import { TOOL_COMMANDS } from '../src/services/platform-commands/tool-commands.js';
 
@@ -38,7 +39,7 @@ import { visibleToolSchemas } from '../src/services/agent/tool-availability.js';
 
 function fixture() {
   const db = new Database(':memory:');
-  migrate(drizzle(db), {migrationsFolder:new URL('../src/db/migrations/', import.meta.url).pathname});
+  migrate(drizzle(db), {migrationsFolder: fileURLToPath(new URL('../src/db/migrations/', import.meta.url))});
   const user = new UserRepository(db).create('tool-boundary@test.dev', 'hash');
   const ledger = new CopilotRunLedger(db, user.id);
   const registry = createAgentToolRegistry(createPlatformTools());

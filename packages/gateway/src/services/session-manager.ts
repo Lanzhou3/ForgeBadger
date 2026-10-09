@@ -5,6 +5,7 @@ import { assertVerificationProcessStopped } from './collaboration/legacy-verific
 import { randomUUID } from "node:crypto";
 import { TaskDispatchEvidenceRepository } from '../db/repositories/task-dispatch-evidence-repository.js';
 import { basename } from "node:path";
+import { redactSensitiveContent } from "../lib/redaction.js";
 
 import type { LaunchPlan } from "../adapters/claude.js";
 import { isAdapterId, type AdapterId } from "./adapter-discovery.js";
@@ -104,6 +105,12 @@ export interface SessionManagerOptions {
   runtimeInputAuthorizer?: (session: Readonly<GateASession>) => void;
   programmaticSubmitSettleMs?: Partial<Record<AdapterId, number>>;
   programmaticReadyTimeoutMs?: number;
+  /** How long the post-staging pane poll keeps looking for the staged input
+   *  before declaring the delivery indeterminate (default 2500 ms). The pty
+   *  echo of a bracketed paste — especially under Windows ConPTY — can lag
+   *  the write by well over the settle window, and a single snapshot then
+   *  misclassifies the staged paste as "not delivered" (Enter never sent). */
+  programmaticStagedVerifyTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
   /**
    * One-shot probe consumed once per status-correction scan: returns true
@@ -175,6 +182,7 @@ export class InMemorySessionManager {
   private readonly runtimeInputAuthorizer: ((session: Readonly<GateASession>) => void) | undefined;
   private readonly programmaticSubmitSettleMs: Readonly<Record<AdapterId, number>>;
   private readonly programmaticReadyTimeoutMs: number;
+  private readonly programmaticStagedVerifyTimeoutMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly detectBackendRestart: (() => boolean) | undefined;
   private readonly sessionLocks = new Map<string, Promise<unknown>>();
@@ -195,6 +203,7 @@ export class InMemorySessionManager {
       ...options.programmaticSubmitSettleMs
     };
     this.programmaticReadyTimeoutMs = Math.min(15_000, Math.max(0, options.programmaticReadyTimeoutMs ?? 10_000));
+    this.programmaticStagedVerifyTimeoutMs = Math.min(15_000, Math.max(0, options.programmaticStagedVerifyTimeoutMs ?? 2_500));
     this.sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     this.detectBackendRestart = options.detectBackendRestart;
   }
@@ -770,6 +779,10 @@ export class InMemorySessionManager {
       try {
         const deadline = Date.now() + this.programmaticReadyTimeoutMs;
         const maxPolls = Math.ceil(this.programmaticReadyTimeoutMs / 250);
+        // The last snapshot that proved an empty composer. Kept for the
+        // staged-input verification: under the writer lease no other writer
+        // can exist, so any non-empty composer after staging is our paste.
+        let readyPane = "";
         for (let poll = 0; ; poll++) {
           input.authorize?.();
           this.assertRuntimeInputAuthorized(session);
@@ -778,7 +791,10 @@ export class InMemorySessionManager {
           if (before.dead) throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
           if (isProgrammaticNativeApprovalRequired(input.adapter, before.content))
             throw new Error(PROGRAMMATIC_SUBMIT_NATIVE_APPROVAL_REQUIRED);
-          if (isProgrammaticComposerReady(input.adapter, before.content)) break;
+          if (isProgrammaticComposerReady(input.adapter, before.content)) {
+            readyPane = before.content;
+            break;
+          }
           if (poll >= maxPolls || Date.now() >= deadline) {
             // The composer never reached a recognized ready state. The ready
             // classifiers match adapter-specific UI text that can drift across
@@ -810,12 +826,31 @@ export class InMemorySessionManager {
           await this.backend.stageProgrammaticInput(session.runtimeSessionName, input.message);
           await this.sleep(this.programmaticSubmitSettleMs[input.adapter]);
 
-          const staged = await this.backend.inspectPane(session.runtimeSessionName);
-          if (
-            staged.dead
-            || !composerContainsStagedTask(input.adapter, staged.content, input.message, needle)
-          ) {
-            throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
+          // The staged paste's echo can lag the pty write by well over the
+          // settle window — Windows ConPTY output latency under load routinely
+          // exceeds it, and inspectPane's whenIdle() only proves the screen
+          // parsed the bytes it has already received, not that the pty has
+          // delivered the echo. Poll for the staged content instead of
+          // sampling once: a single stale snapshot misclassified the paste as
+          // undelivered, so Enter was never pressed and the instruction was
+          // left sitting in the CLI's input box.
+          let staged: Awaited<ReturnType<NonNullable<typeof this.backend.inspectPane>>> | undefined;
+          let stagedTail = "";
+          const stagedDeadline = Date.now() + this.programmaticStagedVerifyTimeoutMs;
+          for (;;) {
+            const snapshot = await this.backend.inspectPane(session.runtimeSessionName);
+            stagedTail = redactSensitiveContent(snapshot.content.slice(-200).replace(/\s+/g, " ").trim());
+            if (!snapshot.dead
+              && composerContainsStagedTask(input.adapter, snapshot.content, input.message, needle, readyPane)) {
+              staged = snapshot;
+              break;
+            }
+            if (Date.now() >= stagedDeadline) {
+              throw new Error(
+                `${PROGRAMMATIC_SUBMIT_INDETERMINATE}: staged input did not appear in the ${input.adapter} composer within ${this.programmaticStagedVerifyTimeoutMs} ms; pane tail: ${stagedTail}`
+              );
+            }
+            await this.sleep(200);
           }
 
           this.assertRuntimeInputAuthorized(session);
@@ -834,8 +869,10 @@ export class InMemorySessionManager {
           await this.sleep(this.programmaticSubmitSettleMs[input.adapter]);
           await this.backend.pressEnter(session.runtimeSessionName);
           return { adapter: input.adapter, needle, stagedPane: staged.content };
-        } catch {
-          throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
+        } catch (error) {
+          // Keep the surfaced contract exact (consumers match the bare code)
+          // while chaining the detailed cause for diagnostics.
+          throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE, { cause: error });
         }
       } finally {
         this.writerLeases.release(lease);

@@ -26,7 +26,7 @@ test('owner pairs a private identity, binds scope and reviews uncertain delivery
     else if(path.endsWith('/channels/routes'))data={routes:bound?[{id:'r',identityId:'i',projectId:'p',conversationId:'c',status:revoked?'revoked':'active',authorityValid:!revoked}]:[]};
     else if(path.endsWith('/routes/r/revoke'))revoked=true;
     else if(path.endsWith('/channels/deliveries'))data={deliveries:[{id:'d',accountId:'a',channel:'feishu',inboxId:'m',phase:'terminal',status:'unknown',createdAt:Date.now(),receiptRecorded:false}]};
-    else if(path.endsWith('/project-manager/overview'))data={projects:[{id:'p',name:'验证项目',copilotAutonomy:true,management:{mode:'manual',ownerLabel:'',nextAction:'',freshnessHours:24,revision:1},counts:{done:0,total:0,in_progress:0,blocked:0},evidenceFreshness:{status:'unknown'}}],observedAt:Date.now()};
+    else if(path.endsWith('/project-manager/overview'))data={projects:[{id:'p',name:'验证项目',copilotAutonomy:true,management:{ownerLabel:'',nextAction:'',freshnessHours:24,revision:1},counts:{done:0,total:0,in_progress:0,blocked:0},evidenceFreshness:{status:'unknown'}}],observedAt:Date.now()};
     else if(path.endsWith('/notifications'))data={notifications:[]};
     else if(path.endsWith('/notifications/feishu'))data={config:{enabled:false,targetId:null,identityId:null,types:['attention','failure','completion'],webBaseUrl:'',revision:0},ready:false,blocker:'TARGET_INVALID',targets:[]};
     else if(path.endsWith('/notifications/feishu/deliveries'))data={deliveries:[]};

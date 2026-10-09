@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -33,7 +34,7 @@ import { agentActions } from '../src/services/platform-commands/agent-actions.js
 
 function fixture(t:TestContext) {
  const root=mkdtempSync(join(tmpdir(),'fb-repair-')),db=new Database(':memory:');db.pragma('foreign_keys=ON');
- migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+ migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
  const userId=new UserRepository(db).create('repair@test.dev','hash').id,projects=new ProjectRepository(db,userId);
  const project=projects.create({name:'P',path:root,aiTool:'codex'});projects.setCopilotAutonomy(project.id,true);
  writeFileSync(join(root,'sum.cjs'),'module.exports=(a,b)=>a-b;');

@@ -134,7 +134,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
     assert.ok(captured, "expected a fetch call");
     assert.equal(
       captured?.url,
-      "http://127.0.0.1:48731/api/v1/session-hooks/claude-notification/sess-opencode-1"
+      "http://127.0.0.1:48731/api/v1/session-hooks/cli-notification/sess-opencode-1"
     );
     assert.equal(captured?.headers["content-type"], "application/json");
     assert.equal(captured?.headers["x-forgebadger-session-id"], "sess-opencode-1");

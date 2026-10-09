@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {it} from 'node:test';
 import {randomBytes} from 'node:crypto';
+import { fileURLToPath } from "node:url";
 import express from 'express';
 import Database from 'better-sqlite3';
 import {drizzle} from 'drizzle-orm/better-sqlite3';
@@ -14,7 +15,7 @@ import {BUILTIN_COPILOT_SKILLS} from '../src/services/agent/skills/copilot-skill
 import type {CopilotPlaybook} from '../src/services/agent/skills/skill-queries.js';
 
 it('serves independently scoped catalog/edit/toggle APIs with active-user validation and version review',async()=>{
- const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations/',import.meta.url).pathname});
+ const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations/', import.meta.url))});
  const user=new UserRepository(db).create('api-owner@test.dev','hash');
  const other=new UserRepository(db).create('api-other@test.dev','hash');
  const secret=randomBytes(32).toString('hex');

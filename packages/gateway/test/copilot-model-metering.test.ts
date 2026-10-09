@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -15,10 +16,10 @@ import { usage } from '../src/services/agent/llm-response.js';
 it('meters real client main and auxiliary responses once with immutable pre-call prices',async()=>{
  const db=new Database(':memory:');
  try {
-  migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+  migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
   const userId=new UserRepository(db).create('meter@test.dev','hash').id;
   const repo=new ModelProviderRepository(db,userId,'a'.repeat(64));
-  const provider=repo.createProviderProfile({name:'P',providerKey:'test',baseUrl:'https://api.example.com',authType:'api_key',apiFormat:'openai',supportedAdapters:['codex']});
+  const provider=repo.createProviderProfile({name:'P',providerKey:'test',baseUrl:'https://api.example.com',authType:'api_key',apiFormat:'openai-compatible',supportedAdapters:['codex']});
   const model=repo.createModelProfile({providerProfileId:provider.id,name:'M',modelId:'fixture',isDefault:true,capabilities:['chat']});
   repo.createCredential({providerProfileId:provider.id,label:'fixture',plaintextSecret:'fixture'});
   const rates=new CopilotTokenRates(db,userId);
@@ -53,10 +54,10 @@ it('normalizes cache and reasoning without double counting, distinguishes free f
 
 it('keeps a compatibility retry on its original model and price when preferences change in flight',async()=>{
  const db=new Database(':memory:');try{
-  migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+  migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
   const userId=new UserRepository(db).create('retry-meter@example.invalid','hash').id;
   const repo=new ModelProviderRepository(db,userId,'a'.repeat(64));
-  const provider=repo.createProviderProfile({name:'P',providerKey:'test',baseUrl:'https://api.example.com',authType:'api_key',apiFormat:'openai',supportedAdapters:['codex']});
+  const provider=repo.createProviderProfile({name:'P',providerKey:'test',baseUrl:'https://api.example.com',authType:'api_key',apiFormat:'openai-compatible',supportedAdapters:['codex']});
   const first=repo.createModelProfile({providerProfileId:provider.id,name:'A',modelId:'model-a',isDefault:true,capabilities:['chat']});
   const second=repo.createModelProfile({providerProfileId:provider.id,name:'B',modelId:'model-b',capabilities:['chat']});
   repo.createCredential({providerProfileId:provider.id,label:'fixture',plaintextSecret:'fixture'});

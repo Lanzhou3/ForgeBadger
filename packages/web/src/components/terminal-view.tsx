@@ -17,6 +17,8 @@ import type { TranslationKey } from "@/lib/i18n";
 import { updateSessionLastPrompt } from "@/lib/api";
 import { resolveWheelAction } from "@/lib/terminal-scroll";
 import { CodexWheelInput } from "@/lib/codex-wheel-input";
+import { PiWheelInput } from "@/lib/pi-wheel-input";
+import { isTerminalWheelInput } from "@/lib/terminal-wheel-input";
 import { installSafariTerminalInputFix } from "@/lib/terminal-safari-input";
 import { terminalAltArrowInput } from "@/lib/terminal-alt-arrows";
 import { copyTerminalText, getTerminalBufferText, shouldCopyTerminalSelection } from "@/lib/terminal-copy";
@@ -448,7 +450,15 @@ export function TerminalView({
     if (terminal) {
       replaceTerminalInputListener(inputDisposableRef, null);
       const disposable = terminal.onData((data) => {
-        if (writerRef.current.readOnly) return;
+        if (writerRef.current.readOnly) {
+          // The copilot owns the keyboard, but a wheel spin is not a
+          // keystroke: pass pure SGR wheel reports through so a fullscreen
+          // TUI's viewport can still be scrolled while watching.
+          if (isTerminalWheelInput(data) && socket.readyState === WebSocket.OPEN) {
+            socket.send(createTerminalInputMessage(data));
+          }
+          return;
+        }
         const prompt = promptCaptureRef.current.push(data);
         if (prompt) {
           setSessionTabPrompt(sessionId, prompt);
@@ -542,6 +552,7 @@ export function TerminalView({
     let osc99Disposable: { dispose(): void } | null = null;
     let osc777Disposable: { dispose(): void } | null = null;
     const codexWheel = new CodexWheelInput();
+    let piWheel: PiWheelInput | null = null;
     let selectionDisposable: { dispose(): void } | null = null;
     let bufferDisposable: { dispose(): void } | null = null;
     let viewportScrollFrame: number | null = null;
@@ -592,12 +603,40 @@ export function TerminalView({
             copySelectionRef.current();
             return false;
           });
+          const pi = new PiWheelInput((data) => terminalRef.current?.input(data, false));
+          piWheel = pi;
           // Full-screen TUIs (Claude Code / Kimi Code) run on the alternate
           // screen with mouse reporting disabled, so xterm's alternateScroll
           // converts the wheel into ↑/↓ key sequences that pollute the input
           // history. Suppress only in that state; OpenCode (mouse on) keeps its
           // SGR wheel events and the normal buffer keeps its scrollback scroll.
           terminal.attachCustomWheelEventHandler((event) => {
+            if (aiToolRef.current === "pi") {
+              // PI's fullscreen TUI consumes SGR wheel reports. The attach
+              // replay restores the rendered screen but not the terminal's
+              // mouse state, so the browser terminal may have mouse reporting
+              // off even though the app is waiting for SGR wheel reports.
+              // Emit OS-coalesced reports (one per accumulated notch, plus a
+              // tail flush) regardless of the browser's local state; PI
+              // accelerates the gesture itself.
+              const screen = terminal.element?.querySelector(".xterm-screen");
+              const rect = screen?.getBoundingClientRect();
+              const data = rect
+                ? pi.encode(event, {
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    cols: terminal.cols,
+                    rows: terminal.rows
+                  })
+                : null;
+              if (data !== null) {
+                event.preventDefault();
+                if (data) terminal.input(data, false);
+                return false;
+              }
+            }
             if (
               aiToolRef.current === "codex" &&
               terminal.buffer.active.type === "alternate" &&
@@ -743,6 +782,8 @@ export function TerminalView({
       if (viewportScrollFrame !== null) window.cancelAnimationFrame(viewportScrollFrame);
       selectionDisposable?.dispose();
       bufferDisposable?.dispose();
+      piWheel?.dispose();
+      piWheel = null;
       terminalRef.current?.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;

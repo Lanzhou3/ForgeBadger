@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -91,16 +93,21 @@ describe("mcp endpoint", () => {
   let server: Server;
   let port: number;
   let userId: string;
+  let root: string;
   let readToken: string;
   let operateToken: string;
+  let cliToken: string;
 
   before(async () => {
     db = createTestDb();
+    root = realpathSync(mkdtempSync(path.join(tmpdir(), "fb-mcp-server-")));
     const users = new UserRepository(db);
     userId = users.create("owner@example.com", "hash", { role: "admin" }).id;
     const tokens = new McpTokenRepository(db);
     readToken = tokens.create({ userId, name: "reader", scopes: ["read"] }).token;
     operateToken = tokens.create({ userId, name: "operator", scopes: ["read", "operate"] }).token;
+    // A complete legacy CLI grant: canonical root + finite lifetime.
+    cliToken = tokens.create({ userId, name: "cli", scopes: ["read", "operate", "cli_dispatch"], allowedRoot: root, expiresAt: new Date(Date.now() + 3_600_000) }).token;
     new ProjectRepository(db, userId).create({
       name: "mcp-demo",
       path: `/tmp/mcp-demo-${randomUUID()}`,
@@ -119,6 +126,7 @@ describe("mcp endpoint", () => {
   after(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     db.close();
+    rmSync(root, { recursive: true, force: true });
   });
 
   it("rejects requests without a token, with an unknown token, and after revocation", async () => {
@@ -172,17 +180,23 @@ describe("mcp endpoint", () => {
     // Act
     const reader = await mcpRpc(port, readToken, "tools/list");
     const operator = await mcpRpc(port, operateToken, "tools/list");
+    const cli = await mcpRpc(port, cliToken, "tools/list");
 
     // Assert
     const readerNames = reader.messages[0]?.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];
     const operatorNames = operator.messages[0]?.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];
+    const cliNames = cli.messages[0]?.result?.tools?.map((tool: { name: string }) => tool.name) ?? [];
     assert.ok(readerNames.includes("list_projects"));
     assert.ok(readerNames.includes("list_sessions"));
     assert.equal(readerNames.includes("dispatch_task_to_session"), false);
     assert.equal(readerNames.includes("stop_session"), false);
+    // CLI control (including direct session dispatch) needs cli_dispatch, not
+    // operate alone.
     assert.equal(operatorNames.includes("dispatch_task_to_session"), false);
     assert.ok(operatorNames.includes("pm_prepare_task_packet"));
     assert.ok(operatorNames.includes("stop_session"));
+    assert.ok(cliNames.includes("dispatch_task_to_session"));
+    assert.ok(cliNames.includes("pm_execute_task_packet"));
   });
 
   it('does not expand old account tokens to raw Shell execution', async () => {
@@ -221,6 +235,17 @@ describe("mcp endpoint", () => {
     assert.match(result?.content?.[0]?.text ?? "", /unavailable tool/i);
   });
 
+  it("refuses direct dispatch for operate tokens without cli_dispatch", async () => {
+    const res = await mcpRpc(port, operateToken, "tools/call", {
+      name: "dispatch_task_to_session",
+      arguments: { sessionId: "s-1", message: "hello", operationId: "op-only-dispatch" }
+    });
+
+    const result = res.messages[0]?.result;
+    assert.equal(result?.isError, true);
+    assert.match(result?.content?.[0]?.text ?? "", /unavailable tool/i);
+  });
+
   it("rejects invalid tool input with an isError result", async () => {
     const res = await mcpRpc(port, readToken, "tools/call", { name: "get_session", arguments: {} });
 
@@ -230,15 +255,17 @@ describe("mcp endpoint", () => {
   });
 
   it("surfaces platform command failures as tool errors, not crashes", async () => {
-    // Arrange: an operate token calling dispatch against a session that does
-    // not exist must fail cleanly through the command pipeline.
-    const res = await mcpRpc(port, operateToken, "tools/call", {
+    // Arrange: a CLI token calling dispatch against a session that does not
+    // exist must fail cleanly through the command pipeline, before any
+    // durable intent exists.
+    const res = await mcpRpc(port, cliToken, "tools/call", {
       name: "dispatch_task_to_session",
-      arguments: { sessionId: `missing-${randomUUID()}`, message: "hello" }
+      arguments: { sessionId: `missing-${randomUUID()}`, message: "hello", operationId: "missing-session-dispatch" }
     });
 
     const result = res.messages[0]?.result;
     assert.equal(result?.isError, true);
+    assert.match(result?.content?.[0]?.text ?? "", /Session not found/);
   });
 
   it("refuses high-risk approval-gated operations instead of auto-approving them", async (t) => {

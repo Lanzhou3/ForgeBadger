@@ -3,7 +3,6 @@ import type { Server } from "node:http";
 import type { GatewayEnv } from "../config/env.js";
 import { loadEnv } from "../config/env.js";
 import { createGatewayApp, type GatewayApp } from "../server.js";
-import { configureCliAutonomyAdapters } from "../services/adapter-autonomy.js";
 import { startupGateway } from "../services/startup.js";
 import type { TerminalBackendClient } from "../services/terminal-backend.js";
 import { createLocalAccountRecovery } from "../services/local-account-recovery.js";
@@ -35,7 +34,6 @@ export async function createGatewayRuntime(
   overrides: GatewayRuntimeOverrides = {}
 ): Promise<GatewayApp> {
   const env = resolveGatewayEnv(input);
-  configureCliAutonomyAdapters(env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS);
   const accountRecovery = createLocalAccountRecovery(env.FORGEBADGER_STATE_DIR);
 
   // The Session Server is the single terminal backend:
@@ -101,7 +99,7 @@ export async function createGatewayRuntime(
 
     // Terminal-native notifications (OSC 9/99/777, bell) observed on the
     // daemon's PTYs arrive over the management socket; ingest them as the
-    // same claude_notification events the CLI hook route produces.
+    // same session_notification events the CLI hook route produces.
     const sessionServerClient =
       overrides.sessionServerClient ?? sessionServerIntegration?.client;
     if (sessionServerClient) {

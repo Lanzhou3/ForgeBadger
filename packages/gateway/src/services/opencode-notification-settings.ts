@@ -63,7 +63,7 @@ async function notify(event) {
   if (!lifecycle) return;
   try {
     const response = await fetch(
-      \`\${GATEWAY_URL.replace(/\\/+$/u, "")}/api/v1/session-hooks/claude-notification/\${encodeURIComponent(SESSION_ID)}\`,
+      \`\${GATEWAY_URL.replace(/\\/+$/u, "")}/api/v1/session-hooks/cli-notification/\${encodeURIComponent(SESSION_ID)}\`,
       {
         method: "POST",
         headers: {

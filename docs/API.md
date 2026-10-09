@@ -544,8 +544,8 @@ unsupported grant capabilities are rejected.
 | `POST /platform-actions/:id/decide` | `{digest,approved}` â `{intent}`. Digest must match the immutable preview. |
 | `POST /platform-actions/:id/execute` | `{receipt}`; requires a currently valid approved intent. Duplicate confirmed execution returns the stored receipt. |
 | `GET /project-manager/overview?grantId=...` | `{projects,observedAt}`; an unavailable, revoked or expired requested grant returns 403. Omitted grant lists the owner's projects. |
-| `PATCH /projects/:id/project-manager/management` | `{expectedRevision,mode?,ownerLabel?,nextAction?,freshnessHours?}` â `{management}`. Mode is `manual` or `cli`; stale revisions conflict. |
-| `GET /sessions/:id/writer` | `{sessionId,mode,autonomy}`; mode is `manual` or `automated`; autonomy is `manual_only` unless the session adapter is listed in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` (then `supervised`). |
+| `PATCH /projects/:id/project-manager/management` | `{expectedRevision,ownerLabel?,nextAction?,freshnessHours?}` â `{management}`. Stale revisions conflict. |
+| `GET /sessions/:id/writer` | `{sessionId,mode}`; mode is `manual` or `automated`. |
 | `POST /sessions/:id/takeover` | `{sessionId,takenOver}`; invalidates the old automatic writer before manual input resumes. |
 
 Grant scope contains explicit project IDs, capabilities and canonical allowed
@@ -578,9 +578,11 @@ The delegatable commands are `project.create`, `project.metadata.update`,
 Task preparation creates/links an idle session and never launches or submits a
 prompt. `pm.task.execute` composes prepare + session start + programmatic
 prompt delivery and marks the work item in progress; `session.dispatch`
-delivers a message into a live session. Both require the target adapter to be
-listed in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` (default empty) â otherwise they
-reject with `ADAPTER_AUTONOMY_UNVERIFIED` before any effect. Delivery uses
+delivers a message into a live session. Copilot-origin dispatch is authorized
+by the target project's Copilot autonomy switch â otherwise it rejects with
+`COPILOT_PROJECT_AUTONOMY_OFF` before any effect (owner-origin actions are the
+owner acting directly). There is deliberately no per-adapter allowlist: every
+code CLI is equal. Delivery uses
 bracketed-paste staging plus a single Enter with consumption confirmation;
 indeterminate delivery surfaces as `COPILOT_DELIVERY_UNCONFIRMED` and is never
 auto-retried. Claude folded multiline pastes are recognized only inside the
@@ -591,21 +593,21 @@ to empty. Footer changes, partial redraws and unknown screens are not receipts.
 Remote replies distinguish indeterminate delivery, cancellation, budget stops
 and invalid model responses instead of reporting them as task completion.
 When `FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED` is also
-on, a dispatch supervisor advances grant-dispatched work items to
+on, a dispatch supervisor advances dispatched work items to
 `ready_for_review` (task completed) or `blocked` (task failed) from session
 hook notifications; acceptance to `done` stays with the owner.
 Explicit owner lifecycle actions remain available. Persistent Copilot memory
 writes use `memory.write`, including the memory-entry HTTP creation endpoint;
 automatic post-turn memory curation is disabled.
 
-Overview projects contain `id`, `name`, `management`, `counts`, `goal`,
-`evidenceFreshness`, and `autonomy`. Management defaults are manual mode, empty
+Overview projects contain `id`, `name`, `copilotAutonomy`, `management`,
+`counts`, `goal`, and `evidenceFreshness`. Management defaults are empty
 owner/next action, 72-hour freshness and revision 0 before the first update.
 Freshness uses declared evidence timestamps (`source=declared_evidence_timestamp`),
 with fresh/stale/unknown counts and nullable `lastObservedAt`; it does not verify
-evidence content or infer completion. Selecting CLI planning mode grants no CLI
-execution permission. Feishu/Telegram integration and autonomous PM scheduling
-remain later phases.
+evidence content or infer completion. Management metadata grants no CLI
+execution permission: the per-project Copilot autonomy switch is the single
+authorization axis.
 
 
 ### Terminal Runtime Dependencies
@@ -1378,6 +1380,10 @@ credential generation; a running CLI environment is not mutated.
 Built-in templates are read-only. Clone creates a tenant-owned custom template
 that can be edited and applied to projects. Template file writes use the same
 path safety and conflict pipeline as project config generation.
+Every template must declare the CLI `adapter` its config files render for:
+`POST /api/v1/templates` requires it (`400` otherwise), `PUT` may change it
+but not clear it, package import requires it, and rendering/syncing a
+template that somehow lacks one fails with `TEMPLATE_ADAPTER_MISSING`.
 Custom templates may carry `visibility: "private" | "shared" | "admin"`.
 Private remains the default; shared templates are readable by other users; admin
 templates are readable by their owner and users with `role = "admin"`. Mutation
@@ -1403,8 +1409,9 @@ reported per project. Results are recorded in the audit log and a
 repository. The Gateway shallow-clones the `url` (optional `branch`, default
 branch when omitted) into a temporary directory, reads every text file from
 it, infers the `adapter` from well-known config filenames, and creates a
-tenant-owned custom template. The template is named after the repository
-unless a `name` is supplied; `description` is optional. Body:
+tenant-owned custom template. The import is rejected with `400` when no
+well-known config filename identifies an adapter. The template is named after
+the repository unless a `name` is supplied; `description` is optional. Body:
 `{ url, branch?, name?, description? }`. Files that are binary, larger than
 512 KiB, beyond a 5 MiB total, or past the 500-file cap are skipped rather
 than failed. On success (201) the response carries `{ templateId, name,
@@ -1889,8 +1896,8 @@ No prompts or terminal history are retained in this runtime work-state cache.
 
 ### Session Hooks
 
-- `POST /api/v1/session-hooks/claude-notification`
-- `POST /api/v1/session-hooks/claude-notification/:sessionId`
+- `POST /api/v1/session-hooks/cli-notification`
+- `POST /api/v1/session-hooks/cli-notification/:sessionId`
 
 This unauthenticated endpoint is for ForgeBadger-generated AI CLI hooks: Claude
 Code HTTP hooks, the OpenCode notification plugin, Codex hooks, and Kimi hooks.
@@ -1902,7 +1909,7 @@ in the path or `X-ForgeBadger-Session-Id`. The payload may carry an optional
 `adapter` field (`"claude"` by default; other integrations send `"opencode"`,
 `"codex"`, or `"kimi"`). Accepted hook payloads are normalized to
 `permission_prompt`, `permission_denied`, `task_completed`, `task_interrupted`,
-`task_failed`, or `session_ended` and emit a user-scoped `claude_notification` event on
+`task_failed`, or `session_ended` and emit a user-scoped `session_notification` event on
 `/ws/events`.
 
 Root `UserPromptSubmit`, `TaskStarted`, and `TurnStarted` hooks update the work
@@ -1969,10 +1976,20 @@ Legacy account tokens without `cli_dispatch` expose read tools
 (`create_project`, `update_project`, `start_session`, `stop_session`,
 `pm_create_work_item`, `pm_update_work_item`,
 `pm_update_management`, `pm_prepare_task_packet`, `write_memory`) require the
-`operate` scope and are hidden from `tools/list` without it. CLI-control tools
-(`dispatch_task_to_session`) remain unavailable. `pm_execute_task_packet`,
-`import_project`, and `apply_project_config` require both `operate` and
-`cli_dispatch`; task execution also requires an autonomy-enabled adapter.
+`operate` scope and are hidden from `tools/list` without it. `pm_execute_task_packet`,
+`import_project`, `apply_project_config`, and `dispatch_task_to_session`
+require both `operate` and `cli_dispatch`; task execution from Copilot also
+requires the project's Copilot autonomy switch.
+`dispatch_task_to_session { sessionId, message }` submits a free-form task
+message (1–4000 chars, no control characters) to a running CLI session that is
+not linked to a work-item Task Packet: start the session first with
+`start_session`, and the CLI composer must reach its adapter-specific ready
+state before staging. Delivery is confirmed only when the composer consumes the
+staged paste (`delivery: "consumed"`); an unconfirmed delivery returns
+`COPILOT_DELIVERY_UNCONFIRMED` — inspect the terminal and `get_mcp_operation`
+before any retry, never retry automatically. Task-packet-linked sessions refuse
+direct dispatch (`TASK_SESSION_REQUIRES_PACKET_EXECUTION`); use
+`pm_execute_task_packet` for those.
 Project grants of every scope and legacy CLI tokens use a narrower
 development-workflow tool list. Project grants exclude global tools and
 `create_project`, `import_project`, and `list_templates`: selecting existing
@@ -2008,7 +2025,8 @@ pattern-based secret redaction; errors are redacted too. Import registers an
 existing directory. Configuration apply
 requires a matching preview digest, uses host credentials, creates missing
 files only, and refuses modified or unsafe files. Task-packet dispatch uses
-Session Server and the adapter autonomy allowlist. Completion evidence can
+Session Server; Copilot-origin dispatch follows the target project's Copilot
+autonomy switch. Completion evidence can
 advance a task to `ready_for_review`, not independently verified or `done`.
 Native CLI trust prompts require the owner at the terminal.
 
@@ -2056,7 +2074,7 @@ activity rows, and the notification center.
 { "type": "session_status_changed", "payload": { "session_id": "...", "old_status": "starting", "new_status": "running" } }
 { "type": "session_work_state_changed", "payload": { "session_id": "...", "state": "working", "updated_at": 1777680000000 } }
 { "type": "session_deleted", "payload": { "session_id": "..." } }
-{ "type": "claude_notification", "payload": { "session_id": "...", "hook_event_name": "Notification", "notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash", "tool_name": "Bash", "notification_id": "...", "created_at": "2026-05-02T00:00:00.000Z", "read": false } }
+{ "type": "session_notification", "payload": { "session_id": "...", "hook_event_name": "Notification", "notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash", "tool_name": "Bash", "notification_id": "...", "created_at": "2026-05-02T00:00:00.000Z", "read": false } }
 { "type": "activity_created", "payload": { "activity_id": "...", "session_id": "...", "project_id": "...", "activity_type": "permission_prompt", "status": "warning", "message": "Permission prompt: Bash", "created_at": "2026-05-02T00:00:00.000Z" } }
 ```
 
@@ -2583,9 +2601,11 @@ surfaces. `list_skills` and `load_skill` are retired native Copilot tool names.
 packet/linked idle session. It does not start a CLI or submit instructions.
 `pm_execute_task_packet` additionally starts the linked session and delivers the
 packet prompt. `dispatch_task_to_session` submits a message into an unlinked live session; linked Task Packets must use `pm_execute_task_packet`;
-both are gated per adapter by `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` at
-preview/execute time (`ADAPTER_AUTONOMY_UNVERIFIED` when not enabled) and are
-never exposed over MCP. The capability settings list reports every tool with
+Copilot-origin dispatches are gated by the target project's Copilot autonomy
+switch at preview/execute time (`COPILOT_PROJECT_AUTONOMY_OFF` when off). MCP
+callers present an `operate` + `cli_dispatch` token as the owner's standing
+authorization for `dispatch_task_to_session`; the autonomy switch does not
+apply to non-Copilot origins. The capability settings list reports every tool with
 `available`/`unavailableReason`; attempts to toggle retired/unknown names return
 404. `enabled` is a configured preference, `available` is runtime availability,
 and `authorization` describes `read` or `approval_or_grant`.

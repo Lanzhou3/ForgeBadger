@@ -40,7 +40,7 @@ const cliAdapters: RuntimeAdapterId[] = [...runtimeAdapterIds];
 
 interface CliConfigSheetProps {
   open: boolean;
-  /** Adapter selected by the entry point (a CLI status cell); defaults to claude. */
+  /** Adapter selected by the entry point (a CLI status cell); no default CLI. */
   adapter: RuntimeAdapterId;
   onOpenChange: (open: boolean) => void;
 }

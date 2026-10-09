@@ -35,7 +35,7 @@ const openaiProviderInput = {
   baseUrl: "https://api.openai.com/v1",
   openaiBaseUrl: "https://api.openai.com/v1",
   authType: "api_key",
-  apiFormat: "openai",
+  apiFormat: "openai-compatible",
   supportedAdapters: ["opencode", "codex"]
 };
 
@@ -131,7 +131,7 @@ describe("model provider routes", () => {
       providerKey: "volcengine",
       baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
       authType: "api_key",
-      apiFormat: "openai",
+      apiFormat: "openai-compatible",
       supportedAdapters: ["kimi"]
     }, authHeaders());
     assert.equal(created.status, 201);
@@ -162,7 +162,7 @@ describe("model provider routes", () => {
       providerKey: "volcengine",
       baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
       authType: "api_key",
-      apiFormat: "openai",
+      apiFormat: "openai-compatible",
       supportedAdapters: ["kimi"]
     }, authHeaders());
     const provider = created.body.data.provider;

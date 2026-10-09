@@ -17,7 +17,6 @@ import { TemplateRepository } from '../../db/repositories/template-repository.js
 import { AgentMemoryRepository } from '../agent/memory.js';
 import { buildTaskPacket, createTaskPacketContext, createTaskPacketSessionName, findWorkItemByTaskPacketSession, resolveTaskPacketSession, withTaskPacketSessionLink, toTaskPacketSessionDto } from '../project-manager/task-packets.js';
 import { createSessionCommands } from './session-commands.js';
-import { assertAdapterAutonomy } from '../adapter-autonomy.js';
 import { runShellCommand, runShellCommandInSession, openCopilotShell, closeCopilotShell, assertCopilotShellSession, SHELL_COMMAND_MAX_LENGTH, SHELL_COMMAND_MAX_TIMEOUT_MS } from '../shell-command-execution.js';
 import { redactAgentValue } from '../agent/redaction.js';
 import { dispatchSessionInput } from '../agent/platform-access.js';
@@ -194,9 +193,6 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
         command({ id: 'pm.task.execute', effect: 'external', inputSchema: taskPrepareInput,
             resolve(ctx, input) {
                 const resources = itemResources(ctx, input);
-                const v = taskPrepareInput.parse(input);
-                const adapter = taskAdapter(ctx, v);
-                assertAdapterAutonomy(adapter);
                 return resources;
             },
             async prepare(ctx, input) {
@@ -224,7 +220,6 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 const adapter = normalizeAdapter(session.aiTool);
                 if (!adapter)
                     throw new Error('Unsupported session adapter');
-                assertAdapterAutonomy(adapter);
                 return resources;
             },
             async execute(ctx, input) {

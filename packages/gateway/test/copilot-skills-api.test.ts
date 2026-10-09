@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { randomBytes } from 'node:crypto';
+import { fileURLToPath } from "node:url";
 import express from 'express';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -12,7 +13,7 @@ import { createCopilotPlaybookRoutes } from '../src/routes/copilot-playbooks.js'
 import type { CopilotSkillDetail } from '../src/services/agent/skills/copilot-skill-service.js';
 
 it('supports authenticated import/detail/update/toggle/history/rollback and legacy edits without cross-user or stale writes',async()=>{
- const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations/',import.meta.url).pathname});
+ const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations/', import.meta.url))});
  const users=new UserRepository(db);const owner=users.create('new-api@test.dev','hash');const other=users.create('foreign-api@test.dev','hash');
  const secret=randomBytes(32).toString('hex');const token=signJwt({userId:owner.id,email:owner.email},secret);const foreignToken=signJwt({userId:other.id,email:other.email},secret);
  const app=express();app.locals.db=db;app.locals.jwtSecret=secret;app.use(express.json({limit:'8mb'}));

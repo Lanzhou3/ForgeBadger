@@ -18,7 +18,6 @@ import { buildAgentStack, type AgentStackDeps } from "./services/agent/agent-sta
 import { startAutomationScheduler, type AutomationScheduler } from "./services/automation/scheduler.js";
 import { startCopilotRuntime } from "./services/agent/runtime.js";
 import { attachDispatchSupervisor, type DispatchSupervisor } from "./services/agent/dispatch-supervisor.js";
-import { cliAutonomyAdapters, configureCliAutonomyAdapters } from "./services/adapter-autonomy.js";
 import { RuntimeAuthorizationInvalidator } from "./services/runtime-authorization-invalidation.js";
 import {
   createRuntimeSettingsStore,
@@ -146,17 +145,19 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     ?? new RuntimeAuthorizationInvalidator();
 
   // DB-backed runtime settings (settings page). The apply hook pushes hot
-  // changes into the live process: autonomy whitelist, session name prefix,
-  // registration mode (read per request via the getter below) and the
-  // dispatch supervisor. mcp_enabled is restart-only (route mounting).
+  // changes into the live process: session name prefix, registration mode
+  // (read per request via the getter below) and the dispatch supervisor.
+  // mcp_enabled is restart-only (route mounting).
   let dispatchSupervisor: DispatchSupervisor | undefined;
   const runtimeSettings: RuntimeSettingsStore | undefined = options.env
     ? createRuntimeSettingsStore(options.db, {
         env: options.env,
         apply: (effective: RuntimeSettingsEffective) => {
-          configureCliAutonomyAdapters([...effective.cliAutonomyAdapters]);
           options.sessionManager.setSessionPrefix(effective.sessionPrefix);
-          const wantSupervisor = effective.pmAutoDispatch && cliAutonomyAdapters().length > 0;
+          // The supervisor only advances already-dispatched work items from
+          // CLI completion evidence; it never launches or retries a CLI, so
+          // it follows the behavior preference alone.
+          const wantSupervisor = effective.pmAutoDispatch;
           if (wantSupervisor && !dispatchSupervisor) {
             dispatchSupervisor = attachDispatchSupervisor({ db: options.db, eventBus });
           } else if (!wantSupervisor && dispatchSupervisor) {
@@ -210,15 +211,14 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const automationScheduler: AutomationScheduler | undefined = copilotAgent
     ? startAutomationScheduler(copilotAgent)
     : undefined;
-  // The dispatch supervisor advances grant-dispatched PM work items on CLI
-  // completion hooks; it requires both operator opt-ins. The runtime settings
-  // applier may already have attached (or detached) it, so only fill in the
-  // env-driven default when nothing is attached yet.
+  // The dispatch supervisor advances PM work items on CLI completion
+  // evidence; it requires the auto-dispatch behavior opt-in. The runtime
+  // settings applier may already have attached (or detached) it, so only fill
+  // in the env-driven default when nothing is attached yet.
   if (!dispatchSupervisor) {
-    dispatchSupervisor =
-      options.pmAutoDispatchEnabled && cliAutonomyAdapters().length > 0
-        ? attachDispatchSupervisor({ db: options.db, eventBus })
-        : undefined;
+    dispatchSupervisor = options.pmAutoDispatchEnabled
+      ? attachDispatchSupervisor({ db: options.db, eventBus })
+      : undefined;
   }
 
   // The Session Server is the single terminal backend; the terminal

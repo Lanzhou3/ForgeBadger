@@ -1,18 +1,22 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
-import type { Session } from "@/lib/api";
+import { GatewayApiError, type Session } from "@/lib/api";
+import { readSessionTabs, writeSessionTabs } from "@/lib/session-tabs";
 import TerminalPage from "./page";
 
-const { getSessionMock, connectSessionMock, startSessionMock, listTaskPacketsMock } = vi.hoisted(
+const { getSessionMock, connectSessionMock, startSessionMock, listTaskPacketsMock, getSessionWorkStatesMock, pushMock, replaceMock } = vi.hoisted(
   () => ({
     getSessionMock: vi.fn(),
     connectSessionMock: vi.fn(),
     startSessionMock: vi.fn(),
     listTaskPacketsMock: vi.fn(),
+    getSessionWorkStatesMock: vi.fn(),
+    pushMock: vi.fn(),
+    replaceMock: vi.fn(),
   })
 );
 
@@ -20,7 +24,7 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "s1" }),
   usePathname: () => "/sessions/s1",
   useSearchParams: () => new URLSearchParams(),
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: pushMock, replace: replaceMock }),
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -45,6 +49,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     connectSession: connectSessionMock,
     startSession: startSessionMock,
     listProjectManagerTaskPackets: listTaskPacketsMock,
+    getSessionWorkStates: getSessionWorkStatesMock,
   };
 });
 
@@ -92,8 +97,11 @@ describe("TerminalPage lost session", () => {
     cleanup();
     vi.clearAllMocks();
     window.localStorage.setItem("forgebadger-language", "zh-CN");
-    window.localStorage.removeItem("forgebadger.session-tabs.v1");
+    writeSessionTabs([]);
+    pushMock.mockClear();
+    replaceMock.mockClear();
     listTaskPacketsMock.mockResolvedValue({ taskPackets: [] });
+    getSessionWorkStatesMock.mockResolvedValue({ states: [], snapshotAt: 0 });
     connectSessionMock.mockResolvedValue({ session: makeSession({}), attachToken: "" });
     startSessionMock.mockResolvedValue({ session: makeSession({ status: "running" }) });
   });
@@ -112,6 +120,8 @@ describe("TerminalPage lost session", () => {
     // The terminal itself must not mount for a lost session.
     expect(screen.queryByText(/正在准备终端连接/)).toBeNull();
     expect(connectSessionMock).not.toHaveBeenCalled();
+    // The tab strip stays mounted so other sessions remain reachable.
+    expect(screen.getByTestId("session-tabs")).toBeTruthy();
   });
 
   it("keeps the stopped panel neutral and points at its own start button", async () => {
@@ -131,13 +141,9 @@ describe("TerminalPage lost session", () => {
     // …and never the stale "go back to the list and use Connect" line.
     expect(screen.queryByText(/返回会话列表并使用连接按钮/)).toBeNull();
     expect(screen.queryByText("无法打开终端")).toBeNull();
-    // The header names the session instead of showing the raw id.
-    expect(screen.getByText("ghost-session")).toBeTruthy();
-    // Mobile: the header reserves the fixed-hamburger band (terminal routes
-    // skip the shell-level pt-16), restored to normal padding at md.
-    const fallbackHeader = screen.getByTestId("session-fallback-header");
-    expect(fallbackHeader.className).toContain("pl-16");
-    expect(fallbackHeader.className).toContain("md:pl-4");
+    // The tab strip stays mounted (previously the whole page was replaced,
+    // which stranded the user on a dead panel with no tab bar).
+    expect(screen.getByTestId("session-tabs")).toBeTruthy();
     expect(screen.queryByText("会话已丢失")).toBeNull();
     expect(connectSessionMock).not.toHaveBeenCalled();
   });
@@ -151,6 +157,35 @@ describe("TerminalPage lost session", () => {
     // Deleted sessions cannot be reconnected: no Connect hint, only the back link.
     expect(screen.queryByText(/返回会话列表并使用连接按钮/)).toBeNull();
     expect(screen.getByRole("link", { name: "返回会话" })).toBeTruthy();
+    // Even an unreadable session keeps the tab strip so other tabs stay usable.
+    expect(screen.getByTestId("session-tabs")).toBeTruthy();
+    // A generic (non-404) failure does not trigger the deleted-session self-heal.
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it("removes a dead tab and jumps to a running session on a real 404", async () => {
+    getSessionMock.mockRejectedValue(new GatewayApiError("Session not found", 404));
+    writeSessionTabs([
+      { id: "s1", label: "dead", status: "running", updatedAt: 1 },
+      { id: "s2", label: "live", status: "running", updatedAt: 2 },
+    ]);
+    renderPage();
+
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/sessions/s2"));
+    expect(replaceMock).not.toHaveBeenCalledWith("/sessions/s1");
+    // The dead tab is removed; the running one stays.
+    expect(readSessionTabs().map((tab) => tab.id)).toEqual(["s2"]);
+  });
+
+  it("drops a dead tab and goes to the session list when nothing is running", async () => {
+    getSessionMock.mockRejectedValue(new GatewayApiError("Session not found", 404));
+    writeSessionTabs([
+      { id: "s1", label: "dead", status: "running", updatedAt: 1 },
+      { id: "s2", label: "stopped", status: "exited", updatedAt: 2 },
+    ]);
+    renderPage();
+
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/sessions"));
   });
 
   it("marks the body in focus mode so the app sidebar chrome is hidden", async () => {

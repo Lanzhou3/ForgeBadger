@@ -46,7 +46,7 @@ const createProviderSchema = z.object({
   region: z.string().optional(),
   productType: productTypeSchema.optional(),
   authType: z.enum(["api_key", "bearer_token", "oauth", "none"]).optional(),
-  apiFormat: z.enum(["anthropic", "openai", "openai-compatible", "google", "bedrock", "local"]).optional(),
+  apiFormat: z.enum(["anthropic", "openai-responses", "openai-compatible", "google"]).optional(),
   supportedAdapters: z.array(providerAdapterSchema).optional(),
   allowPlaintextHttp: z.boolean().optional(),
   allowPrivateNetworks: z.boolean().optional()

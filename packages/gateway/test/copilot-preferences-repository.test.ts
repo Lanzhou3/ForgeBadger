@@ -23,7 +23,7 @@ function createProviderAndModel(db: Database.Database, userId: string) {
     providerKey: "stub",
     baseUrl: "https://stub.example",
     authType: "api_key",
-    apiFormat: "openai",
+    apiFormat: "openai-compatible",
     supportedAdapters: ["opencode"],
   });
   const profile = repo.createModelProfile({

@@ -28,7 +28,7 @@ vi.mock("@/hooks/use-notifications", () => ({
 function makeNotification(overrides: Partial<StoredNotification>): StoredNotification {
   return {
     id: "n1",
-    type: "claude_notification",
+    type: "session_notification",
     category: "session_event",
     titleKey: "notifications.taskCompleted",
     message: "Task finished",

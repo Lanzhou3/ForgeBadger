@@ -29,7 +29,7 @@ function memoryStorage(): Storage {
 function notification(overrides: Partial<StoredNotification> = {}): StoredNotification {
   return {
     id: "notification-1",
-    type: "claude_notification",
+    type: "session_notification",
     category: "session_event",
     titleKey: "notifications.claudePermissionRequest",
     message: "Bash: Claude needs permission",
@@ -56,7 +56,7 @@ describe("browser notifications", () => {
     expect(
       shouldTriggerBrowserNotification(
         {
-          type: "claude_notification",
+          type: "session_notification",
           payload: {
             session_id: "session-1",
             notification_type: "permission_prompt",
@@ -89,7 +89,7 @@ describe("browser notifications", () => {
       expect(
         shouldTriggerBrowserNotification(
           {
-            type: "claude_notification",
+            type: "session_notification",
             payload: { session_id: "session-1", notification_type: notificationType },
           },
           notification()
@@ -102,7 +102,7 @@ describe("browser notifications", () => {
     expect(
       shouldTriggerBrowserNotification(
         {
-          type: "claude_notification",
+          type: "session_notification",
           payload: { session_id: "session-1", notification_type: "permission_prompt" },
         },
         notification({ read: true })

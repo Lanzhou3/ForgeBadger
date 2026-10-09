@@ -44,9 +44,9 @@ export interface SessionDeletedEvent {
   notificationCreatedAt?: Date | undefined;
 }
 
-export interface ClaudeNotificationEvent {
+export interface SessionNotificationEvent {
   cliSummary?: import('./notifications/cli-observation.js').CliSummary | undefined;
-  type: "claude_notification";
+  type: "session_notification";
   userId: string;
   sessionId: string;
   projectId?: string | undefined;
@@ -156,7 +156,7 @@ export type ForgeBadgerEvent =
   | SessionStatusChangedEvent
   | SessionCreatedEvent
   | SessionDeletedEvent
-  | ClaudeNotificationEvent
+  | SessionNotificationEvent
   | AppActionNotificationEvent
   | ActivityCreatedEvent
   | CopilotRunUpdatedEvent
@@ -199,7 +199,7 @@ export class ForgeBadgerEventBus extends EventEmitter {
         this.sessionWork.delete(event.sessionId);
       }
     }
-    if (event.type === "claude_notification" && !event.nativeSubagent
+    if (event.type === "session_notification" && !event.nativeSubagent
       && ["task_completed", "task_failed", "task_interrupted", "session_ended"].includes(event.notificationType)) {
       this.setSessionWorkState({
         userId: event.userId, sessionId: event.sessionId, state: "idle",

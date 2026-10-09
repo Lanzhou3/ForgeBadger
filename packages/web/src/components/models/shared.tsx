@@ -201,11 +201,9 @@ export function applyTargetsForProvider(provider: ProviderProfile | undefined): 
 export function apiFormatLabel(format: ProviderApiFormat, t: Translate): string {
   switch (format) {
     case "anthropic": return t("models.apiFormatAnthropic");
-    case "openai": return t("models.apiFormatOpenai");
-    case "openai-compatible": return t("models.apiFormatOpenaiCompatible");
+    case "openai-responses": return t("models.apiFormatOpenaiResponses");
+    case "openai-compatible": return t("models.apiFormatOpenaiChat");
     case "google": return t("models.apiFormatGoogle");
-    case "bedrock": return t("models.apiFormatBedrock");
-    case "local": return t("models.apiFormatLocal");
     default: return format;
   }
 }
@@ -214,11 +212,9 @@ export function apiFormatLabel(format: ProviderApiFormat, t: Translate): string 
 export function apiFormatHint(format: ProviderApiFormat, t: Translate): string {
   switch (format) {
     case "anthropic": return t("models.apiFormatHintAnthropic");
-    case "openai": return t("models.apiFormatHintOpenai");
-    case "openai-compatible": return t("models.apiFormatHintOpenaiCompatible");
+    case "openai-responses": return t("models.apiFormatHintOpenaiResponses");
+    case "openai-compatible": return t("models.apiFormatHintOpenaiChat");
     case "google": return t("models.apiFormatHintGoogle");
-    case "bedrock": return t("models.apiFormatHintBedrock");
-    case "local": return t("models.apiFormatHintLocal");
     default: return "";
   }
 }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -13,7 +14,7 @@ import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 
 it('archives a real oversized project read and retrieves its redacted tail via the original receipt', async () => {
   const db = new Database(':memory:'); db.pragma('foreign_keys=ON');
-  migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
   try {
     const userId = new UserRepository(db).create('artifact@test.dev', 'hash').id;
     const project = new ProjectRepository(db, userId).create({ name: 'large evidence', path: '/tmp/artifact-source', aiTool: 'codex', description: '证据'.repeat(30000) + ' TAIL-EVIDENCE sk-FAKESECRET123456' });
@@ -57,7 +58,7 @@ function artifactFixture(t: TestContext, fileBacked = false) {
   const root = mkdtempSync(join(tmpdir(), 'fb-artifact-'));
   const filename = join(root, 'fixture.sqlite');
   const db = new Database(fileBacked ? filename : ':memory:'); db.pragma('foreign_keys=ON');
-  migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
   const userId = new UserRepository(db).create('artifact-bounds@test.dev', 'hash').id;
   const project = new ProjectRepository(db, userId).create({ name: 'Source', path: root, aiTool: 'codex' });
   const ledger = new CopilotRunLedger(db, userId); const conversationId = ledger.log.createConversation().id;

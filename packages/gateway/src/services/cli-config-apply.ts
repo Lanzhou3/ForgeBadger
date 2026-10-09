@@ -86,10 +86,9 @@ export interface CliConfigApplyInput {
    */
   routeThroughGateway?: boolean | undefined;
   /**
-   * Codex only: wire protocol the provider uses. Defaults to "chat"
-   * (OpenAI-compatible /chat/completions), which is correct for most
-   * third-party providers. Set to "responses" only when the provider
-   * supports the OpenAI /responses API (native OpenAI, Codex.app, etc.).
+   * Codex only: wire protocol the provider uses. Defaults to the profile's
+   * apiFormat (openai-responses→"responses", everything else→"chat"). Set
+   * explicitly only to override that resolution.
    */
   codexWireApi?: CodexWireApi | undefined;
   resolveHost?: OutboundHostResolver | undefined;
@@ -161,15 +160,16 @@ interface ApplyContext {
   routeToken: string | null;
   /** What the previous apply to this adapter injected as the context window, if known. */
   previousContextWindow: number | null;
-  /** Codex wire API for this provider: "chat" (default) or "responses". */
+  /** Codex wire API resolved from the profile's apiFormat (explicit apply input wins). */
   codexWireApi: CodexWireApi;
 }
 
 /**
  * Codex wire API: "chat" = /chat/completions (OpenAI-compatible), "responses" = /responses.
- * Third-party OpenAI-compatible APIs (Qwen, Moonshot AI, Ollama, etc.) only support
- * chat completions. The official Codex default is "chat" when omitted; ForgeBadger
- * previously hardcoded "responses" which broke every third-party provider.
+ * Third-party chat-completions relays (Qwen, Moonshot AI, Ollama, etc.) only support
+ * chat completions. The value is derived from the profile's apiFormat (explicit
+ * apply input wins); ForgeBadger previously hardcoded "responses" which broke
+ * every third-party provider.
  */
 export type CodexWireApi = "chat" | "responses";
 
@@ -527,28 +527,17 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
     routeMode,
     routeToken,
     previousContextWindow,
-    codexWireApi: resolveCodexWireApi(input, provider, model)
+    codexWireApi: resolveCodexWireApi(input, provider)
   };
 }
 
-/** Resolves the Codex wire API: explicit input wins, else "chat" default, with "responses" for known OpenAI-native providers. */
-function resolveCodexWireApi(
-  input: CliConfigApplyInput,
-  provider: ProviderProfile,
-  model: ModelProfile
-): CodexWireApi {
+/** Resolves the Codex wire API: explicit input wins, else the profile's apiFormat decides. */
+function resolveCodexWireApi(input: CliConfigApplyInput, provider: ProviderProfile): CodexWireApi {
   if (input.codexWireApi) return input.codexWireApi;
-  // Only OpenAI's native providers support the /responses API. Everything else
-  // (Qwen, Moonshot AI, Moonshot, Ollama, generic OpenAI-compatible) is chat only.
-  const providerKey = provider.providerKey.toLowerCase();
-  if (providerKey === "openai" || providerKey === "codex" || providerKey === "chatgpt") {
-    return "responses";
-  }
-  const modelId = model.modelId.toLowerCase();
-  if (modelId.startsWith("gpt-") || modelId.startsWith("o3") || modelId.startsWith("o4-mini") || modelId.startsWith("codex-")) {
-    return "responses";
-  }
-  return "chat";
+  // Only endpoints explicitly marked openai-responses speak the /responses
+  // API. Everything else (Qwen, Moonshot AI, Ollama, generic chat-completions
+  // relays) is chat only.
+  return provider.apiFormat === "openai-responses" ? "responses" : "chat";
 }
 
 /**
@@ -753,12 +742,6 @@ function buildApplyDocument(
     return;
   }
   if (context.adapter === "pi") {
-    if (context.provider.apiFormat === "bedrock") {
-      throw new CliConfigApplyError(
-        "CLI_CONFIG_APPLY_ADAPTER_UNSUPPORTED",
-        "PI providers are file-based (models.json) and do not support the Bedrock API format"
-      );
-    }
     if (target.role === "settings") {
       // Managed startup selection only: PI pairs a bare model id with the
       // provider key (settings.md: defaultProvider + defaultModel). Every
@@ -788,7 +771,7 @@ function buildApplyDocument(
     // `reasoning_effort: <mapped value>` verbatim). Existing map entries —
     // and any other per-model user tuning (maxTokens, input, ...) — are
     // preserved additively.
-    const api = piApiName(context.provider.apiFormat, context.providerKey);
+    const api = piApiName(context.provider.apiFormat);
     const models = context.activeModels.map((activeModel) => {
       const current = record(existingModels.find((entry) => record(entry).id === activeModel.modelId));
       const next: Record<string, unknown> = { ...current, id: activeModel.modelId, name: activeModel.name };
@@ -1161,13 +1144,13 @@ async function withInProcessLock<T>(key: string, action: () => Promise<T>): Prom
 /**
  * MiniMax Code API format names (verified against @minimax-ai/code 0.4.12:
  * the provider registry `api` field, and the URL/header construction it drives).
- * `google` and `bedrock` have no counterpart and are rejected by the
- * capability matrix, so they fall back to the Anthropic Messages shape rather
- * than writing a value the CLI cannot use.
+ * `google` has no counterpart and is rejected by the capability matrix, so it
+ * falls back to the Anthropic Messages shape rather than writing a value the
+ * CLI cannot use.
  */
 function mcodeApiName(apiFormat: ProviderApiFormat): "anthropic-messages" | "openai-responses" | "openai-completions" {
-  if (apiFormat === "openai") return "openai-responses";
-  if (apiFormat === "openai-compatible" || apiFormat === "local") return "openai-completions";
+  if (apiFormat === "openai-responses") return "openai-responses";
+  if (apiFormat === "openai-compatible") return "openai-completions";
   return "anthropic-messages";
 }
 
@@ -1200,6 +1183,11 @@ export function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId
  * Moonshot's OpenAI-compatible protocol (managed service + Kimi Platform
  * keys), "anthropic" speaks the Anthropic Messages protocol, and "openai"
  * covers generic Chat Completions relays.
+ *
+ * Kimi Code's config has a single OpenAI-family provider type ("openai"),
+ * so both openai-responses and openai-compatible providers are declared
+ * there; whether the endpoint actually serves the provider's wire protocol
+ * is the owner's responsibility, the same as for any relay endpoint.
  */
 function kimiProviderType(apiFormat: ProviderProfile["apiFormat"], baseUrl: string | null): string {
   if (apiFormat === "anthropic") return "anthropic";
@@ -1217,26 +1205,31 @@ function isMoonshotEndpoint(baseUrl: string | null): boolean {
   }
 }
 
+/**
+ * OpenCode provider package selection. `@ai-sdk/openai` routes OpenCode to
+ * the OpenAI Responses API (/responses, `input`-shaped bodies) while
+ * `@ai-sdk/openai-compatible` uses Chat Completions (/chat/completions).
+ * Strict third-party gateways reject the Responses API's shorthand history
+ * items (role/content messages, function_call, function_call_output), so
+ * only endpoints explicitly marked openai-responses may take the native
+ * package — everything OpenAI-flavored defaults to chat completions.
+ */
 function openCodePackage(apiFormat: ProviderProfile["apiFormat"]): string {
-  if (apiFormat === "openai") return "@ai-sdk/openai";
+  if (apiFormat === "openai-responses") return "@ai-sdk/openai";
   if (apiFormat === "anthropic") return "@ai-sdk/anthropic";
   if (apiFormat === "google") return "@ai-sdk/google";
-  if (apiFormat === "bedrock") return "@ai-sdk/amazon-bedrock";
   return "@ai-sdk/openai-compatible";
 }
 
 /**
  * PI models.json `api` values for file-based providers (models.md):
- * anthropic→anthropic-messages, google→google-generative-ai, everything
- * OpenAI-flavored→openai-completions except OpenAI-native providers, which
- * get the /responses API. Bedrock has no file-based API (rejected upstream).
+ * anthropic→anthropic-messages, google→google-generative-ai,
+ * openai-responses→the /responses API, chat completions→openai-completions.
  */
-function piApiName(apiFormat: ProviderApiFormat, providerKey: string): string {
+function piApiName(apiFormat: ProviderApiFormat): string {
   if (apiFormat === "anthropic") return "anthropic-messages";
   if (apiFormat === "google") return "google-generative-ai";
-  if (apiFormat === "openai" && ["openai", "codex", "chatgpt"].includes(providerKey)) {
-    return "openai-responses";
-  }
+  if (apiFormat === "openai-responses") return "openai-responses";
   return "openai-completions";
 }
 

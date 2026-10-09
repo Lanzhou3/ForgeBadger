@@ -39,11 +39,9 @@ import {
 
 const API_FORMATS: ProviderApiFormat[] = [
   "anthropic",
-  "openai",
+  "openai-responses",
   "openai-compatible",
   "google",
-  "bedrock",
-  "local",
 ];
 
 const AUTH_TYPES: ProviderAuthType[] = ["api_key", "bearer_token", "oauth", "none"];

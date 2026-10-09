@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { afterEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -12,34 +12,15 @@ import { SessionRepository } from '../src/db/repositories/session-repository.js'
 import { InMemorySessionManager } from '../src/services/session-manager.js';
 import { PlatformActions } from '../src/services/platform-commands/actions.js';
 import { createPlatformCommands } from '../src/services/platform-commands/catalog.js';
-import { assertAdapterAutonomy, cliAutonomyAdapters, configureCliAutonomyAdapters, getAdapterAutonomy } from '../src/services/adapter-autonomy.js';
 import { readTaskPacketDetails, withTaskPacketSessionLink } from '../src/services/project-manager/task-packets.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
-import { loadEnv } from '../src/config/env.js';
 
-afterEach(() => configureCliAutonomyAdapters([]));
-
-describe('CLI autonomy configuration', () => {
-    it('parses FORGEBADGER_CLI_AUTONOMY_ADAPTERS and round-trips a validated env', () => {
-        const base = { FORGEBADGER_JWT_SECRET: 'j'.repeat(32), FORGEBADGER_MASTER_KEY: 'k'.repeat(32) };
-        const env = loadEnv({ ...base, FORGEBADGER_CLI_AUTONOMY_ADAPTERS: 'claude, codex' });
-        assert.deepEqual(env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS, ['claude', 'codex']);
-        assert.deepEqual(loadEnv(env).FORGEBADGER_CLI_AUTONOMY_ADAPTERS, ['claude', 'codex']);
-        assert.deepEqual(loadEnv(base).FORGEBADGER_CLI_AUTONOMY_ADAPTERS, []);
-        assert.throws(() => loadEnv({ ...base, FORGEBADGER_CLI_AUTONOMY_ADAPTERS: 'claude,unknown' }));
-    });
-
-    it('gates programmatic dispatch behind the operator opt-in', () => {
-        assert.equal(getAdapterAutonomy('claude').mode, 'manual_only');
-        assert.throws(() => assertAdapterAutonomy('claude'), /ADAPTER_AUTONOMY_UNVERIFIED/);
-        configureCliAutonomyAdapters(['claude']);
-        assert.deepEqual(cliAutonomyAdapters(), ['claude']);
-        assert.equal(getAdapterAutonomy('claude').mode, 'supervised');
-        assertAdapterAutonomy('claude');
-        assert.equal(getAdapterAutonomy('codex').mode, 'manual_only');
-        assert.throws(() => assertAdapterAutonomy('codex'), /ADAPTER_AUTONOMY_UNVERIFIED/);
-    });
-});
+// The per-project Copilot autonomy switch is the single authorization axis
+// for programmatic CLI dispatch. There is deliberately no per-adapter
+// allowlist: every code CLI (Claude Code, OpenCode, Codex, Kimi Code, PI,
+// MiniMax Code) is equal, and copilot-origin dispatch follows the switch of
+// the session's project. Owner-origin dispatch is the owner acting directly
+// and needs no switch.
 
 function fixture() {
     const db = new Database(':memory:');
@@ -60,7 +41,7 @@ function codexManager(options: { stage?: boolean } = {}) {
         async inspectPane() { return { content: pane, dead: false }; },
         async stageProgrammaticInput(_name: string, data: string) { state.staged.push(data); if (stage) pane = `› ${data}\n\nmodel · cwd`; },
         async pressEnter() { state.enters++; pane = '› Ask Codex to do anything\n\nmodel · cwd'; }
-    }, undefined, undefined, { sleep: async () => {} });
+    }, undefined, undefined, { sleep: async () => {}, programmaticStagedVerifyTimeoutMs: 50 });
     return { manager, state };
 }
 
@@ -81,18 +62,7 @@ function copilotOrigin(db: Database, userId: string, stepId: string): { runId: s
 }
 
 describe('session.dispatch', () => {
-    it('denies preview without recording an intent when the adapter is not autonomy-enabled', async () => {
-        const { db, user, project, sessions } = fixture();
-        try {
-            const session = sessions.create({ projectId: project.id, name: 's', aiTool: 'codex', workingDir: '/tmp' });
-            const actions = new PlatformActions({ db, userId: user.id }, createPlatformCommands());
-            assert.throws(() => actions.preview({ commandId: 'session.dispatch', input: { sessionId: session.id, message: 'hi' }, idempotencyKey: 'denied' }), /ADAPTER_AUTONOMY_UNVERIFIED/);
-            assert.equal((db.prepare('SELECT count(*) n FROM platform_action_intents').get() as { n: number }).n, 0);
-        } finally { db.close(); }
-    });
-
-    it('dispatches into a live session once the adapter is autonomy-enabled', async () => {
-        configureCliAutonomyAdapters(['codex']);
+    it('owner-origin dispatch works without any adapter allowlist: no switch, no env, no per-CLI opt-in', async () => {
         const { db, user, project, sessions } = fixture();
         try {
             const session = sessions.create({ projectId: project.id, name: 's', aiTool: 'codex', workingDir: '/tmp' });
@@ -108,7 +78,6 @@ describe('session.dispatch', () => {
     });
 
     it('surfaces indeterminate delivery as COPILOT_DELIVERY_UNCONFIRMED and never retries', async () => {
-        configureCliAutonomyAdapters(['codex']);
         const { db, user, project, sessions } = fixture();
         try {
             const session = sessions.create({ projectId: project.id, name: 's', aiTool: 'codex', workingDir: '/tmp' });
@@ -124,17 +93,7 @@ describe('session.dispatch', () => {
 });
 
 describe('pm.task.execute', () => {
-    it('denies preview when the adapter is not autonomy-enabled', async () => {
-        const { db, user, project } = fixture();
-        try {
-            const item = new ProjectManagerRepository(db, user.id).createWorkItem(project.id, { title: 'Build feature' });
-            const actions = new PlatformActions({ db, userId: user.id }, createPlatformCommands());
-            assert.throws(() => actions.preview({ commandId: 'pm.task.execute', input: { projectId: project.id, workItemId: item.id }, idempotencyKey: 'pm-denied' }), /ADAPTER_AUTONOMY_UNVERIFIED/);
-        } finally { db.close(); }
-    });
-
-    it('prepares, dispatches the packet prompt and marks the work item in progress', async () => {
-        configureCliAutonomyAdapters(['codex']);
+    it('prepares, dispatches the packet prompt and marks the work item in progress without an adapter allowlist', async () => {
         const { db, user, project, sessions } = fixture();
         try {
             const pm = new ProjectManagerRepository(db, user.id);
@@ -157,7 +116,6 @@ describe('pm.task.execute', () => {
 
 describe('copilot project autonomy gate', () => {
     it('denies a copilot-origin dispatch while the project switch is off and leaves the owner path unaffected', async () => {
-        configureCliAutonomyAdapters(['codex']);
         const { db, user, project, sessions } = fixture();
         try {
             const { manager, state } = codexManager();
@@ -183,7 +141,6 @@ describe('copilot project autonomy gate', () => {
     });
 
     it('dispatches a copilot-origin action when the switch is on and rejects again once it is turned off', async () => {
-        configureCliAutonomyAdapters(['codex']);
         const { db, user, project, sessions } = fixture();
         try {
             const { manager, state } = codexManager();
@@ -213,7 +170,6 @@ describe('copilot project autonomy gate', () => {
     });
 
     it('rejects a copilot-origin dispatch into a session of a project that keeps the switch off', async () => {
-        configureCliAutonomyAdapters(['codex']);
         const { db, user, project, sessions } = fixture();
         try {
             const { manager } = codexManager();

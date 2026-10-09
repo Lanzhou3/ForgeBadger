@@ -68,9 +68,10 @@ export default function ModelsPage() {
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<ProviderProfile | null>(null);
   const [applyDialog, setApplyDialog] = useState<{ open: boolean; adapter?: RuntimeAdapterId }>({ open: false });
-  const [configSheet, setConfigSheet] = useState<{ open: boolean; adapter: RuntimeAdapterId }>({
+  const [configSheet, setConfigSheet] = useState<{ open: boolean; adapter: RuntimeAdapterId | null }>({
     open: false,
-    adapter: "claude",
+    // No default CLI: the sheet opens from an explicit CLI status cell.
+    adapter: null,
   });
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [rotateDialogOpen, setRotateDialogOpen] = useState(false);
@@ -654,11 +655,13 @@ export default function ModelsPage() {
       </div>
       )}
 
-      <CliConfigSheet
-        open={configSheet.open}
-        adapter={configSheet.adapter}
-        onOpenChange={(open) => setConfigSheet((current) => ({ ...current, open }))}
-      />
+      {configSheet.adapter && (
+        <CliConfigSheet
+          open={configSheet.open}
+          adapter={configSheet.adapter}
+          onOpenChange={(open) => setConfigSheet((current) => ({ ...current, open }))}
+        />
+      )}
 
       <AddProviderDialog
         open={providerDialogOpen}

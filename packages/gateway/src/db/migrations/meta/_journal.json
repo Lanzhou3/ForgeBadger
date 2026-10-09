@@ -897,6 +897,34 @@
       "when": 1791092848040,
       "tag": "0128_feishu_builtin_summaries",
       "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1791092848041,
+      "tag": "0129_session_notification_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1791092848042,
+      "tag": "0130_template_adapter_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1791092848043,
+      "tag": "0131_single_project_autonomy",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1791511237807,
+      "tag": "0132_api_format_protocol_values",
+      "breakpoints": true
     }
   ]
 }

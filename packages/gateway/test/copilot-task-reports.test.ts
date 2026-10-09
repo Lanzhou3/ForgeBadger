@@ -12,7 +12,6 @@ import { ProjectRepository } from '../src/db/repositories/project-repository.js'
 import { ProjectManagerRepository } from '../src/db/repositories/project-manager-repository.js';
 import { InMemorySessionManager } from '../src/services/session-manager.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
-import { configureCliAutonomyAdapters } from '../src/services/adapter-autonomy.js';
 import { attachNotificationPersistence } from '../src/services/notification-events.js';
 import { attachDispatchSupervisor } from '../src/services/agent/dispatch-supervisor.js';
 import { publishTaskReviews } from '../src/services/agent/task-review.js';
@@ -24,7 +23,7 @@ import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
 import { readTaskDispatchAttempt } from '../src/services/project-manager/task-execution.js';
 
 const cleanups: Array<() => void> = [];
-afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); configureCliAutonomyAdapters([]); });
+afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 
 function fixture(options: { autonomy?: boolean; cancelAfterDispatch?: boolean; maxSteps?: number; reviewTaskResults?: boolean; modelId?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'fb-task-report-'));
@@ -46,7 +45,6 @@ function fixture(options: { autonomy?: boolean; cancelAfterDispatch?: boolean; m
     async stageProgrammaticInput(_name, data) { pane = `› ${data}\nmodel · cwd`; },
     async pressEnter() { enters++; pane = '› Ask Codex to do anything\nmodel · cwd'; }
   }, undefined, undefined, { sleep: async () => {} });
-  configureCliAutonomyAdapters(['codex']);
   const deps = { db, masterKey: 'test', eventBus, sessionManager: manager, adapterCommandRunner: async (command: string) => ({ exitCode: 0, stdout: `${command} 1.0.0`, stderr: '' }) };
   const ledger = new CopilotRunLedger(db, user.id);
   const conversation = ledger.log.createConversation();
@@ -83,7 +81,7 @@ function fixture(options: { autonomy?: boolean; cancelAfterDispatch?: boolean; m
     const item = pm.listWorkItems(project.id)[0]!;
     const attempt = readTaskDispatchAttempt(item)!;
     assert.equal(attempt.status, 'dispatched');
-    eventBus.emitEvent({ type: 'claude_notification', userId: user.id, projectId: project.id, sessionId: attempt.sessionId, hookEventName: 'Stop', notificationType: 'task_completed', message: 'CLI completed its work' });
+    eventBus.emitEvent({ type: 'session_notification', userId: user.id, projectId: project.id, sessionId: attempt.sessionId, hookEventName: 'Stop', notificationType: 'task_completed', message: 'CLI completed its work' });
     return item;
   };
   const reports = () => db.prepare("SELECT * FROM copilot_messages WHERE user_id = ? AND tool_name = 'pm_task_report'").all(user.id) as Array<{ conversation_id: string; tool_call_id: string; content: string }>;

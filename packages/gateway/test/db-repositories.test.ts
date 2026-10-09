@@ -492,7 +492,7 @@ describe("db repositories", () => {
       );
       assert.equal(settings.hooks.PermissionRequest[0].matcher, undefined);
       assert.equal(settings.hooks.PermissionRequest[0].hooks[0].type, "http");
-      assert.match(settings.hooks.PermissionRequest[0].hooks[0].url, /\/api\/v1\/session-hooks\/claude-notification/);
+      assert.match(settings.hooks.PermissionRequest[0].hooks[0].url, /\/api\/v1\/session-hooks\/cli-notification/);
       assert.equal(settings.hooks.PermissionRequest[0].hooks[0].headers["x-forgebadger-session-token"], "$FORGEBADGER_ATTACH_TOKEN");
       assert.deepEqual(settings.hooks.PermissionRequest[0].hooks[0].allowedEnvVars, [
         "FORGEBADGER_SESSION_ID",

@@ -3,7 +3,7 @@
  *
  * Consumes notifications observed on PTY output by the Session Server
  * (OSC 9, OSC 99, OSC 777, bell — see terminal-notification-scanner.ts) and
- * turns them into the same `claude_notification` event + activity row the
+ * turns them into the same `session_notification` event + activity row the
  * CLI hook route produces, so the web UI toasts uniformly regardless of
  * channel.
  *
@@ -90,7 +90,7 @@ export function ingestTerminalNotification(
   const message = redactSensitiveContent(mapped.message);
   const title = mapped.title ? redactSensitiveContent(mapped.title) : undefined;
   eventBus.emitEvent({
-    type: "claude_notification",
+    type: "session_notification",
     userId: session.userId,
     sessionId: session.id,
     projectId: session.projectId,

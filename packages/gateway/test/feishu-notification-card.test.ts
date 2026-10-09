@@ -13,7 +13,7 @@ const item: FeishuNotificationDelivery = {
 };
 function notice(payload: Record<string, unknown> = {}, patch: Partial<Notification> = {}): Notification {
   return {
-    id: 'notice', userId: 'owner', type: 'claude_notification', category: 'session_event',
+    id: 'notice', userId: 'owner', type: 'session_notification', category: 'session_event',
     titleKey: 'notifications.taskCompleted', message: 'Codex task completed', href: 'https://untrusted.example',
     sessionId: '58999b1a-1234-4321-9876-123456789abc', isRead: false,
     createdAt: occurredAt, updatedAt: occurredAt,

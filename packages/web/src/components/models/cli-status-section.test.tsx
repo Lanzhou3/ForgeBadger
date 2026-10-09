@@ -31,7 +31,7 @@ vi.mock("@/lib/api", () => ({
 
 const provider: ProviderProfile = {
   id: "provider-1", providerKey: "custom", name: "Custom", baseUrl: "https://example.com/v1",
-  apiFormat: "openai", authType: "api_key", supportedAdapters: ["claude", "codex", "kimi"], status: "active",
+  apiFormat: "openai-compatible", authType: "api_key", supportedAdapters: ["claude", "codex", "kimi"], status: "active",
 };
 
 const FETCHED_AT = "2026-09-22T12:00:00Z";

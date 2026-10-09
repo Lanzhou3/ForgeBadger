@@ -10,7 +10,7 @@ import { SessionRepository } from '../src/db/repositories/session-repository.js'
 import { NotificationRepository } from '../src/db/repositories/notification-repository.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { attachNotificationPersistence } from '../src/services/notification-events.js';
-import { handleClaudeNotificationHook } from '../src/routes/session-hooks.js';
+import { handleSessionNotificationHook } from '../src/routes/session-hooks.js';
 import { createNotificationDeduper } from '../src/services/notification-dedupe.js';
 
 it('snapshots a bounded redacted recent user prompt without generating a notification for prompt submission', () => {
@@ -23,7 +23,7 @@ it('snapshots a bounded redacted recent user prompt without generating a notific
     const session = sessions.create({ projectId: project.id, name: 'Project', aiTool: 'codex', workingDir: project.path, attachToken: 'fixture' });
     const bus = new ForgeBadgerEventBus(); attachNotificationPersistence({ db, eventBus: bus });
     const notices = new NotificationRepository(db, user.id);
-    const hook = (event: Record<string, unknown>, token = 'fixture') => handleClaudeNotificationHook(db, bus,
+    const hook = (event: Record<string, unknown>, token = 'fixture') => handleSessionNotificationHook(db, bus,
       { session_id: 'native-session', turn_id: 'round-1', ...event, adapter: 'codex' }, token, session.id, createNotificationDeduper());
     assert.equal(hook({ hook_event_name: 'UserPromptSubmit', prompt: 'unauthorized' }, 'wrong').status, 401);
     assert.equal(sessions.getById(session.id)?.lastPrompt, null);

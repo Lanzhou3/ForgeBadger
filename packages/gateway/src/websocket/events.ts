@@ -166,7 +166,7 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
         session_id: event.sessionId,
         ...notificationMeta
       };
-    case "claude_notification":
+    case "session_notification":
       return {
         session_id: event.sessionId,
         ...(event.projectId ? { project_id: event.projectId } : {}),
@@ -175,7 +175,7 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
         hook_event_name: event.hookEventName,
         notification_type: event.notificationType,
         message: event.message,
-        adapter: event.adapter ?? "claude",
+        ...(event.adapter ? { adapter: event.adapter } : {}),
         ...(event.title ? { title: event.title } : {}),
         ...(event.toolName ? { tool_name: event.toolName } : {}),
         ...notificationMeta

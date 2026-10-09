@@ -21,7 +21,6 @@ import { expandUserPath } from "../lib/user-path.js";
 import { buildProjectConfigFiles } from "../services/project-config-files.js";
 import { adapterForTemplate } from "../services/project-config-render.js";
 
-const defaultTemplateId = "builtin-claude-code";
 const cliUserId = "forgebadger-cli";
 
 export interface InitCommand {
@@ -56,7 +55,7 @@ export function parseForgeBadgerCliArgs(args: string[]): InitCommand {
   if (normalizedArgs[0] !== "init") {
     throw new Error(
       [
-        "Usage: forgebadger init --path <project-path> [--template-id <id>] [--dry-run]",
+        "Usage: forgebadger init --path <project-path> --template-id <id> [--dry-run]",
         "       forgebadger init --list-templates"
       ].join("\n")
     );
@@ -74,10 +73,17 @@ export function parseForgeBadgerCliArgs(args: string[]): InitCommand {
     throw new Error("Invalid --credential-mode");
   }
 
+  // The template is an explicit choice, never a silent default: every CLI
+  // template (Claude Code, OpenCode, Codex, Kimi Code, ...) is equal here.
+  const templateId = values["template-id"];
+  if (!listTemplates && !templateId) {
+    throw new Error("Missing required --template-id (run with --list-templates to see options)");
+  }
+
   return {
     command: "init",
     projectPath,
-    templateId: values["template-id"] ?? defaultTemplateId,
+    templateId: templateId ?? "",
     credentialMode,
     listTemplates,
     dryRun: values["dry-run"] === "true"

@@ -6,7 +6,13 @@ import { isCanonicalAdapterId, type CanonicalAdapterId } from "../../lib/adapter
 import { assertPublicHttpsEndpoint } from "../../services/network-policy.js";
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
-export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
+/**
+ * Wire protocol the provider endpoint speaks, not the vendor: Anthropic
+ * Messages, OpenAI Responses (/responses), OpenAI Chat Completions
+ * (/chat/completions, the safe default for third-party relays and local
+ * services like Ollama/vLLM), and Gemini native generateContent.
+ */
+export type ProviderApiFormat = "anthropic" | "openai-responses" | "openai-compatible" | "google";
 export type ProviderAdapter = CanonicalAdapterId;
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 

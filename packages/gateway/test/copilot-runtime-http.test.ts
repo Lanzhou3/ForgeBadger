@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -13,14 +14,14 @@ import { signJwt } from "../src/auth/jwt.js";
 
 it("HTTP accepts before model completion, restores durable runs, rejects busy edits and awaits cancellation", async()=>{
   const db=new Database(":memory:");
-  migrate(drizzle(db),{migrationsFolder:new URL("../src/db/migrations",import.meta.url).pathname});
+  migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL("../src/db/migrations", import.meta.url))});
   const masterKey="a".repeat(32),jwtSecret="b".repeat(32);
   const user=new UserRepository(db).create("http-runtime@example.com","hash");
   const headers={Authorization:`Bearer ${signJwt({userId:user.id,email:user.email},jwtSecret)}`,"Content-Type":"application/json"};
   const log=new CopilotConversationLog(db,user.id);const c=log.createConversation();
   const other=log.createConversation();const foreign=log.appendMessage(other.id,{role:"user",kind:"text",content:"original"});
   const repo=new ModelProviderRepository(db,user.id,masterKey);
-  const provider=repo.createProviderProfile({name:"fixture",providerKey:"fixture",baseUrl:"https://8.8.8.8",apiFormat:"openai",authType:"api_key",supportedAdapters:["opencode"]});
+  const provider=repo.createProviderProfile({name:"fixture",providerKey:"fixture",baseUrl:"https://8.8.8.8",apiFormat:"openai-compatible",authType:"api_key",supportedAdapters:["opencode"]});
   repo.createCredential({providerProfileId:provider.id,label:"test",plaintextSecret:"fixture-key"});
   repo.createModelProfile({providerProfileId:provider.id,name:"fixture",modelId:"fixture",capabilities:["chat"],isDefault:true});
   let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
@@ -66,7 +67,7 @@ it("HTTP accepts before model completion, restores durable runs, rejects busy ed
 it('serves persisted connection diagnostics and transcript to the owner only', async () => {
   const { createAgentPublicFetch } = await import('../src/services/agent/llm-public-fetch.js');
   const db = new Database(':memory:');
-  migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
   const masterKey = 'a'.repeat(32), jwtSecret = 'b'.repeat(32);
   const users = new UserRepository(db);
   const owner = users.create('error-owner@test.dev', 'hash');
@@ -75,7 +76,7 @@ it('serves persisted connection diagnostics and transcript to the owner only', a
   const log = new CopilotConversationLog(db, owner.id);
   const conversation = log.createConversation();
   const models = new ModelProviderRepository(db, owner.id, masterKey);
-  const provider = models.createProviderProfile({ name: 'fixture', providerKey: 'fixture', baseUrl: 'https://8.8.8.8', apiFormat: 'openai', authType: 'api_key', supportedAdapters: ['opencode'] });
+  const provider = models.createProviderProfile({ name: 'fixture', providerKey: 'fixture', baseUrl: 'https://8.8.8.8', apiFormat: 'openai-compatible', authType: 'api_key', supportedAdapters: ['opencode'] });
   models.createCredential({ providerProfileId: provider.id, label: 'test', plaintextSecret: 'fixture-secret' });
   models.createModelProfile({ providerProfileId: provider.id, name: 'fixture', modelId: 'fixture', capabilities: ['chat'], isDefault: true });
   const app = createGatewayApp({ db, masterKey, jwtSecret,

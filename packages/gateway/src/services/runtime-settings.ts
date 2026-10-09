@@ -1,9 +1,7 @@
-import { adapterIds } from "../lib/adapter-ids.js";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 
 import {
-  cliAutonomyAdaptersSchema,
   registrationModeSchema,
   sessionPrefixSchema,
   type GatewayEnv
@@ -17,14 +15,12 @@ export type RuntimeSettingKey =
   | "registration"
   | "mcp_enabled"
   | "session_prefix"
-  | "cli_autonomy_adapters"
   | "pm_auto_dispatch";
 
 export const RUNTIME_SETTING_KEYS: readonly RuntimeSettingKey[] = [
   "registration",
   "mcp_enabled",
   "session_prefix",
-  "cli_autonomy_adapters",
   "pm_auto_dispatch"
 ];
 
@@ -35,7 +31,6 @@ export const RUNTIME_SETTING_META: Readonly<Record<RuntimeSettingKey, { hot: boo
   registration: { hot: true },
   mcp_enabled: { hot: false },
   session_prefix: { hot: true },
-  cli_autonomy_adapters: { hot: true },
   pm_auto_dispatch: { hot: true }
 };
 
@@ -43,7 +38,6 @@ export interface RuntimeSettingsEffective {
   registration: "open" | "off" | "invite";
   mcpEnabled: boolean;
   sessionPrefix: string;
-  cliAutonomyAdapters: readonly string[];
   pmAutoDispatch: boolean;
   /** true when FORGEBADGER_RUNTIME_SETTINGS_READONLY forbids API writes. */
   readonly: boolean;
@@ -91,9 +85,6 @@ const patchSchema = z
     registration: registrationModeSchema.optional(),
     mcp_enabled: booleanInput.optional(),
     session_prefix: sessionPrefixSchema.optional(),
-    // Accepts either an adapter array or a comma-separated string, exactly
-    // like the FORGEBADGER_CLI_AUTONOMY_ADAPTERS env variable.
-    cli_autonomy_adapters: cliAutonomyAdaptersSchema.optional(),
     pm_auto_dispatch: booleanInput.optional()
   })
   .strict();
@@ -103,7 +94,6 @@ export function envToEffective(env: GatewayEnv): RuntimeSettingsEffective {
     registration: env.FORGEBADGER_REGISTRATION,
     mcpEnabled: env.FORGEBADGER_MCP_ENABLED,
     sessionPrefix: env.FORGEBADGER_SESSION_PREFIX,
-    cliAutonomyAdapters: env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS,
     pmAutoDispatch: env.FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED,
     readonly: env.FORGEBADGER_RUNTIME_SETTINGS_READONLY
   };
@@ -114,7 +104,7 @@ export interface RuntimeSettingsStoreOptions {
   /**
    * Called with the refreshed effective values after each successful write
    * (and once at wiring time). The applier pushes hot changes into the live
-   * process (autonomy registry, session prefix, dispatch supervisor, ...).
+   * process (session prefix, dispatch supervisor, ...).
    */
   apply?: (effective: RuntimeSettingsEffective) => void;
 }
@@ -156,10 +146,6 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
       const value = sessionPrefixSchema.safeParse(overrides.get("session_prefix"));
       if (value.success) merged.sessionPrefix = value.data;
     }
-    if (overrides.has("cli_autonomy_adapters")) {
-      const value = z.array(z.enum(adapterIds)).safeParse(overrides.get("cli_autonomy_adapters"));
-      if (value.success) merged.cliAutonomyAdapters = value.data;
-    }
     if (overrides.has("pm_auto_dispatch")) {
       const value = z.boolean().safeParse(overrides.get("pm_auto_dispatch"));
       if (value.success) merged.pmAutoDispatch = value.data;
@@ -175,8 +161,6 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
         return current.mcpEnabled;
       case "session_prefix":
         return current.sessionPrefix;
-      case "cli_autonomy_adapters":
-        return [...current.cliAutonomyAdapters];
       case "pm_auto_dispatch":
         return current.pmAutoDispatch;
     }
@@ -189,7 +173,6 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
       registration: current.registration,
       mcp_enabled: current.mcpEnabled,
       session_prefix: current.sessionPrefix,
-      cli_autonomy_adapters: [...current.cliAutonomyAdapters],
       pm_auto_dispatch: current.pmAutoDispatch
     };
     return RUNTIME_SETTING_KEYS.map((key) => ({
@@ -223,7 +206,6 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
       registration: data.registration,
       mcp_enabled: data.mcp_enabled === undefined ? undefined : toBoolean(data.mcp_enabled),
       session_prefix: data.session_prefix,
-      cli_autonomy_adapters: data.cli_autonomy_adapters,
       pm_auto_dispatch: data.pm_auto_dispatch === undefined ? undefined : toBoolean(data.pm_auto_dispatch)
     };
 

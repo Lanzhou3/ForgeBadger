@@ -3,6 +3,7 @@ import { it } from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -13,7 +14,7 @@ import { RunGovernance } from '../src/services/agent/run-governance.js';
 
 function fixture(filename = ':memory:') {
   const db = new Database(filename); db.pragma('foreign_keys=ON');
-  migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
   const userId = new UserRepository(db).create('governance@test.dev', 'hash').id;
   const ledger = new CopilotRunLedger(db, userId), queue = new CopilotFollowups(db, userId);
   const conversationId = ledger.log.createConversation().id;

@@ -122,7 +122,10 @@ export function createAgentLlmClient(input: {
     // Empty capability metadata is legacy/unspecified, not an explicit denial of chat.
     if (profile.capabilities.length && !profile.capabilities.includes('chat'))
       throw new AgentError('AGENT_MODEL_NOT_CHAT', 'Model does not support chat');
-    if (!['anthropic','openai','openai-compatible','local'].includes(provider.apiFormat))
+    // The Copilot transport is Anthropic Messages for anthropic-format providers
+    // and OpenAI Chat Completions for every OpenAI-flavored format — including
+    // openai-responses endpoints, which also serve chat completions.
+    if (!['anthropic','openai-responses','openai-compatible'].includes(provider.apiFormat))
       throw new AgentError('AGENT_MODEL_TRANSPORT_UNSUPPORTED', 'Provider protocol is not supported by Copilot');
     // Resolve current authorization on every request, including auxiliary calls.
     // A completed request does not authorize reuse of rotated credentials/config.

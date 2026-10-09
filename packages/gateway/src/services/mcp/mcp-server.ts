@@ -49,7 +49,7 @@ import type { InMemorySessionManager } from "../session-manager.js";
 import { resolveTaskPacketSession } from "../project-manager/task-packets.js";
 import { assertMcpTokenAuthority } from "./token-authority.js";
 
-const MCP_CLI_TOOLS = new Set(["pm_execute_task_packet", "import_project", "apply_project_config", "list_templates", "preview_project_config"]);
+const MCP_CLI_TOOLS = new Set(["pm_execute_task_packet", "dispatch_task_to_session", "import_project", "apply_project_config", "list_templates", "preview_project_config"]);
 const MCP_SCOPED_TOOLS = new Set([
   "list_projects", "get_project", "list_sessions", "get_session", "get_session_output", "get_session_writer",
   "list_templates", "preview_project_config", "create_project", "import_project",
@@ -59,7 +59,7 @@ const MCP_SCOPED_TOOLS = new Set([
   "pm_get_goal", "pm_get_work_item", "pm_get_management", "pm_list_ledger", "pm_update_management",
   "list_project_files", "read_project_file", "project_graph_search",
   "project_graph_symbol_detail", "project_graph_impact", "project_graph_affected_paths",
-  "start_session", "stop_session", "update_project"
+  "start_session", "stop_session", "dispatch_task_to_session", "update_project"
 ]);
 // Existing-project grants cannot create new project identities or read global catalogs.
 const MCP_SELECTED_PROJECT_EXCLUDED = new Set(["create_project", "import_project", "list_templates"]);

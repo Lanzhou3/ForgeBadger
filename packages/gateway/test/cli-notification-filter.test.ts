@@ -8,7 +8,7 @@ import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { SessionRepository } from '../src/db/repositories/session-repository.js';
 import { ForgeBadgerEventBus, type ForgeBadgerEvent } from '../src/services/event-bus.js';
-import { handleClaudeNotificationHook } from '../src/routes/session-hooks.js';
+import { handleSessionNotificationHook } from '../src/routes/session-hooks.js';
 import { createNotificationDeduper } from '../src/services/notification-dedupe.js';
 import { ingestTerminalNotification } from '../src/services/terminal-notification-ingestion.js';
 import { attachNotificationPersistence } from '../src/services/notification-events.js';
@@ -23,8 +23,8 @@ function fixture(adapter: 'claude'|'codex'|'kimi'|'opencode'|'pi') {
   const eventBus = new ForgeBadgerEventBus(); const events: ForgeBadgerEvent[] = [];
   eventBus.on('event', event=>events.push(event as ForgeBadgerEvent));
   attachNotificationPersistence({db,eventBus});
-  const hook=(event:Record<string,unknown>)=>handleClaudeNotificationHook(db,eventBus,{adapter,...event},'token',session.id,createNotificationDeduper());
-  const notifications=()=>events.filter(e=>e.type==='claude_notification');
+  const hook=(event:Record<string,unknown>)=>handleSessionNotificationHook(db,eventBus,{adapter,...event},'token',session.id,createNotificationDeduper());
+  const notifications=()=>events.filter(e=>e.type==='session_notification');
   return {db,eventBus,events,session,hook,notifications};
 }
 

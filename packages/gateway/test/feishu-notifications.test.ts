@@ -38,7 +38,7 @@ function fixture() {
   const identity=identities.confirmPairing(claim.id,{revision:claim.revision,externalUserId:'owner',chatId:'chat'});
   const service=new FeishuNotifications(db,user.id),notifications=new NotificationRepository(db,user.id);
   const enable=(extra:Partial<ReturnType<typeof service.records.config>>={})=>service.update({...service.records.config(),enabled:true,targetId:`private:${identity.id}`,identityId:identity.id,...extra});
-  const create=(type='task_completed',message='已完成')=>new NotificationService(db,user.id).create({type:'claude_notification',titleKey:'notifications.taskCompleted',message,href:'/sessions/not-trusted',payload:{notification_type:type,project_name:'Project',session_name:'Session',adapter:'codex'}});
+  const create=(type='task_completed',message='已完成')=>new NotificationService(db,user.id).create({type:'session_notification',titleKey:'notifications.taskCompleted',message,href:'/sessions/not-trusted',payload:{notification_type:type,project_name:'Project',session_name:'Session',adapter:'codex'}});
   const calls:{url:string;body:Record<string,unknown>}[]=[];
   const io:FeishuNotificationIO={validate:async()=>{},fetch:async(url,init)=>{
     calls.push({url:String(url),body:JSON.parse(String(init?.body??'{}')) as Record<string,unknown>});
@@ -246,7 +246,7 @@ const invalidations:Record<string,(f:ReturnType<typeof fixture>)=>void>={
 for(const level of [undefined,'status','summary'] as const) it(`worker includes frozen result excerpts by default for ${level??'omitted'} legacy content level`,async()=>{
   const f=fixture();try {
     f.enable({contentLevel:level});
-    new NotificationService(f.db,f.user.id).create({type:'claude_notification',titleKey:'notifications.taskCompleted',message:'Codex task completed',href:'/notifications',
+    new NotificationService(f.db,f.user.id).create({type:'session_notification',titleKey:'notifications.taskCompleted',message:'Codex task completed',href:'/notifications',
       payload:{adapter:'codex',notification_type:'task_completed',cli_summary:{version:1,runtimeEpoch:'epoch',identityQuality:'session_only',
         state:'task_completed',observedAt:Date.now(),result:{text:'Frozen private result',source:'native_final_message'},progress:[],verification:[]}}});
     await f.worker();

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { fileURLToPath } from "node:url";
 import express from 'express';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -12,7 +13,7 @@ import { createCopilotRoutes } from '../src/routes/copilot.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { signJwt } from '../src/auth/jwt.js';
 it('enforces authenticated owner scope, rate validation and unknown cost over real HTTP',async()=>{
- const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+ const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
  const masterKey='a'.repeat(64),jwtSecret='b'.repeat(32),users=new UserRepository(db);
  const owner=users.create('meter-owner@test.dev','hash'),other=users.create('meter-other@test.dev','hash');
  const repo=new ModelProviderRepository(db,owner.id,masterKey),provider=repo.createProviderProfile({name:'P',providerKey:'test',baseUrl:'https://api.example.com',apiFormat:'openai-compatible',authType:'api_key',supportedAdapters:['codex']});

@@ -17,7 +17,7 @@ describe("terminal attention browser delivery", () => {
         Notification: BrowserNotification,
         localStorage: { getItem: (key: string) => key === browserNotificationPreferenceKey && enabled ? "true" : "false" },
       });
-      const event = { type: "claude_notification", payload: {
+      const event = { type: "session_notification", payload: {
         session_id: "session-1", adapter, notification_type: "attention", message: "Needs attention",
       } };
       const notification = createNotificationFromEvent(event)!;

@@ -59,8 +59,8 @@ describe("generated CLI notification forwarding", () => {
       const results = await Promise.all([forward(script, url, "a"), forward(script, url, "b")]);
       assert.deepEqual(results, [{ code: 0, output: "" }, { code: 0, output: "" }]);
       assert.deepEqual(requests.sort((a, b) => String(a.id).localeCompare(String(b.id))), [
-        { url: "/api/v1/session-hooks/claude-notification/a", id: "a", token: "test-token-a" },
-        { url: "/api/v1/session-hooks/claude-notification/b", id: "b", token: "test-token-b" }
+        { url: "/api/v1/session-hooks/cli-notification/a", id: "a", token: "test-token-a" },
+        { url: "/api/v1/session-hooks/cli-notification/b", id: "b", token: "test-token-b" }
       ]);
     });
   });

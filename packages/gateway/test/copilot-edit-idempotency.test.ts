@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { it } from "node:test";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -14,7 +15,7 @@ import { createCopilotRoutes } from "../src/routes/copilot.js";
 
 it("deduplicates edited turns before truncation, preserves context, and rejects conflicting edit targets", async () => {
   const db = new Database(":memory:");
-  migrate(drizzle(db), { migrationsFolder: new URL("../src/db/migrations", import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL("../src/db/migrations", import.meta.url)) });
   const user = new UserRepository(db).create("edit-retry@example.com", "hash");
   const other = new UserRepository(db).create("other-edit-retry@example.com", "hash");
   const project = new ProjectRepository(db, user.id).create({ name: "Context", path: "/tmp/copilot-edit-context", aiTool: "kimi" });

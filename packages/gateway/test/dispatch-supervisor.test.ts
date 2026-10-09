@@ -35,7 +35,7 @@ function linkedDispatchedItem(pm: ProjectManagerRepository, sessions: SessionRep
 
 function notify(eventBus: ForgeBadgerEventBus, userId: string, session: Session, notificationType: string) {
     eventBus.emitEvent({
-        type: 'claude_notification',
+        type: 'session_notification',
         userId,
         sessionId: session.id,
         projectId: session.projectId,

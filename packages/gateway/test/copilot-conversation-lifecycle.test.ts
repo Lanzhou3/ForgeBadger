@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -9,7 +10,7 @@ import { CopilotRunLedger } from "../src/services/agent/run-ledger.js";
 function fixture() {
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
-  migrate(drizzle(db), { migrationsFolder: new URL("../src/db/migrations", import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL("../src/db/migrations", import.meta.url)) });
   const user = new UserRepository(db).create("conversation-lifecycle@example.com", "hash");
   const ledger = new CopilotRunLedger(db, user.id);
   const conversation = ledger.log.createConversation("Original title");

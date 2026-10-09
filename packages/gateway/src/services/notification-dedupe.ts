@@ -3,7 +3,7 @@
  *
  * A single CLI prompt can surface through two channels: the CLI-native hook
  * (HTTP) and PTY output interception (OSC 9/99/777, bell). Both land as
- * `claude_notification` events, so within a short window the second copy of
+ * `session_notification` events, so within a short window the second copy of
  * the same logical notification is dropped.
  *
  * Bucket rules (per session):

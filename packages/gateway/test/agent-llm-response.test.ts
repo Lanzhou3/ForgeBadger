@@ -37,10 +37,10 @@ function choice(delta: unknown, finish_reason: string | null = null) { return { 
 const openaiTool = (id = "call_a", args = "{}") => ({ id, type: "function", function: { name: "do_work", arguments: args } });
 const anthropicTool = (id = "call_a", input: unknown = {}) => ({ type: "tool_use", id, name: "do_work", input });
 
-for (const format of ["openai", "anthropic"] as const) {
+for (const format of ["openai-compatible", "anthropic"] as const) {
   for (const response of [undefined, {}, { error: { message: "provider failed" } },
-    format === "openai" ? { choices: [{ message: { content: "", refusal: "no" }, finish_reason: "stop" }] } : { content: [{ type: "thinking", thinking: "hmm" }], stop_reason: "end_turn" },
-    format === "openai" ? { choices: [{ message: { content: "partial", tool_calls: [openaiTool()] }, finish_reason: "length" }] } : { content: [anthropicTool()], stop_reason: "max_tokens" }
+    format === "openai-compatible" ? { choices: [{ message: { content: "", refusal: "no" }, finish_reason: "stop" }] } : { content: [{ type: "thinking", thinking: "hmm" }], stop_reason: "end_turn" },
+    format === "openai-compatible" ? { choices: [{ message: { content: "partial", tool_calls: [openaiTool()] }, finish_reason: "length" }] } : { content: [anthropicTool()], stop_reason: "max_tokens" }
   ]) {
     it(`${format} rejects invalid or incomplete JSON ${JSON.stringify(response)}`, async t => {
       const { run, events } = setup(t, format, response === undefined ? new Response("not JSON") : json(response));
@@ -49,7 +49,7 @@ for (const format of ["openai", "anthropic"] as const) {
     });
   }
   it(`${format} validates the whole JSON tool batch before emitting any calls`, async t => {
-    const response = format === "openai"
+    const response = format === "openai-compatible"
       ? { choices: [{ message: { tool_calls: [openaiTool(), openaiTool("call_b", "{")] }, finish_reason: "tool_calls" }] }
       : { content: [anthropicTool(), anthropicTool("call_b", [])], stop_reason: "tool_use" };
     const { run, events } = setup(t, format, json(response));
@@ -57,7 +57,7 @@ for (const format of ["openai", "anthropic"] as const) {
     assert.equal(events.length, 0);
   });
   it(`${format} rejects duplicate tool ids`, async t => {
-    const response = format === "openai"
+    const response = format === "openai-compatible"
       ? { choices: [{ message: { tool_calls: [openaiTool(), openaiTool()] }, finish_reason: "tool_calls" }] }
       : { content: [anthropicTool(), anthropicTool()], stop_reason: "tool_use" };
     const { run, events } = setup(t, format, json(response));
@@ -65,7 +65,7 @@ for (const format of ["openai", "anthropic"] as const) {
     assert.equal(events.length, 0);
   });
   it(`${format} preserves valid legacy JSON without an explicit reason`, async t => {
-    const response = format === "openai" ? { choices: [{ message: { content: "okay" } }] } : { content: [{ type: "text", text: "okay" }] };
+    const response = format === "openai-compatible" ? { choices: [{ message: { content: "okay" } }] } : { content: [{ type: "text", text: "okay" }] };
     const { run, requests } = setup(t, format, { ok: true, json: async () => response } as Response);
     assert.equal((await run()).message, "okay");
     assert.equal(JSON.parse(requests[0]!.body as string).stream, true);
@@ -76,7 +76,7 @@ for (const format of ["openai", "anthropic"] as const) {
 it("OpenAI emits split UTF-8 text before response completion and assembles tools atomically", async t => {
   let source!: ReadableStreamDefaultController<Uint8Array>;
   const response = new Response(new ReadableStream<Uint8Array>({ start(c) { source = c; } }), { headers: { "content-type": "text/event-stream" } });
-  const { run, events } = setup(t, "openai", response);
+  const { run, events } = setup(t, "openai-compatible", response);
   const pending = run();
   const bytes = new TextEncoder().encode(frame(choice({ content: "你好" })));
   const split = bytes.findIndex(x => x >= 128) + 1;
@@ -115,11 +115,11 @@ it("Anthropic assembles text, tool blocks and usage with complete lifecycle mark
 });
 
 for (const [name, format, text] of [
-  ["OpenAI missing DONE", "openai", frame(choice({ tool_calls: [{ index: 0, ...openaiTool() }] })) + frame(choice({}, "tool_calls"))],
-  ["OpenAI missing finish reason", "openai", frame(choice({ content: "answer" })) + frame("[DONE]")],
-  ["OpenAI truncated tool call", "openai", frame(choice({ tool_calls: [{ index: 0, ...openaiTool() }] })) + frame(choice({}, "length")) + frame("[DONE]")],
-  ["OpenAI provider error", "openai", frame(choice({ tool_calls: [{ index: 0, ...openaiTool() }] })) + frame({ error: { message: "secret" } })],
-  ["OpenAI duplicate ids", "openai", frame(choice({ tool_calls: [{ index: 0, ...openaiTool() }, { index: 1, ...openaiTool() }] })) + frame(choice({}, "tool_calls")) + frame("[DONE]")],
+  ["OpenAI missing DONE", "openai-compatible", frame(choice({ tool_calls: [{ index: 0, ...openaiTool() }] })) + frame(choice({}, "tool_calls"))],
+  ["OpenAI missing finish reason", "openai-compatible", frame(choice({ content: "answer" })) + frame("[DONE]")],
+  ["OpenAI truncated tool call", "openai-compatible", frame(choice({ tool_calls: [{ index: 0, ...openaiTool() }] })) + frame(choice({}, "length")) + frame("[DONE]")],
+  ["OpenAI provider error", "openai-compatible", frame(choice({ tool_calls: [{ index: 0, ...openaiTool() }] })) + frame({ error: { message: "secret" } })],
+  ["OpenAI duplicate ids", "openai-compatible", frame(choice({ tool_calls: [{ index: 0, ...openaiTool() }, { index: 1, ...openaiTool() }] })) + frame(choice({}, "tool_calls")) + frame("[DONE]")],
   ["Anthropic interrupted", "anthropic", anthropicFrames(false)],
   ["Anthropic provider error", "anthropic", anthropicFrames(false) + frame({ type: "error", error: { message: "secret" } })],
   ["Anthropic truncated", "anthropic", anthropicFrames().replace('"tool_use"},"usage"', '"max_tokens"},"usage"')]
@@ -134,7 +134,7 @@ for (const [name, format, text] of [
 it("cancels stalled body reads and releases the stream", async t => {
   let cancelled = false;
   const response = new Response(new ReadableStream({ cancel() { cancelled = true; } }), { headers: { "content-type": "text/event-stream" } });
-  const { run, events } = setup(t, "openai", response);
+  const { run, events } = setup(t, "openai-compatible", response);
   const controller = new AbortController();
   const pending = run(controller.signal);
   await new Promise(resolve => setImmediate(resolve));
@@ -145,13 +145,13 @@ it("cancels stalled body reads and releases the stream", async t => {
 });
 
 it("bounds tool argument bytes", async t => {
-  const { run, events } = setup(t, "openai", json({ choices: [{ message: { tool_calls: [openaiTool("call_a", JSON.stringify({ data: "x".repeat(300_000) }))] }, finish_reason: "tool_calls" }] }));
+  const { run, events } = setup(t, "openai-compatible", json({ choices: [{ message: { tool_calls: [openaiTool("call_a", JSON.stringify({ data: "x".repeat(300_000) }))] }, finish_reason: "tool_calls" }] }));
   await assert.rejects(run(), { code: "AGENT_LLM_INVALID_RESPONSE" });
   assert.equal(events.length, 0);
 });
 
 it("bounds the entire response before JSON parsing", async t => {
-  const { run, events } = setup(t, "openai", json({ choices: [{ message: { content: "x".repeat(2 * 1024 * 1024) } }] }));
+  const { run, events } = setup(t, "openai-compatible", json({ choices: [{ message: { content: "x".repeat(2 * 1024 * 1024) } }] }));
   await assert.rejects(run(), { code: "AGENT_LLM_INVALID_RESPONSE" });
   assert.equal(events.length, 0);
 });
@@ -159,14 +159,14 @@ it("bounds the entire response before JSON parsing", async t => {
 it("enforces the deadline through a stalled SSE body and cleans up", async t => {
   let cancelled = false;
   const response = new Response(new ReadableStream({ cancel() { cancelled = true; } }), { headers: { "content-type": "text/event-stream" } });
-  const { run, events } = setup(t, "openai", response, 10);
+  const { run, events } = setup(t, "openai-compatible", response, 10);
   await assert.rejects(run(), { code: "AGENT_LLM_TIMEOUT" });
   assert.equal(cancelled, true);
   assert.equal(events.length, 0);
 });
 
 it("does not expose provider error bodies", async t => {
-  const { run, events } = setup(t, "openai", new Response("plaintext credential from upstream", { status: 401 }));
+  const { run, events } = setup(t, "openai-compatible", new Response("plaintext credential from upstream", { status: 401 }));
   await assert.rejects(run(), error => {
     assert.equal((error as Error).message, "Provider returned HTTP 401");
     return true;
@@ -177,7 +177,7 @@ it("does not expose provider error bodies", async t => {
 it("reads CRLF frames with multiline data and usage-only terminal chunks", async t => {
   const text = 'data: {"choices": [\r\ndata: {"index":0,"delta":{"content":"okay"},"finish_reason":"stop"}]}\r\n\r\n'
     + frame({ choices: [], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } }) + frame("[DONE]");
-  const { run } = setup(t, "openai", sse(text));
+  const { run } = setup(t, "openai-compatible", sse(text));
   const result = await run();
   assert.equal(result.message, "okay");
   assert.equal(result.finishReason, "stop");
@@ -193,7 +193,7 @@ for (const [name, text] of [
   ["content after termination", frame(choice({ content: "okay" }, "stop")) + frame(choice({ content: "later" })) + frame("[DONE]")]
 ] as const) {
   it(`rejects ${name} before tool commitment`, async t => {
-    const { run, events } = setup(t, "openai", sse(text));
+    const { run, events } = setup(t, "openai-compatible", sse(text));
     await assert.rejects(run(), { code: "AGENT_LLM_INVALID_RESPONSE" });
     assert.equal(events.some(e => e.type === "tool_call" || e.type === "done"), false);
   });
@@ -201,13 +201,13 @@ for (const [name, text] of [
 
 it("rejects invalid UTF-8 in a stream", async t => {
   const response = new Response(Uint8Array.from([0xff, 0xfe]), { headers: { "content-type": "text/event-stream" } });
-  const { run, events } = setup(t, "openai", response);
+  const { run, events } = setup(t, "openai-compatible", response);
   await assert.rejects(run(), { code: "AGENT_LLM_INVALID_RESPONSE" });
   assert.equal(events.length, 0);
 });
 
 it("rejects the actual OpenAI wire expansion of complete historical tool batches without dropping the current goal", async t => {
-  const { client, db, user, requests } = setup(t, "openai", json({ choices: [{ message: { content: "okay" } }] }));
+  const { client, db, user, requests } = setup(t, "openai-compatible", json({ choices: [{ message: { content: "okay" } }] }));
   const log = new CopilotConversationLog(db, user.id);
   const conversation = log.createConversation();
   const goal = "x".repeat(32_000);
@@ -230,8 +230,8 @@ it("rejects the actual OpenAI wire expansion of complete historical tool batches
   assert.equal(log.listMessages(conversation.id)[0]!.content, goal);
 });
 
-for (const format of ["openai", "anthropic"] as const) {
-  const validResponse = () => json(format === "openai" ? { choices: [{ message: { content: "okay" } }] } : { content: [{ type: "text", text: "okay" }] });
+for (const format of ["openai-compatible", "anthropic"] as const) {
+  const validResponse = () => json(format === "openai-compatible" ? { choices: [{ message: { content: "okay" } }] } : { content: [{ type: "text", text: "okay" }] });
   it(`${format} rejects final wire overflow caused by JSON escaping`, async t => {
     const { client, requests } = setup(t, format, validResponse());
     const messages = [{ role: "user" as const, content: "\n".repeat(49_000) }];
@@ -246,7 +246,7 @@ for (const format of ["openai", "anthropic"] as const) {
     assert.equal(requests.length, 0);
   });
   it(`${format} sends a request immediately below the final wire limit without truncating it`, async t => {
-    const { client, requests } = setup(t, format, { ok: true, json: async () => format === "openai" ? { choices: [{ message: { content: "okay" } }] } : { content: [{ type: "text", text: "okay" }] } } as Response);
+    const { client, requests } = setup(t, format, { ok: true, json: async () => format === "openai-compatible" ? { choices: [{ message: { content: "okay" } }] } : { content: [{ type: "text", text: "okay" }] } } as Response);
     await client.stream({ messages: [{ role: "user", content: "g" }], tools: [], onEvent() {} });
     const overhead = (requests[0]!.body as string).length - 1;
     const content = "g".repeat(MAX_CONTEXT_CHARS - overhead);
@@ -259,7 +259,7 @@ for (const format of ["openai", "anthropic"] as const) {
 }
 
 it("openai tolerates a repeated identical finish_reason after stop", async (t) => {
-  const { run } = setup(t, "openai", sse(
+  const { run } = setup(t, "openai-compatible", sse(
     frame(choice({ content: "okay" }, "stop")) + frame(choice({}, "stop")) + frame("[DONE]"),
   ));
   const result = await run();
@@ -267,7 +267,7 @@ it("openai tolerates a repeated identical finish_reason after stop", async (t) =
 });
 
 it("openai tolerates a bare empty-delta frame after stop", async (t) => {
-  const { run } = setup(t, "openai", sse(
+  const { run } = setup(t, "openai-compatible", sse(
     frame(choice({ content: "okay" }, "stop")) + frame(choice({})) + frame("[DONE]"),
   ));
   const result = await run();
@@ -282,7 +282,7 @@ const rejectedPostTerminationFrames: [string, string][] = [
 
 for (const [label, afterFrame] of rejectedPostTerminationFrames) {
   it(`openai rejects ${label}`, async (t) => {
-    const { run, events } = setup(t, "openai", sse(
+    const { run, events } = setup(t, "openai-compatible", sse(
       frame(choice({ content: "okay" }, "stop")) + afterFrame + frame("[DONE]"),
     ));
     await assert.rejects(run(), { code: "AGENT_LLM_INVALID_RESPONSE" });

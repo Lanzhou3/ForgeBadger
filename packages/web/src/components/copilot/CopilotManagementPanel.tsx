@@ -125,7 +125,6 @@ function ManagementRow({ project }: { project: ManagedProject }) {
   const mutation = useMutation({
     mutationFn: () =>
       updateProjectManagement(project.id, {
-        mode: form.mode,
         ownerLabel: form.ownerLabel,
         nextAction: form.nextAction,
         freshnessHours: form.freshnessHours,
@@ -144,8 +143,7 @@ function ManagementRow({ project }: { project: ManagedProject }) {
           {project.name}
         </a>
         <span className="text-xs">
-          {project.management.mode === "manual" ? copy.mgmtModeManual : copy.mgmtModeCli}{" · "}
-          {project.autonomy === "supervised" ? copy.mgmtSupervised : copy.mgmtManualExec}
+          {project.copilotAutonomy ? copy.mgmtSupervised : copy.mgmtManualExec}
         </span>
       </div>
       <p className="text-xs text-muted-foreground">
@@ -167,19 +165,6 @@ function ManagementRow({ project }: { project: ManagedProject }) {
             mutation.mutate();
           }}
         >
-          <label className="block">
-            {copy.mgmtModeLabel}
-            <select
-              className="ml-2 rounded border border-border bg-background p-1"
-              value={form.mode}
-              onChange={(e) =>
-                setForm({ ...form, mode: e.target.value as "manual" | "cli" })
-              }
-            >
-              <option value="manual">{copy.mgmtModeOptionManual}</option>
-              <option value="cli">{copy.mgmtModeOptionCli}</option>
-            </select>
-          </label>
           <label className="block">
             {copy.mgmtOwnerLabel}
             <Input

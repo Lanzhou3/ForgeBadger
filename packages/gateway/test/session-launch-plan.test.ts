@@ -123,7 +123,7 @@ describe("prepareAdapterLaunchExtras hook kill-switch", () => {
 
       // Project-local hook settings must NOT be written.
       const hookText = await readFile(path.join(projectRoot, ".claude", "settings.local.json"), "utf8").catch(() => "");
-      assert.doesNotMatch(hookText, /claude-notification/);
+      assert.doesNotMatch(hookText, /cli-notification/);
 
       const settings = JSON.parse(await readFile(path.join(claudeHome, "settings.json"), "utf8"));
       assert.equal(settings.preferredNotifChannel, "terminal_bell");

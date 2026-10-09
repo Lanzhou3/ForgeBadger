@@ -10,7 +10,7 @@ import { SessionRepository } from '../src/db/repositories/session-repository.js'
 import { NotificationRepository } from '../src/db/repositories/notification-repository.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { attachNotificationPersistence } from '../src/services/notification-events.js';
-import { handleClaudeNotificationHook } from '../src/routes/session-hooks.js';
+import { handleSessionNotificationHook } from '../src/routes/session-hooks.js';
 import { createNotificationDeduper } from '../src/services/notification-dedupe.js';
 import { renderFeishuNotificationCard } from '../src/services/notifications/feishu-notification-card.js';
 import type { FeishuNotificationDelivery } from '../src/db/repositories/feishu-notification-repository.js';
@@ -25,7 +25,7 @@ function setup(t: TestContext) {
   const session = sessions.create({ projectId: project.id, name: 'Named session', aiTool: 'codex', workingDir: project.path, attachToken: 'fixture' });
   const bus = new ForgeBadgerEventBus(); attachNotificationPersistence({ db, eventBus: bus });
   const notices = new NotificationRepository(db, user.id), deduper = createNotificationDeduper();
-  const hook = (event: Record<string, unknown>, token = 'fixture') => handleClaudeNotificationHook(db, bus,
+  const hook = (event: Record<string, unknown>, token = 'fixture') => handleSessionNotificationHook(db, bus,
     { adapter: 'codex', ...event }, token, session.id, deduper);
   const submit = (prompt: string, native = 'native-A', turn?: string) => hook({ hook_event_name: 'UserPromptSubmit', session_id: native, turn_id: turn, prompt });
   const stop = (native?: unknown, turn?: unknown, extra: Record<string, unknown> = {}) => {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it, type TestContext } from 'node:test';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -14,7 +15,7 @@ import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
 
 function fixture(t:TestContext) {
   const db=new Database(':memory:');
-  migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+  migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
   t.after(()=>db.close());
   const userId=new UserRepository(db).create('efficiency@test.invalid','hash').id;
   return {db,userId};
@@ -55,7 +56,7 @@ for(const strictCompression of [false,true])it(`lease takeover stops all subsequ
   }},undefined,{maxContextChars:16000,strictCompression,canCommit:()=>ledger.owns(claim)}),/COPILOT_LEASE_LOST/);
   assert.equal(calls,1);assert.equal(ledger.log.getConversation(conv.id)?.summary,null);
 });
-for(const apiFormat of ['anthropic','openai'] as const)it(`${apiFormat}: explicit cache only marks stable Anthropic system blocks`,async t=>{
+for(const apiFormat of ['anthropic','openai-compatible'] as const)it(`${apiFormat}: explicit cache only marks stable Anthropic system blocks`,async t=>{
   const {db,userId}=fixture(t),repo=new ModelProviderRepository(db,userId,'a'.repeat(64));
   const provider=repo.createProviderProfile({name:'fixture',providerKey:'fixture',baseUrl:'https://provider.example',authType:'api_key',apiFormat,supportedAdapters:['codex']});
   repo.createModelProfile({providerProfileId:provider.id,name:'M',modelId:'fixture',isDefault:true,capabilities:['chat']});

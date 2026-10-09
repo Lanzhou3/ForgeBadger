@@ -17,13 +17,11 @@ vi.stubGlobal(
 const {
   roleRef,
   getRuntimeSettingsMock,
-  updateRuntimeSettingsMock,
-  discoverAdaptersMock
+  updateRuntimeSettingsMock
 } = vi.hoisted(() => ({
   roleRef: { role: "admin" as "admin" | "user" },
   getRuntimeSettingsMock: vi.fn(),
-  updateRuntimeSettingsMock: vi.fn(),
-  discoverAdaptersMock: vi.fn()
+  updateRuntimeSettingsMock: vi.fn()
 }));
 
 vi.mock("@/hooks/use-auth", () => ({
@@ -35,8 +33,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   return {
     ...actual,
     getRuntimeSettings: getRuntimeSettingsMock,
-    updateRuntimeSettings: updateRuntimeSettingsMock,
-    discoverAdapters: discoverAdaptersMock
+    updateRuntimeSettings: updateRuntimeSettingsMock
   };
 });
 
@@ -47,8 +44,7 @@ function settingsState(overrides: Record<string, unknown> = {}) {
       { key: "registration", value: "open", source: "env", hot: true },
       { key: "mcp_enabled", value: false, source: "env", hot: false },
       { key: "session_prefix", value: "fb-", source: "env", hot: true },
-      { key: "cli_autonomy_adapters", value: ["pi"], source: "settings", hot: true },
-      { key: "pm_auto_dispatch", value: true, source: "settings", hot: true }
+      { key: "pm_auto_dispatch", value: false, source: "env", hot: true }
     ],
     ...overrides
   };
@@ -76,73 +72,47 @@ describe("CopilotAutonomyPanel", () => {
           { key: "registration", value: "open", source: "env", hot: true },
           { key: "mcp_enabled", value: false, source: "env", hot: false },
           { key: "session_prefix", value: "fb-", source: "env", hot: true },
-          { key: "cli_autonomy_adapters", value: patch.cli_autonomy_adapters ?? [], source: "settings", hot: true },
           { key: "pm_auto_dispatch", value: patch.pm_auto_dispatch ?? false, source: "settings", hot: true }
         ]
       })
     );
-    discoverAdaptersMock.mockResolvedValue({
-      adapters: [
-        { id: "pi", label: "Pi", command: "pi", supportLevel: "supported", launchEnabled: true, configDir: "~/.pi", runtimeModes: ["terminal"], available: true, status: "available" },
-        { id: "claude", label: "Claude Code", command: "claude", supportLevel: "supported", launchEnabled: true, configDir: "~/.claude", runtimeModes: ["terminal"], available: false, status: "missing" }
-      ]
-    });
   });
 
-  it("renders the enabled adapters and marks detection status", async () => {
+  it("renders the auto-advance switch from runtime settings without any adapter list", async () => {
     renderPanel();
-    const piBox = await screen.findByLabelText("pi");
-    const claudeBox = screen.getByLabelText("claude");
-    expect(screen.getByText("派发自主权")).toBeTruthy();
-    expect((piBox as HTMLButtonElement).hasAttribute("data-state-checked") || (piBox as HTMLButtonElement).getAttribute("data-state") === "checked").toBe(true);
-    expect((claudeBox as HTMLButtonElement).getAttribute("data-state") === "unchecked").toBe(true);
-    expect(screen.getByText("本机已检测到")).toBeTruthy();
-    expect(screen.getByText("未检测到 CLI")).toBeTruthy();
+    const switchEl = await screen.findByRole("switch", { name: "项目任务自动推进" });
+    expect((switchEl as HTMLButtonElement).getAttribute("data-state") === "unchecked").toBe(true);
+    // No per-adapter opt-in surface exists anymore: every CLI is equal.
+    expect(screen.queryByLabelText("pi")).toBeNull();
+    expect(screen.queryByLabelText("claude")).toBeNull();
+    expect(screen.queryByText(/未启用任何适配器/)).toBeNull();
   });
 
-  it("saves the adapter selection and auto-advance switch", async () => {
+  it("saves the auto-advance switch", async () => {
     renderPanel();
-    await screen.findByLabelText("claude");
-    fireEvent.click(screen.getByLabelText("claude"));
+    const switchEl = await screen.findByRole("switch", { name: "项目任务自动推进" });
+    fireEvent.click(switchEl);
     const save = screen.getByRole("button", { name: "保存" });
-    expect((save as HTMLButtonElement).disabled).toBe(false); // dirty after toggling an adapter
+    expect((save as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(save);
     await waitFor(() =>
-      expect(updateRuntimeSettingsMock).toHaveBeenCalledWith({
-        cli_autonomy_adapters: expect.arrayContaining(["pi", "claude"]),
-        pm_auto_dispatch: true
-      })
+      expect(updateRuntimeSettingsMock).toHaveBeenCalledWith({ pm_auto_dispatch: true })
     );
-  });
-
-  it("warns and blocks auto-advance when no adapter is enabled", async () => {
-    getRuntimeSettingsMock.mockResolvedValue(
-      settingsState({
-        settings: [
-          { key: "cli_autonomy_adapters", value: [], source: "env", hot: true },
-          { key: "pm_auto_dispatch", value: false, source: "env", hot: true }
-        ]
-      })
-    );
-    renderPanel();
-    expect(await screen.findByText(/未启用任何适配器/)).toBeTruthy();
-    const switchEl = screen.getByRole("switch", { name: "项目任务自动推进" });
-    expect((switchEl as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("is hidden for non-admin users", async () => {
     roleRef.role = "user";
     renderPanel();
     await waitFor(() => expect(getRuntimeSettingsMock).not.toHaveBeenCalled());
-    expect(screen.queryByText("派发自主权")).toBeNull();
+    expect(screen.queryByRole("switch", { name: "项目任务自动推进" })).toBeNull();
   });
 
   it("renders read-only when FORGEBADGER_RUNTIME_SETTINGS_READONLY is on", async () => {
     getRuntimeSettingsMock.mockResolvedValue(settingsState({ readonly: true }));
     renderPanel();
     expect(await screen.findByText(/FORGEBADGER_RUNTIME_SETTINGS_READONLY/)).toBeTruthy();
-    const readonlyPi = await screen.findByLabelText("pi");
-    expect((readonlyPi as HTMLButtonElement).disabled).toBe(true);
+    const switchEl = await screen.findByRole("switch", { name: "项目任务自动推进" });
+    expect((switchEl as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("pins the save action to the bottom of the settings scroll container", async () => {

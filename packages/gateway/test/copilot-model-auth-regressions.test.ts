@@ -14,7 +14,7 @@ it('supports credential-free transports and observes configuration/credential ch
   try {
     const user = new UserRepository(db).create('auth-fixture@test.invalid', 'fixture');
     const repo = new ModelProviderRepository(db, user.id, 'a'.repeat(32));
-    const provider = repo.createProviderProfile({ name: 'Fixture', providerKey: 'fixture', baseUrl: 'https://before.example', authType: 'none', apiFormat: 'local', supportedAdapters: ['pi'] });
+    const provider = repo.createProviderProfile({ name: 'Fixture', providerKey: 'fixture', baseUrl: 'https://before.example', authType: 'none', apiFormat: 'openai-compatible', supportedAdapters: ['pi'] });
     const model = repo.createModelProfile({ providerProfileId: provider.id, name: 'Fixture', modelId: 'before', capabilities: ['chat'] });
     const calls: { url: string; model: string; headers: Headers }[] = [];
     const client = createAgentLlmClient({ modelProviderRepository: repo, resolveHost: async () => [{ address: '8.8.8.8', family: 4 }],

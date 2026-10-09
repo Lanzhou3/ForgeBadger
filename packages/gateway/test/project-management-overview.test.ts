@@ -31,14 +31,14 @@ function fixture() {
   return { db, user, project, second, foreign, context: { db, userId: user.id } };
 }
 
-it("defaults existing projects to manual, excludes foreign projects and reports unknown evidence", () => {
+it("reports owner-scoped projects without a management mode and reports unknown evidence", () => {
   const f = fixture();
   try {
     const all = projectManagementOverview(f.context);
     assert.equal(all.projects.length, 2);
-    assert.equal(all.projects[0]!.management.mode, "manual");
+    assert.equal(all.projects[0]!.management.ownerLabel, "");
     assert.equal(all.projects[0]!.evidenceFreshness.status, "unknown");
-    assert.equal(all.projects[0]!.autonomy, "manual_only");
+    assert.equal(all.projects[0]!.copilotAutonomy, false);
     assert.deepEqual(projectManagementOverview(f.context, []).projects, []);
     assert.deepEqual(projectManagementOverview(f.context, [f.project.id, f.foreign.id]).projects.map(p => p.id), [f.project.id]);
   } finally { f.db.close(); }
@@ -63,22 +63,24 @@ it("counts every work item without list truncation and distinguishes missing, st
   } finally { f.db.close(); }
 });
 
-it("management command validates schema and resource ownership, uses CAS revision, and CLI mode grants no autonomy", () => {
+it("management command validates schema and resource ownership, uses CAS revision, and updates owner/next-action without any autonomy effect", () => {
   const f = fixture();
   try {
     const command = createManagementCommands()[0]!;
-    const input = command.inputSchema.parse({ projectId: f.project.id, expectedRevision: 0, mode: "cli", ownerLabel: "Alice", nextAction: "Review evidence" });
+    const input = command.inputSchema.parse({ projectId: f.project.id, expectedRevision: 0, ownerLabel: "Alice", nextAction: "Review evidence" });
     assert.deepEqual(command.resolve(f.context, input).projectIds, [f.project.id]);
     const result = command.execute(f.context, input) as { revision: number };
     assert.equal(result.revision, 1);
     assert.throws(() => command.execute(f.context, input), /revision/i);
     assert.throws(() => command.inputSchema.parse({ projectId: f.project.id, expectedRevision: 1, unsupported: true }));
+    assert.throws(() => command.inputSchema.parse({ projectId: f.project.id, expectedRevision: 1, mode: "cli" }));
     assert.throws(() => command.resolve(f.context, { ...input as object, projectId: f.foreign.id }), /not found/i);
     const repo = new ProjectManagementRepository(f.db, f.user.id);
     assert.equal(repo.get(f.project.id).ownerLabel, "Alice");
     const overview = projectManagementOverview(f.context, [f.project.id]).projects[0]!;
-    assert.equal(overview.management.mode, "cli");
-    assert.equal(overview.autonomy, "manual_only");
+    assert.equal(overview.management.ownerLabel, "Alice");
+    // Management metadata never grants autonomy: the switch is the only axis.
+    assert.equal(overview.copilotAutonomy, false);
   } finally { f.db.close(); }
 });
 
@@ -111,7 +113,7 @@ it("HTTP management uses command receipts, rejects stale revisions, and scopes t
     assert.equal((await patch(f.project.id, { expectedRevision: 0, nextAction: "Stale" })).status, 409);
     assert.equal((await patch(f.foreign.id, { expectedRevision: 0, nextAction: "Forbidden" })).status, 404);
     // grantId is no longer a request field: the strict schema rejects it.
-    assert.equal((await patch(f.project.id, { expectedRevision: 1, grantId: "legacy-field", mode: "cli" })).status, 400);
+    assert.equal((await patch(f.project.id, { expectedRevision: 1, grantId: "legacy-field" })).status, 400);
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     f.db.close();

@@ -19,7 +19,6 @@ import { SkillRepository } from "../src/db/repositories/skill-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { createServer } from "../src/server.js";
-import { configureCliAutonomyAdapters } from "../src/services/adapter-autonomy.js";
 import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { attachNotificationPersistence } from "../src/services/notification-events.js";
 import { attachDispatchSupervisor } from "../src/services/agent/dispatch-supervisor.js";
@@ -93,7 +92,6 @@ describe("MCP private project development workflow", () => {
       async stageProgrammaticInput(_name, data) { pane = `› ${data}\nmodel · cwd`; onStage?.(); if (failStage) throw new Error("stage interrupted"); },
       async pressEnter() { enterCount++; pane = "› Ask Codex to do anything\nmodel · cwd"; }
     }, undefined, undefined, { db, sleep: async () => {} });
-    configureCliAutonomyAdapters(["codex"]);
     const app = createServer({ db, jwtSecret, masterKey, sessionManager: manager,
       apiKeyStore: new InMemoryApiKeyStore({ masterKey }), eventBus, appVersion: "test",
       runtimeAuthorizationInvalidator: new RuntimeAuthorizationInvalidator(), mcpEnabled: true,
@@ -107,7 +105,6 @@ describe("MCP private project development workflow", () => {
     await new Promise<void>(resolve => server.close(() => resolve()));
     db.close();
     rmSync(root, { recursive: true, force: true });
-    configureCliAutonomyAdapters([]);
   });
 
   it("preserves old token limits and rejects out-of-root writes", async () => {
@@ -170,7 +167,7 @@ describe("MCP private project development workflow", () => {
     const receipt = output(await rpc(port, cliToken, "get_mcp_operation", { operationId: "dispatch-app" }));
     assert.equal(receipt.status, "completed");
     const session = dispatch.session as { id: string };
-    eventBus.emitEvent({ type: "claude_notification", userId, projectId, sessionId: session.id,
+    eventBus.emitEvent({ type: "session_notification", userId, projectId, sessionId: session.id,
       hookEventName: "Stop", notificationType: "task_completed", message: "Finished" });
     const progress = output(await rpc(port, cliToken, "pm_get_task_progress", { projectId, workItemId }));
     assert.equal(progress.found, true);
@@ -369,6 +366,53 @@ describe("MCP private project development workflow", () => {
       assert.equal(progressRead.isError, true);
       assert.equal(taskList.isError, true);
     } finally { rmSync(outsideRoot, { recursive: true, force: true }); }
+  });
+
+  it("dispatches free-form messages to a running unlinked session with a CLI token", async () => {
+    pane = "› Ask Codex to do anything\nmodel · cwd";
+    const projectPath = path.join(root, `direct-dispatch-${randomUUID()}`);
+    mkdirSync(projectPath);
+    const project = new ProjectRepository(db, userId).create({ name: "direct-dispatch", path: projectPath, aiTool: "codex" });
+    const session = new SessionRepository(db, userId).create({ projectId: project.id, name: "direct", aiTool: "codex", workingDir: projectPath });
+    const started = output(await rpc(port, cliToken, "start_session", { operationId: "direct-start", sessionId: session.id }));
+    assert.equal(started.status, "running");
+    // A missing session fails before any intent exists; the same operationId stays reusable.
+    const missing = await rpc(port, cliToken, "dispatch_task_to_session", {
+      operationId: "direct-missing", sessionId: `missing-${randomUUID()}`, message: "hello"
+    });
+    assert.equal(missing.isError, true);
+    assert.match((missing.content as Array<{ text: string }>)[0]!.text, /Session not found/);
+    const message = "Please summarize the project layout in one short paragraph.";
+    const beforeEnter = enterCount;
+    const dispatched = output(await rpc(port, cliToken, "dispatch_task_to_session", {
+      operationId: "direct-dispatch", sessionId: session.id, message
+    }));
+    assert.equal(dispatched.dispatched, true);
+    assert.equal(dispatched.delivery, "consumed");
+    assert.equal(enterCount, beforeEnter + 1);
+    // The same operationId replays the durable receipt without a second Enter.
+    const replay = output(await rpc(port, cliToken, "dispatch_task_to_session", {
+      operationId: "direct-dispatch", sessionId: session.id, message
+    }));
+    assert.equal(replay.dispatched, true);
+    assert.equal(enterCount, beforeEnter + 1);
+    const receipt = output(await rpc(port, cliToken, "get_mcp_operation", { operationId: "direct-dispatch" }));
+    assert.equal(receipt.status, "completed");
+    // Task-packet-linked sessions refuse direct dispatch.
+    const item = output(await rpc(port, cliToken, "pm_create_work_item", {
+      operationId: "direct-linked-work", projectId: project.id, title: "Linked guard"
+    }));
+    const packet = output(await rpc(port, cliToken, "pm_execute_task_packet", {
+      operationId: "direct-linked-dispatch", projectId: project.id, workItemId: item.id, aiTool: "codex"
+    }));
+    assert.equal(packet.executionStatus, "dispatched");
+    const packetSessionId = (packet.session as { id: string }).id;
+    assert.notEqual(packetSessionId, session.id);
+    const rejected = await rpc(port, cliToken, "dispatch_task_to_session", {
+      operationId: "direct-linked-refuse", sessionId: packetSessionId, message: "bypass the packet"
+    });
+    assert.equal(rejected.isError, true);
+    assert.match((rejected.content as Array<{ text: string }>)[0]!.text, /TASK_SESSION_REQUIRES_PACKET_EXECUTION/);
   });
 
   it("stops before Enter when the token is revoked during staging", async () => {

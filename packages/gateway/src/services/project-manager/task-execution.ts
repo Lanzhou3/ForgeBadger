@@ -1,4 +1,3 @@
-import { assertAdapterAutonomy } from '../adapter-autonomy.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ProjectRepository } from '../../db/repositories/project-repository.js';
@@ -66,11 +65,9 @@ export async function executeTaskPacket(ctx: CommandContext, input: { projectId:
   if (session && repo.getWorkItemByTaskPacketSession(project.id, session.id)?.id !== item.id) throw new PlatformNoEffectError('TASK_SESSION_LINK_AMBIGUOUS');
   const adapter = normalizeAdapter(session?.aiTool ?? input.aiTool ?? project.aiTool);
   if (!adapter || (input.aiTool && input.aiTool !== adapter)) throw new PlatformNoEffectError('Task adapter mismatch');
-  assertAdapterAutonomy(adapter);
   const semantics = canonical({ project, title: item.title, description: item.description, acceptanceCriteria: item.acceptanceCriteria, stageId: item.stageId });
   const authorize = () => {
     ctx.authorize?.();
-    assertAdapterAutonomy(adapter);
     const fresh = repo.getWorkItem(project.id, item.id)!;
     const currentProject = new ProjectRepository(ctx.db, ctx.userId).getById(project.id);
     if (canonical({ project: currentProject, title: fresh.title, description: fresh.description, acceptanceCriteria: fresh.acceptanceCriteria, stageId: fresh.stageId }) !== semantics) throw new Error('Task execution semantics changed');

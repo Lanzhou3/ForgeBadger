@@ -12,7 +12,7 @@ import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { SessionRepository } from "../src/db/repositories/session-repository.js";
 import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
-import { createSessionHookRoutes, handleClaudeNotificationHook } from "../src/routes/session-hooks.js";
+import { createSessionHookRoutes, handleSessionNotificationHook } from "../src/routes/session-hooks.js";
 import { createNotificationDeduper } from "../src/services/notification-dedupe.js";
 
 function createTestDb(): Database {
@@ -67,7 +67,7 @@ describe("Claude Code session hook route", () => {
     });
     const eventPromise = waitForEvent(eventBus);
 
-    const res = handleClaudeNotificationHook(
+    const res = handleSessionNotificationHook(
       db,
       eventBus,
       {
@@ -85,8 +85,8 @@ describe("Claude Code session hook route", () => {
     assert.equal(res.status, 200);
     assert.deepEqual(res.body, { code: 0, data: { accepted: true }, message: "" });
     const event = await eventPromise;
-    assert.equal(event.type, "claude_notification");
-    if (event.type === "claude_notification") {
+    assert.equal(event.type, "session_notification");
+    if (event.type === "session_notification") {
       assert.equal(event.sessionId, session.id);
       assert.equal(event.notificationType, "permission_prompt");
       assert.equal(event.toolName, "Bash");
@@ -111,7 +111,7 @@ describe("Claude Code session hook route", () => {
     const events: ForgeBadgerEvent[] = [];
     eventBus.on("event", event => events.push(event as ForgeBadgerEvent));
 
-    const res = handleClaudeNotificationHook(
+    const res = handleSessionNotificationHook(
       db,
       eventBus,
       {
@@ -147,7 +147,7 @@ describe("Claude Code session hook route", () => {
     });
     const eventPromise = waitForEvent(eventBus);
 
-    const res = handleClaudeNotificationHook(
+    const res = handleSessionNotificationHook(
       db,
       eventBus,
       {
@@ -162,8 +162,8 @@ describe("Claude Code session hook route", () => {
 
     assert.equal(res.status, 200);
     const event = await eventPromise;
-    assert.equal(event.type, "claude_notification");
-    if (event.type === "claude_notification") {
+    assert.equal(event.type, "session_notification");
+    if (event.type === "session_notification") {
       assert.equal(event.sessionId, session.id);
       assert.equal(event.hookEventName, "Notification");
       assert.equal(event.notificationType, "permission_prompt");
@@ -189,7 +189,7 @@ describe("Claude Code session hook route", () => {
     });
     const eventPromise = waitForEvent(eventBus);
 
-    const res = handleClaudeNotificationHook(
+    const res = handleSessionNotificationHook(
       db,
       eventBus,
       {
@@ -203,8 +203,8 @@ describe("Claude Code session hook route", () => {
 
     assert.equal(res.status, 200);
     const event = await eventPromise;
-    assert.equal(event.type, "claude_notification");
-    if (event.type === "claude_notification") {
+    assert.equal(event.type, "session_notification");
+    if (event.type === "session_notification") {
       assert.equal(event.sessionId, session.id);
       assert.equal(event.notificationType, "permission_prompt");
     }
@@ -228,7 +228,7 @@ describe("Claude Code session hook route", () => {
     const events: ForgeBadgerEvent[] = [];
     eventBus.on("event", event => events.push(event as ForgeBadgerEvent));
 
-    const res = handleClaudeNotificationHook(
+    const res = handleSessionNotificationHook(
       db,
       eventBus,
       {
@@ -261,7 +261,7 @@ describe("Claude Code session hook route", () => {
     const events: ForgeBadgerEvent[] = [];
     eventBus.on("event", event => events.push(event as ForgeBadgerEvent));
 
-    const res = handleClaudeNotificationHook(
+    const res = handleSessionNotificationHook(
       db,
       eventBus,
       {
@@ -278,7 +278,7 @@ describe("Claude Code session hook route", () => {
   });
 
   it("rejects hook events with an invalid session token", async () => {
-    const res = handleClaudeNotificationHook(
+    const res = handleSessionNotificationHook(
       db,
       eventBus,
       { sessionId: "missing", event: { hook_event_name: "Notification" } },
@@ -312,7 +312,7 @@ describe("Claude Code session hook route", () => {
 
     for (const [hookEventName, notificationType] of cases) {
       const eventPromise = waitForEvent(eventBus);
-      const res = handleClaudeNotificationHook(
+      const res = handleSessionNotificationHook(
         db,
         eventBus,
         { hook_event_name: hookEventName, adapter: "kimi" },
@@ -322,8 +322,8 @@ describe("Claude Code session hook route", () => {
 
       assert.equal(res.status, 200);
       const event = await eventPromise;
-      assert.equal(event.type, "claude_notification");
-      if (event.type === "claude_notification") {
+      assert.equal(event.type, "session_notification");
+      if (event.type === "session_notification") {
         assert.equal(event.notificationType, notificationType);
         assert.equal(event.adapter, "kimi");
         assert.equal(event.projectId, project.id);
@@ -334,7 +334,7 @@ describe("Claude Code session hook route", () => {
 
     const backgroundEvents: ForgeBadgerEvent[] = [];
     eventBus.on("event", event => backgroundEvents.push(event as ForgeBadgerEvent));
-    handleClaudeNotificationHook(
+    handleSessionNotificationHook(
       db,
       eventBus,
       {
@@ -367,7 +367,7 @@ describe("Claude Code session hook route", () => {
 
     // agent_settled -> Stop
     let eventPromise = waitForEvent(eventBus);
-    let res = handleClaudeNotificationHook(
+    let res = handleSessionNotificationHook(
       db,
       eventBus,
       { hook_event_name: "Stop", adapter: "pi" },
@@ -376,8 +376,8 @@ describe("Claude Code session hook route", () => {
     );
     assert.equal(res.status, 200);
     let event = await eventPromise;
-    assert.equal(event.type, "claude_notification");
-    if (event.type === "claude_notification") {
+    assert.equal(event.type, "session_notification");
+    if (event.type === "session_notification") {
       assert.equal(event.notificationType, "task_completed");
       assert.equal(event.adapter, "pi");
       assert.equal(event.message, "PI task completed");
@@ -385,7 +385,7 @@ describe("Claude Code session hook route", () => {
 
     // ui_prompt_start -> PermissionRequest (with the extension's waiting message)
     eventPromise = waitForEvent(eventBus);
-    res = handleClaudeNotificationHook(
+    res = handleSessionNotificationHook(
       db,
       eventBus,
       {
@@ -398,8 +398,8 @@ describe("Claude Code session hook route", () => {
     );
     assert.equal(res.status, 200);
     event = await eventPromise;
-    assert.equal(event.type, "claude_notification");
-    if (event.type === "claude_notification") {
+    assert.equal(event.type, "session_notification");
+    if (event.type === "session_notification") {
       assert.equal(event.notificationType, "permission_prompt");
       assert.equal(event.adapter, "pi");
       assert.equal(event.message, "PI is waiting for your confirm: Run bash command");
@@ -408,9 +408,9 @@ describe("Claude Code session hook route", () => {
     // Process shutdown is not completion of a user task.
     const shutdownEvents: ForgeBadgerEvent[] = [];
     eventBus.on("event", event => shutdownEvents.push(event as ForgeBadgerEvent));
-    res = handleClaudeNotificationHook(db,eventBus,{hook_event_name:"SessionEnd",adapter:"pi"},"pi-token",session.id);
+    res = handleSessionNotificationHook(db,eventBus,{hook_event_name:"SessionEnd",adapter:"pi"},"pi-token",session.id);
     assert.equal(res.status, 200);
-    assert.equal(shutdownEvents.filter(event => event.type === "claude_notification").length, 0);
+    assert.equal(shutdownEvents.filter(event => event.type === "session_notification").length, 0);
     assert.equal(eventBus.getSessionWorkState(session.userId, session.id)?.state, "idle");
   });
 });
@@ -461,7 +461,7 @@ describe("Claude Code session hook route: session identity precedence", () => {
     // the URL path, but the worker sends its own session via the header.
     const res = await makeRequest(
       app,
-      `/api/v1/session-hooks/claude-notification/${staleSession.id}`,
+      `/api/v1/session-hooks/cli-notification/${staleSession.id}`,
       { hook_event_name: "Stop" },
       {
         "x-forgebadger-session-id": currentSession.id,
@@ -471,8 +471,8 @@ describe("Claude Code session hook route: session identity precedence", () => {
 
     assert.equal(res.status, 200);
     const event = await eventPromise;
-    assert.equal(event.type, "claude_notification");
-    if (event.type === "claude_notification") {
+    assert.equal(event.type, "session_notification");
+    if (event.type === "session_notification") {
       assert.equal(event.sessionId, currentSession.id);
     }
   });
@@ -499,7 +499,7 @@ describe("Claude Code session hook route: session identity precedence", () => {
 
     const res = await makeRequest(
       app,
-      "/api/v1/session-hooks/claude-notification",
+      "/api/v1/session-hooks/cli-notification",
       { hook_event_name: "Stop" },
       {
         "x-forgebadger-session-id": "nonexistent-session",

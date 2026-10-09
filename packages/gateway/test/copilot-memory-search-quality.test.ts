@@ -3,6 +3,7 @@ import { it, type TestContext } from 'node:test';
 import { mkdtempSync,rmSync,mkdirSync,readFileSync,writeFileSync,copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from "node:url";
 import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { startCopilotRuntime } from '../src/services/agent/runtime.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
@@ -14,7 +15,7 @@ import { AgentMemoryRepository } from '../src/services/agent/memory.js';
 
 function fixture(t:TestContext) {
   const db=new Database(':memory:');db.pragma('foreign_keys=ON');
-  migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+  migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
   const userId=new UserRepository(db).create('search-quality@example.invalid','hash').id;
   t.after(()=>db.close());
   return {db,userId,memory:new AgentMemoryRepository(db,userId)};
@@ -102,7 +103,7 @@ it('continues a partially rebuilt file database after reopening',t=>{
   const directory=mkdtempSync(join(tmpdir(),'fb-memory-index-')),filename=join(directory,'fixture.db');
   let db=new Database(filename);db.pragma('foreign_keys=ON');
   t.after(()=>{if(db.open)db.close();rmSync(directory,{recursive:true,force:true});});
-  migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+  migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
   const userId=new UserRepository(db).create('reopen-index@example.invalid','hash').id;
   let memory=new AgentMemoryRepository(db,userId);let target='';
   for(let i=0;i<65;i++)target=memory.create({scope:'global',kind:'fact',text:`历史记录 item${i}`}).id;
@@ -115,7 +116,7 @@ it('continues a partially rebuilt file database after reopening',t=>{
 it('upgrades a populated pre-index database without changing original memory text',t=>{
   const directory=mkdtempSync(join(tmpdir(),'fb-memory-upgrade-')),legacy=join(directory,'migrations');
   t.after(()=>rmSync(directory,{recursive:true,force:true}));mkdirSync(join(legacy,'meta'),{recursive:true});
-  const migrations=new URL('../src/db/migrations/',import.meta.url).pathname;
+  const migrations=fileURLToPath(new URL('../src/db/migrations/',import.meta.url));
   const journal=JSON.parse(readFileSync(join(migrations,'meta/_journal.json'),'utf8')) as {entries:Array<{tag:string}>};
   journal.entries=journal.entries.filter(entry=>Number(entry.tag.slice(0,4))<=112);
   writeFileSync(join(legacy,'meta/_journal.json'),JSON.stringify(journal));
@@ -160,7 +161,7 @@ for(const multi of [false,true])it(`keeps readiness and ${multi?'all scopes':'ex
   }});
   db.pragma('journal_mode=WAL');
   t.after(()=>{peer?.close();db.close();rmSync(directory,{recursive:true,force:true});});
-  migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+  migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
   userId=new UserRepository(db).create('race-memory@example.invalid','hash').id;
   const memory=new AgentMemoryRepository(db,userId),project=new ProjectRepository(db,userId).create({name:'P',path:'/tmp/race-memory',aiTool:'codex'});
   memory.create({scope:'global',kind:'fact',text:'original needle'});

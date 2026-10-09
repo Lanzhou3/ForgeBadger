@@ -531,7 +531,7 @@ describe("api client", () => {
           notifications: [
             {
               id: "notification-legacy-1",
-              type: "claude_notification",
+              type: "session_notification",
               titleKey: "notifications.taskCompleted",
               message: "done",
               href: "/sessions/session-1",

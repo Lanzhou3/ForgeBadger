@@ -95,7 +95,7 @@ function cliLines(notification: Notification, payload: Record<string, unknown>):
 export function renderFeishuNotificationCard(item: FeishuNotificationDelivery, notification: Notification | undefined,
   webBaseUrl: string, _legacyContentLevel?: 'status' | 'summary') {
   const payload = readPayload(notification);
-  const isCli = notification?.type === 'claude_notification';
+  const isCli = notification?.type === 'session_notification';
   const progress = isCli ? cliProgress.get(String(payload.notification_type)) : undefined;
   const lines = isCli ? cliLines(notification, payload) : [
     ...[['项目', payload.project_name], ['会话', payload.session_name], ['操作', payload.tool_name]].flatMap(([label, value]) => {
@@ -114,7 +114,7 @@ export function renderFeishuNotificationCard(item: FeishuNotificationDelivery, n
 
 function notificationPath(notification:Notification|undefined,payload:Record<string,unknown>):string|undefined {
   if(!notification)return '/notifications';
-  if(notification.type==='claude_notification' && notification.sessionId)return `/sessions/${encodeURIComponent(notification.sessionId)}`;
+  if(notification.type==='session_notification' && notification.sessionId)return `/sessions/${encodeURIComponent(notification.sessionId)}`;
   if(notification.type==='app_action_notification')return '/models';
   if(notification.type==='copilot_automation' && typeof payload.automation_id==='string' && /^[\w-]{1,128}$/.test(payload.automation_id))return `/copilot/automations/${encodeURIComponent(payload.automation_id)}`;
   return '/notifications';

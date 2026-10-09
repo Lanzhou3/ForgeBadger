@@ -15,14 +15,13 @@ import { SessionRepository } from '../src/db/repositories/session-repository.js'
 import { InMemorySessionManager } from '../src/services/session-manager.js';
 import { PlatformActions } from '../src/services/platform-commands/actions.js';
 import { createPlatformCommands } from '../src/services/platform-commands/catalog.js';
-import { configureCliAutonomyAdapters } from '../src/services/adapter-autonomy.js';
 import { readTaskPacketDetails, findWorkItemByTaskPacketSession, withTaskPacketSessionLink } from '../src/services/project-manager/task-packets.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { attachNotificationPersistence } from '../src/services/notification-events.js';
 import { attachDispatchSupervisor } from '../src/services/agent/dispatch-supervisor.js';
 
 const cleanups: Array<()=>void> = [];
-afterEach(()=>{ for(const cleanup of cleanups.splice(0))cleanup(); configureCliAutonomyAdapters([]); });
+afterEach(()=>{ for(const cleanup of cleanups.splice(0))cleanup(); });
 function fixture(options: { ready?: boolean; fastHook?: boolean; stagingVisible?: boolean } = {}) {
  const root=mkdtempSync(join(tmpdir(),'fb-pm-lifecycle-'));
  const db=new Database(':memory:');
@@ -40,11 +39,10 @@ function fixture(options: { ready?: boolean; fastHook?: boolean; stagingVisible?
   async stageProgrammaticInput(_name,data){state.staged.push(data);if(options.stagingVisible!==false)pane=`› ${data}\nmodel · cwd`;},
   async pressEnter(){state.enters++;pane='› Ask Codex to do anything\nmodel · cwd';if(options.fastHook)notify();}
  },undefined,undefined,{db,sleep:async()=>{}});
- const notify=()=>eventBus.emitEvent({type:'claude_notification',userId:user.id,projectId:project.id,sessionId:state.sessionId || (db.prepare('SELECT id FROM sessions LIMIT 1').get() as {id:string}).id,hookEventName:'Stop',notificationType:'task_completed',message:'Finished'});
+ const notify=()=>eventBus.emitEvent({type:'session_notification',userId:user.id,projectId:project.id,sessionId:state.sessionId || (db.prepare('SELECT id FROM sessions LIMIT 1').get() as {id:string}).id,hookEventName:'Stop',notificationType:'task_completed',message:'Finished'});
  const actions=new PlatformActions({db,userId:user.id,sessionManager:manager,eventBus,adapterCommandRunner:async(command)=>({exitCode:0,stdout:`${command} 1.0.0`,stderr:''})},createPlatformCommands());
  const supervisor=attachDispatchSupervisor({db,eventBus});
  cleanups.push(()=>{supervisor.stop();db.close();rmSync(root,{recursive:true,force:true});});
- configureCliAutonomyAdapters(['codex']);
  return {db,user,project,pm,manager,actions,state,eventBus,notify,supervisor,setReady(){pane='› Ask Codex to do anything\nmodel · cwd';}};
 }
 
@@ -121,7 +119,7 @@ describe('PM task lifecycle reliability',()=>{
  it('persists failed CLI completion as blocked and forbids automatic redispatch',async()=>{
   const f=fixture();const item=f.pm.createWorkItem(f.project.id,{title:'Failure'});const input={projectId:f.project.id,workItemId:item.id};
   const result=await f.actions.executeOwner('pm.task.execute',input,'fail-dispatch') as {session:{id:string}};
-  f.eventBus.emitEvent({type:'claude_notification',userId:f.user.id,sessionId:result.session.id,projectId:f.project.id,hookEventName:'StopFailure',notificationType:'task_failed',message:'Failed'});
+  f.eventBus.emitEvent({type:'session_notification',userId:f.user.id,sessionId:result.session.id,projectId:f.project.id,hookEventName:'StopFailure',notificationType:'task_failed',message:'Failed'});
   assert.equal(f.pm.getWorkItem(f.project.id,item.id)?.status,'blocked');
   await assert.rejects(f.actions.executeOwner('pm.task.execute',input,'fail-replay'),/TASK_NOT_DISPATCHABLE/);assert.equal(f.state.enters,1);
  });
@@ -130,7 +128,7 @@ describe('PM task lifecycle reliability',()=>{
   const f=fixture();const item=f.pm.createWorkItem(f.project.id,{title:'Interrupted'});
   const input={projectId:f.project.id,workItemId:item.id};
   const result=await f.actions.executeOwner('pm.task.execute',input,'interrupt-dispatch') as {session:{id:string};attemptId:string};
-  f.eventBus.emitEvent({type:'claude_notification',userId:f.user.id,sessionId:result.session.id,
+  f.eventBus.emitEvent({type:'session_notification',userId:f.user.id,sessionId:result.session.id,
    projectId:f.project.id,hookEventName:'Interrupt',notificationType:'task_interrupted',message:'Interrupted'});
   assert.equal(f.pm.getWorkItem(f.project.id,item.id)?.status,'in_progress');
   const progress=getTaskProgress({db:f.db,userId:f.user.id},f.project.id,item.id);
@@ -143,7 +141,7 @@ describe('PM task lifecycle reliability',()=>{
   assert.equal(progress.attempt?.consumedNotificationId,undefined);
   await assert.rejects(f.actions.executeOwner('pm.task.execute',input,'interrupt-replay'),/TASK_ALREADY_DISPATCHED/);
   assert.equal(f.state.enters,1);
-  f.eventBus.emitEvent({type:'claude_notification',userId:f.user.id,sessionId:result.session.id,
+  f.eventBus.emitEvent({type:'session_notification',userId:f.user.id,sessionId:result.session.id,
    projectId:f.project.id,hookEventName:'Stop',notificationType:'task_completed',message:'Finished later'});
   assert.equal(f.pm.getWorkItem(f.project.id,item.id)?.status,'ready_for_review');
   const resolved=getTaskProgress({db:f.db,userId:f.user.id},f.project.id,item.id);
@@ -156,10 +154,10 @@ describe('PM task lifecycle reliability',()=>{
   const input={projectId:f.project.id,workItemId:item.id};
   const result=await f.actions.executeOwner('pm.task.execute',input,'many-interruptions') as {session:{id:string}};
   f.supervisor.stop();
-  for(let index=0;index<25;index++) f.eventBus.emitEvent({type:'claude_notification',userId:f.user.id,
+  for(let index=0;index<25;index++) f.eventBus.emitEvent({type:'session_notification',userId:f.user.id,
    sessionId:result.session.id,projectId:f.project.id,hookEventName:'Interrupt',
    notificationType:'task_interrupted',message:`Interrupted ${index}`});
-  f.eventBus.emitEvent({type:'claude_notification',userId:f.user.id,sessionId:result.session.id,
+  f.eventBus.emitEvent({type:'session_notification',userId:f.user.id,sessionId:result.session.id,
    projectId:f.project.id,hookEventName:'Stop',notificationType:'task_completed',message:'Finished after interruptions'});
   const before=getTaskProgress({db:f.db,userId:f.user.id},f.project.id,item.id);
   assert.equal(before.found&&before.notifications.some(entry=>entry.notificationType==='task_completed'),true);
@@ -198,12 +196,10 @@ describe('PM task lifecycle reliability',()=>{
   assert.equal((f.db.prepare('SELECT count(*) n FROM sessions').get() as {n:number}).n,0);
  });
 
- it('authorizes the linked adapter rather than the project default and rejects ambiguous session links',async()=>{
+ it('rejects ambiguous session links',async()=>{
   const f=fixture();const item=f.pm.createWorkItem(f.project.id,{title:'Adapter'});
   const session=new SessionRepository(f.db,f.user.id).create({projectId:f.project.id,name:'s',aiTool:'claude',workingDir:f.project.path});
   f.pm.updateWorkItem(f.project.id,item.id,{details:withTaskPacketSessionLink(item.details,session,f.project)});
-  await assert.rejects(f.actions.executeOwner('pm.task.execute',{projectId:f.project.id,workItemId:item.id},'linked-adapter'),/ADAPTER_AUTONOMY_UNVERIFIED/);
-  configureCliAutonomyAdapters(['claude']);
   const other=f.pm.createWorkItem(f.project.id,{title:'Other'});
   f.pm.updateWorkItem(f.project.id,other.id,{details:withTaskPacketSessionLink(other.details,session,f.project)});
   await assert.rejects(f.actions.executeOwner('pm.task.execute',{projectId:f.project.id,workItemId:item.id},'ambiguous'),/TASK_SESSION_LINK_AMBIGUOUS/);

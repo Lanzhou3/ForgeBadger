@@ -73,7 +73,7 @@ it('reads complete goal/task/management/declared ledger within tenant scope',asy
 it('projects writer status without secrets and rejects absent runtime/foreign session',async()=>{
   const f=fixture();try{
     const result=await f.call('get_session_writer',{sessionId:f.session.id});
-    assert.deepEqual(result.output,{sessionId:f.session.id,mode:'automated',autonomy:'manual_only'});
+    assert.deepEqual(result.output,{sessionId:f.session.id,mode:'automated'});
     assert.doesNotMatch(JSON.stringify(result.output),/NEVER_EXPOSE|[Tt]oken/);
     assert.equal((await f.call('get_session_writer',{sessionId:f.session.id},{...f.ctx,sessionManager:undefined})).ok,false);
     assert.equal((await f.call('get_session_writer',{sessionId:f.session.id},{...f.ctx,userId:f.other.id})).ok,false);
@@ -95,7 +95,7 @@ it('takeover executes through an exact persisted owner approval once when projec
     await r.orchestrator.resumeAfterApproval({userId:f.user.id,runId:r.runId,actionId:action.id,approved:true});
     assert.equal(f.takenOver(),1);assert.equal(r.ledger.get(r.runId)?.status,'completed');
     await r.orchestrator.resumeAfterApproval({userId:f.user.id,runId:r.runId,actionId:action.id,approved:true});assert.equal(f.takenOver(),1);
-    assert.deepEqual((await f.call('get_session_writer',{sessionId:f.session.id})).output,{sessionId:f.session.id,mode:'manual',autonomy:'manual_only'});
+    assert.deepEqual((await f.call('get_session_writer',{sessionId:f.session.id})).output,{sessionId:f.session.id,mode:'manual'});
     const receipts=f.db.prepare('SELECT * FROM platform_action_receipts WHERE user_id=?').all(f.user.id);assert.equal(receipts.length,1);
   }finally{f.db.close();}
 });

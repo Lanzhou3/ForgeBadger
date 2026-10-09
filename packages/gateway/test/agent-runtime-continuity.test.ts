@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -14,7 +15,7 @@ import type { AgentLlmClient } from "../src/services/agent/orchestrator-types.js
 function fixture(stream: AgentLlmClient["stream"], operate = false, maxSteps = 16, failWrite = false) {
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
-  migrate(drizzle(db), { migrationsFolder: new URL("../src/db/migrations", import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL("../src/db/migrations", import.meta.url)) });
   const userId = new UserRepository(db).create("continuity@example.com", "hash").id;
   const log = new CopilotConversationLog(db, userId);
   const conversationId = log.createConversation().id;

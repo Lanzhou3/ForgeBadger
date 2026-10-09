@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -19,7 +20,7 @@ import type { AgentLlmClient } from '../src/services/agent/orchestrator-types.js
 
 async function fixture(t: TestContext, isolated = true) {
   const db = new Database(':memory:'); t.after(() => db.close());
-  migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
   const user = new UserRepository(db).create('stop-target@test.dev', 'hash');
   const projects = new ProjectRepository(db, user.id);
   const project = projects.create({ name: 'ForgeBadger', path: '/tmp', aiTool: 'codex' });

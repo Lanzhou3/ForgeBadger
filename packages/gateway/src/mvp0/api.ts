@@ -433,7 +433,7 @@ function toTemplateRecord(template: import("../db/repositories/template-reposito
   return {
     id: template.id,
     name: template.name,
-    adapter: "claude" as const,
+    adapter: template.adapter,
     files: (template.files ?? []).map((file) => ({
       id: String(file.id),
       relativePath: file.filePath,

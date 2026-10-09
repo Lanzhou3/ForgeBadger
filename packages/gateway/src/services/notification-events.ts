@@ -3,7 +3,7 @@ import { NotificationService } from './notification-service.js';
 import type { Database } from "../db/types.js";
 import type {
   AppActionNotificationEvent,
-  ClaudeNotificationEvent,
+  SessionNotificationEvent,
   ForgeBadgerEvent,
   ForgeBadgerEventBus
 } from "./event-bus.js";
@@ -19,9 +19,8 @@ type TranslationKey = `notifications.${string}`;
 
 /**
  * Adapters that have their own `notifications.<adapter>Permission*` titles in
- * the web catalogue. An adapter missing from this set falls back to the Claude
- * wording — which used to be silent, because the previous if-chain and the key
- * catalogue were maintained separately and drifted.
+ * the web catalogue. An adapter missing from this set falls back to the
+ * adapter-neutral `notifications.cliPermission*` wording.
  */
 const NOTIFICATION_TITLE_ADAPTERS: ReadonlySet<string> = new Set([
   "claude",
@@ -32,7 +31,7 @@ const NOTIFICATION_TITLE_ADAPTERS: ReadonlySet<string> = new Set([
   "mcode"
 ]);
 
-type PersistableNotificationEvent = ClaudeNotificationEvent | AppActionNotificationEvent;
+type PersistableNotificationEvent = SessionNotificationEvent | AppActionNotificationEvent;
 
 /** Only these CLI hook notification types become in-app notifications. */
 const NOTIFIED_CLI_NOTIFICATION_TYPES = new Set([
@@ -56,7 +55,7 @@ export function attachNotificationPersistence(options: NotificationPersistenceOp
     if (!input) return;
 
     try {
-      if (event.type === 'claude_notification') {
+      if (event.type === 'session_notification') {
         try {
           const native = nativePromptIdentity(event.nativeSessionId, event.nativeTurnId);
           const prompt = event.cliSummary?.identityQuality === 'exact_turn' ? event.cliSummary.request
@@ -79,12 +78,12 @@ export function attachNotificationPersistence(options: NotificationPersistenceOp
 }
 
 function isPersistableNotificationEvent(event: ForgeBadgerEvent): event is PersistableNotificationEvent {
-  return event.type === "claude_notification" || event.type === "app_action_notification";
+  return event.type === "session_notification" || event.type === "app_action_notification";
 }
 
 export function notificationInputFromEvent(event: ForgeBadgerEvent): CreateNotificationInput | undefined {
   switch (event.type) {
-    case "claude_notification": {
+    case "session_notification": {
       if (!NOTIFIED_CLI_NOTIFICATION_TYPES.has(event.notificationType)) {
         return undefined;
       }
@@ -142,13 +141,10 @@ export function notificationInputFromEvent(event: ForgeBadgerEvent): CreateNotif
   }
 }
 
-function notificationTitleKey(notificationType: string, adapter: string): string {
-  if (notificationType === "permission_prompt") {
-    return `notifications.${NOTIFICATION_TITLE_ADAPTERS.has(adapter) ? adapter : "claude"}PermissionRequest` as TranslationKey;
-  }
-  if (notificationType === "permission_denied") {
-    return `notifications.${NOTIFICATION_TITLE_ADAPTERS.has(adapter) ? adapter : "claude"}PermissionDenied` as TranslationKey;
-  }
+function notificationTitleKey(notificationType: string, adapter: string | undefined): string {
+  const prefix = adapter !== undefined && NOTIFICATION_TITLE_ADAPTERS.has(adapter) ? adapter : "cli";
+  if (notificationType === "permission_prompt") return `notifications.${prefix}PermissionRequest` as TranslationKey;
+  if (notificationType === "permission_denied") return `notifications.${prefix}PermissionDenied` as TranslationKey;
   if (notificationType === "task_completed") return "notifications.taskCompleted";
   if (notificationType === "task_failed") return "notifications.taskFailed";
   if (notificationType === "session_ended") return "notifications.sessionEnded";

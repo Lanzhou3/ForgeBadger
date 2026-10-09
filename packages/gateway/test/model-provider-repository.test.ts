@@ -73,7 +73,7 @@ describe("model provider repository", () => {
     }), /public HTTPS endpoint/u);
     assert.doesNotThrow(() => repo.createProviderProfile({
       name: "Local no auth", providerKey: "local-no-auth", baseUrl: "http://127.0.0.1:11434/v1",
-      authType: "none", apiFormat: "local", supportedAdapters: ["opencode"]
+      authType: "none", apiFormat: "openai-compatible", supportedAdapters: ["opencode"]
     }));
   });
 

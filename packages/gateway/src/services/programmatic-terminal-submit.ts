@@ -137,7 +137,9 @@ const PI_BOX_BORDER = /^\s*─{20,}\s*$/u;
 const PI_PASTE_MARKER = /\[paste#\d+(?:\+\d+lines?)?\]/u;
 // Claude 2.1.283 folds multiline input inside the current composer. The number
 // after '+' is the newline count, not the total number of lines (live verified).
-const CLAUDE_PASTE_COMPOSER = /^❯\[Pastedtext#[1-9]\d*\+(\d+)lines?\]$/u;
+// Newer builds omit the count ("[Pasted text #2]"), so the count group is
+// optional; when present it is still compared strictly.
+const CLAUDE_PASTE_COMPOSER = /^❯\[Pastedtext#[1-9]\d*(?:\+(\d+)lines?)?\]$/u;
 // Box-bar/spacer slots above the status line that the busy spinner occupies.
 const PI_FOOTER_WINDOW = 4;
 // Max interior height when searching upward for the box's top border.
@@ -239,37 +241,65 @@ export function composerContainsStagedTask(
   adapter: AdapterId,
   pane: string,
   message: string,
-  needle: string
+  needle: string,
+  readyPane?: string
 ): boolean {
   if (composerContainsNeedle(adapter, pane, needle)) return true;
   const composer = normalizeComparable(currentProgrammaticComposer(adapter, pane));
   if (adapter === 'claude') {
     const marker = CLAUDE_PASTE_COMPOSER.exec(composer);
-    const newlines = message.split('\n').length - 1;
-    // SessionManager already proved an empty composer under the writer lease
-    // before staging. Reject partial markers, additional drafts and wrong sizes.
-    return marker !== null && newlines > 0 && Number(marker[1]) === newlines;
+    if (marker !== null) {
+      const newlines = message.split('\n').length - 1;
+      // A count-carrying marker must still match the newline count exactly;
+      // count-less markers (newer builds) are accepted as-is.
+      return marker[1] === undefined || newlines > 0 && Number(marker[1]) === newlines;
+    }
   }
-  if (adapter === "pi") {
+  else if (adapter === "pi") {
     // The ready gate requires an empty composer, so a paste marker found here
     // can only come from the write that was just staged.
-    return PI_PASTE_MARKER.test(composer);
+    if (PI_PASTE_MARKER.test(composer)) return true;
   }
-  if (adapter !== "codex") return false;
+  else if (adapter === "codex") {
+    // Codex collapses pastes over its large-paste threshold into a current-
+    // composer element like `[Pasted Content 2032 chars]`, while retaining the
+    // full payload internally for expansion on submit. Rust's `chars().count()`
+    // counts Unicode scalar values, which matches Array.from rather than JS's
+    // UTF-16 string length for astral characters. The exact placeholder wording
+    // has varied across Codex versions (`Pasted Content` vs `Pasted` vs
+    // `characters` vs `chars`), so match by an extracted count instead of a
+    // hard-coded literal — normalizeComparable already strips whitespace, so the
+    // regex runs against the compacted form.
+    const charCount = Array.from(message).length;
+    const pasteCountPattern = /\[Pasted(?:Content)?(\d+)(?:chars|characters)?\]/i;
+    const match = pasteCountPattern.exec(composer);
+    if (match !== null && Number(match[1]) === charCount) return true;
+    // A count-carrying marker that does NOT match falls through to the
+    // generic ready-pane fallback below instead of hard-failing (unlike the
+    // claude branch): the composer is a single input, so any marker visible
+    // after staging under the writer lease can only be the staged write or a
+    // CLI re-render of it, and the fallback still requires the composer to
+    // differ from the leased ready pane.
+  }
 
-  // Codex collapses pastes over its large-paste threshold into a current-
-  // composer element like `[Pasted Content 2032 chars]`, while retaining the
-  // full payload internally for expansion on submit. Rust's `chars().count()`
-  // counts Unicode scalar values, which matches Array.from rather than JS's
-  // UTF-16 string length for astral characters. The exact placeholder wording
-  // has varied across Codex versions (`Pasted Content` vs `Pasted` vs
-  // `characters` vs `chars`), so match by an extracted count instead of a
-  // hard-coded literal — normalizeComparable already strips whitespace, so the
-  // regex runs against the compacted form.
-  const charCount = Array.from(message).length;
-  const pasteCountPattern = /\[Pasted(?:Content)?(\d+)(?:chars|characters)?\]/i;
-  const match = pasteCountPattern.exec(composer);
-  return match !== null && Number(match[1]) === charCount;
+  // Generic fallback. The caller captured `readyPane` immediately before
+  // staging, under the same writer lease that fences every other writer
+  // (manual input included), and the ready gate accepted that pane. Any
+  // composer content that DIFFERS from the ready pane's composer and is
+  // non-empty is therefore the staged write, however the CLI chose to render
+  // it: folded, wrapped, placeholdered or reformulated beyond the needle.
+  // Comparing against the ready composer (not against "") matters because
+  // Codex and OpenCode keep placeholder text in a ready composer.
+  // This closes the recognition gap for adapters without a fold-marker
+  // parser (kimi, opencode) and for marker wording drift across CLI versions.
+  if (
+    readyPane !== undefined
+    && isProgrammaticComposerReady(adapter, readyPane)
+  ) {
+    const readyComposer = normalizeComparable(currentProgrammaticComposer(adapter, readyPane));
+    return composer !== "" && composer !== readyComposer;
+  }
+  return false;
 }
 
 export function isProgrammaticTaskConsumed(

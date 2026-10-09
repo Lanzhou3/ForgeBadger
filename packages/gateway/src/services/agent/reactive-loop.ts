@@ -14,7 +14,7 @@
  * server.ts): when off, no listener is attached at all.
  *
  * `copilot_run_updated` never wakes the loop (a proactive turn would otherwise
- * re-trigger itself); `claude_notification` is excluded as too noisy (permission/
+ * re-trigger itself); `session_notification` is excluded as too noisy (permission/
  * idle prompts would wake the agent mid-session). A turn rejected by a busy
  * conversation is retained but retried with bounded exponential backoff and
  * dropped after a cap of consecutive busy rejections. All timers are

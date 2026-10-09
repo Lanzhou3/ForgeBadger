@@ -21,8 +21,11 @@ const aiToolSchema = z.enum(adapterIds);
 // Config rendering derives the adapter from the bound template, never from the
 // project's ai_tool hint, so CLI-agnostic projects render correctly. The
 // template's stored adapter wins; the built-in id mapping is the legacy
-// fallback, with "claude" as the final default.
+// fallback for templates created before the adapter column existed. There is
+// deliberately no default adapter: a template with no resolvable adapter is a
+// hard error instead of a silent Claude rendering.
 const templateAdapterByBuiltinId: Record<string, z.infer<typeof aiToolSchema>> = {
+  "builtin-claude-code": "claude",
   "builtin-opencode": "opencode",
   "builtin-codex": "codex",
   "builtin-kimi": "kimi"
@@ -33,7 +36,13 @@ export function adapterForTemplate(template: { id: string; adapter: string | nul
   if (stored.success) {
     return stored.data;
   }
-  return templateAdapterByBuiltinId[template.id] ?? "claude";
+  const legacy = templateAdapterByBuiltinId[template.id];
+  if (legacy) {
+    return legacy;
+  }
+  throw new Error(
+    `TEMPLATE_ADAPTER_MISSING: template ${template.id} declares no CLI adapter; set one before rendering project config`
+  );
 }
 
 export type ProjectConfigSkillSync = (repo: Pick<SkillRepository, "create" | "getByName" | "update">) => unknown;

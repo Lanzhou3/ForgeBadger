@@ -180,9 +180,13 @@ The MVP-5 `forgebadger init` prototype can generate ForgeBadger project config
 without opening the Web console:
 
 ```bash
-pnpm forgebadger -- init --path /path/to/project --dry-run
+pnpm forgebadger -- init --path /path/to/project --template-id builtin-claude-code --dry-run
 pnpm forgebadger -- init --path /path/to/project --template-id builtin-claude-code
 ```
+
+`--template-id` is required: a template declares the CLI adapter its config
+files render for, so the command has no implicit default. `forgebadger
+init --list-templates` prints the available template ids.
 
 Dry-run returns a JSON envelope with generated file paths, hashes, and detected
 conflicts. A non-dry run writes the rendered config through the same

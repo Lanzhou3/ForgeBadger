@@ -334,9 +334,9 @@ describe("cli-config apply: PI", () => {
   it("maps provider api formats to PI api names and endpoints", async () => {
     const cases = [
       { name: "anthropic", apiFormat: "anthropic", providerKey: "relay", expectedApi: "anthropic-messages", expectedUrl: "https://api.deepseek.com/anthropic" },
-      { name: "openai-native", apiFormat: "openai", providerKey: "openai", expectedApi: "openai-responses", expectedUrl: "https://api.deepseek.com/v1" },
+      { name: "openai-native", apiFormat: "openai-responses", providerKey: "openai", expectedApi: "openai-responses", expectedUrl: "https://api.deepseek.com/v1" },
       { name: "google", apiFormat: "google", providerKey: "gemini-relay", expectedApi: "google-generative-ai", expectedUrl: "https://api.deepseek.com/v1" },
-      { name: "local", apiFormat: "local", providerKey: "ollama", expectedApi: "openai-completions", expectedUrl: "https://api.deepseek.com/v1" }
+      { name: "openai-compatible", apiFormat: "openai-compatible", providerKey: "ollama", expectedApi: "openai-completions", expectedUrl: "https://api.deepseek.com/v1" }
     ] as const;
     for (const testCase of cases) {
       const db = createTestDb();
@@ -365,33 +365,6 @@ describe("cli-config apply: PI", () => {
       assert.equal(models.providers[testCase.providerKey].api, testCase.expectedApi, testCase.name);
       assert.equal(models.providers[testCase.providerKey].baseUrl, testCase.expectedUrl, testCase.name);
     }
-  });
-
-  it("rejects bedrock providers without touching the config files", async () => {
-    const db = createTestDb();
-    const user = new UserRepository(db).create("apply-pi-bedrock@example.com", "hash");
-    const root = await useConfigRoot("forgebadger-apply-pi-bedrock-");
-    const repo = new ModelProviderRepository(db, user.id, masterKey);
-    const provider = repo.createProviderProfile({
-      name: "bedrock provider",
-      providerKey: "bedrock",
-      baseUrl: "https://bedrock.example.com",
-      authType: "api_key",
-      apiFormat: "bedrock",
-      supportedAdapters: ["pi"]
-    });
-    repo.createModelProfile({ providerProfileId: provider.id, name: "M", modelId: "m-1", isDefault: true });
-    repo.createCredential({ providerProfileId: provider.id, label: "c", plaintextSecret: "sk-x" });
-
-    const error = await applyCliConfigToAdapter({
-      db, userId: user.id, masterKey, adapter: "pi",
-      providerProfileId: provider.id, resolveHost: publicResolver
-    }).catch((caught: unknown) => caught);
-
-    assert.ok(error instanceof Error);
-    assert.equal((error as { code?: string }).code, "CLI_CONFIG_APPLY_ADAPTER_UNSUPPORTED");
-    assert.equal(existsSync(path.join(root, "models.json")), false);
-    assert.equal(existsSync(path.join(root, "settings.json")), false);
   });
 
   it("never writes auth.json and warns when it shadows the applied key", async () => {

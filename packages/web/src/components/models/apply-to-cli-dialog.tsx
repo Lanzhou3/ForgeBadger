@@ -66,11 +66,11 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
   const activeCredentials = useMemo(() => credentials.filter((credential) => credential.status === "active"), [credentials]);
   const defaultModel = activeModels.find((model) => model.isDefault) ?? activeModels[0];
 
-  const [adapter, setAdapter] = useState<ProviderSupportedAdapter>(targets[0] ?? "claude");
+  const [adapter, setAdapter] = useState<ProviderSupportedAdapter | "">(targets[0] ?? "");
   // Prefer a native Anthropic endpoint, including legacy Anthropic baseUrl.
   // Only providers without one need protocol translation through the Gateway.
   const needsRoute = adapter === "claude" && !provider.anthropicBaseUrl && provider.apiFormat !== "anthropic";
-  const routeSupported = needsRoute && (provider.apiFormat === "openai" || provider.apiFormat === "openai-compatible");
+  const routeSupported = needsRoute && (provider.apiFormat === "openai-responses" || provider.apiFormat === "openai-compatible");
   const routeUnsupported = needsRoute && !routeSupported;
   const routeQuery = useQuery({
     queryKey: ["claude-route"],
@@ -110,10 +110,10 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
     const preset = initialAdapter && targets.includes(initialAdapter as ProviderSupportedAdapter)
       ? (initialAdapter as ProviderSupportedAdapter)
       : undefined;
-    const fallback = preset ?? chooseDefaultAdapter(detectedAdapters, targets) ?? targets[0] ?? "claude";
+    const fallback = preset ?? chooseDefaultAdapter(detectedAdapters, targets) ?? targets[0] ?? "";
     const detected = new Map(detectedAdapters.map((adapter) => [adapter.id, adapter]));
     setAdapter((current) =>
-      !preset && targets.includes(current) && (detected.get(current) ? isAdapterSelectable(detected.get(current)!, targets) : true)
+      current !== "" && !preset && targets.includes(current) && (detected.get(current) ? isAdapterSelectable(detected.get(current)!, targets) : true)
         ? current
         : fallback
     );
@@ -157,7 +157,10 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
 
   const previewQuery = useQuery({
     queryKey: ["cli-config-apply-preview", adapter, debouncedPreviewInput],
-    queryFn: () => previewCliConfigApply(adapter, debouncedPreviewInput),
+    queryFn: () => {
+      if (adapter === "") throw new Error("No CLI selected");
+      return previewCliConfigApply(adapter, debouncedPreviewInput);
+    },
     // Gate on the debounce having caught up: expanding the summary must not
     // fire a request with the stale (pre-selection) input, and selection
     // changes pause the query until the 400ms debounce settles.
@@ -168,6 +171,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
 
   const applyMutation = useMutation({
     mutationFn: async () => {
+      if (!adapter) throw new Error("No CLI selected");
       // One-tap path: enable the route first, then apply through it.
       if (needsRoute && !routeEnabled) {
         await setClaudeRoute(true);
@@ -413,6 +417,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
           <Button
             type="button"
             disabled={
+              !adapter ||
               applyMutation.isPending ||
               routeUnsupported ||
               codexWireApiBlocked ||

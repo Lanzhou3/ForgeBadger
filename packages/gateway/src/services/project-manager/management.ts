@@ -3,13 +3,10 @@ import { ProjectRepository } from "../../db/repositories/project-repository.js";
 import { ProjectManagerRepository, PROJECT_MANAGER_WORK_ITEM_STATUSES } from "../../db/repositories/project-manager-repository.js";
 import { ProjectManagementRepository, type ManagementEvidenceRow } from "../../db/repositories/project-management-repository.js";
 import type { CommandContext, PlatformCommand } from "../platform-commands/types.js";
-import type { AdapterId } from "../adapter-discovery.js";
-import { getAdapterAutonomy } from "../adapter-autonomy.js";
 import { ConflictError } from "../../middleware/errors.js";
 
 export const managementPatchSchema = z.object({
   expectedRevision: z.number().int().min(0),
-  mode: z.enum(["manual", "cli"]).optional(),
   ownerLabel: z.string().trim().max(200).optional(),
   nextAction: z.string().trim().max(2000).optional(),
   freshnessHours: z.number().int().min(1).max(8760).optional(),
@@ -29,7 +26,6 @@ export function createManagementCommands(): PlatformCommand[] {
     execute(context, raw) {
       const { projectId, expectedRevision, ...patch } = commandSchema.parse(raw);
       return new ProjectManagementRepository(context.db, context.userId).update(projectId, expectedRevision, {
-        ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
         ...(patch.ownerLabel !== undefined ? { ownerLabel: patch.ownerLabel } : {}),
         ...(patch.nextAction !== undefined ? { nextAction: patch.nextAction } : {}),
         ...(patch.freshnessHours !== undefined ? { freshnessHours: patch.freshnessHours } : {}),
@@ -72,7 +68,6 @@ export function projectManagementOverview(context: CommandContext, allowedProjec
     const goal = pm.getGoal(project.id);
     return { id: project.id, name: project.name, copilotAutonomy: project.copilotAutonomy, management, counts,
       goal: goal ? { summary: goal.summary, status: goal.status } : null,
-      evidenceFreshness: evidenceFreshness(rows, management.freshnessHours, now),
-      autonomy: getAdapterAutonomy(project.aiTool as AdapterId).mode };
+      evidenceFreshness: evidenceFreshness(rows, management.freshnessHours, now) };
   }), observedAt: now };
 }

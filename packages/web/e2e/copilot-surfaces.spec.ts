@@ -5,7 +5,7 @@ async function mockSurfaceApis(page: Page) {
  await page.addInitScript(user=>{localStorage.setItem('forgebadger-language','zh-CN');localStorage.setItem('forgebadger.token','fixture');localStorage.setItem('forgebadger.user',JSON.stringify(user));},user);
  await page.routeWebSocket('**/ws/**',()=>{});
  const long='very_long_identifier_'.repeat(24);
- const projects=[{id:'p',name:'项目界面验证',copilotAutonomy:false,counts:{done:0,total:0,in_progress:0,blocked:0},evidenceFreshness:{status:'unknown'},sessions:[],management:{mode:'manual',ownerLabel:'',nextAction:'',freshnessHours:24,revision:1}}];
+ const projects=[{id:'p',name:'项目界面验证',copilotAutonomy:false,counts:{done:0,total:0,in_progress:0,blocked:0},evidenceFreshness:{status:'unknown'},sessions:[],management:{ownerLabel:'',nextAction:'',freshnessHours:24,revision:1}}];
  const models=[{id:'default',name:'默认模型',providerName:'Provider',status:'active',isDefault:true},{id:'selected',name:'实际选择的模型',providerName:'Provider',status:'active',isDefault:false}];
  const conversations=['a','b'].map(id=>({id,title:'历史会话 '+id,status:'active',created_at:Date.now(),updated_at:Date.now()}));
  const messages=[{role:'user',content:long},{role:'assistant',content:'## 验证结果\n\n这是长内容和 Markdown 表格的布局检查。\n\n```ts\nconst result = "'+long+'";\n```\n\n| 文件 | 状态 |\n|---|---|\n|'+long+'| 通过 |'},{role:'assistant',kind:'tool_call',toolName:long,toolCallId:'call',toolInputJson:JSON.stringify({file:long}),content:''},{role:'tool',kind:'tool_result',toolCallId:'call',content:JSON.stringify({output:long})}].map((m,i)=>({id:'m'+i,conversationId:'a',userId:user.id,kind:'text',sequence:i+1,createdAt:new Date().toISOString(),...m}));
@@ -31,7 +31,7 @@ async function mockSurfaceApis(page: Page) {
   else if(p.endsWith('/copilot/memory/entries'))data={entries:[{id:'mem',text:long,scope:'global',kind:'preference'}]};
   else if(p.endsWith('/copilot/automations/suggestions'))data={suggestions:[]};
   else if(p.endsWith('/copilot/automations'))data={automations:[{id:'auto',name:long,prompt:'检查项目',status:'enabled',scheduleKind:'cron',scheduleExpression:'0 9 * * *'}]};
-  else if(p.endsWith('/runtime-settings'))data={readonly:false,settings:[{key:'cli_autonomy_adapters',value:[],source:'settings'},{key:'pm_auto_dispatch',value:false,source:'settings'}]};
+  else if(p.endsWith('/runtime-settings'))data={readonly:false,settings:[{key:'pm_auto_dispatch',value:false,source:'settings'}]};
   else if(p.endsWith('/adapters/discovery'))data={adapters:[]};
   else if(/integrations\/(feishu|telegram)\/account$/.test(p))data={account:null};
   else if(/integrations\/(feishu|telegram)\/health$/.test(p))data={health:{state:'disabled'}};

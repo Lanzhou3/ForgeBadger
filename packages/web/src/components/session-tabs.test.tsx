@@ -127,7 +127,7 @@ describe("SessionTabs gateway status events", () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
-  it("closes the active tab and navigates to the next tab", () => {
+  it("closes the active tab and navigates to the most recently used running tab", () => {
     seedTabs([
       { id: "s1", label: "A", status: "running", updatedAt: 1 },
       { id: "s2", label: "B", status: "running", updatedAt: 2 },
@@ -138,6 +138,37 @@ describe("SessionTabs gateway status events", () => {
 
     expect(readSessionTabs().map((tab) => tab.id)).toEqual(["s2"]);
     expect(pushMock).toHaveBeenCalledWith("/sessions/s2");
+  });
+
+  it("skips a stale non-running tab and jumps to the running one", () => {
+    // A lingering exited/stopped tab (e.g. a Copilot-command session that was
+    // auto-deleted server-side) must never become the navigation target: its
+    // page would show the not-found card.
+    seedTabs([
+      { id: "s1", label: "A", status: "running", updatedAt: 1 },
+      { id: "dead", label: "dead", status: "exited", updatedAt: 2 },
+      { id: "s3", label: "C", status: "running", updatedAt: 3 },
+    ]);
+    renderTabs("s1");
+
+    dispatchStatusChanged("s1", "exited");
+
+    expect(readSessionTabs().map((tab) => tab.id)).toEqual(["dead", "s3"]);
+    expect(pushMock).toHaveBeenCalledWith("/sessions/s3");
+  });
+
+  it("navigates to the session list when no running tab remains", () => {
+    seedTabs([
+      { id: "s1", label: "A", status: "running", updatedAt: 1 },
+      { id: "dead", label: "dead", status: "exited", updatedAt: 2 },
+    ]);
+    renderTabs("s1");
+
+    dispatchStatusChanged("s1", "exited");
+
+    // No running session left — go to the list instead of a dead tab.
+    expect(readSessionTabs().map((tab) => tab.id)).toEqual(["dead"]);
+    expect(pushMock).toHaveBeenCalledWith("/sessions");
   });
 
   it("navigates to the session list when the last tab exits", () => {

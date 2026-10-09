@@ -43,7 +43,6 @@ const state = {
     { key: "registration", value: "open", source: "env", hot: true },
     { key: "mcp_enabled", value: false, source: "env", hot: false },
     { key: "session_prefix", value: "fb-", source: "env", hot: true },
-    { key: "cli_autonomy_adapters", value: [], source: "env", hot: true },
     { key: "pm_auto_dispatch", value: false, source: "env", hot: true }
   ]
 };

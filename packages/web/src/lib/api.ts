@@ -639,7 +639,8 @@ export interface ProjectSkill {
 }
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
-export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
+/** Wire protocol the provider endpoint speaks (not the vendor). */
+export type ProviderApiFormat = "anthropic" | "openai-responses" | "openai-compatible" | "google";
 export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
 
 /**
@@ -3579,7 +3580,6 @@ export type RuntimeSettingKey =
   | "registration"
   | "mcp_enabled"
   | "session_prefix"
-  | "cli_autonomy_adapters"
   | "pm_auto_dispatch";
 
 export interface RuntimeSettingView {

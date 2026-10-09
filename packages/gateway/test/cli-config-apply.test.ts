@@ -76,7 +76,7 @@ function createFixture(db: Database.Database, userId: string, adapter: AdapterId
     anthropicBaseUrl: "https://api.deepseek.com/anthropic",
     openaiBaseUrl: "https://api.deepseek.com/v1",
     authType: "api_key",
-    apiFormat: adapter === "claude" || adapter === "kimi" ? "anthropic" : "openai-compatible",
+    apiFormat: adapter === "claude" || adapter === "kimi" ? "anthropic" : adapter === "codex" ? "openai-responses" : "openai-compatible",
     supportedAdapters: [adapter]
   });
   const model = repo.createModelProfile({

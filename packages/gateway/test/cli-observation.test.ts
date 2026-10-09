@@ -11,7 +11,7 @@ import { NotificationRepository } from '../src/db/repositories/notification-repo
 import { CliObservationRepository, MAX_CLI_OBSERVATIONS } from '../src/db/repositories/cli-observation-repository.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { attachNotificationPersistence } from '../src/services/notification-events.js';
-import { handleClaudeNotificationHook } from '../src/routes/session-hooks.js';
+import { handleSessionNotificationHook } from '../src/routes/session-hooks.js';
 import { createNotificationDeduper } from '../src/services/notification-dedupe.js';
 import { adapterIds } from '../src/lib/adapter-ids.js';
 import { cliAdapterLabels, cliText, directCliFields } from '../src/services/notifications/cli-observation.js';
@@ -27,7 +27,7 @@ function fixture(t: TestContext) {
   const records = new CliObservationRepository(db, user.id), notices = new NotificationRepository(db, user.id);
   const deduper = createNotificationDeduper();
   const hook = (hook_event_name: string, turn_id?: string, extra: Record<string, unknown> = {}, token = 'fixture') =>
-    handleClaudeNotificationHook(db, bus, { adapter: 'codex', session_id: 'native', turn_id, hook_event_name, ...extra }, token, session.id, deduper);
+    handleSessionNotificationHook(db, bus, { adapter: 'codex', session_id: 'native', turn_id, hook_event_name, ...extra }, token, session.id, deduper);
   return { db, user, session, sessions, bus, records, notices, hook };
 }
 

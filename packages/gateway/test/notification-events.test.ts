@@ -58,7 +58,7 @@ describe("notification event persistence", () => {
 
     for (const notificationType of ["status", "elicitation_dialog", "auth_status"]) {
       eventBus.emitEvent({
-        type: "claude_notification",
+        type: "session_notification",
         userId: user.id,
         sessionId: "session-9",
         hookEventName: "Notification",
@@ -79,7 +79,7 @@ describe("notification event persistence", () => {
     attachNotificationPersistence({ db, eventBus });
 
     eventBus.emitEvent({
-      type: "claude_notification",
+      type: "session_notification",
       userId: user.id,
       sessionId: "session-2",
       hookEventName: "Notification",
@@ -102,7 +102,7 @@ describe("notification event persistence", () => {
     attachNotificationPersistence({ db, eventBus });
 
     eventBus.emitEvent({
-      type: "claude_notification",
+      type: "session_notification",
       userId: user.id,
       sessionId: "session-3",
       projectId: "project-3",
@@ -137,7 +137,7 @@ describe("notification event persistence", () => {
       const eventBus = new ForgeBadgerEventBus();
       attachNotificationPersistence({ db, eventBus });
       const marker = "sk-FAKENOTIFICATION123456";
-      eventBus.emitEvent({ type: "claude_notification", userId: user.id,
+      eventBus.emitEvent({ type: "session_notification", userId: user.id,
         sessionId: "session-1", hookEventName: "Interrupt", notificationType: "task_interrupted",
         message: `CLI interruption ${marker}`, title: `title ${marker}`,
         toolName: `Bash-${marker}` });
@@ -166,7 +166,7 @@ describe("notification event persistence", () => {
     ];
     for (const testCase of cases) {
       eventBus.emitEvent({
-        type: "claude_notification",
+        type: "session_notification",
         userId: user.id,
         sessionId: "session-4",
         hookEventName: "Notification",

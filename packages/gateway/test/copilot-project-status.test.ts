@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -93,7 +94,7 @@ it('rejects parent Git discovery, linked gitdirs and cancellation', async t => {
 
 it('registers a core read tool and enforces tenant and research project scope', async t => {
   const f = repo(t), db = new Database(':memory:'); t.after(() => db.close());
-  migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
   const owner = new UserRepository(db).create('status-owner@test.dev', 'hash');
   const other = new UserRepository(db).create('status-other@test.dev', 'hash');
   const project = new ProjectRepository(db, owner.id).create({ name: 'Status', path: f.root, aiTool: 'codex' });

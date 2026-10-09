@@ -81,10 +81,10 @@ export class NotificationRepository {
     if (!projectIds.length) return [];
     return this.drizzle.select({ notification: notifications }).from(notifications)
       .innerJoin(sessions, and(eq(sessions.id, notifications.sessionId), eq(sessions.userId, notifications.userId)))
-      .where(and(eq(notifications.userId, this.userId), eq(notifications.type, 'claude_notification'),
+      .where(and(eq(notifications.userId, this.userId), eq(notifications.type, 'session_notification'),
         inArray(sessions.projectId, projectIds), gte(notifications.createdAt, since),
         sql`json_extract(CASE WHEN json_valid(${notifications.payload}) THEN ${notifications.payload} ELSE '{}' END,'$.project_id') = ${sessions.projectId}`,
-        sql`${notifications}.rowid IN (SELECT MAX(n.rowid) FROM notifications n WHERE n.user_id=${this.userId} AND n.type='claude_notification' GROUP BY n.session_id)`))
+        sql`${notifications}.rowid IN (SELECT MAX(n.rowid) FROM notifications n WHERE n.user_id=${this.userId} AND n.type='session_notification' GROUP BY n.session_id)`))
       .orderBy(desc(notifications.createdAt), sql`${notifications}.rowid DESC`).limit(8).all()
       .map(row => row.notification as Notification);
   }

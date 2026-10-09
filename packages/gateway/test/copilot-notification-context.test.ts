@@ -23,7 +23,7 @@ function fixture() {
   const session = new SessionRepository(db, user.id).create({ projectId: project.id, name: 'Project', aiTool: 'codex', workingDir: project.path });
   const log = new CopilotConversationLog(db, user.id), conversation = log.createConversation();
   const notices = new NotificationRepository(db, user.id);
-  const add = (extra: Record<string, unknown> = {}) => notices.create({ type: 'claude_notification', titleKey: 'notifications.taskCompleted',
+  const add = (extra: Record<string, unknown> = {}) => notices.create({ type: 'session_notification', titleKey: 'notifications.taskCompleted',
     message: 'Codex task completed', href: '', sessionId: session.id,
     payload: { project_id: project.id, notification_type: 'task_completed', session_name: 'Project', last_prompt: 'review 通知', ...extra } });
   const input = { userId: user.id, conversationId: conversation.id, userText: '进度如何', projectId: project.id };
@@ -74,7 +74,7 @@ it('keeps the newest event within one timestamp second, and one busy session can
     for (let i = 0; i < 10; i++) {
       const session = new SessionRepository(f.db, f.user.id).create({ projectId: f.project.id, name: `session-${i}`,
         aiTool: 'codex', workingDir: f.project.path });
-      f.notices.create({ type: 'claude_notification', titleKey: 'notifications.taskCompleted', message: '', href: '', sessionId: session.id,
+      f.notices.create({ type: 'session_notification', titleKey: 'notifications.taskCompleted', message: '', href: '', sessionId: session.id,
         payload: { project_id: f.project.id, notification_type: 'task_completed', last_prompt: '界'.repeat(2000) } });
     }
     for (let i = 0; i < 40; i++) f.add();

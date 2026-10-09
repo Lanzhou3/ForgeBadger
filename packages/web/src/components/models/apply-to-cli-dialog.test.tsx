@@ -19,7 +19,7 @@ vi.mock("@/lib/api", () => ({
 
 const provider: ProviderProfile = {
   id: "provider-1", providerKey: "custom", name: "Custom", baseUrl: "https://example.com/v1",
-  apiFormat: "openai", authType: "api_key", supportedAdapters: ["claude"], status: "active",
+  apiFormat: "openai-compatible", authType: "api_key", supportedAdapters: ["claude"], status: "active",
 };
 
 function makeModel(overrides: Partial<ModelProfile> = {}): ModelProfile {
@@ -46,7 +46,7 @@ afterEach(cleanup);
 
 describe("Claude endpoint routing", () => {
   it.each([
-    { apiFormat: "openai" as const, anthropicBaseUrl: "https://example.com/anthropic", openaiBaseUrl: "https://example.com/v1" },
+    { apiFormat: "openai-responses" as const, anthropicBaseUrl: "https://example.com/anthropic", openaiBaseUrl: "https://example.com/v1" },
     { apiFormat: "openai-compatible" as const, anthropicBaseUrl: "https://example.com/anthropic" },
     { apiFormat: "anthropic" as const },
   ])("applies native Anthropic configuration directly: %j", async (overrides) => {
@@ -62,7 +62,7 @@ describe("Claude endpoint routing", () => {
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["claude-route"] }));
   });
 
-  it.each(["openai", "openai-compatible"] as const)("enables routing for %s without Anthropic", async (apiFormat) => {
+  it.each(["openai-responses", "openai-compatible"] as const)("enables routing for %s without Anthropic", async (apiFormat) => {
     setup({ apiFormat });
     await waitFor(() => expect(getClaudeRoute).toHaveBeenCalled());
     const button = screen.getByRole("button", { name: "models.claudeRouteEnableAndApply" });

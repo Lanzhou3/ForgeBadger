@@ -63,7 +63,7 @@ function fixture(folder=migrationsFolder) {
 function models(f: ReturnType<typeof fixture>) {
   const repo=new ModelProviderRepository(f.db,f.user.id,f.key);
   const add=(name:string,key:string,modelId:string,isDefault=false)=>{
-    const provider=repo.createProviderProfile({name,providerKey:key,baseUrl:`https://8.8.8.8/${key}/v1`,apiFormat:'openai',authType:'api_key',supportedAdapters:['opencode']});
+    const provider=repo.createProviderProfile({name,providerKey:key,baseUrl:`https://8.8.8.8/${key}/v1`,apiFormat:'openai-compatible',authType:'api_key',supportedAdapters:['opencode']});
     repo.createCredential({providerProfileId:provider.id,label:'fixture',plaintextSecret:randomBytes(24).toString('hex')});
     return repo.createModelProfile({providerProfileId:provider.id,name,modelId,capabilities:['chat'],isDefault});
   };
@@ -154,11 +154,11 @@ it('missing, foreign and ambiguous model references never mutate the selection',
   const f=fixture();
   try {
     const {repo,a,b}=models(f);f.command(`/model ${a.id}`);await f.deliver();
-    const duplicate=repo.createProviderProfile({name:'Beta elsewhere',providerKey:'beta',baseUrl:'https://1.1.1.1/v1',apiFormat:'openai',authType:'api_key',supportedAdapters:['opencode']});
+    const duplicate=repo.createProviderProfile({name:'Beta elsewhere',providerKey:'beta',baseUrl:'https://1.1.1.1/v1',apiFormat:'openai-compatible',authType:'api_key',supportedAdapters:['opencode']});
     repo.createCredential({providerProfileId:duplicate.id,plaintextSecret:'fixture-secret'});
     repo.createModelProfile({providerProfileId:duplicate.id,name:b.name,modelId:b.modelId,capabilities:['chat']});
     const foreign=new ModelProviderRepository(f.db,f.other.id,f.key);
-    const provider=foreign.createProviderProfile({name:'private-foreign',providerKey:'foreign',baseUrl:'https://1.1.1.1',apiFormat:'openai',authType:'api_key',supportedAdapters:['opencode']});
+    const provider=foreign.createProviderProfile({name:'private-foreign',providerKey:'foreign',baseUrl:'https://1.1.1.1',apiFormat:'openai-compatible',authType:'api_key',supportedAdapters:['opencode']});
     const foreignModel=foreign.createModelProfile({providerProfileId:provider.id,name:'private-foreign',modelId:'secret-model'});
     for(const selector of ['missing',foreignModel.id,'beta/org/model-b',b.name])f.command(`/model ${selector}`);
     const replies=await f.deliver();assert.ok(replies.every(r=>r.includes('未切换')));assert.equal(pin(f),a.id);

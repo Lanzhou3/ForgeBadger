@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import express from "express";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -13,10 +13,6 @@ import { loadEnv, type GatewayEnv } from "../src/config/env.js";
 import { createRuntimeSettingsRoutes } from "../src/routes/runtime-settings.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { AuditLogRepository } from "../src/db/repositories/audit-log-repository.js";
-import {
-  assertAdapterAutonomy,
-  configureCliAutonomyAdapters
-} from "../src/services/adapter-autonomy.js";
 import {
   createRuntimeSettingsStore,
   RuntimeSettingsError,
@@ -43,67 +39,55 @@ function createTestDb(): Database {
   return db;
 }
 
-afterEach(() => configureCliAutonomyAdapters([]));
-
 describe("runtime settings store", () => {
   let db: Database;
   let env: GatewayEnv;
 
   beforeEach(() => {
     db = createTestDb();
-    env = baseEnv({ FORGEBADGER_CLI_AUTONOMY_ADAPTERS: "claude" });
+    env = baseEnv();
   });
 
   it("falls back to env defaults and reports per-key provenance", () => {
     const store = createRuntimeSettingsStore(db, { env });
     const views = store.views();
     const byKey = new Map(views.map((view) => [view.key, view]));
-    assert.deepEqual(byKey.get("cli_autonomy_adapters")?.value, ["claude"]);
-    assert.equal(byKey.get("cli_autonomy_adapters")?.source, "env");
     assert.equal(byKey.get("registration")?.value, "open");
     assert.equal(byKey.get("mcp_enabled")?.hot, false);
-    assert.equal(byKey.get("cli_autonomy_adapters")?.hot, true);
+    assert.equal(byKey.get("pm_auto_dispatch")?.value, false);
+    assert.equal(byKey.get("pm_auto_dispatch")?.source, "env");
   });
 
-  it("persists DB overrides on top of env and hot-applies autonomy adapters", () => {
+  it("persists DB overrides on top of env and hot-applies the dispatch behavior flag", () => {
     const applied: RuntimeSettingsEffective[] = [];
-    configureCliAutonomyAdapters([]);
     const store = createRuntimeSettingsStore(db, {
       env,
       // Mirrors the production wiring in createGatewayApp.
       apply: (effective) => {
-        configureCliAutonomyAdapters([...effective.cliAutonomyAdapters]);
         applied.push(effective);
       }
     });
 
     // Initial wiring apply reconciles env state.
     assert.equal(applied.length, 1);
-    assert.deepEqual(applied[0]?.cliAutonomyAdapters, ["claude"]);
+    assert.equal(applied[0]?.pmAutoDispatch, false);
 
-    const views = store.update("tester", { cli_autonomy_adapters: ["pi"] });
-    const autonomy = views.find((view) => view.key === "cli_autonomy_adapters");
-    assert.deepEqual(autonomy?.value, ["pi"]);
-    assert.equal(autonomy?.source, "settings");
+    const views = store.update("tester", { pm_auto_dispatch: true });
+    const flag = views.find((view) => view.key === "pm_auto_dispatch");
+    assert.equal(flag?.value, true);
+    assert.equal(flag?.source, "settings");
 
-    // Hot apply: the live autonomy registry now admits pi.
-    assertAdapterAutonomy("pi");
-    assert.throws(() => assertAdapterAutonomy("claude"), /ADAPTER_AUTONOMY_UNVERIFIED/);
+    // Hot apply: the applier observes the refreshed value.
+    assert.equal(applied.at(-1)?.pmAutoDispatch, true);
 
     // A second process reading the same DB sees the override.
     const reopened = createRuntimeSettingsStore(db, { env });
-    assert.deepEqual(reopened.effective().cliAutonomyAdapters, ["pi"]);
-  });
-
-  it("accepts comma-separated strings like the env variable", () => {
-    const store = createRuntimeSettingsStore(db, { env });
-    const views = store.update("tester", { cli_autonomy_adapters: "kimi, pi" });
-    assert.deepEqual(views.find((view) => view.key === "cli_autonomy_adapters")?.value, ["kimi", "pi"]);
+    assert.equal(reopened.effective().pmAutoDispatch, true);
   });
 
   it("rejects invalid input, unknown keys, and empty patches", () => {
     const store = createRuntimeSettingsStore(db, { env });
-    assert.throws(() => store.update("tester", { cli_autonomy_adapters: ["nope"] }), RuntimeSettingsError);
+    assert.throws(() => store.update("tester", { pm_auto_dispatch: "maybe" }), RuntimeSettingsError);
     assert.throws(() => store.update("tester", { registration: "wide-open" }), RuntimeSettingsError);
     assert.throws(() => store.update("tester", { session_prefix: "bad prefix!" }), RuntimeSettingsError);
     assert.throws(() => store.update("tester", { bogus: true }), RuntimeSettingsError);

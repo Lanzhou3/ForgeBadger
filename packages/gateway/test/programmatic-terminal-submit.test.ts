@@ -253,4 +253,55 @@ describe("programmatic terminal submit classifiers", () => {
       "Codex counts Unicode scalar values, not UTF-16 code units"
     );
   });
+
+  it("accepts a Claude folded marker without a line count (newer builds)", () => {
+    const message = ["Task: fix", "detail one", "detail two"].join("\n");
+    const needle = programmaticDeliveryNeedle(message);
+    const pane = "──────\n❯ [Pasted text #2]\n──────\n  auto mode on";
+    assert.equal(composerContainsStagedTask("claude", pane, message, needle), true);
+    // A count-carrying marker still must match exactly.
+    assert.equal(
+      composerContainsStagedTask("claude", "──────\n❯ [Pasted text #2 +4 lines]\n──────", message, needle),
+      false
+    );
+  });
+
+  it("falls back to the ready-pane proof when the CLI renders the paste beyond the needle", () => {
+    // Kimi has no fold-marker parser; suppose its box clips the staged text
+    // so the full needle never appears literally.
+    const message = "修复登录流程并验证全部边界条件与回归用例";
+    const needle = programmaticDeliveryNeedle(message);
+    const readyPane = "│ >                                                                        │\nauto  K3 thinking: high  context: 0%";
+    const clipped = "│ > 修复登录流程并验证                                     │\nauto  K3 thinking: high  context: 0%";
+    assert.equal(composerContainsNeedle("kimi", clipped, needle), false, "needle clipped by box width");
+    assert.equal(composerContainsStagedTask("kimi", clipped, message, needle, readyPane), true);
+
+    // Without the ready-pane proof the clipped text is not accepted.
+    assert.equal(composerContainsStagedTask("kimi", clipped, message, needle), false);
+    // An empty composer after staging is never accepted (echo truly absent).
+    assert.equal(composerContainsStagedTask("kimi", readyPane, message, needle, readyPane), false);
+    // A ready pane that was NOT composer-ready disables the fallback: a
+    // non-empty composer could predate the staging write.
+    const busy = "│ > someone else's draft                   │\ncontext: 0%";
+    assert.equal(composerContainsStagedTask("kimi", clipped, message, needle, busy), false);
+  });
+
+  it("ready-pane fallback covers opencode and codex placeholder drift", () => {
+    const message = "Task: add tests\nCover edge cases";
+    const needle = programmaticDeliveryNeedle(message);
+    const readyOpenCode = "┃ Ask anything... \"Fix a TODO in the codebase\"\n┃ Build · model\nctrl+p commands";
+    // opencode re-renders the folded input with its own wording.
+    const folded = "┃ [1 file pasted]\n┃ Build · model\nctrl+p commands";
+    assert.equal(composerContainsStagedTask("opencode", folded, message, needle, readyOpenCode), true);
+
+    const readyCodex = "› Ask Codex to do anything\n\n  gpt-5.6-sol · ~/Project/ForgeBadger";
+    // Codex placeholder wording drift with a changed count format.
+    const drifted = "› [Pasted 42 chars]\n\nmodel · cwd";
+    assert.equal(composerContainsStagedTask("codex", drifted, message, needle), false, "count must match when parsed");
+    assert.equal(composerContainsStagedTask("codex", drifted, message, needle, readyCodex), true);
+    // An UNCHANGED ready composer (placeholder intact, paste echo not yet
+    // rendered) must not be accepted: a Codex-ready composer is non-empty by
+    // definition, so the comparison is against the ready composer, not "".
+    assert.equal(composerContainsStagedTask("codex", readyCodex, message, needle, readyCodex), false);
+  });
 });

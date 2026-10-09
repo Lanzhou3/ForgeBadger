@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -14,7 +15,7 @@ import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 it('rejects secret-shaped model tool input before any durable tool plan or execution', async () => {
   const db = new Database(':memory:');
   try {
-    migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+    migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
     const user = new UserRepository(db).create('sensitive-tool@test.dev', 'hash');
     const ledger = new CopilotRunLedger(db, user.id);
     const conversation = ledger.log.createConversation();
@@ -53,7 +54,7 @@ it('rejects secret-shaped model tool input before any durable tool plan or execu
 it('rejects credential-shaped tool names before writing a tool step', async () => {
   const db = new Database(':memory:');
   try {
-    migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+    migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
     const user = new UserRepository(db).create('sensitive-name@test.dev', 'hash');
     const ledger = new CopilotRunLedger(db, user.id);
     const conversation = ledger.log.createConversation();
@@ -83,7 +84,7 @@ it('rejects ordinary credential values in nested tool argument fields and JSON s
   ]) {
     const db = new Database(':memory:');
     try {
-      migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+      migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
       const user = new UserRepository(db).create('sensitive-field@test.dev', 'hash');
       const ledger = new CopilotRunLedger(db, user.id);
       const conversation = ledger.log.createConversation();
@@ -171,7 +172,7 @@ it('redacts JSON credentials embedded in tool error messages', () => {
 it('does not broadcast a secret split across model text deltas', async () => {
   const db = new Database(':memory:');
   try {
-    migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+    migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
     const user = new UserRepository(db).create('sensitive-stream@test.dev', 'hash');
     const ledger = new CopilotRunLedger(db, user.id);
     const conversation = ledger.log.createConversation();
@@ -199,7 +200,7 @@ it('does not broadcast a secret split across model text deltas', async () => {
 it('redacts a model-generated conversation title before storage and broadcast', async () => {
   const db = new Database(':memory:');
   try {
-    migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+    migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
     const user = new UserRepository(db).create('sensitive-title@test.dev', 'hash');
     const ledger = new CopilotRunLedger(db, user.id);
     const conversation = ledger.log.createConversation();

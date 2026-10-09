@@ -83,7 +83,7 @@ export function notificationType(notification:Notification):FeishuNotificationTy
   if(!payload || typeof payload!=='object')return;
   if(notification.type==='copilot_automation')return 'automation';
   if(notification.type==='app_action_notification')return 'app_action';
-  if(notification.type!=='claude_notification')return;
+  if(notification.type!=='session_notification')return;
   switch(payload.notification_type) {
     case 'attention':case 'permission_prompt':return 'attention';
     case 'task_failed':case 'permission_denied':return 'failure';

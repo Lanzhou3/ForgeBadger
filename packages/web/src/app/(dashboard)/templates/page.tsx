@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { QueryState } from "@/components/ui/query-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { AdapterSelect } from "@/components/adapter-select";
 import { toast } from "@/lib/toast";
 import {
   cloneTemplate,
@@ -36,6 +37,7 @@ restoreTemplateVersion,
   updateTemplate,
   updateTemplateFile,
   type GitTemplateImportInput,
+  type RuntimeAdapterId,
   type Template,
   type TemplatePackage,
 } from "@/lib/api";
@@ -51,7 +53,7 @@ import {
 import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import { TemplateSyncPanel } from "@/components/templates/TemplateSyncPanel";
 
-const defaultFilePath = "CLAUDE.md";
+const defaultFilePath = "AGENTS.md";
 const defaultTemplateContent = [
   "# {{projectName}}",
   "",
@@ -74,6 +76,7 @@ export default function TemplatesPage() {
   const queryClient = useQueryClient();
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [newTemplateName, setNewTemplateName] = useState("");
+  const [newTemplateAdapter, setNewTemplateAdapter] = useState<RuntimeAdapterId | "">("");
   const [newTemplateVisibility, setNewTemplateVisibility] = useState<LibraryVisibility>("private");
   const [cloneName, setCloneName] = useState("");
   const [editName, setEditName] = useState("");
@@ -156,11 +159,14 @@ export default function TemplatesPage() {
       createTemplate({
         name: newTemplateName.trim(),
         visibility: newTemplateVisibility,
+        // A template must declare which CLI it targets; no implicit default.
+        ...(newTemplateAdapter ? { adapter: newTemplateAdapter } : {}),
         files: [{ filePath: defaultFilePath, content: defaultTemplateContent, fileType: "markdown" }],
       }),
     onSuccess: async ({ template }) => {
       setNotice(t("templates.created"));
       setNewTemplateName("");
+      setNewTemplateAdapter("");
       setNewTemplateVisibility("private");
       setSelectedTemplateId(template.id);
       setEditBaselineContent(null);
@@ -475,6 +481,15 @@ export default function TemplatesPage() {
                   required
                 />
                 <div className="space-y-2">
+                  <Label>{t("common.aiTool")}</Label>
+                  <AdapterSelect
+                    ariaLabel={t("common.aiTool")}
+                    className="h-10 w-full"
+                    value={newTemplateAdapter}
+                    onValueChange={(id) => setNewTemplateAdapter(id)}
+                  />
+                </div>
+                <div className="space-y-2">
                   <Label>{t("common.visibility")}</Label>
                   <div className="flex flex-wrap gap-2">
                     {visibilityOptions.map((visibility) => (
@@ -493,7 +508,7 @@ export default function TemplatesPage() {
                     {t(visibilityDescriptionKey(newTemplateVisibility))}
                   </p>
                 </div>
-                <Button type="submit" className="w-full" disabled={createMutation.isPending}>
+                <Button type="submit" className="w-full" disabled={createMutation.isPending || !newTemplateAdapter}>
                   <Plus className="size-4" />
                   {createMutation.isPending ? t("templates.creating") : t("templates.createCustom")}
                 </Button>

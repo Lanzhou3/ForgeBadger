@@ -27,6 +27,14 @@ const baselines = [
   {"name":"project-insights","version":"2.0.1","digest":"977afe76519be491a6e52aa22ff2725047872db0b7c0a3e8d5aa2967e3c177fa","commit":"bundled-2026-09-26"},
   {"name":"memory-playbook","version":"3.0.1","digest":"de7008ddfa3b4e53bcf238ee5e4395c2b702b18d43aa20686d95f04a1cf5ef1d","commit":"bundled-2026-09-26"},
   {"name":"safety-and-approvals","version":"3.0.1","digest":"2aa044b5e4731b58bee10c166fbc31538fcf81d7461c126007f47ec9d49df0ee","commit":"bundled-2026-09-26"},
+  // The 2026-10 rewording replaced the retired per-adapter autonomy denial
+  // (ADAPTER_AUTONOMY_UNVERIFIED) with the per-project switch denial
+  // (COPILOT_PROJECT_AUTONOMY_OFF). Versions were intentionally not bumped,
+  // matching the same-version precedent above; old entries stay so untouched
+  // copies of the previous wording are still recognized as unmodified.
+  {"name":"autonomous-work-item-loop","version":"4.0.1","digest":"9ce400a206cc4b60915380a0cecdd177d09fe370e66c15295d921cdb7a057a66","commit":"bundled-2026-10-09"},
+  {"name":"session-dispatch","version":"4.0.1","digest":"ed5d4ef1d5acb2748a3069c73d083754ef9f6535be50d6ee9b91d1ab5c12659f","commit":"bundled-2026-10-09"},
+  {"name":"safety-and-approvals","version":"3.0.1","digest":"e2b28b0458fe88b52577d32e282eb1b633b8d09f64c44b1683fca8d45232b13a","commit":"bundled-2026-10-09"},
 ] as const;
 
 export function isUnmodifiedBuiltin(snapshot: CopilotSkillSnapshot): boolean {

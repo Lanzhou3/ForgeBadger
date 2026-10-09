@@ -51,7 +51,7 @@ async function createFixture(): Promise<Fixture> {
   const userB = userRepo.create("tpl-sync-b@example.com", "hash-b");
 
   const templateRepo = new TemplateRepository(db, userA.id);
-  const template = templateRepo.create({ name: "sync-template" });
+  const template = templateRepo.create({ name: "sync-template", adapter: "claude" });
   templateRepo.updateFile(template.id, "CLAUDE.md", "T\n");
 
   const projectRepo = new ProjectRepository(db, userA.id);

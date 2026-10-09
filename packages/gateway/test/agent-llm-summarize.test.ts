@@ -78,7 +78,7 @@ describe("copilot llm summarize", () => {
 
   it("folds messages to a summary over the OpenAI wire format", async () => {
     const db = createTestDb();
-    const { client, calls } = setupClient(db, "openai", {
+    const { client, calls } = setupClient(db, "openai-compatible", {
       choices: [{ message: { content: "SUMMED", tool_calls: [] } }]
     });
 

@@ -5,14 +5,14 @@ import type { ProjectSkill } from "../db/repositories/project-skill-repository.j
 import type { AdapterId } from "./adapter-discovery.js";
 
 export interface BuildProjectConfigFilesInput {
-  adapter?: AdapterId | undefined;
+  adapter: AdapterId;
   templateFiles: TemplateFileInput[];
   skills?: ProjectSkill[];
 }
 
 
 export function buildProjectConfigFiles(input: BuildProjectConfigFilesInput): TemplateFileInput[] {
-  const adapter = input.adapter ?? "claude";
+  const adapter = input.adapter;
   const files = [
     ...adaptTemplateFiles(input.templateFiles, adapter),
     ...(input.skills ?? [])

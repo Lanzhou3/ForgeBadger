@@ -8,7 +8,7 @@ import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { SessionRepository } from '../src/db/repositories/session-repository.js';
 import { ForgeBadgerEventBus, type ForgeBadgerEvent } from '../src/services/event-bus.js';
-import { handleClaudeNotificationHook } from '../src/routes/session-hooks.js';
+import { handleSessionNotificationHook } from '../src/routes/session-hooks.js';
 import { createNotificationDeduper } from '../src/services/notification-dedupe.js';
 import express from 'express';
 import http from 'node:http';
@@ -27,7 +27,7 @@ it('tracks authenticated root CLI work independently of process status and notif
   const session = new SessionRepository(db, user.id).create({ projectId: project.id, name: 'Session', aiTool: 'codex', workingDir: project.path, attachToken: 'fixture' });
   const bus = new ForgeBadgerEventBus(); const events: ForgeBadgerEvent[] = [];
   bus.on('event', event => events.push(event));
-  const hook = (name: string, extra: Record<string, unknown> = {}, token = 'fixture') => handleClaudeNotificationHook(db, bus,
+  const hook = (name: string, extra: Record<string, unknown> = {}, token = 'fixture') => handleSessionNotificationHook(db, bus,
     { hook_event_name: name, session_id: 'native', turn_id: 'turn-1', ...extra }, token, session.id, createNotificationDeduper());
 
   hook('UserPromptSubmit', { prompt: 'Work' }, 'wrong');
@@ -36,7 +36,7 @@ it('tracks authenticated root CLI work independently of process status and notif
   hook('UserPromptSubmit', { prompt: 'Work' });
   assert.equal(bus.getSessionWorkState(user.id, session.id)?.state, 'working');
   assert.equal(bus.getSessionWorkState('other-user', session.id), undefined);
-  assert.equal(events.filter(event => event.type === 'claude_notification').length, 0);
+  assert.equal(events.filter(event => event.type === 'session_notification').length, 0);
   hook('Stop', { agent_id: 'child' });
   hook('Stop', { turn_id: 'older-turn' });
   assert.equal(bus.getSessionWorkState(user.id, session.id)?.state, 'working');
@@ -55,7 +55,7 @@ it('tracks authenticated root CLI work independently of process status and notif
   assert.equal(bus.getSessionWorkState(user.id, session.id), undefined);
 
   const sharedDeduper = createNotificationDeduper();
-  const repeated = (hook_event_name: string) => handleClaudeNotificationHook(db, bus,
+  const repeated = (hook_event_name: string) => handleSessionNotificationHook(db, bus,
     { hook_event_name }, 'fixture', session.id, sharedDeduper);
   repeated('UserPromptSubmit'); repeated('Stop');
   repeated('UserPromptSubmit');
@@ -95,7 +95,7 @@ it('repairs missed work events via authenticated snapshots and scopes HTTP and W
   assert.equal((await fetch(summaryUrl)).status, 401);
   assert.equal((await fetch(summaryUrl, {headers:{Authorization:`Bearer ${otherToken}`}})).status, 404);
   sessions.update(session.id, {attachToken:'summary-fixture'});
-  const notify = (hook_event_name:string,turn_id:string,extra:Record<string,unknown>={}) => handleClaudeNotificationHook(db,bus,
+  const notify = (hook_event_name:string,turn_id:string,extra:Record<string,unknown>={}) => handleSessionNotificationHook(db,bus,
     {adapter:'codex',session_id:'native',hook_event_name,turn_id,...extra},'summary-fixture',session.id,createNotificationDeduper());
   notify('UserPromptSubmit','A',{prompt:'Old request'});
   notify('UserPromptSubmit','B',{prompt:'Current request'});

@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import Database from 'better-sqlite3';
@@ -21,7 +22,6 @@ import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { startAndConnectSessionServer } from '../src/services/session-server-integration.js';
 import { InMemorySessionManager } from '../src/services/session-manager.js';
 import { createDbSessionRecoveryStore } from '../src/services/db-session-recovery-store.js';
-import { configureCliAutonomyAdapters } from '../src/services/adapter-autonomy.js';
 import { createGatewayApp } from '../src/server.js';
 import { InMemoryApiKeyStore } from '../src/secrets/api-key-store.js';
 import { getTaskProgress } from '../src/services/project-manager/task-progress.js';
@@ -46,7 +46,7 @@ execFileSync('git', ['init', '-q', projectPath]);
 const originalTests = readFileSync(join(projectPath, 'add.test.cjs'), 'utf8');
 process.env.FORGEBADGER_STATE_DIR = statePath;
 const db = new Database(join(statePath, 'test.db'));
-migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
 const masterKey = randomBytes(32).toString('hex');
 const realPlanner = process.env.FORGEBADGER_REAL_COPILOT_TEST === '1';
 let sourceDb: Database.Database | undefined;
@@ -61,7 +61,11 @@ if (realPlanner) {
   liveLlm = createAgentLlmClient({ modelProviderRepository: new ModelProviderRepository(sourceDb, modelOwner, process.env.FORGEBADGER_MASTER_KEY) });
 }
 const user = new UserRepository(db).create('flow@example.test', 'not-a-login');
-const project = new ProjectRepository(db, user.id).create({ name: 'Isolated CLI acceptance', path: projectPath, aiTool: 'codex' });
+const projects = new ProjectRepository(db, user.id);
+const project = projects.create({ name: 'Isolated CLI acceptance', path: projectPath, aiTool: 'codex' });
+// Dispatch autonomy is per-project now; the harness exercises the Copilot
+// path, so the acceptance project opts in explicitly.
+projects.setCopilotAutonomy(project.id, true);
 const pm = new ProjectManagerRepository(db, user.id);
 const log = new CopilotConversationLog(db, user.id);
 const conversation = log.createConversation();
@@ -76,7 +80,6 @@ daemon.client.inspectPane = async (...args) => {
   return pane;
 };
 const manager = new InMemorySessionManager(daemon.client, createDbSessionRecoveryStore(db, masterKey), eventBus, { db });
-configureCliAutonomyAdapters(['codex']);
 const app = createGatewayApp({ db, masterKey, jwtSecret: randomBytes(32).toString('hex'),
   sessionManager: manager, sessionServerIpcPath: daemon.ipcPath, eventBus,
   apiKeyStore: new InMemoryApiKeyStore({ masterKey }) });

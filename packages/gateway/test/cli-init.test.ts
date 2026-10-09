@@ -68,17 +68,17 @@ describe("forgebadger init CLI prototype", () => {
       dryRun: true
     });
 
-    assert.equal(
-      parseForgeBadgerCliArgs(["--", "init", "--path", "/tmp/demo"]).projectPath,
-      "/tmp/demo"
+    assert.throws(
+      () => parseForgeBadgerCliArgs(["--", "init", "--path", "/tmp/demo"]),
+      /--template-id/
     );
   });
 
-  it("parses --list-templates without requiring --path", () => {
+  it("parses --list-templates without requiring --path or --template-id", () => {
     assert.deepEqual(parseForgeBadgerCliArgs(["init", "--list-templates"]), {
       command: "init",
       projectPath: null,
-      templateId: "builtin-claude-code",
+      templateId: "",
       credentialMode: "host_environment",
       listTemplates: true,
       dryRun: false
@@ -87,6 +87,13 @@ describe("forgebadger init CLI prototype", () => {
 
   it("rejects init without --path when not listing templates", () => {
     assert.throws(() => parseForgeBadgerCliArgs(["init"]), /--path/);
+  });
+
+  it("rejects init without --template-id: no CLI is the implicit default", () => {
+    assert.throws(
+      () => parseForgeBadgerCliArgs(["init", "--path", "/tmp/demo"]),
+      /Missing required --template-id/
+    );
   });
 
   it("creates a dry-run render plan from the built-in template", async () => {

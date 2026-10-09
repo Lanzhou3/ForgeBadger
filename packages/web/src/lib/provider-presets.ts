@@ -53,7 +53,7 @@ export const providerPresets: ProviderPreset[] = [
     id: "openai",
     name: "OpenAI",
     description: "Official OpenAI API endpoint.",
-    apiFormat: "openai",
+    apiFormat: "openai-responses",
     openaiBaseUrl: "https://api.openai.com/v1",
     supportedAdapters: ["opencode", "codex", "kimi", "pi"],
   }),

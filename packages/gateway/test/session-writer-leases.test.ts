@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionWriterLeases } from "../src/services/session-writer-leases.js";
-import { assertAdapterAutonomy, getAdapterAutonomy } from "../src/services/adapter-autonomy.js";
 import { TerminalInputBuffer } from "../src/websocket/terminal.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 
@@ -69,11 +68,4 @@ test("buffer rechecks writer authorization at flush and drops blocked bytes", ()
   allowed = true;
   buffer.flush({ write: (value) => writes.push(value) });
   assert.deepEqual(writes, []);
-});
-
-test("every production adapter requires manual execution", () => {
-  for (const adapter of ["claude", "opencode", "codex", "kimi"] as const) {
-    assert.equal(getAdapterAutonomy(adapter).mode, "manual_only");
-    assert.throws(() => assertAdapterAutonomy(adapter), /ADAPTER_AUTONOMY_UNVERIFIED/);
-  }
 });

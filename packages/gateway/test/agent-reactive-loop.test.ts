@@ -55,7 +55,7 @@ describe("copilot reactive loop", () => {
     const { bus, user, runCalls, log, loop } = setup();
     bus.emitEvent({ type: "copilot_run_updated", userId: user.id, runId: "r", conversationId: "c", status: "running", occurredAt: new Date() });
     bus.emitEvent({ type: "error", userId: user.id, message: "boom", recoverable: false });
-    bus.emitEvent({ type: "claude_notification", userId: user.id, sessionId: "s", hookEventName: "idle", notificationType: "idle", message: "m" });
+    bus.emitEvent({ type: "session_notification", userId: user.id, sessionId: "s", hookEventName: "idle", notificationType: "idle", message: "m" });
     await sleep(30);
     assert.equal(runCalls.length, 0);
     assert.equal(log.listConversations().length, 0);

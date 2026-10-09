@@ -27,7 +27,7 @@ it("persists and validates the copilot model + thinking preference", async () =>
     providerKey: "stub",
     baseUrl: "https://stub.example",
     authType: "api_key",
-    apiFormat: "openai",
+    apiFormat: "openai-compatible",
     supportedAdapters: ["opencode"],
   });
   const profile = providerRepo.createModelProfile({

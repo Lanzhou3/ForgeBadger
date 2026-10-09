@@ -14,7 +14,7 @@ import { createAgentToolRegistry } from '../src/services/agent/tool-registry.js'
 import { createPlatformTools } from '../src/services/agent/tools/index.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { MAX_CONTEXT_CHARS } from '../src/services/agent/context.js';
-for(const apiFormat of ['openai','anthropic'] as const)it(`selected project without memory and huge tool turn fit complete ${apiFormat} wire body`,async()=>{
+for(const apiFormat of ['openai-compatible','anthropic'] as const)it(`selected project without memory and huge tool turn fit complete ${apiFormat} wire body`,async()=>{
   const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations',import.meta.url))});
   try{
     const user=new UserRepository(db).create('context-wire@test.dev','hash');
@@ -29,7 +29,7 @@ for(const apiFormat of ['openai','anthropic'] as const)it(`selected project with
     repo.createModelProfile({providerProfileId:provider.id,name:'fixture',modelId:'fixture',capabilities:['chat'],isDefault:true});
     const bodies:string[]=[];
     const llm=createAgentLlmClient({modelProviderRepository:repo,fetchImpl:async(_url,init)=>{
-      bodies.push(String(init?.body));return new Response(JSON.stringify(apiFormat==='openai'?{choices:[{finish_reason:'stop',message:{content:'done'}}]}:{content:[{type:'text',text:'done'}],stop_reason:'end_turn'}),{headers:{'Content-Type':'application/json'}});
+      bodies.push(String(init?.body));return new Response(JSON.stringify(apiFormat==='openai-compatible'?{choices:[{finish_reason:'stop',message:{content:'done'}}]}:{content:[{type:'text',text:'done'}],stop_reason:'end_turn'}),{headers:{'Content-Type':'application/json'}});
     }});
     const tools=createPlatformTools();tools[0]={...tools[0]!,description:'"\\'.repeat(5000)};
     const orchestrator=createCopilotOrchestrator({db,masterKey:'a'.repeat(32),eventBus:new ForgeBadgerEventBus(),llm,toolRegistry:createAgentToolRegistry(tools)});

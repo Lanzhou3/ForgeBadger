@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from "node:url";
 import { CopilotModelResponseRepository, publicModelResponse } from '../src/db/repositories/copilot-model-response-repository.js';
 import { buildCompressedContext, projectTranscript } from '../src/services/agent/context.js';
 import { CopilotConversationLog } from '../src/services/agent/conversation-log.js';
@@ -26,12 +27,12 @@ import { NotificationRepository } from '../src/db/repositories/notification-repo
 const key = 'a'.repeat(32);
 
 it('includes relevant persisted CLI notifications in actual subsequent model requests', async t => {
-  const f = setup(t, 'openai');
+  const f = setup(t, 'openai-compatible');
   const root = mkdtempSync(join(tmpdir(), 'fb-notification-context-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const project = new ProjectRepository(f.db, f.user.id).create({ name: 'Review', path: root, aiTool: 'codex' });
   const session = new SessionRepository(f.db, f.user.id).create({ projectId: project.id, name: 'Review', aiTool: 'codex', workingDir: root });
-  const notice = new NotificationRepository(f.db, f.user.id).create({ type: 'claude_notification', titleKey: 'notifications.taskCompleted',
+  const notice = new NotificationRepository(f.db, f.user.id).create({ type: 'session_notification', titleKey: 'notifications.taskCompleted',
     message: 'Codex task completed', href: '', sessionId: session.id,
     payload: { project_id: project.id, notification_type: 'task_completed', last_prompt: 'review 飞书通知' } });
   await f.orchestrator().runTurn({ userId: f.user.id, conversationId: f.conversation.id, projectId: project.id, userText: '进展如何' });
@@ -51,10 +52,10 @@ const blocks = [
   { type: 'tool_use', id: 'call_1', name: 'inspect_state', input: { scope: 'current' } },
 ];
 
-function setup(t: TestContext, format: 'openai' | 'anthropic', databasePath = ':memory:') {
+function setup(t: TestContext, format: 'openai-compatible' | 'anthropic', databasePath = ':memory:') {
   const db = new Database(databasePath);
   t.after(() => { if (db.open) db.close(); });
-  migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+  migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
   const user = new UserRepository(db).create('assistant-replay@test.dev', 'hash');
   const repo = new ModelProviderRepository(db, user.id, key);
   const provider = repo.createProviderProfile({ name: 'fixture', providerKey: 'fixture', baseUrl: 'https://api.example.com', apiFormat: format, authType: 'api_key', supportedAdapters: ['opencode'] });
@@ -69,7 +70,7 @@ function setup(t: TestContext, format: 'openai' | 'anthropic', databasePath = ':
     fetchImpl: async (_url, init) => {
       requests.push(JSON.parse(String(init?.body)));
       const first = requests.length === 1;
-      return Response.json(format === 'openai'
+      return Response.json(format === 'openai-compatible'
         ? { choices: [{ finish_reason: first ? 'tool_calls' : 'stop', message: first
           ? { role: 'assistant', content, reasoning_content: reasoning, reasoning_details: [{ type: 'reasoning.text', text: reasoning }], tool_calls: [openaiCall] }
           : { role: 'assistant', content: 'The current state is available.' } }] }
@@ -82,7 +83,7 @@ function setup(t: TestContext, format: 'openai' | 'anthropic', databasePath = ':
   return { db, user, ledger, conversation, requests, orchestrator, llm, repo, provider, executions: () => executions };
 }
 
-for (const format of ['openai', 'anthropic'] as const) {
+for (const format of ['openai-compatible', 'anthropic'] as const) {
   it(`${format} replays one complete assistant with matching tool result across model rounds`, async t => {
     const f = setup(t, format);
     const run = await f.orchestrator().runTurn({ userId: f.user.id, conversationId: f.conversation.id, userText: 'Inspect the current state.' });
@@ -90,7 +91,7 @@ for (const format of ['openai', 'anthropic'] as const) {
     assert.equal(f.executions(), 1);
     const assistants = f.requests[1]!.messages.filter(m => m.role === 'assistant');
     assert.equal(assistants.length, 1, 'one provider response must stay one assistant message');
-    if (format === 'openai') {
+    if (format === 'openai-compatible') {
       assert.equal(assistants[0]!.content, content);
       assert.equal(assistants[0]!.reasoning_content, reasoning);
       assert.deepEqual(assistants[0]!.reasoning_details, [{ type: 'reasoning.text', text: reasoning }]);
@@ -106,12 +107,12 @@ for (const format of ['openai', 'anthropic'] as const) {
     assert.equal(persisted.includes(reasoning), false, 'private provider replay must not be plaintext ledger data');
     const modelStep = f.ledger.steps(run).find(s => s.kind === 'model')!;
     const diagnostic = JSON.parse(modelStep.result_json!);
-    assert.equal(diagnostic.finishReason, format === 'openai' ? 'tool_calls' : 'tool_use');
+    assert.equal(diagnostic.finishReason, format === 'openai-compatible' ? 'tool_calls' : 'tool_use');
     assert.equal(diagnostic.toolCallCount, 1);
   });
 }
 
-for (const format of ['openai', 'anthropic'] as const) {
+for (const format of ['openai-compatible', 'anthropic'] as const) {
   it(`${format} strips private replay from summaries and a different model`, async t => {
     const f = setup(t, format);
     await f.orchestrator().runTurn({ userId: f.user.id, conversationId: f.conversation.id, userText: 'Inspect state.' });
@@ -137,7 +138,7 @@ it('reopens encrypted assistant replay from file SQLite without executing histor
   const root = mkdtempSync(join(tmpdir(), 'fb-replay-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const file = join(root, 'test.db');
-  const f = setup(t, 'openai', file);
+  const f = setup(t, 'openai-compatible', file);
   const run = await f.orchestrator().runTurn({ userId: f.user.id, conversationId: f.conversation.id, userText: 'Inspect state.' });
   const expected = new CopilotModelResponseRepository(f.db, f.user.id, key).list(f.conversation.id);
   const result = f.ledger.steps(run).find(s => s.kind === 'model')!.result_json;
@@ -157,7 +158,7 @@ it('reopens encrypted assistant replay from file SQLite without executing histor
 });
 
 it('rejects ciphertext moved between model steps, tampered ciphertext and wrong keys', async t => {
-  const f = setup(t, 'openai');
+  const f = setup(t, 'openai-compatible');
   const run = await f.orchestrator().runTurn({ userId: f.user.id, conversationId: f.conversation.id, userText: 'Inspect state.' });
   const models = f.ledger.steps(run).filter(s => s.kind === 'model');
   const store = new CopilotModelResponseRepository(f.db, f.user.id, key);
@@ -175,7 +176,7 @@ it('rejects ciphertext moved between model steps, tampered ciphertext and wrong 
 });
 
 it('does not resurrect model replay after editing the originating user message', async t => {
-  const f = setup(t, 'openai');
+  const f = setup(t, 'openai-compatible');
   await f.orchestrator().runTurn({ userId: f.user.id, conversationId: f.conversation.id, userText: 'Inspect state.' });
   const userMessage = f.ledger.log.listMessages(f.conversation.id)[0]!;
   f.ledger.log.truncateAfterMessage(userMessage.id, 'A different request.');
@@ -186,7 +187,7 @@ it('does not resurrect model replay after editing the originating user message',
 });
 
 it('treats incomplete or cross-step results as observations instead of valid tool history', async t => {
-  const f = setup(t, 'openai');
+  const f = setup(t, 'openai-compatible');
   await f.orchestrator().runTurn({ userId: f.user.id, conversationId: f.conversation.id, userText: 'Inspect state.' });
   const originals = new CopilotModelResponseRepository(f.db, f.user.id, key).list(f.conversation.id);
   const rows = f.ledger.log.listMessages(f.conversation.id);
@@ -199,7 +200,7 @@ it('treats incomplete or cross-step results as observations instead of valid too
 });
 
 it('counts private replay in compression and summarizes older turns using public messages', async t => {
-  const f = setup(t, 'openai');
+  const f = setup(t, 'openai-compatible');
   await f.orchestrator().runTurn({ userId: f.user.id, conversationId: f.conversation.id, userText: 'Inspect state.' });
   const originals = new CopilotModelResponseRepository(f.db, f.user.id, key).list(f.conversation.id);
   const first = [...originals.values()][0]!;
@@ -241,7 +242,7 @@ it('assembles Anthropic SSE thinking signatures and native blocks without losing
 });
 
 it('records parser failure diagnostics without executing tentative calls or saving raw provider content', async t => {
-  const f = setup(t, 'openai');
+  const f = setup(t, 'openai-compatible');
   f.llm.stream = async request => readOpenAiCompletion(Response.json({ choices: [{ finish_reason: 'length',
     message: { content: 'private-partial-provider-output', tool_calls: [openaiCall] } }] }), request.onEvent, new AbortController().signal);
   await assert.rejects(f.orchestrator().runTurn({ userId: f.user.id, conversationId: f.conversation.id, userText: 'Inspect state.' }),
@@ -256,7 +257,7 @@ it('records parser failure diagnostics without executing tentative calls or savi
 });
 
 it('normal text-only stop ends the conversation turn without choosing a tool or imposing a workflow', async t => {
-  const f = setup(t, 'openai');
+  const f = setup(t, 'openai-compatible');
   f.llm.stream = async request => readOpenAiCompletion(Response.json({ choices: [{ finish_reason: 'stop',
     message: { content: '请选择项目，然后我会开始检查。' } }] }), request.onEvent, new AbortController().signal);
   const run = await f.orchestrator().runTurn({ userId: f.user.id, conversationId: f.conversation.id, userText: 'Explain the next step.' });
@@ -266,7 +267,7 @@ it('normal text-only stop ends the conversation turn without choosing a tool or 
 });
 
 it('persists safe connection diagnostics in the run and visible conversation without crossing tenants', async t => {
-  const f = setup(t, 'openai');
+  const f = setup(t, 'openai-compatible');
   const llm = createAgentLlmClient({ modelProviderRepository: f.repo, resolveHost: async () => {
     throw Object.assign(new Error('private-host Bearer do-not-store-this'), { code: 'EAI_AGAIN' });
   } });
@@ -294,7 +295,7 @@ it('persists safe connection diagnostics in the run and visible conversation wit
 });
 
 it('distinguishes the model deadline from caller cancellation without retrying either', async t => {
-  const f = setup(t, 'openai');
+  const f = setup(t, 'openai-compatible');
   for (const cancel of [false, true]) {
     let lookups = 0;
     const controller = new AbortController();
@@ -316,7 +317,7 @@ it('distinguishes the model deadline from caller cancellation without retrying e
 it('retains real TLS-handshake and response timeout phases through the full LLM client', async t => {
   const { createServer: tcpServer } = await import('node:net');
   const { createServer: httpServer } = await import('node:http');
-  const f = setup(t, 'openai');
+  const f = setup(t, 'openai-compatible');
   for (const phase of ['tls', 'response'] as const) {
     const sockets = new Set<import('node:net').Socket>();
     const server = phase === 'tls' ? tcpServer() : httpServer((_req, res) => {

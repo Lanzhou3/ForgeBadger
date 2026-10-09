@@ -48,7 +48,7 @@ interface ShellOption {
 export function SessionLaunchDialog({ projectId, open, onOpenChange, onCreated, initialAdapter }: SessionLaunchDialogProps) {
   const { t } = useLanguage();
   const [mode, setMode] = useState<LaunchMode>("cli");
-  const [adapter, setAdapter] = useState<RuntimeAdapterId>(initialAdapter ?? "claude");
+  const [adapter, setAdapter] = useState<RuntimeAdapterId | "">(initialAdapter ?? "");
   const [shell, setShell] = useState<TerminalShell>(() =>
     defaultTerminalShellForPlatform(isWindowsPlatform())
   );
@@ -115,7 +115,9 @@ export function SessionLaunchDialog({ projectId, open, onOpenChange, onCreated, 
     mutationFn: () =>
       mode === "terminal"
         ? createSession({ projectId, aiTool: "terminal", shell })
-        : createSession({ projectId, aiTool: adapter }),
+        : adapter
+          ? createSession({ projectId, aiTool: adapter })
+          : Promise.reject(new Error("No CLI selected")),
     onSuccess: ({ session }) => {
       onOpenChange(false);
       onCreated(session);

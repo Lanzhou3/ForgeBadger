@@ -35,7 +35,7 @@ async function fixture(variant:Variant){
   const project=projects.create({name:'Selected project with no memory',path:'/tmp/copilot-request-project',aiTool:''});
   if(variant==='autonomy-on')projects.setCopilotAutonomy(project.id,true);
   const providerRepo=new ModelProviderRepository(db,user.id,masterKey);
-  const provider=providerRepo.createProviderProfile({name:'fixture',providerKey:'fixture',baseUrl:'https://8.8.8.8',apiFormat:'openai',authType:'api_key',supportedAdapters:['opencode']});
+  const provider=providerRepo.createProviderProfile({name:'fixture',providerKey:'fixture',baseUrl:'https://8.8.8.8',apiFormat:'openai-compatible',authType:'api_key',supportedAdapters:['opencode']});
   providerRepo.createCredential({providerProfileId:provider.id,label:'test',plaintextSecret:'fixture-key'});
   providerRepo.createModelProfile({providerProfileId:provider.id,name:'fixture',modelId:'fixture',capabilities:['chat'],isDefault:true});
   let release!:()=>void;const gate=new Promise<void>(r=>{release=r;});const requests:string[]=[];

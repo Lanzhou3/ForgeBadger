@@ -10,7 +10,6 @@ import { z } from "zod";
 import { authenticate, type AuthenticatedRequest } from "../auth/middleware.js";
 import { createClaudeLaunchPlan, type LaunchPlan } from "../adapters/claude.js";
 import { getAdapterLaunchStatus } from "../services/adapter-discovery.js";
-import { getAdapterAutonomy } from "../services/adapter-autonomy.js";
 import type { CommandRunner } from "../lib/dependency-check.js";
 import { validateProjectRoot } from "../lib/safe-resolve.js";
 import { ProjectRepository } from "../db/repositories/project-repository.js";
@@ -441,8 +440,7 @@ export function createSessionRoutes(
       try { sessionManager.assertManualInputAllowed(userId,req.params.id); }
       catch(error) { if(error instanceof Error&&error.message==="SESSION_WRITER_BUSY")mode="automated";else return res.status(409).json({code:1,message:error instanceof Error?error.message:"Writer unavailable"}); }
     }
-    const adapter = normalizeAdapter(session.aiTool);
-    return res.json({code:0,data:{sessionId:req.params.id,mode,autonomy:adapter?getAdapterAutonomy(adapter).mode:"manual_only"},message:""});
+    return res.json({ code: 0, data: { sessionId: req.params.id, mode }, message: "" });
   });
 
   for (const action of ["start", "stop", "takeover"] as const) {

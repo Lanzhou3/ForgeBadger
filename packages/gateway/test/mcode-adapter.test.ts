@@ -124,7 +124,7 @@ describe("MiniMax Code adapter", () => {
   it("declares only the api formats config.yaml can express", () => {
     const capability = getProviderCapabilities().find((entry) => entry.adapter === "mcode");
     assert.ok(capability);
-    assert.deepEqual(capability.apiFormats, ["anthropic", "openai", "openai-compatible"]);
+    assert.deepEqual(capability.apiFormats, ["anthropic", "openai-responses", "openai-compatible"]);
     // No project-level config.yaml exists for this CLI.
     assert.deepEqual(capability.scopes, ["global"]);
     assert.equal(capability.modelSelection, "native-config");
@@ -153,7 +153,7 @@ describe("MiniMax Code adapter", () => {
       anthropicBaseUrl: "https://anthropic-proxy.invalid"
     } as never;
     assert.equal(endpointForAdapter(provider, "mcode"), "https://anthropic-proxy.invalid");
-    const openai = { apiFormat: "openai", baseUrl: "https://proxy.invalid" } as never;
+    const openai = { apiFormat: "openai-responses", baseUrl: "https://proxy.invalid" } as never;
     assert.equal(endpointForAdapter(openai, "mcode"), "https://proxy.invalid");
   });
 

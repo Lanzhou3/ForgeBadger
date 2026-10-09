@@ -1675,7 +1675,8 @@ Gateway project-selection boundary, not an OS sandbox for CLI child processes.
 Their host credentials, native permissions, and network access still apply.
 Revocation,
 expiry, and owner status are checked again before terminal staging and Enter.
-The adapter must be enabled in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS`.
+Copilot-origin dispatch requires the target project's Copilot autonomy switch;
+there is no per-adapter allowlist (every code CLI is equal).
 
 External writes with such tokens use a caller-stable `operationId` namespaced
 by token ID. Platform action receipts handle retries, and the task-packet

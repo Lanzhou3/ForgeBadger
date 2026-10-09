@@ -3,7 +3,6 @@ import path from "node:path";
 
 import { z } from "zod";
 
-import { adapterIds } from "../lib/adapter-ids.js";
 import { expandUserPath } from "../lib/user-path.js";
 
 const strictEnvBoolean = z
@@ -11,20 +10,13 @@ const strictEnvBoolean = z
   .default(false)
   .transform((value) => value === true || value === "true");
 
-const cliAdapterId = z.enum(adapterIds);
-
 // Shared with the runtime-settings service so the settings page validates
 // against exactly the same shapes the process env accepts.
 export const registrationModeSchema = z.enum(["open", "off", "invite"]);
-export const cliAdapterIdSchema = cliAdapterId;
 export const sessionPrefixSchema = z
   .string()
   .regex(/^[a-zA-Z0-9_-]+$/)
   .max(32);
-export const cliAutonomyAdaptersSchema = z
-  .union([z.string(), z.array(cliAdapterId)])
-  .transform((value) => (typeof value === "string" ? value.split(",").map((entry) => entry.trim()).filter(Boolean) : value))
-  .pipe(z.array(cliAdapterId));
 const runtimeSettingsBoolean = z
   .union([z.boolean(), z.enum(["true", "false"])])
   .default(false)
@@ -39,7 +31,6 @@ const envSchema = z.object({
   FORGEBADGER_SESSION_PREFIX: sessionPrefixSchema.default("fb-"),
   FORGEBADGER_REGISTRATION: registrationModeSchema.default("open"),
   FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: strictEnvBoolean,
-  FORGEBADGER_CLI_AUTONOMY_ADAPTERS: cliAutonomyAdaptersSchema.default(""),
   FORGEBADGER_MCP_ENABLED: strictEnvBoolean,
   /**
    * Operator escape hatch: when true the runtime-settings API rejects writes

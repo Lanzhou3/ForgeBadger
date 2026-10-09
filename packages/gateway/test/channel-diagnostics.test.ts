@@ -44,11 +44,11 @@ it('projects notifications into a remote conversation using its current route, w
     const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
     f.projects.setCopilotAutonomy(f.project.id, true);
     const session = new SessionRepository(f.db, f.user.id).create({ projectId: f.project.id, name: 'review', aiTool: 'codex', workingDir: f.project.path });
-    new NotificationRepository(f.db, f.user.id).create({ type: 'claude_notification', titleKey: 'notifications.taskCompleted',
+    new NotificationRepository(f.db, f.user.id).create({ type: 'session_notification', titleKey: 'notifications.taskCompleted',
       message: 'review finished', href: '', sessionId: session.id, payload: { project_id: f.project.id, notification_type: 'task_completed', last_prompt: 'review 通知' } });
     const elsewhere = f.projects.create({ name: 'elsewhere', path: '/tmp/notice-other-route', aiTool: 'codex' });
     const otherSession = new SessionRepository(f.db, f.user.id).create({ projectId: elsewhere.id, name: 'secret', aiTool: 'codex', workingDir: elsewhere.path });
-    new NotificationRepository(f.db, f.user.id).create({ type: 'claude_notification', titleKey: 'notifications.taskCompleted',
+    new NotificationRepository(f.db, f.user.id).create({ type: 'session_notification', titleKey: 'notifications.taskCompleted',
       message: 'PRIVATE_OTHER_PROJECT', href: '', sessionId: otherSession.id, payload: { notification_type: 'task_completed', project_id: f.project.id } });
     const inbox = new NativeChannelInbox(f.db, f.user.id, f.key);
     inbox.receive(peer, { eventId: 'context-event', messageId: 'context-message', text: '刚才的通知呢' });
@@ -123,7 +123,7 @@ function pairFeishu(f: ReturnType<typeof fixture>) {
 }
 
 function seedModel(f: ReturnType<typeof fixture>): ModelProviderRepository {
-  const provider = f.models.createProviderProfile({ name: 'fixture', providerKey: 'fixture', baseUrl: 'https://8.8.8.8', apiFormat: 'openai', authType: 'api_key', supportedAdapters: ['opencode'] });
+  const provider = f.models.createProviderProfile({ name: 'fixture', providerKey: 'fixture', baseUrl: 'https://8.8.8.8', apiFormat: 'openai-compatible', authType: 'api_key', supportedAdapters: ['opencode'] });
   f.models.createCredential({ providerProfileId: provider.id, label: 'fixture', plaintextSecret: 'fixture-key' });
   f.models.createModelProfile({ providerProfileId: provider.id, name: 'fixture', modelId: 'fixture', capabilities: ['chat'], isDefault: true });
   return f.models;
@@ -258,7 +258,7 @@ it('distinguishes unhealthy connections, disabled models and failed deliveries',
   const f = fixture();
   const { account, peer } = pairFeishu(f);
   f.accounts.updateAccountHealth(account.id, { state: 'unhealthy', errorMessage: 'token invalid' });
-  const provider = f.models.createProviderProfile({ name: 'fixture', providerKey: 'fixture', baseUrl: 'https://8.8.8.8', apiFormat: 'openai', authType: 'api_key', supportedAdapters: ['opencode'] });
+  const provider = f.models.createProviderProfile({ name: 'fixture', providerKey: 'fixture', baseUrl: 'https://8.8.8.8', apiFormat: 'openai-compatible', authType: 'api_key', supportedAdapters: ['opencode'] });
   f.models.createCredential({ providerProfileId: provider.id, label: 'fixture', plaintextSecret: 'fixture-key' });
   f.models.createModelProfile({ providerProfileId: provider.id, name: 'fixture', modelId: 'fixture', capabilities: ['chat'], isDefault: true });
   f.db.prepare("UPDATE model_profiles SET status='disabled' WHERE user_id=?").run(f.user.id);

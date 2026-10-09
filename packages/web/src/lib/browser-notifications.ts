@@ -35,7 +35,7 @@ export function shouldTriggerBrowserNotification(
     return false;
   }
   if (
-    event.type === "claude_notification" &&
+    event.type === "session_notification" &&
     [
       "permission_prompt",
       "permission_denied",

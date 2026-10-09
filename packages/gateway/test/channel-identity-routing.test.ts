@@ -668,7 +668,7 @@ it('default Gateway composition receives, adopts, executes and delivers without 
   const f=inboxFixture();let handlers:FeishuSdkEventHandlers|undefined;let sends=0;let closed=0;
   const legacy=f.accounts.enqueueOutbox({accountId:f.account.id,idempotencyKey:'historical',chatId:f.peer.chatId,payload:'historical payload'});
   const models=new ModelProviderRepository(f.db,f.user.id,f.key);
-  const provider=models.createProviderProfile({name:'fixture',providerKey:'fixture',baseUrl:'https://8.8.8.8',apiFormat:'openai',authType:'api_key',supportedAdapters:['opencode']});
+  const provider=models.createProviderProfile({name:'fixture',providerKey:'fixture',baseUrl:'https://8.8.8.8',apiFormat:'openai-compatible',authType:'api_key',supportedAdapters:['opencode']});
   models.createCredential({providerProfileId:provider.id,label:'fixture',plaintextSecret:'fixture-key'});
   models.createModelProfile({providerProfileId:provider.id,name:'fixture',modelId:'fixture',capabilities:['chat'],isDefault:true});
   const app=createGatewayApp({db:f.db,masterKey:f.key,jwtSecret:randomBytes(32).toString('hex'),sessionServerIpcPath:'/private/tmp/forgebadger-channel-test.sock',

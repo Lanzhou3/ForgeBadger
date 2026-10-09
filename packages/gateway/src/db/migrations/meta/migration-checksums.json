@@ -126,5 +126,9 @@
   "0125_copilot_approval_clock.sql": "96bedc587418c02dd0c8f102bddffbca3d857c77037f929aedba167231e09c25",
   "0126_development_execution_identity.sql": "dc46b09209548a5a0b9b3550766be0e0b20c873cebfe261aea113d2857832c65",
   "0127_cli_observation_summaries.sql": "d7d32de15e0d18f06a12e9883bd58e82c5f15a416bc49a02dff0ca2ad2b0280c",
-  "0128_feishu_builtin_summaries.sql": "49e56258d48b1c4165f506823894e4df61533afe1f1cce0c835fae53fecdd0fc"
+  "0128_feishu_builtin_summaries.sql": "49e56258d48b1c4165f506823894e4df61533afe1f1cce0c835fae53fecdd0fc",
+  "0129_session_notification_type.sql": "da549542c3e555b46a863ee7f086399d72f5437d06a435345981d3811d2ca748",
+  "0130_template_adapter_backfill.sql": "ab90ad2d59cebfd5c73a0a6cd0814e8ff11785e1f51b20052d8a49ef11261da1",
+  "0131_single_project_autonomy.sql": "d281707868512beb8804217d64215c5b6ca9c56068a2a865f3e0d04f576b0222",
+  "0132_api_format_protocol_values.sql": "8ae33fe12ec2c9a53e137fc16a1e7bc571ab34c082a39128f2c73e350d380eb4"
 }

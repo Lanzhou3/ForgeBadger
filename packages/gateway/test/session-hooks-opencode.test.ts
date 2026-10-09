@@ -12,7 +12,7 @@ import { SessionRepository } from "../src/db/repositories/session-repository.js"
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
 import { attachNotificationPersistence } from "../src/services/notification-events.js";
-import { handleClaudeNotificationHook } from "../src/routes/session-hooks.js";
+import { handleSessionNotificationHook } from "../src/routes/session-hooks.js";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -87,7 +87,7 @@ describe("OpenCode session hook route", () => {
     attachNotificationPersistence({ db, eventBus });
     const eventPromise = waitForEvent(eventBus);
 
-    const res = handleClaudeNotificationHook(
+    const res = handleSessionNotificationHook(
       db,
       eventBus,
       openCodePermissionBody(),
@@ -99,8 +99,8 @@ describe("OpenCode session hook route", () => {
     assert.deepEqual(res.body, { code: 0, data: { accepted: true }, message: "" });
 
     const event = await eventPromise;
-    assert.equal(event.type, "claude_notification");
-    if (event.type === "claude_notification") {
+    assert.equal(event.type, "session_notification");
+    if (event.type === "session_notification") {
       assert.equal(event.adapter, "opencode");
       assert.equal(event.sessionId, session.id);
       assert.equal(event.hookEventName, "PermissionRequest");
@@ -123,7 +123,7 @@ describe("OpenCode session hook route", () => {
     attachNotificationPersistence({ db, eventBus });
     const marker = "sk-FAKEHOOKSECRET123456";
     const eventPromise = waitForEvent(eventBus);
-    const res = handleClaudeNotificationHook(db, eventBus, {
+    const res = handleSessionNotificationHook(db, eventBus, {
       ...openCodePermissionBody(), message: `Permission body ${marker}`,
       title: `Permission title ${marker}`, tool_name: `Bash-${marker}`
     }, "opencode-session-token", session.id);
@@ -144,7 +144,7 @@ describe("OpenCode session hook route", () => {
       { hook_event_name: "StopFailure", notification_type: "task_failed", error: `Failed ${marker}` }
     ]) {
       const eventPromise = waitForEvent(eventBus);
-      const res = handleClaudeNotificationHook(db, eventBus, { ...hook, adapter: "opencode" },
+      const res = handleSessionNotificationHook(db, eventBus, { ...hook, adapter: "opencode" },
         "opencode-session-token", session.id);
       assert.equal(res.status, 200);
       assert.equal(JSON.stringify(await eventPromise).includes(marker), false);
@@ -161,7 +161,7 @@ describe("OpenCode session hook route", () => {
 
     const body = openCodePermissionBody();
     delete body.adapter;
-    const res = handleClaudeNotificationHook(
+    const res = handleSessionNotificationHook(
       db,
       eventBus,
       body,
@@ -171,8 +171,8 @@ describe("OpenCode session hook route", () => {
 
     assert.equal(res.status, 200);
     const event = await eventPromise;
-    assert.equal(event.type, "claude_notification");
-    if (event.type === "claude_notification") {
+    assert.equal(event.type, "session_notification");
+    if (event.type === "session_notification") {
       assert.equal(event.adapter, "opencode");
     }
 
@@ -186,7 +186,7 @@ describe("OpenCode session hook route", () => {
   it("rejects opencode notifications with a missing session token", async () => {
     const session = createOpenCodeSession(db);
 
-    const res = handleClaudeNotificationHook(
+    const res = handleSessionNotificationHook(
       db,
       eventBus,
       openCodePermissionBody(),
@@ -201,7 +201,7 @@ describe("OpenCode session hook route", () => {
   it("rejects opencode notifications with an invalid session token", async () => {
     const session = createOpenCodeSession(db);
 
-    const res = handleClaudeNotificationHook(
+    const res = handleSessionNotificationHook(
       db,
       eventBus,
       openCodePermissionBody(),
@@ -214,7 +214,7 @@ describe("OpenCode session hook route", () => {
   });
 
   it("rejects an invalid opencode notification body", async () => {
-    const res = handleClaudeNotificationHook(db, eventBus, { sessionId: "", event: {} }, "token", undefined);
+    const res = handleSessionNotificationHook(db, eventBus, { sessionId: "", event: {} }, "token", undefined);
 
     assert.equal(res.status, 400);
     assert.deepEqual(res.body, { code: 1, message: "Invalid input" });
