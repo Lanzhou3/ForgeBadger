@@ -764,18 +764,33 @@ function buildApplyDocument(
     // then falls back to pi's built-in "medium", so thinking is on by default
     // and adjustable via /thinking. A hand-set `reasoning: true` on an
     // existing entry is preserved even when the profile lacks the capability.
+    // Per-model `input` is capability-driven the same way: the profile's
+    // "vision" capability writes `input: ["text", "image"]` — PI gates every
+    // image block (clipboard paste, the read tool, provider encoders) on
+    // model.input.includes("image"), so without the entry the model is
+    // text-only even when the relay accepts vision requests. A hand-set
+    // image input survives even when the profile lacks the capability
+    // (monotonic, like reasoning). When the entry is (re)written the array is
+    // normalized to exactly ["text", "image"]; PI's input vocabulary is just
+    // these two values, so no user-set modality is ever lost.
     // `thinkingLevelMap` is mostly user-managed, except that reasoning
     // models on openai-completions relays gain an additive `xhigh: "xhigh"`
     // entry (PI's TUI hides xhigh/max unless the map explicitly defines
     // them; generic openai-completions relays receive
     // `reasoning_effort: <mapped value>` verbatim). Existing map entries —
-    // and any other per-model user tuning (maxTokens, input, ...) — are
-    // preserved additively.
+    // and any other per-model user tuning (maxTokens, ...) — are preserved
+    // additively.
     const api = piApiName(context.provider.apiFormat);
     const models = context.activeModels.map((activeModel) => {
       const current = record(existingModels.find((entry) => record(entry).id === activeModel.modelId));
       const next: Record<string, unknown> = { ...current, id: activeModel.modelId, name: activeModel.name };
       next.reasoning = activeModel.capabilities.includes("reasoning") || current.reasoning === true;
+      const currentInput = Array.isArray(current.input)
+        ? current.input.filter((value): value is string => typeof value === "string")
+        : [];
+      if (activeModel.capabilities.includes("vision") || currentInput.includes("image")) {
+        next.input = ["text", "image"];
+      }
       if (next.reasoning === true && api === "openai-completions") {
         const currentMap = record(current.thinkingLevelMap);
         if (currentMap.xhigh === undefined) {

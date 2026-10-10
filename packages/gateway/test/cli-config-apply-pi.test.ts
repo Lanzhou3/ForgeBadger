@@ -331,6 +331,61 @@ describe("cli-config apply: PI", () => {
     assert.deepEqual(model.input, ["text"], "user-tuned input preserved");
   });
 
+  it("writes input: [\"text\", \"image\"] from the profile vision capability", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("apply-pi-vision@example.com", "hash");
+    const root = await useConfigRoot("forgebadger-apply-pi-vision-");
+    const fixture = createFixture(db, user.id);
+    fixture.repo.updateModelProfile(fixture.modelId, { capabilities: ["chat", "vision"] });
+    // A non-vision sibling model must stay text-only (no input field at all).
+    fixture.repo.createModelProfile({ providerProfileId: fixture.providerId, name: "Plain", modelId: "pi-plain" });
+
+    const first = await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+    assert.equal(first.changed, true);
+    const readModels = async () => (JSON.parse(await readFile(path.join(root, "models.json"), "utf8")) as {
+      providers: Record<string, { models: Array<Record<string, unknown>> }>;
+    }).providers["pi-provider"].models;
+    let models = await readModels();
+    const vision = models.find((model) => model.id === "pi-model-1");
+    const textOnly = models.find((model) => model.id === "pi-plain");
+    assert.ok(vision && textOnly, "both models written");
+    assert.deepEqual(vision.input, ["text", "image"], "vision capability enables PI image input");
+    assert.equal(textOnly.input, undefined, "non-vision models get no input field");
+
+    // Re-applying the same state is a no-op.
+    const second = await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+    assert.equal(second.changed, false, "idempotent with a capability-written input");
+
+    // Removing the capability must not strip the image input PI already has
+    // (monotonic, like a hand-set reasoning: true).
+    fixture.repo.updateModelProfile(fixture.modelId, { capabilities: ["chat"] });
+    await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+    models = await readModels();
+    assert.deepEqual(models.find((model) => model.id === "pi-model-1")?.input, ["text", "image"], "image input is not stripped when the capability is removed");
+
+    // A user who hand-set image input on a non-vision model keeps it.
+    const manual = JSON.parse(await readFile(path.join(root, "models.json"), "utf8")) as {
+      providers: Record<string, { models: Array<Record<string, unknown>> }>;
+    };
+    manual.providers["pi-provider"].models.find((model) => model.id === "pi-plain")!.input = ["text", "image"];
+    await writeFile(path.join(root, "models.json"), JSON.stringify(manual, null, 2) + "\n", "utf8");
+    await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+    models = await readModels();
+    assert.deepEqual(models.find((model) => model.id === "pi-plain")?.input, ["text", "image"], "hand-set image input preserved for a non-vision model");
+  });
+
   it("maps provider api formats to PI api names and endpoints", async () => {
     const cases = [
       { name: "anthropic", apiFormat: "anthropic", providerKey: "relay", expectedApi: "anthropic-messages", expectedUrl: "https://api.deepseek.com/anthropic" },
