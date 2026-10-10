@@ -1360,9 +1360,15 @@ const AUTH_CREDENTIAL_PATHS = [
   "/api/v1/auth/reset-password"
 ];
 
+/** Provider-credential reveal also answers 401 for a wrong account password. */
+function isPasswordChallengePath(path: string): boolean {
+  return /^\/api\/v1\/model-providers\/[^/]+\/credentials\/[^/]+\/reveal$/u.test(path);
+}
+
 function handleUnauthorized(path: string, hadToken: boolean, status: number): void {
   if (status !== 401 || !hadToken) return;
   if (AUTH_CREDENTIAL_PATHS.some((authPath) => path.startsWith(authPath))) return;
+  if (isPasswordChallengePath(path)) return;
   if (typeof window === "undefined") return;
   clearToken();
   clearUser();
@@ -3278,6 +3284,23 @@ export async function rotateProviderCredential(
     method: "POST",
     body: JSON.stringify(data),
   }) as Promise<{ credential: ProviderCredentialSummary }>;
+}
+
+/**
+ * Reveals the stored provider secret for copying into other tools. The
+ * Gateway verifies the caller's account password on top of the session and
+ * answers 401 (like change-password) for a wrong password, so the path is
+ * exempt from the stale-session redirect below.
+ */
+export async function revealProviderCredential(
+  providerId: string,
+  credentialId: string,
+  password: string
+): Promise<{ secret: string }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/credentials/${credentialId}/reveal`, {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  }) as Promise<{ secret: string }>;
 }
 
 export async function deleteProviderCredential(providerId: string, credentialId: string): Promise<{ disposition: "deleted" | "revoked" }> {

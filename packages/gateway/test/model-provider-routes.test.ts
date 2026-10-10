@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import bcrypt from "bcryptjs";
 import express from "express";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -614,6 +615,109 @@ describe("model provider routes", () => {
     assert.match(mismatchedDelete.body.message, /provider/i);
     assert.equal(deleted.status, 200);
     assert.equal(listed.body.data.credentials.some((item: { id: string }) => item.id === credential.body.data.credential.id), false);
+  });
+
+  it("reveals a credential secret only after the account password matches", async () => {
+    const passwordHash = await bcrypt.hash("s3cret-account-pass", 10);
+    const user = new UserRepository(db).create("reveal-routes@example.com", passwordHash);
+    const revealHeaders = {
+      Authorization: `Bearer ${signJwt({ userId: user.id, email: user.email }, secret)}`,
+      "Content-Type": "application/json"
+    };
+
+    const created = await makeRequest(app, "POST", "/api/v1/model-providers", deepseekProviderInput, revealHeaders);
+    const providerId = created.body.data.provider.id;
+    const credential = await makeRequest(app, "POST", `/api/v1/model-providers/${providerId}/credentials`, {
+      label: "reveal target",
+      plaintextSecret: "sk-reveal-target"
+    }, revealHeaders);
+    const credentialId = credential.body.data.credential.id;
+    const revealPath = `/api/v1/model-providers/${providerId}/credentials/${credentialId}/reveal`;
+
+    const missingPassword = await makeRequest(app, "POST", revealPath, {}, revealHeaders);
+    assert.equal(missingPassword.status, 400);
+
+    const wrongPassword = await makeRequest(app, "POST", revealPath, { password: "wrong-password" }, revealHeaders);
+    assert.equal(wrongPassword.status, 401);
+    assert.equal(wrongPassword.body.message, "Invalid password");
+
+    // A different (authenticated) user who knows their own password still
+    // cannot reveal this user's credential: lookup is scoped per owner.
+    const foreignHash = await bcrypt.hash("foreign-account-pass", 10);
+    const foreignUser = new UserRepository(db).create("reveal-foreign@example.com", foreignHash);
+    const foreignHeaders = {
+      Authorization: `Bearer ${signJwt({ userId: foreignUser.id, email: foreignUser.email }, secret)}`,
+      "Content-Type": "application/json"
+    };
+    const foreignReveal = await makeRequest(app, "POST", revealPath, { password: "foreign-account-pass" }, foreignHeaders);
+    assert.equal(foreignReveal.status, 404);
+
+    const revealed = await makeRequest(app, "POST", revealPath, { password: "s3cret-account-pass" }, revealHeaders);
+    assert.equal(revealed.status, 200);
+    assert.equal(revealed.body.data.secret, "sk-reveal-target");
+  });
+
+  it("rejects reveal for unknown, foreign, revoked, or rate-limited credential lookups", async () => {
+    const passwordHash = await bcrypt.hash("s3cret-account-pass", 10);
+    const user = new UserRepository(db).create("reveal-guarded@example.com", passwordHash);
+    const revealHeaders = {
+      Authorization: `Bearer ${signJwt({ userId: user.id, email: user.email }, secret)}`,
+      "Content-Type": "application/json"
+    };
+    const deepseek = await makeRequest(app, "POST", "/api/v1/model-providers", deepseekProviderInput, revealHeaders);
+    const openai = await makeRequest(app, "POST", "/api/v1/model-providers", openaiProviderInput, revealHeaders);
+    const credential = await makeRequest(app, "POST", `/api/v1/model-providers/${deepseek.body.data.provider.id}/credentials`, {
+      plaintextSecret: "sk-guarded"
+    }, revealHeaders);
+    const credentialId = credential.body.data.credential.id;
+    const password = { password: "s3cret-account-pass" };
+
+    // Unknown provider and unknown credential (under a valid provider) both 404.
+    const unknownProvider = await makeRequest(
+      app, "POST",
+      `/api/v1/model-providers/missing-provider/credentials/${credentialId}/reveal`,
+      password,
+      revealHeaders
+    );
+    assert.equal(unknownProvider.status, 404);
+    assert.match(unknownProvider.body.message, /provider/i);
+    const unknownCredential = await makeRequest(
+      app, "POST",
+      `/api/v1/model-providers/${deepseek.body.data.provider.id}/credentials/missing-credential/reveal`,
+      password,
+      revealHeaders
+    );
+    assert.equal(unknownCredential.status, 404);
+    assert.match(unknownCredential.body.message, /credential/i);
+
+    // The credential belongs to the DeepSeek provider, not the OpenAI one.
+    const mismatched = await makeRequest(
+      app, "POST",
+      `/api/v1/model-providers/${openai.body.data.provider.id}/credentials/${credentialId}/reveal`,
+      password,
+      revealHeaders
+    );
+    assert.equal(mismatched.status, 400);
+    assert.match(mismatched.body.message, /provider/i);
+
+    db.prepare("UPDATE provider_credentials SET status = 'revoked' WHERE id = ?").run(credentialId);
+    const revoked = await makeRequest(
+      app, "POST",
+      `/api/v1/model-providers/${deepseek.body.data.provider.id}/credentials/${credentialId}/reveal`,
+      password,
+      revealHeaders
+    );
+    assert.equal(revoked.status, 400);
+    assert.match(revoked.body.message, /active/i);
+
+    // The per-user budget is five attempts per minute; the sixth is throttled.
+    // (Requests 1-4 above already consumed part of this user's budget.)
+    db.prepare("UPDATE provider_credentials SET status = 'active' WHERE id = ?").run(credentialId);
+    const revealPath = `/api/v1/model-providers/${deepseek.body.data.provider.id}/credentials/${credentialId}/reveal`;
+    const extra = await makeRequest(app, "POST", revealPath, { password: "wrong-password" }, revealHeaders);
+    assert.equal(extra.status, 401);
+    const throttled = await makeRequest(app, "POST", revealPath, password, revealHeaders);
+    assert.equal(throttled.status, 429);
   });
 
   it("returns envelope errors for invalid custom provider payloads and denied apply roots", async () => {

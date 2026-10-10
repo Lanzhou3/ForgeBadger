@@ -1359,6 +1359,16 @@ provenance, and make future start/recovery fail before decryption until the
 credential is explicitly rotated/reactivated. Rotation increments the
 credential generation; a running CLI environment is not mutated.
 
+Revealing a stored credential is the only read path that returns the plaintext
+secret. `POST /api/v1/model-providers/:id/credentials/:credentialId/reveal`
+takes the caller's account password in the body and verifies it with a bcrypt
+comparison on top of the session JWT; a wrong password answers 401 and does not
+log the session out. Only the owning user's own `active` credentials can be
+revealed: unknown or foreign provider/credential ids answer 404, revoked
+credentials and provider/credential mismatches answer 400. The endpoint is
+rate-limited to five attempts per user per minute, and each successful reveal
+writes a `model_provider.credential.reveal` audit entry.
+
 ### Templates
 
 - `GET /api/v1/templates`

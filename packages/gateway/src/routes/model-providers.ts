@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import { adapterIds } from "../lib/adapter-ids.js";
 import { Router } from "express";
 import { z } from "zod";
@@ -15,6 +16,8 @@ import {
   type UpdateModelProfileInput
 } from "../db/repositories/model-provider-repository.js";
 import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-config-applied-provider-repository.js";
+import { AuditLogRepository } from "../db/repositories/audit-log-repository.js";
+import { UserRepository } from "../db/repositories/user-repository.js";
 import type { Database } from "../db/types.js";
 import { checkModelEndpoint } from "../services/model-endpoint-health.js";
 import {
@@ -67,6 +70,9 @@ const createCredentialSchema = z.object({
   plaintextSecret: z.string().min(1)
 });
 const rotateCredentialSchema = createCredentialSchema;
+const revealCredentialSchema = z.object({
+  password: z.string().min(1)
+});
 const endpointTestSchema = z.object({
   timeoutMs: z.number().int().min(100).max(15000).optional()
 });
@@ -112,6 +118,11 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
   router.use("/:id/test", probeLimiter);
   router.use("/:id/models/sync", probeLimiter);
   router.use("/:id/balance", probeLimiter);
+
+  // Reveal demands the account password on top of the JWT; keep the per-user
+  // attempt budget tight so a leaked session cannot brute-force it.
+  const revealLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 5 });
+  router.use("/:id/credentials/:credentialId/reveal", revealLimiter);
 
   // Sidebar polling would otherwise spray provider endpoints; cache balance
   // reads briefly and let POST /:id/balance act as the explicit refresh.
@@ -580,6 +591,53 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       plaintextSecret: parseResult.data.plaintextSecret
     });
     res.json({ code: 0, data: { credential: updated }, message: "" });
+  });
+
+  // Reveal the stored secret for copying into other tools. It is gated on a
+  // fresh account-password check (on top of the session JWT) and audit-logged;
+  // only the owning user's own active credentials can be revealed.
+  router.post("/:id/credentials/:credentialId/reveal", async (req, res) => {
+    const parseResult = revealCredentialSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid reveal payload" });
+      return;
+    }
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const user = new UserRepository(db).findById(userId);
+    if (!user || !(await bcrypt.compare(parseResult.data.password, user.passwordHash))) {
+      res.status(401).json({ code: 1, message: "Invalid password" });
+      return;
+    }
+    const repo = repoFor(db, masterKey, req);
+    if (!repo.getProviderProfile(req.params.id)) {
+      res.status(404).json({ code: 1, message: "Provider not found" });
+      return;
+    }
+    const credential = repo.getCredential(req.params.credentialId);
+    if (!credential) {
+      res.status(404).json({ code: 1, message: "Credential not found" });
+      return;
+    }
+    if (credential.providerProfileId !== req.params.id) {
+      res.status(400).json({ code: 1, message: "Credential does not belong to the selected provider" });
+      return;
+    }
+    if (credential.status !== "active") {
+      res.status(400).json({ code: 1, message: "Only an active credential can be revealed" });
+      return;
+    }
+    try {
+      const secret = repo.decryptCredential(credential.id);
+      new AuditLogRepository(db, userId).create({
+        action: "model_provider.credential.reveal",
+        resourceType: "provider_credential",
+        resourceId: credential.id,
+        ipAddress: req.ip
+      });
+      res.json({ code: 0, data: { secret }, message: "" });
+    } catch {
+      res.status(500).json({ code: 1, message: "Failed to reveal credential" });
+    }
   });
 
   router.delete("/:id/credentials/:credentialId", (req, res) => {
