@@ -23,7 +23,6 @@ function fixture(memory = false, researchAfterApproval = false) {
   const userId = new UserRepository(db).create('approval-lifecycle@test.dev', 'fixture').id;
   const projects = new ProjectRepository(db, userId);
   const project = projects.create({ name: 'Lifecycle', path: '/private/tmp/fb-approval-lifecycle', aiTool: 'codex' });
-  projects.setCopilotAutonomy(project.id, true);
   const ledger = new CopilotRunLedger(db, userId);
   const conversationId = ledger.log.createConversation().id;
   const masterKey = randomBytes(32).toString('hex');
@@ -151,7 +150,6 @@ it('keeps a valid channel decision on the original signed intent deadline', asyn
 const revokedCases: Array<[string, (f: Fixture, actionId: string) => void]> = [
   ['inactive actor', f => { f.db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(f.userId); }],
   ['owner disabled tool', f => { f.disableTool(); }],
-  ['project autonomy disabled', f => { f.projects.setCopilotAutonomy(f.project.id, false); }],
   ['resource changed', f => { f.projects.updateMetadata(f.project.id, { name: 'Changed while waiting' }); }],
   ['raw pending input changed', (f, id) => { f.db.prepare('UPDATE copilot_pending_actions SET input_json=? WHERE id=?')
     .run(JSON.stringify({ projectId: f.project.id, description: 'Unapproved change' }), id); }]
@@ -177,7 +175,6 @@ for (const [label, revoke] of revokedCases) {
 it('writes current session memory through the real orchestrator without project authority', async () => {
   const f = fixture(true);
   try {
-    f.projects.setCopilotAutonomy(f.project.id, false);
     const runId = await f.run();
     assert.equal(f.ledger.get(runId)?.status, 'completed');
     assert.equal(f.ledger.log.listPendingActions(runId).length, 0);

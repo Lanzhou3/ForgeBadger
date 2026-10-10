@@ -16,10 +16,9 @@ import {
 } from "@/components/ui/select";
 import type { ChannelIdentity, ChannelRoute } from "@/lib/copilot-channels-api";
 import { DESTRUCTIVE_ROUTE_STATES, type ChannelRouteStateKey, type SetupBlocker } from "./channel-setup";
-import { CopilotManagementPanel } from "./CopilotManagementPanel";
 import { useSettingsCopy } from "./settings-copy";
 
-export interface AutonomyProjectOption {
+export interface ProjectOption {
   id: string;
   name: string;
 }
@@ -31,7 +30,7 @@ interface Props {
   identities: ChannelIdentity[];
   identityId: string;
   onIdentityChange: (id: string) => void;
-  autonomyProjects: AutonomyProjectOption[];
+  projects: ProjectOption[];
   projectId: string;
   onProjectChange: (id: string) => void;
   projectsLoading: boolean;
@@ -54,10 +53,10 @@ function routeBadgeClass(state: ChannelRouteStateKey | null): string {
   return "text-muted-foreground";
 }
 
-/** Step 3: bind a confirmed identity to an autonomy-enabled project. */
+/** Step 3: bind a confirmed identity to a project. */
 export function ChannelBindingStep({
   busy, queriesError, channelName, identities, identityId, onIdentityChange,
-  autonomyProjects, projectId, onProjectChange, projectsLoading, projectsError,
+  projects, projectId, onProjectChange, projectsLoading, projectsError,
   blocker, activationReason, showBlockerLink, onActivate, routes, routeState, projectName, onRevokeRoute,
 }: Props) {
   const copy = useSettingsCopy();
@@ -69,13 +68,9 @@ export function ChannelBindingStep({
         description={copy.bindingDescription}
       />
       <CardContent className="space-y-3">
-        <div className="space-y-2 rounded-md border border-border/70 p-3">
-          <p className="text-sm font-medium">{copy.manageAutonomy}</p>
-          <CopilotManagementPanel />
-        </div>
         {projectsLoading && <p role="status">{copy.projectsLoading}</p>}
-        {!projectsLoading && !projectsError && !autonomyProjects.length && (
-          <p className="text-sm">{copy.noAutonomyProjects}</p>
+        {!projectsLoading && !projectsError && !projects.length && (
+          <p className="text-sm">{copy.noProjects}</p>
         )}
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1 text-sm">
@@ -98,7 +93,7 @@ export function ChannelBindingStep({
                 <SelectValue placeholder={copy.projectPlaceholder} />
               </SelectTrigger>
               <SelectContent>
-                {autonomyProjects.map((project) => (
+                {projects.map((project) => (
                   <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
                 ))}
               </SelectContent>

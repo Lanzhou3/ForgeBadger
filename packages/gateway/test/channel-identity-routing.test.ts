@@ -21,7 +21,6 @@ import { randomBytes } from 'node:crypto';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { FeishuChannelRepository } from '../src/db/repositories/feishu-channel-repository.js';
 import { FeishuIntegrationRepository } from '../src/db/repositories/feishu-integration-repository.js';
-import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { ChannelIdentityService, type TrustedChannelPeer } from '../src/services/channels/channel-identity-service.js';
 
 function fixture(path = ':memory:', folder = migrationsFolder) {
@@ -33,22 +32,12 @@ function fixture(path = ':memory:', folder = migrationsFolder) {
   const account = accounts.upsertAccount({ appId: 'fixture', appSecret: randomBytes(24).toString('hex'), enabled: true });
   const config = new FeishuIntegrationRepository(db, user.id);
   config.upsertConfig({ enabled: true, emergencyDisabled: false });
-  const projects = new ProjectRepository(db, user.id);
-  // Upgrade-rehearsal fixtures may predate migration 0104; ProjectRepository writes with the
-  // current schema (drizzle RETURNING lists copilot_autonomy), so seed the project with raw
-  // SQL on those schemas. The full-schema fixture turns the autonomy switch on so channel
-  // admission passes without a grant.
-  const hasAutonomyColumn = (db.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>).some(column => column.name === 'copilot_autonomy');
-  let project: { id: string };
-  if (hasAutonomyColumn) {
-    project = projects.create({ name: 'p', path: '/private/tmp/channel-project', aiTool: 'claude' });
-    projects.setCopilotAutonomy(project.id, true);
-  } else {
-    const now = Date.now();
-    db.prepare('INSERT INTO projects(id,user_id,name,path,ai_tool,status,is_imported,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run('fixture-project', user.id, 'p', '/private/tmp/channel-project', 'claude', 'active', 0, now, now);
-    project = { id: 'fixture-project' };
-  }
+  // Upgrade-rehearsal fixtures predate the current projects schema, so seed the
+  // project with a raw SQL column subset that works on both shapes.
+  const now = Date.now();
+  db.prepare('INSERT INTO projects(id,user_id,name,path,ai_tool,status,is_imported,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run('fixture-project', user.id, 'p', '/private/tmp/channel-project', 'claude', 'active', 0, now, now);
+  const project: { id: string } = { id: 'fixture-project' };
   const service = new ChannelIdentityService(db, user.id, key);
   const peer: TrustedChannelPeer = { channel: 'feishu', accountId: account.id, accountRevision: account.configRevision, externalUserId: 'ou-owner', chatId: 'oc-private', chatType: 'p2p' };
   const pair = () => {
@@ -56,7 +45,7 @@ function fixture(path = ':memory:', folder = migrationsFolder) {
     const claimed = service.claimPairing(issued.token, peer);
     return service.confirmPairing(claimed.id, { revision: claimed.revision, externalUserId: peer.externalUserId, chatId: peer.chatId });
   };
-  return { db, user, other, key, accounts, account, config, project, projects, service, peer, pair };
+  return { db, user, other, key, accounts, account, config, project, service, peer, pair };
 }
 
 it('requires claim and exact owner confirmation; hashes tokens and rejects replay', () => {
@@ -127,12 +116,11 @@ for (const change of ['expire', 'rotate', 'emergency', 'allowlist', 'cancel'] as
   });
 }
 
-for (const change of ['autonomy', 'identity', 'route', 'account', 'config', 'actor', 'history', 'peer'] as const) {
+for (const change of ['identity', 'route', 'account', 'config', 'actor', 'history', 'peer'] as const) {
   it(`rejects stale admission after ${change} changes`, () => {
     const f = fixture();
     try {
       const identity = f.pair(); const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
-      if (change === 'autonomy') f.projects.setCopilotAutonomy(f.project.id, false);
       if (change === 'identity') f.service.revokeIdentity(identity.id);
       if (change === 'route') f.service.revokeRoute(route.id);
       if (change === 'account') f.accounts.upsertAccount({ appId: f.account.appId, enabled: false });
@@ -292,7 +280,6 @@ it('upgrades populated main schema, preserves route revocation and restores a pr
     } finally { restored.close(); }
     assert.equal(db.prepare('SELECT count(*) AS n FROM channel_identities').get().n, 0);
     assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
-    new ProjectRepository(db, f.user.id).setCopilotAutonomy(f.project.id, true);
     const identity = f.pair(); const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
     db.close(); db = new Sqlite(path);
     let service = new ChannelIdentityService(db, f.user.id, f.key);
@@ -327,8 +314,8 @@ it('rejects a foreign project without leaving a conversation or route', () => {
   const f = fixture();
   try {
     const identity = f.pair();
-    f.db.prepare('INSERT INTO projects(id,user_id,name,path,ai_tool,status,is_imported,copilot_autonomy,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-      .run('foreign-project', f.other.id, 'foreign', '/private/tmp/foreign-channel-project', 'claude', 'active', 0, 0, Date.now(), Date.now());
+    f.db.prepare('INSERT INTO projects(id,user_id,name,path,ai_tool,status,is_imported,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run('foreign-project', f.other.id, 'foreign', '/private/tmp/foreign-channel-project', 'claude', 'active', 0, Date.now(), Date.now());
     assert.throws(() => f.service.createRoute({ identityId: identity.id, projectId: 'foreign-project' }));
     assert.equal(f.service.records.listRoutes().length, 0);
     assert.equal(f.db.prepare('SELECT count(*) AS n FROM copilot_conversations').get().n, 0);
@@ -779,7 +766,6 @@ it('upgrades populated native inbox through the grant removal, clears the route 
     assert.equal(f.db.prepare("SELECT count(*) n FROM sqlite_master WHERE type='table' AND name IN ('copilot_grants','copilot_conversation_grants')").get().n,0);
     assert.equal(f.db.prepare("SELECT count(*) n FROM platform_action_intents WHERE id='upgrade-intent'").get().n,1);
     assert.equal(f.db.prepare("SELECT count(*) n FROM pragma_table_info('platform_action_intents') WHERE name IN ('grant_id','grant_revision')").get().n,0);
-    f.projects.setCopilotAutonomy(f.project.id,true);
     f.service.createRoute({identityId:identity.id,projectId:f.project.id});
     const message=new NativeChannelInbox(f.db,f.user.id,f.key).receive(f.peer,incoming('post-upgrade'));
     assert.throws(()=>new ChannelDeliveryRepository(f.db,f.other.id).enqueue(message.id,'terminal','encrypted'));
@@ -835,23 +821,10 @@ function entriesBefore<T extends {tag:string}>(entries:T[],tag:string):T[] {
   return entries.slice(0,index);
 }
 
-it('admits a route with project autonomy on and rejects the same route immediately after the switch turns off',()=>{
+it('admits an active route bound to a project of the owner',()=>{
  const f=fixture();
  try {
   const identity=f.pair();const route=f.service.createRoute({identityId:identity.id,projectId:f.project.id});
   assert.ok(f.service.admit(route.id,f.peer));
-  f.projects.setCopilotAutonomy(f.project.id,false);assert.throws(()=>f.service.admit(route.id,f.peer));
  }finally{f.db.close();}
-});
-it('persists the project autonomy switch across reopen without letting another tenant toggle it',()=>{
- const directory=mkdtempSync(join(tmpdir(),'fb-project-autonomy-'));const file=join(directory,'db.sqlite');const f=fixture(file);
- try {
-  f.projects.setCopilotAutonomy(f.project.id,true);
-  f.db.close();const reopened=new Sqlite(file);
-  try {
-   const own=new ProjectRepository(reopened,f.user.id);assert.equal(own.getCopilotAutonomy(f.project.id),true);
-   assert.equal(new ProjectRepository(reopened,f.other.id).setCopilotAutonomy(f.project.id,false),undefined);
-   assert.equal(own.getCopilotAutonomy(f.project.id),true);
-  }finally{reopened.close();}
- }finally{if(f.db.open)f.db.close();rmSync(directory,{recursive:true,force:true});}
 });

@@ -17,7 +17,7 @@ function approvalRemedy(error: unknown): TranslationKey {
   const code = error instanceof GatewayApiError && typeof error.details?.code === "string" ? error.details.code : "";
   if (["PLATFORM_INTENT_EXPIRED", "COPILOT_APPROVAL_EXPIRED", "COPILOT_TIME_BUDGET", "COPILOT_TOKEN_BUDGET"].includes(code)) return "copilot.approvalExpired";
   if (["COPILOT_APPROVAL_CHANGED", "COPILOT_REQUEST_CONFLICT", "PLATFORM_STALE_RESOURCE", "COPILOT_NOT_FOUND"].includes(code)) return "copilot.approvalInputChanged";
-  if (["COPILOT_APPROVAL_DENIED", "COPILOT_APPROVAL_SCOPE", "COPILOT_PROJECT_AUTONOMY_OFF", "COPILOT_USER_INACTIVE"].includes(code)) return "copilot.approvalAuthorityChanged";
+  if (["COPILOT_APPROVAL_DENIED", "COPILOT_APPROVAL_SCOPE", "COPILOT_USER_INACTIVE"].includes(code)) return "copilot.approvalAuthorityChanged";
   if (code === "COPILOT_TOOL_DISABLED") return "copilot.approvalToolDisabled";
   if (code === "COPILOT_TOOL_UNAVAILABLE") return "copilot.approvalToolUnavailable";
   return "copilot.approvalUncertain";

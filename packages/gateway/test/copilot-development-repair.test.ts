@@ -36,7 +36,7 @@ function fixture(t:TestContext) {
  const root=mkdtempSync(join(tmpdir(),'fb-repair-')),db=new Database(':memory:');db.pragma('foreign_keys=ON');
  migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
  const userId=new UserRepository(db).create('repair@test.dev','hash').id,projects=new ProjectRepository(db,userId);
- const project=projects.create({name:'P',path:root,aiTool:'codex'});projects.setCopilotAutonomy(project.id,true);
+ const project=projects.create({name:'P',path:root,aiTool:'codex'});
  writeFileSync(join(root,'sum.cjs'),'module.exports=(a,b)=>a-b;');
  const test="const a=require('node:assert/strict');a.equal(require('./sum.cjs')(2,3),5);";
  writeFileSync(join(root,'sum.test.cjs'),test);
@@ -83,9 +83,7 @@ it('rejects changed tests, expanded files, duplicate submissions and revoked aut
  assert.throws(()=>assertRepairPlan(f.db,f.userId,child,stepId,{...f.plan,changes:[...f.plan.changes,{path:'sum.test.cjs',beforeSha256:f.plan.checks[0]!.sha256,content:'process.exit(0)'}]}),/SCOPE|TEST/);
  reserveRepairSubmission(f.db,f.userId,child,stepId,f.plan);
  assert.throws(()=>reserveRepairSubmission(f.db,f.userId,child,randomUUID(),f.plan),/SUBMISSION_LIMIT/);
- f.projects.setCopilotAutonomy(f.project.id,false);
- assert.throws(()=>assertRepairPlan(f.db,f.userId,child,stepId,f.plan),/AUTONOMY/);
- f.projects.setCopilotAutonomy(f.project.id,true);writeFileSync(join(f.root,'sum.cjs'),'changed source');
+ writeFileSync(join(f.root,'sum.cjs'),'changed source');
  assert.throws(()=>assertRepairPlan(f.db,f.userId,child,stepId,f.plan),/DRIFT|STALE|HASH/);
 });
 
@@ -145,11 +143,10 @@ it('rotates past 100 unreportable jobs to publish later terminal results',t=>{
  assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_repair_jobs WHERE report_message_id IS NOT NULL').get() as {n:number}).n,1);
 });
 
-it('confirmed root remains repairable after admission expiry while live autonomy is still required',t=>{
+it('confirmed root remains repairable after admission expiry',t=>{
  const f=fixture(t),task=f.failed(f.runId),row=new DevelopmentTaskRepository(f.db,f.userId).get(task)!;
  f.db.prepare('UPDATE platform_action_intents SET expires_at=0 WHERE id=?').run(row.intent_id);
  const child=admitDevelopmentRepair(f.db,f.userId,task)!;assert.ok(child);assertRepairPlan(f.db,f.userId,child,randomUUID(),f.plan);
- f.projects.setCopilotAutonomy(f.project.id,false);assert.throws(()=>assertRepairPlan(f.db,f.userId,child,randomUUID(),f.plan),/AUTONOMY/);
 });
 
 it('inherits the durable channel repair mode through PlatformActions preview', { skip: !sandboxCapability().available }, t => {

@@ -26,7 +26,6 @@ export interface Project {
   aiTool: string;
   status: string;
   isImported: boolean;
-  copilotAutonomy: boolean;
   templateId: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -105,24 +104,6 @@ export class ProjectRepository {
 
   updateMetadata(id: string, input: { name?: string | undefined; description?: string | undefined }): Project | undefined {
     return this.drizzle.update(projects).set({ ...(input.name !== undefined ? { name: input.name } : {}), ...(input.description !== undefined ? { description: input.description } : {}) }).where(and(eq(projects.id, id), eq(projects.userId, this.userId))).returning().get() as Project | undefined;
-  }
-
-  getCopilotAutonomy(id: string): boolean | undefined {
-    const result = this.drizzle
-      .select({ copilotAutonomy: projects.copilotAutonomy })
-      .from(projects)
-      .where(and(eq(projects.id, id), eq(projects.userId, this.userId)))
-      .get() as { copilotAutonomy: boolean } | undefined;
-    return result?.copilotAutonomy;
-  }
-
-  setCopilotAutonomy(id: string, enabled: boolean): Project | undefined {
-    return this.drizzle
-      .update(projects)
-      .set({ copilotAutonomy: enabled })
-      .where(and(eq(projects.id, id), eq(projects.userId, this.userId)))
-      .returning()
-      .get() as Project | undefined;
   }
 
   delete(id: string): void {

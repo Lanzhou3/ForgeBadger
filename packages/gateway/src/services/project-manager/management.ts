@@ -66,7 +66,7 @@ export function projectManagementOverview(context: CommandContext, allowedProjec
       Record<typeof PROJECT_MANAGER_WORK_ITEM_STATUSES[number] | "total", number>;
     for (const row of rows) counts[row.status]++;
     const goal = pm.getGoal(project.id);
-    return { id: project.id, name: project.name, copilotAutonomy: project.copilotAutonomy, management, counts,
+    return { id: project.id, name: project.name, management, counts,
       goal: goal ? { summary: goal.summary, status: goal.status } : null,
       evidenceFreshness: evidenceFreshness(rows, management.freshnessHours, now) };
   }), observedAt: now };

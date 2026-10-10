@@ -77,7 +77,6 @@ it('approval HTTP preserves a known tool rejection code and does not consume the
   try {
     const projects = new ProjectRepository(f.db, f.user.id);
     const project = projects.create({ name: 'Fixture', path: '/tmp', aiTool: 'pi' }); projectId = project.id;
-    projects.setCopilotAutonomy(project.id, true);
     const runId = await f.orchestrator.runTurn({ userId: f.user.id, conversationId: f.conversation.id, userText: 'Fixture', projectId, source: 'reactive' });
     const action = f.ledger.log.listPendingActions(runId)[0]!;
     new CopilotToolPreferenceRepository(f.db, f.user.id).setEnabled('update_project', false);
@@ -107,7 +106,6 @@ it('retains safe text while awaiting approval and across its new execution fence
   try {
     const projects = new ProjectRepository(f.db, f.user.id);
     const project = projects.create({ name: 'Fixture', path: '/tmp', aiTool: 'pi' }); projectId = project.id;
-    projects.setCopilotAutonomy(project.id, true);
     const runId = await f.orchestrator.runTurn({ userId: f.user.id, conversationId: f.conversation.id, userText: 'Fixture', projectId, source: 'reactive' });
     const read = async () => {
       const response = await fetch(`${f.url}/runs/${runId}`, { headers: f.headers() });

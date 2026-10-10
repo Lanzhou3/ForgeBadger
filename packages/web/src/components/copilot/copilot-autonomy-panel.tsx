@@ -22,10 +22,10 @@ import { useSettingsCopy } from "./settings-copy";
 
 /**
  * Dispatch behavior card (Copilot settings → general): whether confirmed CLI
- * completion evidence auto-advances linked work items. Authorization for
- * programmatic dispatch itself lives on each project's Copilot autonomy
- * switch — there is deliberately no per-adapter allowlist, so every code CLI
- * is equal. Admin-only (the API enforces the same boundary).
+ * completion evidence auto-advances linked work items. Programmatic dispatch
+ * is open to every project by default — there is deliberately no per-adapter
+ * allowlist, so every code CLI is equal. Admin-only (the API enforces the
+ * same boundary).
  */
 export function CopilotAutonomyPanel() {
   const { user } = useAuth();

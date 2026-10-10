@@ -12,7 +12,7 @@ import { InMemorySessionManager } from '../src/services/session-manager.js';
 import { InMemoryApiKeyStore } from '../src/secrets/api-key-store.js';
 import { signJwt } from '../src/auth/jwt.js';
 import { fileURLToPath } from 'node:url';
-it('composes preview execution receipt and owner autonomy scope over real HTTP', async () => {
+it('composes preview execution receipt and owner path over real HTTP', async () => {
     const db = new Database(':memory:');
     migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
     const masterKey = 'a'.repeat(32), jwtSecret = 'b'.repeat(32);
@@ -68,9 +68,6 @@ it('composes preview execution receipt and owner autonomy scope over real HTTP',
         assert.equal(count('project_manager_work_items'), 1);
         // The decide endpoint no longer exists; intents never wait for approval.
         assert.equal((await fetch(base + `/platform-actions/${intent.id}/decide`, { method: 'POST', headers, body: JSON.stringify({ approved: true }) })).status, 404);
-        // Owner scope isolation: the per-project Copilot autonomy switch (default
-        // off) gates copilot-origin actions only, never the owner API path.
-        assert.equal(new ProjectRepository(db, user.id).getCopilotAutonomy(project.id), false);
         const owner = await post('/platform-actions/preview', { commandId: 'project.metadata.update', input: { projectId: project.id, name: 'Renamed' }, idempotencyKey: 'owner-1' });
         assert.equal(owner.status, 200);
         const oi = owner.body.data.intent as ActionIntent;

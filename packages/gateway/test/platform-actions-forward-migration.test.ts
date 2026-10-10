@@ -8,7 +8,6 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
-import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { CopilotConversationLog } from '../src/services/agent/conversation-log.js';
 import { fileURLToPath } from 'node:url';
 const root=fileURLToPath(new URL('../src/db/migrations/',import.meta.url));
@@ -58,20 +57,11 @@ it('upgrades the original 0069, removes the grant tables and grant columns, and 
  assert.equal((f.db.prepare('SELECT status FROM platform_action_intents WHERE id=?').get('completed') as {status:string}).status,'completed');
  assert.equal((f.db.prepare('SELECT status FROM platform_action_intents WHERE id=?').get('interrupted') as {status:string}).status,'indeterminate');
  assert.equal((f.db.prepare('SELECT count(*) n FROM platform_action_intents').get() as {n:number}).n,2);
- assert.ok((f.db.pragma('table_info(projects)') as {name:string}[]).some(c=>c.name==='copilot_autonomy'));
+ assert.ok(!(f.db.pragma('table_info(projects)') as {name:string}[]).some(c=>c.name==='copilot_autonomy'));
  const routeCols=(f.db.pragma('table_info(channel_routes)') as {name:string}[]).map(c=>c.name);
  assert.ok(routeCols.includes('project_id')&&!routeCols.includes('grant_id')&&!routeCols.includes('grant_revision'));
  assert.deepEqual(f.db.pragma('foreign_key_check'),[]);
  assert.equal((f.db.prepare('SELECT hash FROM __drizzle_migrations WHERE created_at=?').get(1788393600202) as {hash:string}).hash,appliedHash);
- f.db.prepare("INSERT INTO projects(id,user_id,name,path,ai_tool,created_at,updated_at) VALUES (?,?,?,?,?,?,?)").run('proj-1',f.user.id,'Autonomy','/tmp/autonomy','claude',1600,1601);
- const repos=new ProjectRepository(f.db,f.user.id);
- assert.equal(repos.getCopilotAutonomy('proj-1'),false);
- assert.equal(repos.setCopilotAutonomy('proj-1',true)?.copilotAutonomy,true);
- const foreign=new UserRepository(f.db).create('foreign-autonomy@test.dev','hash');
- const foreignRepos=new ProjectRepository(f.db,foreign.id);
- assert.equal(foreignRepos.getCopilotAutonomy('proj-1'),undefined);
- assert.equal(foreignRepos.setCopilotAutonomy('proj-1',false),undefined);
- assert.equal(repos.getCopilotAutonomy('proj-1'),true);
  upgrade(f.db);assert.equal((f.db.prepare('SELECT count(*) n FROM platform_action_receipts').get() as {n:number}).n,1);
  }finally{f.close();}
 });
@@ -108,7 +98,7 @@ it('builds the same final schema from a fresh database',()=>{const db=new Databa
  const intentCols=(db.pragma('table_info(platform_action_intents)') as {name:string}[]).map(c=>c.name);
  assert.ok(intentCols.includes('execution_owner')&&!intentCols.includes('grant_id')&&!intentCols.includes('grant_revision'));
  assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='session_writer_leases'").get());
- assert.ok((db.pragma('table_info(projects)') as {name:string}[]).some(c=>c.name==='copilot_autonomy'));
+ assert.ok(!(db.pragma('table_info(projects)') as {name:string}[]).some(c=>c.name==='copilot_autonomy'));
  assert.ok((db.pragma('table_info(channel_routes)') as {name:string}[]).some(c=>c.name==='project_id'));
  assert.deepEqual(db.pragma('foreign_key_check'),[]);
  }finally{db.close();}});

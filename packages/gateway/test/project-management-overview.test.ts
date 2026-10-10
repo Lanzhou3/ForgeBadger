@@ -14,7 +14,6 @@ import express from "express";
 import { randomUUID } from "node:crypto";
 import { signJwt } from "../src/auth/jwt.js";
 import { PlatformActions } from "../src/services/platform-commands/actions.js";
-import { PlatformNoEffectError } from "../src/services/platform-commands/errors.js";
 import { createProjectManagementRoutes } from "../src/routes/project-management.js";
 import { errorHandler } from "../src/middleware/error-handler.js";
 import { fileURLToPath } from "node:url";
@@ -38,7 +37,6 @@ it("reports owner-scoped projects without a management mode and reports unknown 
     assert.equal(all.projects.length, 2);
     assert.equal(all.projects[0]!.management.ownerLabel, "");
     assert.equal(all.projects[0]!.evidenceFreshness.status, "unknown");
-    assert.equal(all.projects[0]!.copilotAutonomy, false);
     assert.deepEqual(projectManagementOverview(f.context, []).projects, []);
     assert.deepEqual(projectManagementOverview(f.context, [f.project.id, f.foreign.id]).projects.map(p => p.id), [f.project.id]);
   } finally { f.db.close(); }
@@ -63,7 +61,7 @@ it("counts every work item without list truncation and distinguishes missing, st
   } finally { f.db.close(); }
 });
 
-it("management command validates schema and resource ownership, uses CAS revision, and updates owner/next-action without any autonomy effect", () => {
+it("management command validates schema and resource ownership, uses CAS revision, and updates owner/next-action", () => {
   const f = fixture();
   try {
     const command = createManagementCommands()[0]!;
@@ -79,8 +77,6 @@ it("management command validates schema and resource ownership, uses CAS revisio
     assert.equal(repo.get(f.project.id).ownerLabel, "Alice");
     const overview = projectManagementOverview(f.context, [f.project.id]).projects[0]!;
     assert.equal(overview.management.ownerLabel, "Alice");
-    // Management metadata never grants autonomy: the switch is the only axis.
-    assert.equal(overview.copilotAutonomy, false);
   } finally { f.db.close(); }
 });
 
@@ -120,7 +116,7 @@ it("HTTP management uses command receipts, rejects stale revisions, and scopes t
   }
 });
 
-it("gates copilot-origin management actions on the per-project autonomy switch while the owner path is unaffected", async () => {
+it("runs copilot-origin management actions through an approved intent while the owner path is unaffected", async () => {
   const f = fixture();
   try {
     const commands = new Map(createManagementCommands().map(command => [command.id, command]));
@@ -130,28 +126,13 @@ it("gates copilot-origin management actions on the per-project autonomy switch w
     const runId = ledger.admit({ userId: f.user.id, conversationId: conversation.id, userText: "Update the plan" }, 10);
     const step = ledger.addStep(runId, { kind: "tool", toolName: "pm_update_management", effect: "write" });
     const copilot = new PlatformActions({ db: f.db, userId: f.user.id, actionOrigin: { kind: "copilot", runId, stepId: step.id } }, commands);
-    const projects = new ProjectRepository(f.db, f.user.id);
     const copilotIntentCount = () => (f.db.prepare("SELECT count(*) AS n FROM platform_action_intents WHERE user_id=? AND origin_kind='copilot'").get(f.user.id) as { n: number }).n;
 
-    // The switch defaults to OFF: the copilot preview is rejected with the switch code,
-    // the project name and Web guidance, and nothing is persisted.
-    assert.equal(projects.getCopilotAutonomy(f.project.id), false);
-    assert.throws(
-      () => copilot.preview({ commandId: "pm.management.update", input: { projectId: f.project.id, expectedRevision: 0, nextAction: "From Copilot" }, idempotencyKey: step.id }),
-      (error: unknown) => error instanceof PlatformNoEffectError
-        && error.message.startsWith("COPILOT_PROJECT_AUTONOMY_OFF:")
-        && error.message.includes(f.project.name)
-        && error.message.includes("未开启 Copilot 自治")
-        && error.message.includes("Web 控制台项目设置中开启后重试"),
-    );
-    assert.equal(copilotIntentCount(), 0);
-
-    // The owner path is never gated by the switch.
+    // The owner path works without any copilot origin.
     const owner = await new PlatformActions(f.context, commands).executeOwner("pm.management.update", { projectId: f.project.id, expectedRevision: 0, nextAction: "Owner first" }, "owner-1") as { nextAction: string };
     assert.equal(owner.nextAction, "Owner first");
 
-    // Switch ON: the preview is approved, bound to the run step, and execution confirms a receipt.
-    projects.setCopilotAutonomy(f.project.id, true);
+    // A copilot preview is approved, bound to the run step, and execution confirms a receipt.
     const intent = copilot.preview({ commandId: "pm.management.update", input: { projectId: f.project.id, expectedRevision: 1, nextAction: "From Copilot" }, idempotencyKey: step.id });
     assert.equal(intent.status, "approved");
     assert.equal(intent.origin_kind, "copilot");
@@ -159,15 +140,6 @@ it("gates copilot-origin management actions on the per-project autonomy switch w
     assert.equal(intent.origin_step_id, step.id);
     const receipt = await copilot.execute(intent.id);
     assert.equal(receipt.outcome, "confirmed");
-
-    // The switch is hot: flipping it back OFF rejects a new copilot intent
-    // immediately, while the confirmed receipt survives.
-    projects.setCopilotAutonomy(f.project.id, false);
-    const nextStep = ledger.addStep(runId, { kind: "tool", toolName: "pm_update_management", effect: "write" });
-    assert.throws(
-      () => copilot.preview({ commandId: "pm.management.update", input: { projectId: f.project.id, expectedRevision: 2, nextAction: "Again" }, idempotencyKey: nextStep.id }),
-      (error: unknown) => error instanceof PlatformNoEffectError && error.message.startsWith("COPILOT_PROJECT_AUTONOMY_OFF:"),
-    );
     assert.equal(copilotIntentCount(), 1);
     assert.equal(copilot.intents.receipt(intent.id)?.outcome, "confirmed");
   } finally { f.db.close(); }

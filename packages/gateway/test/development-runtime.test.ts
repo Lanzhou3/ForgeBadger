@@ -115,7 +115,6 @@ it('real failed checks never enable acceptance',{skip:!sandboxAvailable},async()
  assert.throws(()=>f.actions.preview({commandId:'development.task.accept',input:{projectId:f.project.id,taskId,artifactDigest:row.artifact_digest},idempotencyKey:'bad-accept'}),/STALE/);
 }finally{await runtime?.stop();f.close();}});
 it('real Copilot approval creates durable task whose completed origin remains valid',{skip:!sandboxAvailable},async()=>{const f=fixture();let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
- new ProjectRepository(f.db,f.user.id).setCopilotAutonomy(f.project.id,true);
  const log=new CopilotConversationLog(f.db,f.user.id),conversation=log.createConversation('fixture');let models=0;
  const orchestrator=createCopilotOrchestrator({db:f.db,masterKey:'x'.repeat(32),eventBus:f.eventBus,toolRegistry:createAgentToolRegistry(createPlatformTools()),llm:{async stream(req){models++;if(models===1)req.onEvent({type:'tool_call',toolCall:{id:'submit-one',name:'submit_development_task',arguments:JSON.stringify(f.plan)}});else req.onEvent({type:'text_delta',text:'Task queued, not accepted.'});return {message:''};},async summarize(){return '';},async generateTitle(){return '';},async proposeMemory(){return [];}}});
  const runId=await orchestrator.runTurn({userId:f.user.id,conversationId:conversation.id,userText:'Create the reviewed task'});assert.equal(log.getRun(runId)?.status,'awaiting_approval');const pending=log.listPendingActions(runId)[0]!;
@@ -154,7 +153,6 @@ it('source pagination uses fully redacted text before every arbitrary offset',as
  for(const offset of [0,10,content.indexOf('FIXTURE'),content.indexOf('TOKEN')]){const output=await tool.execute({projectId:f.project.id,path:'redaction.cjs',offset,length:12},{db:f.db,userId:f.user.id,masterKey:'x'.repeat(32)}) as {content:string;sha256:string;offsetSpace:string};assert.ok(!output.content.includes('FIXTURE')&&!output.content.includes('123456789'));assert.equal(output.sha256,hashText(content));assert.equal(output.offsetSpace,'redacted_text');}
 }finally{f.close();}});
 it('explicit Copilot origin with missing step cannot become owner API authority',()=>{const f=fixture();try{
- new ProjectRepository(f.db,f.user.id).setCopilotAutonomy(f.project.id,true);
  const actions=new PlatformActions({db:f.db,userId:f.user.id,actionOrigin:{kind:'copilot',runId:'missing',stepId:'missing'}},createPlatformCommands());
  const capability=sandboxCapability();
  if(capability.available)assert.throws(()=>actions.preview({commandId:'development.task.submit',input:f.plan,idempotencyKey:'missing'}),/origin missing/);

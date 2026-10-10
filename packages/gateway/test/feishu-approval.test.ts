@@ -28,7 +28,6 @@ function fixture(group = false) {
   config.upsertConfig({ enabled: true, emergencyDisabled: false });
   const projects = new ProjectRepository(db, user.id);
   const project = projects.create({ name: 'Approval project', path: '/private/tmp/fb-approval', aiTool: 'claude' });
-  projects.setCopilotAutonomy(project.id, true);
   const authority = new ChannelIdentityService(db, user.id);
   const peer: TrustedChannelPeer = { channel: 'feishu', accountId: account.id, accountRevision: account.configRevision,
     externalUserId: 'ou-owner', chatId: 'oc-private', chatType: 'p2p' };
@@ -134,7 +133,6 @@ const invalidCases: Array<[string, (f: Fixture, event: ReturnType<typeof callbac
   ['signature tampering', (_f,e) => { e.action.value.signature = '0'.repeat(64); }],
   ['revoked route', (f) => { f.authority.revokeRoute(f.route.id); }],
   ['revoked identity', (f) => { f.authority.revokeIdentity(f.identity.id); }],
-  ['disabled autonomy', (f) => { f.projects.setCopilotAutonomy(f.project.id, false); }],
   ['emergency stop', (f) => { f.config.upsertConfig({ emergencyDisabled: true }); }],
   ['removed chat allowlist', (f) => { f.config.upsertConfig({ allowedChatIds: ['different-chat'] }); }],
   ['account revision change', (f) => { f.accounts.upsertAccount({ appId: 'replacement', appSecret: 'new', enabled: true }); }],

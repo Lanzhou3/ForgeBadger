@@ -470,7 +470,7 @@ const SYSTEM_PROMPT = [
   "",
   "Be concise. Use tools to complete authorized work. Routine scoped platform operations",
   "run automatically for direct owner requests; high-risk actions require exact approval.",
-  "Tenant ownership, project autonomy, tool switches and exact approvals are enforced by the platform.",
+  "Tenant ownership, tool switches and exact approvals are enforced by the platform.",
   "Use list_playbooks and load_playbook for Copilot operating guides. CLI Skills",
   "belong to CLI sessions and do not add tools to your runtime. Task preparation",
   "does not start a CLI or dispatch a prompt. Use pm_execute_task_packet to prepare,",

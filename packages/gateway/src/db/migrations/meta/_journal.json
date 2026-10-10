@@ -932,6 +932,13 @@
       "when": 1791600000000,
       "tag": "0133_copilot_run_trace",
       "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1791690000000,
+      "tag": "0134_drop_copilot_project_autonomy",
+      "breakpoints": true
     }
   ]
 }

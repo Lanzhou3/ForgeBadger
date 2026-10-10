@@ -138,7 +138,7 @@ export function createProjectManagerTools(): AgentTool[] {
     {
       name: "pm_execute_task_packet",
       description:
-        "Prepare (if needed), start the linked CLI session, and programmatically deliver the task packet prompt to it, then mark the work item in progress. Requires the project's Copilot autonomy switch to be on.",
+        "Prepare (if needed), start the linked CLI session, and programmatically deliver the task packet prompt to it, then mark the work item in progress.",
       risk: "operate",
       requiresApproval: true,
       inputSchema: startPacketInput,

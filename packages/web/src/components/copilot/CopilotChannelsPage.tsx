@@ -62,14 +62,14 @@ export function CopilotChannelsPage() {
   const routes=data?.routes.filter(r=>accountIdentities.some(i=>i.id===r.identityId))??[];
   const deliveries=data?.deliveries.filter(d=>d.accountId===accountId && d.channel===channel)??[];
   const identities=data?.identities.filter(i=>i.status==='active' && i.accountId===accountId && i.accountRevision===accountRevision)??[];
-  const autonomyProjects=projects.data?.projects.filter(p=>p.copilotAutonomy)??[];
-  const project=autonomyProjects.find(p=>p.id===projectId);
+  const bindableProjects=projects.data?.projects??[];
+  const project=bindableProjects.find(p=>p.id===projectId);
   const identity=identities.find(i=>i.id===identityId)??(identities.length===1?identities[0]:undefined);
   const integrationEnabled=!integrationConfig.isPending&&!integrationConfig.isError&&!!integrationConfig.data?.enabled&&!integrationConfig.data.emergencyDisabled;
   const canPair=!!account?.enabled&&integrationEnabled;
   const blocker=channelSetupBlocker({account,configLoading:integrationConfig.isPending,configError:integrationConfig.isError,
     config:integrationConfig.data,identities,identity,pairing,staleIdentity:accountIdentities.some(i=>i.accountRevision!==accountRevision),
-    projectsLoading:projects.isPending,projectsError:projects.isError,projectCount:autonomyProjects.length,selectedProject:!!project,
+    projectsLoading:projects.isPending,projectsError:projects.isError,projectCount:bindableProjects.length,selectedProject:!!project,
     existingRoute:routes.find(r=>r.identityId===identity?.id&&r.status==='active')},copy.channelSetup);
   const tokenVisible=!!token && token.expiresAt>now && (data?.pairings.some(p=>p.id===token.id && p.accountId===accountId)??false);
   const queriesError=!!(query.isError||accountQuery.isError);
@@ -85,7 +85,6 @@ export function CopilotChannelsPage() {
     if(projects.isPending || projects.isError)return 'pending_review';
     const bound=projects.data?.projects.find(p=>p.id===route.projectId);
     if(!bound)return 'project_missing';
-    if(!bound.copilotAutonomy)return 'autonomy_off';
     if(route.authorityValid===false)return 'authority_revoked';
     if(route.authorityValid!==true)return 'pending_review';
     return 'authorized';
@@ -181,7 +180,7 @@ export function CopilotChannelsPage() {
             identities={identities}
             identityId={identity?.id??''}
             onIdentityChange={setIdentityId}
-            autonomyProjects={autonomyProjects}
+            projects={bindableProjects}
             projectId={project?.id??''}
             onProjectChange={setProjectId}
             projectsLoading={projects.isPending}

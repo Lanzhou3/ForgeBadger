@@ -24,7 +24,6 @@ async function fixture(t: TestContext, isolated = true) {
   const user = new UserRepository(db).create('stop-target@test.dev', 'hash');
   const projects = new ProjectRepository(db, user.id);
   const project = projects.create({ name: 'ForgeBadger', path: '/tmp', aiTool: 'codex' });
-  projects.setCopilotAutonomy(project.id, true);
   const sessions = new SessionRepository(db, user.id);
   const panes = new Map<string, string>(); const killed: string[] = []; const entered: string[] = [];
   let inputGate = Promise.resolve(); let staged!: () => void;

@@ -28,7 +28,6 @@ it('retains the latest event rejected by a busy real conversation, then admits i
   const user = new UserRepository(db).create('reactive@test.invalid', 'fixture');
   const projects = new ProjectRepository(db, user.id);
   const project = projects.create({ name: 'Reactive fixture', path: '/tmp', aiTool: 'pi' });
-  projects.setCopilotAutonomy(project.id, true);
   const eventBus = new ForgeBadgerEventBus();
   const deps = { db, masterKey: 'a'.repeat(32), eventBus };
   const stack = buildAgentStack(deps, user.id);

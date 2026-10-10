@@ -31,7 +31,8 @@ it('reports dispatch as a normal owner-action tool and refuses enabling retired 
     // A session runtime is needed independently of per-adapter autonomy.
     assert.equal(dispatch.available,false);
     assert.equal(dispatch.unavailableReason,'SESSION_RUNTIME_UNAVAILABLE');
-    // Authorization is the project-autonomy gate for copilot-origin actions; owner-initiated tool calls are plain owner actions.
+    // Owner-initiated tool calls are plain owner actions; copilot-origin actions
+    // require a live run origin instead of any per-project switch.
     assert.equal(dispatch.authorization,'owner_action');
     assert.ok(body.data.tools.some(tool=>tool.name==='pm_prepare_task_packet'));
     assert.ok(body.data.tools.some(tool=>tool.name==='pm_execute_task_packet'));

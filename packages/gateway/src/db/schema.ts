@@ -219,9 +219,6 @@ export const projects = sqliteTable("projects", {
   aiTool: text("ai_tool").notNull(),
   status: text("status").notNull().default("active"),
   isImported: integer("is_imported", { mode: "boolean" }).notNull().default(false),
-  // Project-level Copilot autonomy switch: true lets the Copilot execute
-  // platform actions inside this project without per-action approval.
-  copilotAutonomy: integer("copilot_autonomy", { mode: "boolean" }).notNull().default(false),
   templateId: text("template_id").references(() => templates.id),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())

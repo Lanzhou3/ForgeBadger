@@ -37,9 +37,6 @@ function fixture() {
 
   const projects = new ProjectRepository(db, user.id);
   const project = projects.create({ name: 'p', path: '/private/tmp/tg-channel-project', aiTool: 'claude' });
-  // Channel admission requires the project-level Copilot autonomy switch; the
-  // flow tests run with it enabled and the dedicated switch tests toggle it.
-  projects.setCopilotAutonomy(project.id, true);
   const service = new ChannelIdentityService(db, user.id, key);
   const pair = (channel: 'feishu' | 'telegram', accountId: string, accountRevision: number, externalUserId: string, chatId: string) => {
     const peer: TrustedChannelPeer = { channel, accountId, accountRevision, externalUserId, chatId, chatType: 'p2p' };

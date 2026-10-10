@@ -188,7 +188,7 @@ export class ChannelIdentityService {
     requireAuthority(route?.status === 'active');
     const project = new ProjectRepository(this.db, this.userId).getById(route!.projectId);
     requireAuthority(this.conversations.getConversation(route!.conversationId)?.status === 'active'
-      && project?.copilotAutonomy === true);
+      && !!project);
     return route!;
   }
 

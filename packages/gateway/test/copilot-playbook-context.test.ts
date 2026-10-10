@@ -131,30 +131,11 @@ it('playbook listing and forged direct loads expose only the owner\'s available 
   } finally { f.db.close(); }
 });
 
-it('project autonomy switch gates copilot-origin platform writes at the intent level', async () => {
+it('gates copilot-origin platform writes at the intent level: scoped writes run, global writes need the Web, other tenants stay isolated', async () => {
   const f = fixture();
   try {
-    const projects = new ProjectRepository(f.db, f.user.id);
-    assert.equal(projects.getCopilotAutonomy(f.project.id), false);
-
-    // Switch OFF (default): project-scoped write refused with the switch guidance; no intent, no memory.
-    f.emit([{ name: 'write_memory', input: { kind: 'fact', scope: 'project', projectId: f.project.id, text: 'Switch is off' } }]);
-    const offMessages = await f.turn('Write the project memory');
-    const offResult = offMessages.find(message => message.kind === 'tool_result')!.content;
-    assert.equal(offResult, 'Denied by security policy: COPILOT_PROJECT_AUTONOMY_OFF: 项目「allowed」未开启 Copilot 自治，请在 Web 控制台项目设置中开启后重试');
-    assert.equal((f.db.prepare('SELECT count(*) n FROM platform_action_intents').get() as { n: number }).n, 0);
-    assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_memory').get() as { n: number }).n, 0);
-
-    // No project in scope: copilot origin cannot perform global writes.
-    f.emit([{ name: 'write_memory', input: { kind: 'fact', scope: 'global', text: 'No project scope' } }]);
-    const globalMessages = await f.turn('Write a global memory');
-    const globalResult = globalMessages.find(message => message.kind === 'tool_result')!.content;
-    assert.equal(globalResult, 'Denied by security policy: COPILOT_GLOBAL_ACTION_REQUIRES_WEB: 请在 Web 控制台手动执行');
-
-    // Switch ON: a direct user's scoped memory write runs under the low-risk policy.
-    projects.setCopilotAutonomy(f.project.id, true);
-    assert.equal(projects.getCopilotAutonomy(f.project.id), true);
-    f.emit([{ name: 'write_memory', input: { kind: 'fact', scope: 'project', projectId: f.project.id, text: 'Switch is on' } }]);
+    // A direct user's project-scoped memory write runs under the low-risk policy.
+    f.emit([{ name: 'write_memory', input: { kind: 'fact', scope: 'project', projectId: f.project.id, text: 'Scoped memory' } }]);
     const conversation = f.ledger.log.createConversation();
     const runId = await f.orchestrator.runTurn({ userId: f.user.id, conversationId: conversation.id, userText: 'Write the project memory now' });
     assert.equal(f.ledger.get(runId)?.status, 'completed');
@@ -170,12 +151,11 @@ it('project autonomy switch gates copilot-origin platform writes at the intent l
     assert.match(f.ledger.log.listMessages(conversation.id).find(message => message.kind === 'tool_result')!.content, /"receiptOutcome":"confirmed"/);
     assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_memory').get() as { n: number }).n, 1);
 
-    // Hot ON -> OFF: the next intent is refused again even though the switch was on before.
-    projects.setCopilotAutonomy(f.project.id, false);
-    f.emit([{ name: 'write_memory', input: { kind: 'fact', scope: 'project', projectId: f.project.id, text: 'Switch flipped off again' } }]);
-    const hotMessages = await f.turn('Write again after the switch went off');
-    assert.match(hotMessages.find(message => message.kind === 'tool_result')!.content, /COPILOT_PROJECT_AUTONOMY_OFF: 项目「allowed」未开启 Copilot 自治/);
-    assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_memory').get() as { n: number }).n, 1);
+    // No project in scope: copilot origin cannot perform global writes.
+    f.emit([{ name: 'write_memory', input: { kind: 'fact', scope: 'global', text: 'No project scope' } }]);
+    const globalMessages = await f.turn('Write a global memory');
+    const globalResult = globalMessages.find(message => message.kind === 'tool_result')!.content;
+    assert.equal(globalResult, 'Denied by security policy: COPILOT_GLOBAL_ACTION_REQUIRES_WEB: 请在 Web 控制台手动执行');
 
     // Owner scope isolation: another tenant's project is not addressable in a turn.
     const foreignUser = new UserRepository(f.db).create('scope-other@test.dev', 'hash');

@@ -35,7 +35,6 @@ it('run cancellation stops a real Shell before later file effects', {skip: proce
     const user = new UserRepository(db).create('overall-shell-probe@test.dev','fixture');
     const projects = new ProjectRepository(db,user.id);
     const project = projects.create({name:'Probe',path:root,aiTool:'pi'});
-    projects.setCopilotAutonomy(project.id,true);
     const ledger = new CopilotRunLedger(db,user.id);
     const conversation = ledger.log.createConversation('cancel probe');
     let calls = 0;

@@ -7,7 +7,7 @@ This document summarizes the current REST and WebSocket contract. `docs/TECH-ARC
 Current Copilot authority (2026-09-26): migration 0105 retired Copilot Grants.
 Older sections mentioning `/copilot/grants`, `grantId` or Grant-bound scope are
 historical references, not active API contracts. Current authorization uses
-project autonomy, tenant scope, tool policy and exact platform-action receipts.
+tenant scope, tool policy, run origin and exact platform-action receipts.
 
 ## 1. Base Rules
 
@@ -517,9 +517,9 @@ by the Gateway, never accepted from the request body. Feishu decisions retain
 their signed original deadline; expired cards remain rejected.
 
 Copilot session memory writes are restricted to the originating run's owned
-conversation and cannot carry a project association. They do not require
-project autonomy. Global writes and other projectless actions remain Web-only;
-scheduled and restricted runs do not gain memory write authority. This change
+conversation and cannot carry a project association. Global writes and other
+projectless actions remain Web-only; scheduled and restricted runs do not gain
+memory write authority. This change
 does not alter running development tasks' existing intent deadline checks or
 provide Shell cancellation/job recovery.
 An older session-memory intent without the conversation resource fact must be
@@ -579,10 +579,10 @@ The delegatable commands are `project.create`, `project.metadata.update`,
 Task preparation creates/links an idle session and never launches or submits a
 prompt. `pm.task.execute` composes prepare + session start + programmatic
 prompt delivery and marks the work item in progress; `session.dispatch`
-delivers a message into a live session. Copilot-origin dispatch is authorized
-by the target project's Copilot autonomy switch â otherwise it rejects with
-`COPILOT_PROJECT_AUTONOMY_OFF` before any effect (owner-origin actions are the
-owner acting directly). There is deliberately no per-adapter allowlist: every
+delivers a message into a live session. Copilot-origin dispatch is open for
+every owned project; the guardrails are the security policy, the run origin
+and the exact platform-action receipt (owner-origin actions are the owner
+acting directly). There is deliberately no per-adapter allowlist: every
 code CLI is equal. Delivery uses
 bracketed-paste staging plus a single Enter with consumption confirmation;
 indeterminate delivery surfaces as `COPILOT_DELIVERY_UNCONFIRMED` and is never
@@ -601,14 +601,14 @@ Explicit owner lifecycle actions remain available. Persistent Copilot memory
 writes use `memory.write`, including the memory-entry HTTP creation endpoint;
 automatic post-turn memory curation is disabled.
 
-Overview projects contain `id`, `name`, `copilotAutonomy`, `management`,
+Overview projects contain `id`, `name`, `management`,
 `counts`, `goal`, and `evidenceFreshness`. Management defaults are empty
 owner/next action, 72-hour freshness and revision 0 before the first update.
 Freshness uses declared evidence timestamps (`source=declared_evidence_timestamp`),
 with fresh/stale/unknown counts and nullable `lastObservedAt`; it does not verify
 evidence content or infer completion. Management metadata grants no CLI
-execution permission: the per-project Copilot autonomy switch is the single
-authorization axis.
+execution permission; dispatch authorization is covered by the security policy
+and the run origin.
 
 
 ### Terminal Runtime Dependencies
@@ -1752,7 +1752,7 @@ again when delivery occurs. CLI response completion is not task acceptance.
 Saving an enabled subscription explicitly authorizes outbound notifications to
 one selected private chat or verified group. Group targets are never selected
 automatically; the UI identifies that group members can see the chosen notification
-types. Inbound command allowlists, project autonomy and remote-operation routes
+types. Inbound command allowlists and remote-operation routes
 are independent and unchanged. A confirmed private chat does not need to be in
 the inbound command allowlist to receive notifications.
 
@@ -1979,8 +1979,7 @@ Legacy account tokens without `cli_dispatch` expose read tools
 `pm_update_management`, `pm_prepare_task_packet`, `write_memory`) require the
 `operate` scope and are hidden from `tools/list` without it. `pm_execute_task_packet`,
 `import_project`, `apply_project_config`, and `dispatch_task_to_session`
-require both `operate` and `cli_dispatch`; task execution from Copilot also
-requires the project's Copilot autonomy switch.
+require both `operate` and `cli_dispatch`.
 `dispatch_task_to_session { sessionId, message }` submits a free-form task
 message (1–4000 chars, no control characters) to a running CLI session that is
 not linked to a work-item Task Packet: start the session first with
@@ -2026,8 +2025,7 @@ pattern-based secret redaction; errors are redacted too. Import registers an
 existing directory. Configuration apply
 requires a matching preview digest, uses host credentials, creates missing
 files only, and refuses modified or unsafe files. Task-packet dispatch uses
-Session Server; Copilot-origin dispatch follows the target project's Copilot
-autonomy switch. Completion evidence can
+Session Server. Completion evidence can
 advance a task to `ready_for_review`, not independently verified or `done`.
 Native CLI trust prompts require the owner at the terminal.
 
@@ -2366,7 +2364,7 @@ the current revision. Candidate changes invalidate previous acknowledgement.
 Secrets and one-time pairing tokens stay out of query/mutation cache, URL and
 local storage. Identical account saves preserve the revision, connection state and pairing. Credential or enablement changes increment the revision and require new pairing/binding; existing stale identities are never reactivated automatically.
 
-The page selects an owned project with Copilot autonomy enabled and binds the
+The page selects an owned project and binds the
 confirmed private identity to it. Invalid identities are not selectable. Route
 status reflects account, identity and project authorization even when the stored
 route remains active. Owners can revoke identities/routes or open the bound
@@ -2384,7 +2382,7 @@ unknown outcomes as uncertain and offers no resend action.
 `channel_route_sessions` maps each authorized route and `(chat_type, chat_id,
 thread_id)` to a channel-owned Copilot conversation. Private history is preserved;
 groups and topics receive separate histories. Every execution revalidates the
-parent route, identity, account, project autonomy and chat allowlist. Telegram
+parent route, identity, account and chat allowlist. Telegram
 retains `message_thread_id`; Feishu uses actual `thread_id` and replies to the
 persisted inbound message. A Feishu quote `root_id` alone does not create a topic.
 Admission persists a trusted snapshot of the route/identity revisions, original
@@ -2602,15 +2600,13 @@ surfaces. `list_skills` and `load_skill` are retired native Copilot tool names.
 packet/linked idle session. It does not start a CLI or submit instructions.
 `pm_execute_task_packet` additionally starts the linked session and delivers the
 packet prompt. `dispatch_task_to_session` submits a message into an unlinked live session; linked Task Packets must use `pm_execute_task_packet`;
-Copilot-origin dispatches are gated by the target project's Copilot autonomy
-switch at preview/execute time (`COPILOT_PROJECT_AUTONOMY_OFF` when off). MCP
-callers present an `operate` + `cli_dispatch` token as the owner's standing
-authorization for `dispatch_task_to_session`; the autonomy switch does not
-apply to non-Copilot origins. The capability settings list reports every tool with
+Copilot-origin dispatches are open for every owned project. MCP callers
+present an `operate` + `cli_dispatch` token as the owner's standing
+authorization for `dispatch_task_to_session`. The capability settings list reports every tool with
 `available`/`unavailableReason`; attempts to toggle retired/unknown names return
 404. `enabled` is a configured preference, `available` is runtime availability,
 and `authorization` describes `read` or `approval_or_grant`.
-Actual resource authorization is always checked again during execution. Copilot-origin intents (including legacy origins) recheck project autonomy and Copilot tool preferences at preview, execution and asynchronous checkpoints. These Copilot switches do not disable explicitly authenticated owner Web actions.
+Actual resource authorization is always checked again during execution. Copilot-origin intents (including legacy origins) recheck Copilot tool preferences at preview, execution and asynchronous checkpoints. These Copilot switches do not disable explicitly authenticated owner Web actions.
 
 Direct user turns automatically approve routine scoped platform actions under
 the risk policy; `approval_or_grant` is the capability family, not a promise
@@ -3259,7 +3255,7 @@ owner approval before each sandbox retest. Original source files, permitted
 change paths and check hashes/content remain fixed. No automatic source apply,
 CLI dispatch, test weakening, acceptance or deployment is authorized.
 Deleting the original conversation, editing/truncating its request (even with
-identical text), revoking project autonomy, disabling the actor/tool, source
+identical text), disabling the actor/tool, source
 changes or revoking repair stops subsequent authorized work and sandbox checks.
 Repair admission/results append links and receipts to the original conversation;
 Gateway events plus polling refresh the Web view.

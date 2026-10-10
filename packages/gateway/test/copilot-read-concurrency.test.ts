@@ -24,7 +24,6 @@ it('runs at most three real Git reads, serializes intervening writes and preserv
   migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
   const userId=new UserRepository(db).create('parallel@test.dev','hash').id;
   const project=new ProjectRepository(db,userId).create({name:'P',path:root,aiTool:'codex'});
-  new ProjectRepository(db,userId).setCopilotAutonomy(project.id,true);
   const ledger=new CopilotRunLedger(db,userId),conversationId=ledger.log.createConversation('Parallel').id;
   const runId=ledger.admit({userId,conversationId,userText:'Inspect'},3);
   db.exec(`CREATE TRIGGER assert_serial_write BEFORE UPDATE OF status ON copilot_run_steps

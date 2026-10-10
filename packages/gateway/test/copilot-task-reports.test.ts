@@ -25,14 +25,13 @@ import { readTaskDispatchAttempt } from '../src/services/project-manager/task-ex
 const cleanups: Array<() => void> = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 
-function fixture(options: { autonomy?: boolean; cancelAfterDispatch?: boolean; maxSteps?: number; reviewTaskResults?: boolean; modelId?: string } = {}) {
+function fixture(options: { cancelAfterDispatch?: boolean; maxSteps?: number; reviewTaskResults?: boolean; modelId?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'fb-task-report-'));
   const db = new Database(':memory:');
   migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
   const user = new UserRepository(db).create('report@test.dev', 'hash');
   const projects = new ProjectRepository(db, user.id);
   const project = projects.create({ name: 'report fixture', path: root, aiTool: 'codex' });
-  if (options.autonomy ?? true) projects.setCopilotAutonomy(project.id, true);
   const pm = new ProjectManagerRepository(db, user.id);
   const eventBus = new ForgeBadgerEventBus();
   attachNotificationPersistence({ db, eventBus });
@@ -140,18 +139,6 @@ describe('Copilot durable task reports', () => {
     publishTaskReports(f.deps, f.user.id);
     assert.equal(f.reports().length, 0);
     assert.equal(f.enterCount(), 1);
-  });
-
-  it('refuses to publish when the project autonomy switch never authorized the copilot dispatch', async () => {
-    const f = fixture({ autonomy: false });
-    const runId = await f.run();
-    assert.equal(f.ledger.get(runId)?.status, 'completed');
-    const toolSteps = f.ledger.steps(runId).filter(step => step.kind === 'tool');
-    assert.ok(toolSteps.length > 0);
-    for (const step of toolSteps) assert.match(step.result_json ?? '', /COPILOT_PROJECT_AUTONOMY_OFF/);
-    assert.equal(f.pm.listWorkItems(f.project.id).length, 0);
-    publishTaskReports(f.deps, f.user.id);
-    assert.equal(f.reports().length, 0);
   });
 
   it('rechecks active user and task semantics before publishing', async () => {

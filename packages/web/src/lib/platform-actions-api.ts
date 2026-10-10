@@ -27,7 +27,6 @@ export interface ProjectManagement {
 export interface ManagedProject {
   id: string;
   name: string;
-  copilotAutonomy: boolean;
   management: ProjectManagement;
   counts: {
     total: number;
@@ -54,12 +53,6 @@ export function getPlatformAction(id: string) {
 }
 export function getProjectOverview() {
   return fetchJson<{ projects: ManagedProject[]; observedAt: number }>("/api/v1/project-manager/overview");
-}
-export function setCopilotAutonomy(projectId: string, enabled: boolean) {
-  return fetchJson<{ projectId: string; copilotAutonomy: boolean }>(
-    `/api/v1/projects/${encodeURIComponent(projectId)}/copilot-autonomy`,
-    { method: "PATCH", body: JSON.stringify({ enabled }) },
-  );
 }
 export function updateProjectManagement(
   id: string,

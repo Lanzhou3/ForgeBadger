@@ -23,7 +23,6 @@ function fixture(toolName: string, source?: 'reactive' | 'scheduled') {
   migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
   const user = new UserRepository(db).create('risk-test@example.com', 'test-hash');
   const project = new ProjectRepository(db, user.id).create({ name: 'test', path: '/tmp/copilot-risk-test', aiTool: 'codex' });
-  new ProjectRepository(db, user.id).setCopilotAutonomy(project.id, true);
   const log = new CopilotConversationLog(db, user.id);
   const conversation = log.createConversation();
   let calls = 0;
@@ -41,7 +40,7 @@ function fixture(toolName: string, source?: 'reactive' | 'scheduled') {
   return { db, log, user, project, run: () => orchestrator.runTurn({ userId: user.id, conversationId: conversation.id, userText: 'Create a task', ...(source ? { source } : {}) }) };
 }
 
-describe('Copilot project autonomy', () => {
+describe('Copilot origin policy', () => {
   it('executes routine task creation without a pending approval and persists its receipt', async () => {
     const f = fixture('pm_create_work_item');
     try {

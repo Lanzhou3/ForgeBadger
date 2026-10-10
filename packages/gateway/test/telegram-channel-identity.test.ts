@@ -37,9 +37,6 @@ function fixture() {
 
   const projects = new ProjectRepository(db, user.id);
   const project = projects.create({ name: 'p', path: '/private/tmp/tg-channel-project', aiTool: 'claude' });
-  // Channel admission requires the project-level Copilot autonomy switch; the
-  // flow tests run with it enabled and the dedicated switch tests toggle it.
-  projects.setCopilotAutonomy(project.id, true);
   const service = new ChannelIdentityService(db, user.id, key);
   const pair = (channel: 'feishu' | 'telegram', accountId: string, accountRevision: number, externalUserId: string, chatId: string) => {
     const peer: TrustedChannelPeer = { channel, accountId, accountRevision, externalUserId, chatId, chatType: 'p2p' };
@@ -191,43 +188,6 @@ it('telegram ingress admits private and mentioned group messages and ignores eve
     const claimed = handle(event({ eventId: 'tg:7', text: `/pair ${issued.token}` }));
     assert.equal(claimed.status, 'pairing_claimed');
     assert.equal((f.db.prepare('SELECT count(*) n FROM channel_messages').get() as { n: number }).n, 2);
-  } finally { f.db.close(); }
-});
-
-it('refuses channel admission and inbox intake while the project copilot autonomy switch is off', () => {
-  const f = fixture();
-  try {
-    f.projects.setCopilotAutonomy(f.project.id, false);
-    const { peer, identity } = f.pair('telegram', f.telegramAccount.id, f.telegramAccount.configRevision, 'tg-owner', 'tg-private');
-    // Route creation only validates project ownership; the switch gates admission, not routing.
-    const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
-    assert.throws(() => f.service.admit(route.id, peer), /CHANNEL_AUTHORITY_REJECTED/);
-    assert.throws(() => f.service.admitRoute(route.id), /CHANNEL_AUTHORITY_REJECTED/);
-    const inbox = new NativeChannelInbox(f.db, f.user.id, f.key);
-    assert.throws(() => inbox.receive(peer, { eventId: 'off-event', messageId: 'off-message', text: 'hello' }), /CHANNEL_AUTHORITY_REJECTED/);
-    assert.equal((f.db.prepare('SELECT count(*) n FROM channel_messages').get() as { n: number }).n, 0);
-    f.projects.setCopilotAutonomy(f.project.id, true);
-    const admitted = f.service.admit(route.id, peer);
-    assert.deepEqual(admitted.projectIds, [f.project.id]);
-  } finally { f.db.close(); }
-});
-
-it('fences a live route and its backlog when the project copilot autonomy switch is flipped off', () => {
-  const f = fixture();
-  try {
-    const { peer, identity } = f.pair('telegram', f.telegramAccount.id, f.telegramAccount.configRevision, 'tg-owner', 'tg-private');
-    const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
-    assert.ok(f.service.admit(route.id, peer));
-    const inbox = new NativeChannelInbox(f.db, f.user.id, f.key);
-    inbox.receive(peer, { eventId: 'pre-flip-event', messageId: 'pre-flip-message', text: 'before the switch' });
-    f.projects.setCopilotAutonomy(f.project.id, false);
-    assert.throws(() => f.service.admit(route.id, peer), /CHANNEL_AUTHORITY_REJECTED/);
-    assert.throws(() => inbox.receive(peer, { eventId: 'post-flip-event', messageId: 'post-flip-message', text: 'after the switch' }), /CHANNEL_AUTHORITY_REJECTED/);
-    assert.equal(inbox.adoptNext().status, 'rejected');
-    assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_runs').get() as { n: number }).n, 0);
-    f.projects.setCopilotAutonomy(f.project.id, true);
-    inbox.receive(peer, { eventId: 'reopen-event', messageId: 'reopen-message', text: 'after reopening' });
-    assert.equal(inbox.adoptNext().status, 'adopted');
   } finally { f.db.close(); }
 });
 

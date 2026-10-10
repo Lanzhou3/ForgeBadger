@@ -326,7 +326,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                         ledger.validateScope(input);
                         await maybeAutoTitle({ log: ledger.log, userId: input.userId, conversationId: input.conversationId, userText: input.userText, assistantText: text, source: input.source ?? "user", signal, canCommit: () => { if(control.stopped || !deps.db.open)return false; ledger.validateScope(input); return !!ledger.log.getConversation(input.conversationId) && ledger.log.listRuns(input.conversationId)[0]?.id === c.runId; }, runId: c.runId, eventBus: deps.eventBus, llm, ...(input.modelId ? { modelId: input.modelId } : {}) }).catch(() => undefined);
                         // Durable memory writes are platform commands; background curation
-                        // cannot bypass the project autonomy switch or exact one-shot approval.
+                        // cannot bypass tenant scope or exact one-shot approval.
                     }
                 }
                 return;

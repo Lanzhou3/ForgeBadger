@@ -233,6 +233,10 @@ PM 派发采用持久 attempt 和阶段回执：首写前确定未发送可保�
 
 Copilot runtime 在启动及周期扫描中恢复已派发任务，并向原对话幂等写入状态报告；跟踪既有任务不依赖“允许新派发”开关。完成只推进待验收，失败进入 blocked，不自动派下一任务或声称独立验收通过。旧无 attempt 记录保持不可自动追溯，不重写历史 unknown 回执。详见 [审查与验收说明](COPILOT-AUTONOMY-REVIEW.md)。
 
+### 0.5.11 移除项目级 Copilot 自治开关（2026-10-10）
+
+项目级 `copilot_autonomy` 开关已整体移除（迁移 0134 删除列，`COPILOT_PROJECT_AUTONOMY_OFF` 不再出现）：程序化下发对 owner 名下所有项目默认开放，不再需要逐项目开启。上文中涉及“项目自治开关/允许新派发开关”的描述是历史快照，以本节为准。剩余授权轴：owner 级工具开关（Copilot tool preferences）、安全策略（命令/路径黑名单与终端写保护）、run origin 与 exact receipt、租户作用域；非项目全局动作仍只能在 Web 执行，交互式工具仍要求 `source === 'user'`。渠道绑定也不再过滤项目，只要求项目存在且归属 owner。
+
 ## 零、架构总览
 
 ### 架构模式

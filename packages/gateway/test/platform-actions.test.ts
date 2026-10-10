@@ -72,29 +72,11 @@ it('rolls back database effects when execution throws', async () => {
         db.close();
     }
 });
-it('rejects copilot-origin actions while the project autonomy switch is off', async () => {
-    const { db, user, command, commands } = fixture();
-    try {
-        const projects = new ProjectRepository(db, user.id);
-        const project = projects.create({ name: 'Locked', path: '/tmp/platform-actions-locked', aiTool: 'claude' });
-        assert.equal(projects.getCopilotAutonomy(project.id), false);
-        command.resolve = () => ({ projectIds: [project.id], revision: '1' });
-        const { actions, key } = copilotSession(db, user).next(commands);
-        assert.throws(() => actions.preview({ commandId: 'test.write', input: { value: 1 }, idempotencyKey: key }),
-            error => error instanceof PlatformNoEffectError && /COPILOT_PROJECT_AUTONOMY_OFF/.test(error.message) && /Web 控制台/.test(error.message));
-        assert.equal((db.prepare('SELECT count(*) n FROM platform_action_intents').get() as { n: number }).n, 0);
-        assert.equal((db.prepare('SELECT count(*) n FROM action_test').get() as { n: number }).n, 0);
-    }
-    finally {
-        db.close();
-    }
-});
-it('executes copilot-origin actions straight through when autonomy is on and records a confirmed receipt', async () => {
+it('executes copilot-origin actions straight through and records a confirmed receipt', async () => {
     const { db, user, command, commands } = fixture();
     try {
         const projects = new ProjectRepository(db, user.id);
         const project = projects.create({ name: 'Open', path: '/tmp/platform-actions-open', aiTool: 'claude' });
-        projects.setCopilotAutonomy(project.id, true);
         command.resolve = () => ({ projectIds: [project.id], revision: '1' });
         const session = copilotSession(db, user);
         const { actions, key } = session.next(commands);
@@ -114,28 +96,6 @@ it('executes copilot-origin actions straight through when autonomy is on and rec
         db.close();
     }
 });
-it('applies an autonomy switch flip to the next copilot intent immediately', async () => {
-    const { db, user, command, commands } = fixture();
-    try {
-        const projects = new ProjectRepository(db, user.id);
-        const project = projects.create({ name: 'Flapping', path: '/tmp/platform-actions-flapping', aiTool: 'claude' });
-        projects.setCopilotAutonomy(project.id, true);
-        command.resolve = () => ({ projectIds: [project.id], revision: '1' });
-        const session = copilotSession(db, user);
-        const first = session.next(commands);
-        const intent = first.actions.preview({ commandId: 'test.write', input: { value: 1 }, idempotencyKey: first.key });
-        assert.equal(intent.status, 'approved');
-        await first.actions.execute(intent.id);
-        projects.setCopilotAutonomy(project.id, false);
-        const second = session.next(commands);
-        assert.throws(() => second.actions.preview({ commandId: 'test.write', input: { value: 2 }, idempotencyKey: second.key }),
-            error => error instanceof PlatformNoEffectError && /COPILOT_PROJECT_AUTONOMY_OFF/.test(error.message));
-        assert.equal((db.prepare('SELECT count(*) n FROM action_test').get() as { n: number }).n, 1);
-    }
-    finally {
-        db.close();
-    }
-});
 it('requires the Web console for copilot-origin actions without a project while the owner path stays ungated', async () => {
     const { db, user, commands } = fixture();
     try {
@@ -147,22 +107,6 @@ it('requires the Web console for copilot-origin actions without a project while 
         const intent = owner.preview({ commandId: 'test.write', input: { value: 1 }, idempotencyKey: 'owner-global' });
         assert.equal(intent.status, 'approved');
         assert.equal(intent.origin_kind, 'legacy');
-    }
-    finally {
-        db.close();
-    }
-});
-it('scopes the project autonomy switch to the owning user', async () => {
-    const { db, user } = fixture();
-    try {
-        const projects = new ProjectRepository(db, user.id);
-        const project = projects.create({ name: 'Scoped', path: '/tmp/platform-actions-scoped', aiTool: 'claude' });
-        projects.setCopilotAutonomy(project.id, true);
-        const other = new UserRepository(db).create('other-actions@test.dev', 'hash');
-        const foreign = new ProjectRepository(db, other.id);
-        assert.equal(foreign.getCopilotAutonomy(project.id), undefined);
-        assert.equal(foreign.setCopilotAutonomy(project.id, false), undefined);
-        assert.equal(projects.getCopilotAutonomy(project.id), true);
     }
     finally {
         db.close();
@@ -214,7 +158,6 @@ it('rechecks current tool switches for a Copilot intent before preview and execu
         const { CopilotRunLedger } = await import('../src/services/agent/run-ledger.js');
         const projects = new ProjectRepository(db, user.id);
         const project = projects.create({ name: 'Tool switches', path: '/tmp/copilot-tool-switch-test', aiTool: 'kimi' });
-        projects.setCopilotAutonomy(project.id, true);
         const ledger = new CopilotRunLedger(db, user.id);
         const conversation = ledger.log.createConversation();
         const runId = ledger.admit({ userId: user.id, conversationId: conversation.id, userText: 'Remember' }, 2);

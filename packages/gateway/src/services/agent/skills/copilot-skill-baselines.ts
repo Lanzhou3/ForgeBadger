@@ -35,6 +35,15 @@ const baselines = [
   {"name":"autonomous-work-item-loop","version":"4.0.1","digest":"9ce400a206cc4b60915380a0cecdd177d09fe370e66c15295d921cdb7a057a66","commit":"bundled-2026-10-09"},
   {"name":"session-dispatch","version":"4.0.1","digest":"ed5d4ef1d5acb2748a3069c73d083754ef9f6535be50d6ee9b91d1ab5c12659f","commit":"bundled-2026-10-09"},
   {"name":"safety-and-approvals","version":"3.0.1","digest":"e2b28b0458fe88b52577d32e282eb1b633b8d09f64c44b1683fca8d45232b13a","commit":"bundled-2026-10-09"},
+  // The 2026-10-10 change removed the per-project Copilot autonomy switch
+  // (COPILOT_PROJECT_AUTONOMY_OFF no longer exists), so the wording must reach
+  // installed playbooks: these version bumps trigger the auto builtin-update
+  // for unmodified copies. Old entries stay so pre-update snapshots are still
+  // recognized as unmodified (rollback and review flows).
+  {"name":"autonomous-work-item-loop","version":"4.1.0","digest":"051673ef8bb2e8167a7fb750991bdd6c7a1b87557365f48aaba208e552272236","commit":"bundled-2026-10-10"},
+  {"name":"session-dispatch","version":"4.1.0","digest":"c390210c9004a5f471b45d867bd9f08feaab4bf21cf14fc90293e5b7b72cbbd6","commit":"bundled-2026-10-10"},
+  {"name":"project-insights","version":"2.1.0","digest":"489f808e0956817d6472c2c1f34d336c5be5350c7f1f00a3aeeb5973866325b3","commit":"bundled-2026-10-10"},
+  {"name":"safety-and-approvals","version":"3.1.0","digest":"3fcf1d426818475fc8adb3ef5fa0f2db62435da3ab8f129e0c5b9fb4139013c0","commit":"bundled-2026-10-10"},
 ] as const;
 
 export function isUnmodifiedBuiltin(snapshot: CopilotSkillSnapshot): boolean {

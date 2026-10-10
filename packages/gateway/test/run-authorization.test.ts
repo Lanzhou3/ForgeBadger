@@ -17,7 +17,7 @@ import { NativeChannelInbox } from '../src/services/channels/native-channel-inbo
 import { assertChannelRunScope } from '../src/services/channels/channel-run-scope.js';
 import { ChannelIdentityError } from '../src/services/channels/channel-identity-service.js';
 import { CopilotRunLedger, type TurnInput } from '../src/services/agent/run-ledger.js';
-import { loadRunFacts, ParentChainDepthError, PARENT_CHAIN_MAX_DEPTH, projectAutonomyEnabled, hasUserMessageAuthorization, runAncestry } from '../src/services/agent/run-authorization.js';
+import { loadRunFacts, ParentChainDepthError, PARENT_CHAIN_MAX_DEPTH, hasUserMessageAuthorization, runAncestry } from '../src/services/agent/run-authorization.js';
 import { computeToolSurface, CHANNEL_TOOLS } from '../src/services/agent/tool-surface.js';
 import type { AgentToolRegistry } from '../src/services/agent/tool-registry.js';
 
@@ -35,7 +35,6 @@ function channelFixture() {
   const key = randomBytes(32).toString('hex');
   const projects = new ProjectRepository(db, user.id);
   const a = projects.create({ name: 'Allowed A', path: join(root, 'a'), aiTool: 'claude' });
-  projects.setCopilotAutonomy(a.id, true);
   const account = new TelegramChannelRepository(db, user.id, key).upsertAccount({ botToken: 'fixture', enabled: true });
   new TelegramIntegrationRepository(db, user.id).upsertConfig({ enabled: true, emergencyDisabled: false, allowedChatIds: ['123', '-1001'] });
   const service = new ChannelIdentityService(db, user.id);
@@ -120,16 +119,6 @@ it('user message authorization matches run id, edit message id, and active conve
     // Hidden conversations no longer authorize new work.
     db.prepare("UPDATE copilot_conversations SET status='hidden' WHERE id=?").run(conversation.id);
     assert.equal(hasUserMessageAuthorization(db, user.id, conversation.id, 'authorized goal', run), false);
-  } finally { db.close(); }
-});
-
-it('project autonomy derivation is one boolean primitive', () => {
-  const { db, user } = dbFixture();
-  try {
-    const project = new ProjectRepository(db, user.id).create({ name: 'autonomy', path: join(mkdtempSync(join(tmpdir(), 'fb-run-auth-proj-')), 'p'), aiTool: 'claude' });
-    assert.equal(projectAutonomyEnabled(db, user.id, project.id), false);
-    new ProjectRepository(db, user.id).setCopilotAutonomy(project.id, true);
-    assert.equal(projectAutonomyEnabled(db, user.id, project.id), true);
   } finally { db.close(); }
 });
 

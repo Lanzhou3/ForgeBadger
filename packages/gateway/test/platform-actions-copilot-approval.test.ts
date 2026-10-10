@@ -18,7 +18,6 @@ function fixture(scope: 'project' | 'session' = 'project', normalizeInput = fals
     const user = new UserRepository(db).create('approval-actions@test.dev', 'hash');
     const projects = new ProjectRepository(db, user.id);
     const project = projects.create({ name: 'Approval', path: '/private/tmp/approval-action-project', aiTool: 'claude' });
-    projects.setCopilotAutonomy(project.id, true);
     const ledger = new CopilotRunLedger(db, user.id);
     const conversation = ledger.log.createConversation();
     const runId = ledger.admit({ userId: user.id, conversationId: conversation.id, userText: 'Remember' }, 8);
@@ -106,14 +105,13 @@ it('compares normalized command input while preserving exact raw tool digests an
     } finally { f.db.close(); }
 });
 
-for (const change of ['actor', 'tool', 'autonomy', 'resource', 'channel', 'source', 'origin', 'digest', 'input', 'command', 'pending-input', 'policy'] as const) {
+for (const change of ['actor', 'tool', 'resource', 'channel', 'source', 'origin', 'digest', 'input', 'command', 'pending-input', 'policy'] as const) {
     it(`does not revive an expired intent after ${change} authority/input changes`, () => {
         const f = fixture();
         try {
             f.db.prepare('UPDATE platform_action_intents SET expires_at=0 WHERE id=?').run(f.intent.id);
             if (change === 'actor') f.db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(f.user.id);
             if (change === 'tool') new CopilotToolPreferenceRepository(f.db, f.user.id).setEnabled('write_memory', false);
-            if (change === 'autonomy') f.projects.setCopilotAutonomy(f.project.id, false);
             if (change === 'resource') f.projects.updateMetadata(f.project.id, { name: 'Changed' });
             if (change === 'channel') f.db.prepare('UPDATE copilot_conversations SET channel_owned=1 WHERE id=?').run(f.conversation.id);
             if (change === 'source') f.db.prepare("UPDATE copilot_runs SET source='scheduled' WHERE id=?").run(f.runId);
@@ -184,10 +182,9 @@ it('rolls expiry renewal back when the encompassing exact decision transaction f
     } finally { f.db.close(); }
 });
 
-it('session memory binds only the originating tenant conversation and needs no project autonomy', async () => {
+it('session memory binds only the originating tenant conversation', async () => {
     const f = fixture('session');
     try {
-        f.projects.setCopilotAutonomy(f.project.id, false);
         f.approve();
         assert.equal((await f.actions.execute(f.intent.id)).outcome, 'confirmed');
         const memory = f.db.prepare('SELECT user_id,scope,conversation_id,project_id FROM copilot_memory').get();

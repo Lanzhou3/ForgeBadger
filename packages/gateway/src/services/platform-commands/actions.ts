@@ -9,11 +9,10 @@ import { z } from 'zod';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { PlatformActionRepository, type ActionIntent } from '../../db/repositories/platform-action-repository.js';
-import { ProjectRepository } from '../../db/repositories/project-repository.js';
 import { validateProjectRoot, DENIED_ROOTS } from '../../lib/safe-resolve.js';
 import type { CommandContext, PlatformCommand, CommandResources, CopilotApprovalRevalidation } from './types.js';
 import type { TurnInput } from '../agent/run-ledger.js';
-import { parseRunInput, projectAutonomyEnabled } from '../agent/run-authorization.js';
+import { parseRunInput } from '../agent/run-authorization.js';
 export function canonical(value: unknown): string {
     if (value instanceof Date)
         return JSON.stringify(value.toISOString());
@@ -85,13 +84,6 @@ export class PlatformActions {
         let reason: string | undefined;
         if (!resources.projectIds.length && !this.isOriginSessionMemory(commandId, input, resources, context))
             reason = 'COPILOT_GLOBAL_ACTION_REQUIRES_WEB: 请在 Web 控制台手动执行';
-        const projects = new ProjectRepository(this.context.db, this.context.userId);
-        for (const id of resources.projectIds) {
-            if (projectAutonomyEnabled(this.context.db, this.context.userId, id)) continue;
-            const name = projects.getById(id)?.name ?? id;
-            reason = `COPILOT_PROJECT_AUTONOMY_OFF: 项目「${name}」未开启 Copilot 自治，请在 Web 控制台项目设置中开启后重试`;
-            break;
-        }
         // An execution checkpoint can follow an earlier side effect. Only
         // admission/preflight is known to have made no changes.
         if (reason) throw beforeExecution ? new PlatformNoEffectError(reason) : new Error(reason);

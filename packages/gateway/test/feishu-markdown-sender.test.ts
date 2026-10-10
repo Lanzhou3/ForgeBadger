@@ -172,7 +172,7 @@ it('durable worker sends a long reply across batches and resumes from database c
   const f=fixture();const directory=mkdtempSync(join(tmpdir(),'fb-markdown-restart-'));try {
     new FeishuIntegrationRepository(f.db,f.user.id).upsertConfig({enabled:true,emergencyDisabled:false,allowedChatIds:['chat']});
     const projects=new ProjectRepository(f.db,f.user.id);
-    const project=projects.create({name:'markdown',path:'/private/tmp/markdown-test',aiTool:'claude'});projects.setCopilotAutonomy(project.id,true);
+    const project=projects.create({name:'markdown',path:'/private/tmp/markdown-test',aiTool:'claude'});
     const service=new ChannelIdentityService(f.db,f.user.id,f.key),peer=f.input.peer;
     const pair=service.createPairing({channel:'feishu',accountId:f.account.id});
     const claimed=service.claimPairing(pair.token,peer);

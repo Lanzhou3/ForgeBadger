@@ -39,7 +39,6 @@ function fixture() {
   const projects = new ProjectRepository(db, user.id);
   const a = projects.create({ name: 'Allowed A', path: join(root, 'a'), aiTool: 'claude' });
   const b = projects.create({ name: 'Private B', path: join(root, 'b'), aiTool: 'claude', description: 'private-b-marker' });
-  projects.setCopilotAutonomy(a.id, true); projects.setCopilotAutonomy(b.id, true);
   const account = new TelegramChannelRepository(db, user.id, key).upsertAccount({ botToken: 'fixture', enabled: true });
   new TelegramIntegrationRepository(db, user.id).upsertConfig({ enabled: true, emergencyDisabled: false, allowedChatIds: ['123', '-1001'] });
   const service = new ChannelIdentityService(db, user.id);

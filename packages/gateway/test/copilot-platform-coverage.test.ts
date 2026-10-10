@@ -87,9 +87,8 @@ async function takeoverRun(f:ReturnType<typeof fixture>,options:{source?:'user'|
   const runId=await orchestrator.runTurn({userId:f.user.id,conversationId:conversation.id,userText:'Take over this session',...(options.source?{source:options.source}:{})});
   return {ledger,orchestrator,runId};
 }
-it('takeover executes through an exact persisted owner approval once when project autonomy is on',async()=>{
+it('takeover executes through an exact persisted owner approval once',async()=>{
   const f=fixture();try{
-    f.projects.setCopilotAutonomy(f.project.id,true);
     const r=await takeoverRun(f);assert.equal(r.ledger.get(r.runId)?.status,'awaiting_approval');assert.equal(f.takenOver(),0);
     const action=r.ledger.log.listPendingActions(r.runId)[0]!;
     await r.orchestrator.resumeAfterApproval({userId:f.user.id,runId:r.runId,actionId:action.id,approved:true});
@@ -99,13 +98,8 @@ it('takeover executes through an exact persisted owner approval once when projec
     const receipts=f.db.prepare('SELECT * FROM platform_action_receipts WHERE user_id=?').all(f.user.id);assert.equal(receipts.length,1);
   }finally{f.db.close();}
 });
-it('autonomy-off, scheduled, reactive, disabled takeover never creates approval or effects',async()=>{
+it('scheduled, reactive and disabled takeover never create approval or effects',async()=>{
   const f=fixture();try{
-    const off=await takeoverRun(f);
-    assert.equal(off.ledger.log.listPendingActions(off.runId).length,0);assert.equal(f.takenOver(),0);
-    const offMessages=JSON.stringify(off.ledger.log.listMessages(off.ledger.get(off.runId)!.conversation_id));
-    assert.match(offMessages,/COPILOT_PROJECT_AUTONOMY_OFF/);
-    assert.match(offMessages,/请在 Web 控制台项目设置中开启后重试/);
     for(const options of [{source:'scheduled' as const},{source:'reactive' as const},{disabled:()=>true}]){
       const r=await takeoverRun(f,options);assert.equal(r.ledger.log.listPendingActions(r.runId).length,0);assert.equal(f.takenOver(),0);
       assert.match(JSON.stringify(r.ledger.log.listMessages(r.ledger.get(r.runId)!.conversation_id)),/Denied|denied/);
@@ -115,7 +109,6 @@ it('autonomy-off, scheduled, reactive, disabled takeover never creates approval 
 });
 it('disabled takeover after pending approval has no effect',async()=>{
   const f=fixture();try{
-    f.projects.setCopilotAutonomy(f.project.id,true);
     let disabled=false;const r=await takeoverRun(f,{disabled:()=>disabled});const action=r.ledger.log.listPendingActions(r.runId)[0]!;
     assert.ok(action);disabled=true;
     await assert.rejects(r.orchestrator.resumeAfterApproval({userId:f.user.id,runId:r.runId,actionId:action.id,approved:true}),

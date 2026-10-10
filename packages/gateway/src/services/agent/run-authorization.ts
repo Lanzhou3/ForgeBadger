@@ -1,13 +1,11 @@
 import type { Database } from '../../db/types.js';
 import type { RunRecord, TurnInput } from './run-ledger.js';
-import { ProjectRepository } from '../../db/repositories/project-repository.js';
 
 /**
  * Shared derivation of run authorization facts. Every consumer of run identity
- * (input_json parsing), parent-chain traversal, owner-message authorization, or
- * the project autonomy flag routes through these primitives so the derivation
- * exists exactly once; call sites keep their own error identity, ordering, and
- * check frequency.
+ * (input_json parsing), parent-chain traversal, or owner-message authorization
+ * routes through these primitives so the derivation exists exactly once; call
+ * sites keep their own error identity, ordering, and check frequency.
  */
 export const PARENT_CHAIN_MAX_DEPTH = 8;
 
@@ -72,9 +70,4 @@ export function hasUserMessageAuthorization(db: Database, userId: string, conver
     WHERE m.user_id=? AND m.conversation_id=? AND c.status='active' AND m.role='user' AND m.kind='text'
       AND m.content=? AND (m.run_id=? OR m.id=?) LIMIT 1`)
     .get(userId, conversationId, userText, runId, editMessageId ?? null);
-}
-
-/** The per-project Copilot autonomy switch, derived in one place. */
-export function projectAutonomyEnabled(db: Database, userId: string, projectId: string): boolean | undefined {
-  return new ProjectRepository(db, userId).getCopilotAutonomy(projectId);
 }

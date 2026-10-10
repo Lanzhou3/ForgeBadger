@@ -35,7 +35,7 @@ export interface ChannelSetupCopy {
   existingRoute: string;
   projectsLoading: string;
   projectsError: string;
-  noAutonomyProjects: string;
+  noProjects: string;
   selectProject: string;
 }
 
@@ -59,7 +59,7 @@ export function channelSetupBlocker(state: SetupState, copy: ChannelSetupCopy): 
   if (state.existingRoute) return authorization(copy.existingRoute);
   if (state.projectsLoading) return authorization(copy.projectsLoading);
   if (state.projectsError) return authorization(copy.projectsError);
-  if (!state.projectCount) return authorization(copy.noAutonomyProjects);
+  if (!state.projectCount) return authorization(copy.noProjects);
   if (!state.selectedProject) return authorization(copy.selectProject);
   return undefined;
 }
@@ -83,7 +83,6 @@ export type ChannelRouteStateKey =
   | 'config_changed'
   | 'channel_disabled'
   | 'project_missing'
-  | 'autonomy_off'
   | 'authority_revoked';
 
 /** Route states that render as destructive badges. */
@@ -92,7 +91,6 @@ export const DESTRUCTIVE_ROUTE_STATES: readonly ChannelRouteStateKey[] = [
   'config_changed',
   'channel_disabled',
   'project_missing',
-  'autonomy_off',
   'authority_revoked',
 ];
 

@@ -10,8 +10,8 @@
  *
  * All three are `operate`-risk tools routed through the platform command
  * catalog (terminal.run / terminal.open / terminal.close, effect: external),
- * so they inherit the project-level `copilot_autonomy` switch, intent/receipt
- * idempotency, and restricted-run gating automatically. While a command
+ * so they inherit intent/receipt idempotency and restricted-run gating
+ * automatically. While a command
  * runs, the workspace writer lease makes the browser terminal read-only;
  * the owner can take over at any time, which transfers control with
  * userTookOver=true. A persistent command may still be running.
@@ -46,7 +46,6 @@ export function createTerminalTools(): AgentTool[] {
         "With sessionId (from terminal_open) the command runs in the persistent shell, " +
         "which keeps cwd/env/package-manager state across commands — prefer it for " +
         "multi-step work (install then build, cd then test). " +
-        "Requires project Copilot autonomy to be enabled. " +
         "Avoid commands that block on interactive input; if the user takes over the terminal " +
         "mid-command, userTookOver=true means the command may still be running; do not retry automatically. " +
         "A timeout stops the shell; reopen a persistent shell before continuing. " +
@@ -57,7 +56,7 @@ export function createTerminalTools(): AgentTool[] {
       async execute() {
         // The actual execution is delegated to the platform command catalog
         // (terminal.run) via executeAgentAction in the tool registry, which
-        // applies copilot_autonomy / idempotency / restricted-run gating.
+        // applies idempotency / restricted-run gating.
         throw new Error("terminal_run must be dispatched through the platform command catalog");
       }
     },

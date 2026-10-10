@@ -32,7 +32,6 @@ export interface Project {
   templateId?: string | null;
   description?: string;
   status?: string;
-  copilotAutonomy?: boolean;
 }
 
 export interface ProjectManagerEvidenceRef {

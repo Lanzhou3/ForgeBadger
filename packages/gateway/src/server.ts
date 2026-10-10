@@ -96,8 +96,8 @@ export interface GatewayAppOptions {
   /**
    * Full process env; when provided the Gateway builds the DB-backed runtime
    * settings store (settings page overrides on top of these defaults) and
-   * hot-applies autonomy adapters / session prefix / registration mode /
-   * dispatch supervisor changes.
+   * hot-applies session prefix / registration mode / dispatch supervisor
+   * changes.
    */
   env?: GatewayEnv | undefined;
 }

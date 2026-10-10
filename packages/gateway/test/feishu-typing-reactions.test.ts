@@ -31,7 +31,6 @@ function fixture() {
   config.upsertConfig({ enabled: true, emergencyDisabled: false, allowedChatIds: ['chat'] });
   const projects = new ProjectRepository(db, user.id);
   const project = projects.create({ name: 'typing', path: '/private/tmp/typing-test', aiTool: 'claude' });
-  projects.setCopilotAutonomy(project.id, true);
   const service = new ChannelIdentityService(db, user.id, key);
   const peer: TrustedChannelPeer = { channel: 'feishu', accountId: account.id, accountRevision: account.configRevision,
     externalUserId: 'sender', chatId: 'chat', chatType: 'p2p', replyToMessageId: 'original' };

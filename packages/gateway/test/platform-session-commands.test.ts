@@ -10,7 +10,6 @@ import { ProjectRepository } from '../src/db/repositories/project-repository.js'
 import { SessionRepository } from '../src/db/repositories/session-repository.js';
 import { InMemorySessionManager } from '../src/services/session-manager.js';
 import { PlatformActions } from '../src/services/platform-commands/actions.js';
-import { PlatformNoEffectError } from '../src/services/platform-commands/errors.js';
 import type { CommandContext } from '../src/services/platform-commands/types.js';
 import { CopilotConversationLog } from '../src/services/agent/conversation-log.js';
 
@@ -84,7 +83,6 @@ for (const change of ['disabled','expired','resource'] as const) test(`a ${chang
  try{
  migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
  const user=new UserRepository(db).create('waiting-start@test.dev','hash');const p=new ProjectRepository(db,user.id).create({name:'p',path:'/tmp',aiTool:'codex'});
- new ProjectRepository(db,user.id).setCopilotAutonomy(p.id,true);
  const {CopilotRunLedger}=await import('../src/services/agent/run-ledger.js');
  const ledger=new CopilotRunLedger(db,user.id);const conversation=ledger.log.createConversation();
  const runId=ledger.admit({userId:user.id,conversationId:conversation.id,userText:'Start session'},2);
@@ -147,15 +145,13 @@ test('start is rejected when a running session has a live terminal',async()=>{
  assert.equal(launches,0);
  }finally{db.close();}
 });
-// The project-level autonomy switch is the only gate on Copilot action
-// origins: OFF rejects at preview time with guidance and persists nothing,
-// ON approves the intent immediately, a hot OFF flip blocks new intents,
-// and the owner path is never gated by the switch.
-test('copilot origin is gated by the project autonomy switch; the owner path is not',async()=>{
+// Copilot action origins are approved immediately and record their run/step
+// identity; the owner path creates legacy intents without an origin.
+test('copilot origin intents are approved immediately and record their origin; the owner path is unchanged',async()=>{
  const db=new Database(':memory:');
  try{
   migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
-  const user=new UserRepository(db).create('autonomy-switch@test.dev','hash');
+  const user=new UserRepository(db).create('session-origin@test.dev','hash');
   const projects=new ProjectRepository(db,user.id);
   const p=projects.create({name:'p',path:'/tmp',aiTool:'codex'});
   const repo=new SessionRepository(db,user.id);const s=repo.create({projectId:p.id,name:'s',aiTool:'codex',workingDir:'/tmp'});
@@ -168,27 +164,17 @@ test('copilot origin is gated by the project autonomy switch; the owner path is 
   const commands=new Map(createSessionCommands().map(c=>[c.id,c]));
   const copilotFor=(stepId:string)=>new PlatformActions({...base,actionOrigin:{kind:'copilot',runId:'run-1',stepId}},commands);
   const owner=new PlatformActions({...base},commands);
-  assert.equal(projects.getCopilotAutonomy(p.id),false);
-  assert.throws(()=>copilotFor('off-key').preview({commandId:'session.start',input:{sessionId:s.id},idempotencyKey:'off-key'}),
-   (error:unknown)=>error instanceof PlatformNoEffectError&&error.message.includes('COPILOT_PROJECT_AUTONOMY_OFF')&&error.message.includes('Web'));
-  assert.equal(owner.intents.byKey('off-key'),undefined);
-  // The owner path ignores the switch.
+  // The owner path creates a legacy intent without an origin.
   const ownerIntent=owner.preview({commandId:'session.start',input:{sessionId:s.id},idempotencyKey:'owner-key'});
   assert.equal(ownerIntent.status,'approved');
   assert.equal(ownerIntent.origin_kind,'legacy');
-  // ON: a copilot intent is approved immediately and records its origin.
-  projects.setCopilotAutonomy(p.id,true);
+  // A copilot intent is approved immediately and records its origin.
   const onIntent=copilotFor('on-key').preview({commandId:'session.start',input:{sessionId:s.id},idempotencyKey:'on-key'});
   assert.equal(onIntent.status,'approved');
   assert.equal(onIntent.origin_kind,'copilot');
   assert.equal(onIntent.origin_run_id,'run-1');
   assert.equal(onIntent.origin_step_id,'on-key');
-  // Hot flip back OFF: the next copilot intent is rejected again.
-  projects.setCopilotAutonomy(p.id,false);
-  assert.throws(()=>copilotFor('hot-key').preview({commandId:'session.start',input:{sessionId:s.id},idempotencyKey:'hot-key'}),/COPILOT_PROJECT_AUTONOMY_OFF/);
-  assert.equal(owner.intents.byKey('hot-key'),undefined);
-  // ON again: the approved copilot intent executes to a confirmed receipt.
-  projects.setCopilotAutonomy(p.id,true);
+  // The approved copilot intent executes to a confirmed receipt.
   const receipt=await copilotFor('on-key').execute(onIntent.id);
   assert.equal(receipt.outcome,'confirmed');
   assert.equal(repo.getById(s.id)?.status,'running');

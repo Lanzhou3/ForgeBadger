@@ -127,14 +127,12 @@ function routeCheck(db: Database, userId: string, records: ChannelIdentityReposi
     const project = projects.getById(route.projectId);
     const conversation = conversations.getConversation(route.conversationId);
     if (!project) { problem = problem ?? 'project'; problemRouteId = problemRouteId ?? route.id; continue; }
-    if (project.copilotAutonomy !== true) { problem = problem ?? 'autonomy_off'; problemRouteId = problemRouteId ?? route.id; continue; }
     if (conversation?.status !== 'active') { problem = problem ?? 'conversation'; problemRouteId = problemRouteId ?? route.id; continue; }
     return { key: 'route', ok: true, detail: '存在有效的渠道授权路由。', fixHint: '' };
   }
   return {
     key: 'route', ok: false,
     detail: problem === 'project' ? `路由 ${problemRouteId} 指向的项目不存在。`
-      : problem === 'autonomy_off' ? `路由 ${problemRouteId} 所在项目未开启 Copilot 自治。`
       : problem === 'revision' ? '渠道授权与当前配置版本不匹配（需重新绑定）。'
       : problem === 'disabled' ? '渠道已停用，授权路由不可用。'
       : problem === 'identity' ? '渠道授权绑定的身份已失效。'
@@ -195,7 +193,6 @@ function pairingHint(label: string): string {
 
 function routeHint(problem: string): string {
   if (problem === 'project') return '删除失效路由，选择有效项目后重新绑定。';
-  if (problem === 'autonomy_off') return '在 Web 控制台项目设置中开启该项目的 Copilot 自治后，渠道授权即可生效。';
   if (problem === 'conversation') return '路由绑定的会话已失效：请回「远程渠道」第 3 步重新绑定渠道授权。';
   if (problem === 'revision' || problem === 'identity') return '配置或身份已变化：请先重新完成身份配对，再回「远程渠道」第 3 步重新绑定渠道授权。';
   if (problem === 'disabled') return '请先在「远程渠道」设置页启用渠道，再重新绑定渠道授权。';

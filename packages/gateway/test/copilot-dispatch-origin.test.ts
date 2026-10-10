@@ -15,12 +15,12 @@ import { createPlatformCommands } from '../src/services/platform-commands/catalo
 import { readTaskPacketDetails, withTaskPacketSessionLink } from '../src/services/project-manager/task-packets.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 
-// The per-project Copilot autonomy switch is the single authorization axis
-// for programmatic CLI dispatch. There is deliberately no per-adapter
-// allowlist: every code CLI (Claude Code, OpenCode, Codex, Kimi Code, PI,
-// MiniMax Code) is equal, and copilot-origin dispatch follows the switch of
-// the session's project. Owner-origin dispatch is the owner acting directly
-// and needs no switch.
+// Programmatic CLI dispatch is not gated by any per-project or per-adapter
+// switch: there is deliberately no allowlist, every code CLI (Claude Code,
+// OpenCode, Codex, Kimi Code, PI, MiniMax Code) is equal. Copilot-origin
+// dispatch is scoped to the session's project and tenant; owner-origin
+// dispatch is the owner acting directly. Projectless copilot commands still
+// require the Web console.
 
 function fixture() {
     const db = new Database(':memory:');
@@ -114,89 +114,31 @@ describe('pm.task.execute', () => {
     });
 });
 
-describe('copilot project autonomy gate', () => {
-    it('denies a copilot-origin dispatch while the project switch is off and leaves the owner path unaffected', async () => {
+describe('copilot-origin dispatch', () => {
+    it('dispatches a copilot-origin action end-to-end with no per-project switch', async () => {
         const { db, user, project, sessions } = fixture();
         try {
             const { manager, state } = codexManager();
             const session = sessions.create({ projectId: project.id, name: 's', aiTool: 'codex', workingDir: '/tmp' });
             await liveSession(manager, sessions, user.id, session.id);
-            const projects = new ProjectRepository(db, user.id);
-            assert.equal(projects.getCopilotAutonomy(project.id), false);
-            const { runId } = copilotOrigin(db, user.id, 'autonomy-off-1');
-            const copilot = new PlatformActions({ db, userId: user.id, sessionManager: manager, eventBus: new ForgeBadgerEventBus(), actionOrigin: { kind: 'copilot', runId, stepId: 'autonomy-off-1' } }, createPlatformCommands());
-            assert.throws(() => copilot.preview({ commandId: 'session.dispatch', input: { sessionId: session.id, message: 'do it' }, idempotencyKey: 'autonomy-off-1' }), (error: unknown) => {
-                assert.match((error as Error).message, /COPILOT_PROJECT_AUTONOMY_OFF/);
-                assert.match((error as Error).message, /项目「p」/);
-                assert.match((error as Error).message, /请在 Web 控制台项目设置中开启后重试/);
-                return true;
-            });
-            assert.equal((db.prepare('SELECT count(*) n FROM platform_action_intents').get() as { n: number }).n, 0);
-            // The owner path (non-copilot origin) is not gated by the project switch.
-            const owner = new PlatformActions({ db, userId: user.id, sessionManager: manager, eventBus: new ForgeBadgerEventBus() }, createPlatformCommands());
-            const result = await owner.executeOwner('session.dispatch', { sessionId: session.id, message: 'owner says hi' }, 'owner-1') as { dispatched: boolean };
-            assert.equal(result.dispatched, true);
-            assert.deepEqual(state.staged, ['owner says hi']);
-        } finally { db.close(); }
-    });
-
-    it('dispatches a copilot-origin action when the switch is on and rejects again once it is turned off', async () => {
-        const { db, user, project, sessions } = fixture();
-        try {
-            const { manager, state } = codexManager();
-            const session = sessions.create({ projectId: project.id, name: 's', aiTool: 'codex', workingDir: '/tmp' });
-            await liveSession(manager, sessions, user.id, session.id);
-            const projects = new ProjectRepository(db, user.id);
-            projects.setCopilotAutonomy(project.id, true);
-            assert.equal(projects.getCopilotAutonomy(project.id), true);
-            const { runId } = copilotOrigin(db, user.id, 'autonomy-on-1');
-            const copilot = new PlatformActions({ db, userId: user.id, sessionManager: manager, eventBus: new ForgeBadgerEventBus(), actionOrigin: { kind: 'copilot', runId, stepId: 'autonomy-on-1' } }, createPlatformCommands());
-            const intent = copilot.preview({ commandId: 'session.dispatch', input: { sessionId: session.id, message: 'do it' }, idempotencyKey: 'autonomy-on-1' });
+            const { runId } = copilotOrigin(db, user.id, 'dispatch-copilot-1');
+            const copilot = new PlatformActions({ db, userId: user.id, sessionManager: manager, eventBus: new ForgeBadgerEventBus(), actionOrigin: { kind: 'copilot', runId, stepId: 'dispatch-copilot-1' } }, createPlatformCommands());
+            const intent = copilot.preview({ commandId: 'session.dispatch', input: { sessionId: session.id, message: 'do it' }, idempotencyKey: 'dispatch-copilot-1' });
             assert.equal(intent.status, 'approved');
             assert.equal(intent.origin_kind, 'copilot');
             const receipt = await copilot.execute(intent.id);
             assert.equal(receipt.outcome, 'confirmed');
             assert.equal((receipt.result as { dispatched: boolean }).dispatched, true);
             assert.deepEqual(state.staged, ['do it']);
-            // The switch is read live at preview time: turning it off rejects the next copilot intent.
-            projects.setCopilotAutonomy(project.id, false);
-            const { runId: runId2 } = copilotOrigin(db, user.id, 'autonomy-off-2');
-            const copilotAfter = new PlatformActions({ db, userId: user.id, sessionManager: manager, eventBus: new ForgeBadgerEventBus(), actionOrigin: { kind: 'copilot', runId: runId2, stepId: 'autonomy-off-2' } }, createPlatformCommands());
-            assert.throws(() => copilotAfter.preview({ commandId: 'session.dispatch', input: { sessionId: session.id, message: 'again' }, idempotencyKey: 'autonomy-off-2' }), (error: unknown) => {
-                assert.match((error as Error).message, /COPILOT_PROJECT_AUTONOMY_OFF/);
-                return true;
-            });
-        } finally { db.close(); }
-    });
-
-    it('rejects a copilot-origin dispatch into a session of a project that keeps the switch off', async () => {
-        const { db, user, project, sessions } = fixture();
-        try {
-            const { manager } = codexManager();
-            const session = sessions.create({ projectId: project.id, name: 's', aiTool: 'codex', workingDir: '/tmp' });
-            await liveSession(manager, sessions, user.id, session.id);
-            const projects = new ProjectRepository(db, user.id);
-            projects.setCopilotAutonomy(project.id, true);
-            const outside = projects.create({ name: 'outside', path: '/tmp/outside-dispatch', aiTool: 'codex' });
-            const outsideSession = sessions.create({ projectId: outside.id, name: 'o', aiTool: 'codex', workingDir: '/tmp' });
-            assert.equal(projects.getCopilotAutonomy(outside.id), false);
-            const { runId } = copilotOrigin(db, user.id, 'autonomy-scope-1');
-            const copilot = new PlatformActions({ db, userId: user.id, sessionManager: manager, eventBus: new ForgeBadgerEventBus(), actionOrigin: { kind: 'copilot', runId, stepId: 'autonomy-scope-1' } }, createPlatformCommands());
-            assert.throws(() => copilot.preview({ commandId: 'session.dispatch', input: { sessionId: outsideSession.id, message: 'x' }, idempotencyKey: 'autonomy-scope-1' }), (error: unknown) => {
-                assert.match((error as Error).message, /COPILOT_PROJECT_AUTONOMY_OFF/);
-                assert.match((error as Error).message, /项目「outside」/);
-                return true;
-            });
-            assert.equal((db.prepare('SELECT count(*) n FROM platform_action_intents').get() as { n: number }).n, 0);
         } finally { db.close(); }
     });
 
     it('rejects a copilot-origin command that resolves no project', async () => {
         const { db, user } = fixture();
         try {
-            const { runId } = copilotOrigin(db, user.id, 'autonomy-global-1');
-            const copilot = new PlatformActions({ db, userId: user.id, actionOrigin: { kind: 'copilot', runId, stepId: 'autonomy-global-1' } }, createPlatformCommands());
-            assert.throws(() => copilot.preview({ commandId: 'memory.write', input: { kind: 'fact', scope: 'global', text: 'global note' }, idempotencyKey: 'autonomy-global-1' }), (error: unknown) => {
+            const { runId } = copilotOrigin(db, user.id, 'dispatch-global-1');
+            const copilot = new PlatformActions({ db, userId: user.id, actionOrigin: { kind: 'copilot', runId, stepId: 'dispatch-global-1' } }, createPlatformCommands());
+            assert.throws(() => copilot.preview({ commandId: 'memory.write', input: { kind: 'fact', scope: 'global', text: 'global note' }, idempotencyKey: 'dispatch-global-1' }), (error: unknown) => {
                 assert.match((error as Error).message, /COPILOT_GLOBAL_ACTION_REQUIRES_WEB/);
                 assert.match((error as Error).message, /请在 Web 控制台手动执行/);
                 return true;

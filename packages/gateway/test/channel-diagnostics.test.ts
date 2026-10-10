@@ -42,7 +42,6 @@ it('projects notifications into a remote conversation using its current route, w
     const claimed = f.service.claimPairing(issued.token, peer);
     const identity = f.service.confirmPairing(claimed.id, { revision: claimed.revision, externalUserId: peer.externalUserId, chatId: peer.chatId });
     const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
-    f.projects.setCopilotAutonomy(f.project.id, true);
     const session = new SessionRepository(f.db, f.user.id).create({ projectId: f.project.id, name: 'review', aiTool: 'codex', workingDir: f.project.path });
     new NotificationRepository(f.db, f.user.id).create({ type: 'session_notification', titleKey: 'notifications.taskCompleted',
       message: 'review finished', href: '', sessionId: session.id, payload: { project_id: f.project.id, notification_type: 'task_completed', last_prompt: 'review 通知' } });
@@ -118,7 +117,6 @@ function pairFeishu(f: ReturnType<typeof fixture>) {
   const claimed = f.service.claimPairing(issued.token, peer);
   const identity = f.service.confirmPairing(claimed.id, { revision: claimed.revision, externalUserId: peer.externalUserId, chatId: peer.chatId });
   const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
-  f.projects.setCopilotAutonomy(f.project.id, true);
   return { account, peer, identity, route };
 }
 
@@ -203,9 +201,9 @@ it('reports delivered channel checks separately from untested model connectivity
   }
 });
 
-it('surfaces stale identity and an autonomy-off route with targeted fix hints', async () => {
+it('surfaces a stale identity and a fenced route with targeted fix hints', async () => {
   const f = fixture();
-  const { account, route } = pairFeishu(f);
+  const { account } = pairFeishu(f);
   f.accounts.updateAccountHealth(account.id, { state: 'connected', lastConnectedAt: new Date() });
   seedModel(f);
 
@@ -236,22 +234,7 @@ it('surfaces stale identity and an autonomy-off route with targeted fix hints', 
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 
-  // Turning off the project's Copilot autonomy invalidates the route even when identity and revision match.
-  f.service.revokeRoute(route.id);
-  const fresh = pairFeishu(f);
-  f.projects.setCopilotAutonomy(f.project.id, false);
-  assert.throws(() => f.service.admit(fresh.route.id, fresh.peer));
-  ({ server, checks } = await serve(f));
-  try {
-    all = await checks('/feishu/diagnostics');
-    assert.equal(all.route!.ok, false);
-    assert.match(all.route!.detail, /未开启 Copilot 自治/);
-    assert.match(all.route!.fixHint, /开启该项目的 Copilot 自治/);
-    assert.equal(fresh.route.status, 'active');
-  } finally {
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-    f.db.close();
-  }
+  f.db.close();
 });
 
 it('distinguishes unhealthy connections, disabled models and failed deliveries', async () => {
@@ -322,7 +305,6 @@ it('surfaces AGENT_NO_MODEL and generic failure categories in channel replies', 
   const claimed = f.service.claimPairing(issued.token, peer);
   const identity = f.service.confirmPairing(claimed.id, { revision: claimed.revision, externalUserId: peer.externalUserId, chatId: peer.chatId });
   f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
-  f.projects.setCopilotAutonomy(f.project.id, true);
 
   const failWith = async (reason: string, status: 'failed' | 'indeterminate' | 'stopped' | 'cancelled' = 'failed'): Promise<string> => {
     const inbox = new NativeChannelInbox(f.db, f.user.id, f.key);

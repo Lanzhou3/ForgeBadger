@@ -63,9 +63,6 @@ if (realPlanner) {
 const user = new UserRepository(db).create('flow@example.test', 'not-a-login');
 const projects = new ProjectRepository(db, user.id);
 const project = projects.create({ name: 'Isolated CLI acceptance', path: projectPath, aiTool: 'codex' });
-// Dispatch autonomy is per-project now; the harness exercises the Copilot
-// path, so the acceptance project opts in explicitly.
-projects.setCopilotAutonomy(project.id, true);
 const pm = new ProjectManagerRepository(db, user.id);
 const log = new CopilotConversationLog(db, user.id);
 const conversation = log.createConversation();
