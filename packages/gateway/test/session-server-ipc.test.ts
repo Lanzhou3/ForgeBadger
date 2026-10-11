@@ -85,7 +85,7 @@ describe("Session Server IPC", () => {
 
   it("kills session via IPC", { skip: !confirmedStopHostAvailable }, async () => {
     const ipcPath = uniqueIpcPath();
-    const { ipcServer, client } = await startPair(ipcPath, cwd);
+    const { sessionServer, ipcServer, client } = await startPair(ipcPath, cwd);
     try {
       // Long-lived process: an instant "exit 0" can be reaped before the kill
       // arrives on fast machines, turning the kill into a Session-not-found.
@@ -101,12 +101,13 @@ describe("Session Server IPC", () => {
     } finally {
       await client.disconnect();
       await ipcServer.stop();
+      await sessionServer.destroy();
     }
   });
 
   it("naturally exited sessions become invisible via IPC", async () => {
     const ipcPath = uniqueIpcPath();
-    const { ipcServer, client } = await startPair(ipcPath, cwd);
+    const { sessionServer, ipcServer, client } = await startPair(ipcPath, cwd);
     try {
       // Stay alive briefly: a plain "exit 0" can exit before the first
       // has_session roundtrip on fast machines, racing the assertion below.
@@ -129,6 +130,7 @@ describe("Session Server IPC", () => {
     } finally {
       await client.disconnect();
       await ipcServer.stop();
+      await sessionServer.destroy();
     }
   });
 });
