@@ -82,12 +82,12 @@ export function estimateJsonTokens(value: unknown): number {
 
 /**
  * Projection budget for a provider context window: reserve the output headroom
- * (up to 16k or a quarter of the window), never letting the reserve starve the
- * prompt below half the window (or 8k). Unknown windows fall back to the
+ * (up to 16k or a quarter of the window), within the physical context window
+ * even for small models. Unknown windows fall back to the
  * harness default aligned with the retired 96k-char bound.
  */
 export function contextTokenBudget(contextWindow?: number | null): number {
   if (!contextWindow) return MAX_CONTEXT_TOKENS;
   const reserve = Math.min(16_384, contextWindow / 4);
-  return Math.max(Math.max(8_000, contextWindow * 0.5), contextWindow - reserve);
+  return Math.floor(contextWindow - reserve);
 }

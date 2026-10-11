@@ -74,22 +74,22 @@ export function channelToolAllowed(input: ToolSurfaceInput, name: string): boole
 export function computeToolSurface(input: ToolSurfaceInput, context: ToolSurfaceContext): ToolSurface {
   const registered = context.registry.tools;
   const exclusions: Array<{ layer: ToolSurfaceLayer; toolName: string }> = [];
-  const byTool = new Map<string, ToolExclusion>();
+  const byTool = new Map<string, ToolExclusion[]>();
   const visible = context.registry.toModelSchemas().filter(tool => {
     const verdicts = exclusionReasons(input, context, tool.name, registered.get(tool.name)?.risk);
     if (!verdicts.length) return true;
     for (const verdict of verdicts) if (!exclusions.some(exclusion => exclusion.toolName === tool.name && exclusion.layer === verdict.layer))
       exclusions.push({ layer: verdict.layer, toolName: tool.name });
-    if (!byTool.has(tool.name)) byTool.set(tool.name, verdicts[0]!);
+    byTool.set(tool.name, verdicts);
     return false;
   });
   return {
     visible, exclusions,
-    exclusion: (toolName) => byTool.get(toolName),
-    excluded: (toolName, layer) => byTool.get(toolName)?.layer === layer,
+    exclusion: (toolName) => byTool.get(toolName)?.[0],
+    excluded: (toolName, layer) => byTool.get(toolName)?.some(verdict => verdict.layer === layer) ?? false,
     unavailableReason: (toolName) => {
-      const verdict = byTool.get(toolName);
-      return verdict && (verdict.layer === 'retired' || verdict.layer === 'session-runtime') ? verdict.reason : null;
+      const verdict = byTool.get(toolName)?.find(verdict => verdict.layer === 'retired' || verdict.layer === 'session-runtime');
+      return verdict?.reason ?? null;
     },
   };
 }

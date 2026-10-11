@@ -54,8 +54,10 @@ it('clamps context token budgets and falls back for unknown windows', () => {
   assert.equal(contextTokenBudget(undefined), MAX_CONTEXT_TOKENS);
   assert.equal(contextTokenBudget(32_768), 24_576); // window - window/4 reserve
   assert.equal(contextTokenBudget(200_000), 183_616); // window - 16384 reserve
-  // Small window: reserve can never starve the prompt below 8k / half the window.
-  assert.equal(contextTokenBudget(10_000), 8_000);
+  assert.equal(contextTokenBudget(10_000), 7_500);
   assert.equal(contextTokenBudget(100_000), Math.max(50_000, 100_000 - 16_384));
-  assert.ok(contextTokenBudget(1_000) >= 8_000);
+  for (const window of [1, 3, 1_000, 4_096, 8_192]) {
+    assert.equal(contextTokenBudget(window), Math.floor(window * 0.75));
+    assert.ok(contextTokenBudget(window) < window, 'leave output headroom inside the physical context window');
+  }
 });

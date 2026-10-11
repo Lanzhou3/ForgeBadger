@@ -156,3 +156,15 @@ it('computeToolSurface names the excluding layer for every plane', () => {
   assert.ok(CHANNEL_TOOLS.has('list_projects'));
   assert.equal(channel.exclusion('get_usage_summary')!.layer, 'channel-catalog');
 });
+
+it('retains every exclusion for execution gates while reporting the first layer as provenance', () => {
+  const surface = computeToolSurface({ source: 'reactive', executionMode: 'research' }, {
+    registry: surfaceRegistry(), hasSessionManager: false, isToolDisabled: () => true,
+  });
+  assert.equal(surface.exclusion('mcp_query')?.layer, 'scheduled-readonly');
+  for (const layer of ['scheduled-readonly', 'mcp-source', 'owner-disabled'] as const)
+    assert.equal(surface.excluded('mcp_query', layer), true, layer);
+  assert.equal(surface.excluded('takeover_session', 'restricted-mode'), true);
+  assert.equal(surface.unavailableReason('takeover_session'), 'SESSION_RUNTIME_UNAVAILABLE');
+  assert.equal(surface.unavailableReason('load_skill'), 'TOOL_RETIRED');
+});
