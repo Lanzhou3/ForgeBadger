@@ -91,11 +91,11 @@ for (const scenario of [
     const errors = await mockGateway(page, scenario);
     await page.goto("/sessions/shell-qa?attachToken=qa-attach");
     await expect(page.getByTestId("terminal-host")).toBeVisible();
-    await page.getByRole("button", { name: "New Session · Shell QA", exact: true }).click();
+    await page.getByRole("button", { name: "New session · Shell QA", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByRole("button", { name: "Terminal", exact: true }).click();
     await expect(dialog.locator("#launch-shell")).toHaveValue(scenario.selected);
-    await expect(dialog.getByRole("button", { name: "New Session", exact: true })).toBeEnabled();
+    await expect(dialog.getByRole("button", { name: "New session", exact: true })).toBeEnabled();
     const available = await dialog.locator("#launch-shell option:enabled").evaluateAll(options => options.map(el => (el as HTMLOptionElement).value));
     expect(available).toEqual(scenario.installed);
     await page.screenshot({ path: `/tmp/forgebadger-shell-${scenario.gatewayPlatform}.png` });

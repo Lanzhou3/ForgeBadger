@@ -25,6 +25,7 @@ test("MVP-1 management console smoke", async ({ page }) => {
   }, gatewayUrl);
 
   await page.goto("/register");
+  await expect(page.getByRole("button", { name: "Create account" })).toBeEnabled();
   await page.fill('input[name="email"]', email);
   await fillRecoveryKey(page);
   await page.fill('input[name="password"]', password);

@@ -3,9 +3,10 @@ import { test, expect } from "@playwright/test";
 import { fillRecoveryKey } from "./register-user";
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
+  await page.addInitScript(url => {
     window.localStorage.setItem("forgebadger-language", "en");
-  });
+    window.__FORGEBADGER_RUNTIME__ = { gatewayBaseUrl: url };
+  }, process.env.NEXT_PUBLIC_GATEWAY_URL ?? process.env.FORGEBADGER_GATEWAY_URL ?? 'http://127.0.0.1:18332');
 });
 
 test("complete MVP-0 user journey", async ({ page }) => {
@@ -17,6 +18,7 @@ test("complete MVP-0 user journey", async ({ page }) => {
 
   // 1. Visit register page
   await page.goto("/register");
+  await expect(page.locator('button[type="submit"]')).toBeEnabled();
 
   // 2. Register a new user
   await page.fill('input[name="email"]', email);
@@ -66,7 +68,7 @@ test("complete MVP-0 user journey", async ({ page }) => {
 
 test("auth guard redirects to login", async ({ page }) => {
   await page.goto("/");
-  await expect(page).toHaveURL("/login");
+  await expect(page).toHaveURL("/login?next=%2F");
 });
 
 test("login flow", async ({ page }) => {
@@ -75,6 +77,7 @@ test("login flow", async ({ page }) => {
 
   // Register first via UI to ensure user exists
   await page.goto("/register");
+  await expect(page.locator('button[type="submit"]')).toBeEnabled();
   await page.fill('input[name="email"]', email);
   await fillRecoveryKey(page);
   await page.fill('input[name="password"]', password);
@@ -84,7 +87,7 @@ test("login flow", async ({ page }) => {
 
   // Logout
   await page.click('[aria-label="Log out"]');
-  await page.waitForURL("/login");
+  await page.waitForURL("/login?next=%2F");
 
   // Login with existing user
   await page.fill('input[name="email"]', email);
