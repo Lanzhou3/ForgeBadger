@@ -115,12 +115,12 @@ describe("cli-account routes", () => {
     assert.equal(refresh.status, 401);
   });
 
-  it("aggregates the three adapters without leaking token material", async () => {
+  it("aggregates the four adapters without leaking token material", async () => {
     const res = await makeRequest(app, "GET", "/api/v1/cli-accounts", undefined, authHeaders());
     assert.equal(res.status, 200);
     assert.equal(res.body.code, 0);
     const accounts = res.body.data.accounts;
-    assert.equal(accounts.length, 3);
+    assert.equal(accounts.length, 4);
     const byAdapter = new Map(accounts.map((account: any) => [account.login.adapter, account]));
     assert.equal(byAdapter.get("claude").login.state, "ready");
     assert.equal(byAdapter.get("claude").login.method, "claude.ai");

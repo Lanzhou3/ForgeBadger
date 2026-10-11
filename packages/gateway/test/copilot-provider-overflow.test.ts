@@ -34,6 +34,11 @@ it('bounds error-body classification and aborts a stalled rejection body',async(
   assert.equal((await providerRejection(large,new AbortController().signal)).code,'AGENT_HTTP_ERROR');
   let cancelled=false;
   const stalled=new Response(new ReadableStream({cancel(){cancelled=true;}}),{status:400});
-  await assert.rejects(providerRejection(stalled,AbortSignal.timeout(25)),/abort|timeout/i);
+  const controller = new AbortController();
+  // Keep this test's deadline referenced even when a stalled stream has no handles.
+  const timer = setTimeout(() => controller.abort(new DOMException('Timed out', 'TimeoutError')), 25);
+  try {
+    await assert.rejects(providerRejection(stalled, controller.signal), /abort|timeout/i);
+  } finally { clearTimeout(timer); }
   assert.equal(cancelled,true);
 });

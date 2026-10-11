@@ -24,12 +24,13 @@ describe("adapter updates", () => {
 
     const results = await checkAdapterUpdates({ runner, fetcher, resolveHost: publicResolver });
 
-    assert.deepEqual(results.map((result) => result.id), ["claude", "opencode", "codex", "kimi", "pi"]);
+    assert.deepEqual(results.map((result) => result.id), ["claude", "opencode", "codex", "kimi", "pi", "mcode"]);
     assert.deepEqual(results.map((result) => result.state), [
-      "update_available", "update_available", "update_available", "missing", "update_available"
+      "update_available", "update_available", "update_available", "missing", "update_available", "update_available"
     ]);
-    assert.equal(urls.length, 4);
+    assert.equal(urls.length, 5);
     assert.ok(urls.includes("https://registry.npmjs.org/@earendil-works%2Fpi-coding-agent/latest"));
+    assert.ok(urls.includes("https://registry.npmjs.org/@minimax-ai%2Fcode/latest"));
     assert.equal(results.find((result) => result.id === "pi")?.command, "pi update --self");
   });
 

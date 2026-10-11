@@ -274,9 +274,18 @@ describe("db repositories", () => {
         workingDir: "/tmp/sp"
       });
       assert.equal(session.name, "Session 1");
+      assert.equal(session.projectName, project.name);
 
       const list = repo.list();
       assert.equal(list.length, 1);
+    });
+
+    it("rejects creation against another tenant's project", () => {
+      const owner = userRepo.create("foreign-owner@example.com", "hash");
+      const actor = userRepo.create("foreign-actor@example.com", "hash");
+      const project = new ProjectRepository(db, owner.id).create({ name: "Private project", path: "/tmp/foreign-owner", aiTool: "codex" });
+      assert.throws(() => new SessionRepository(db, actor.id).create({ projectId: project.id, name: "Unbound", aiTool: "codex", workingDir: "/tmp/foreign-actor" }), { code: "SQLITE_CONSTRAINT_FOREIGNKEY" });
+      assert.deepEqual(new SessionRepository(db, actor.id).list(), []);
     });
 
     it("updates session status", () => {

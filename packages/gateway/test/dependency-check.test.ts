@@ -104,7 +104,7 @@ describe("Session Server runtime dependencies", () => {
       seen.push(command);
       return { exitCode: 127, stdout: "", stderr: "not found" };
     });
-    assert.deepEqual(seen, ["claude", "opencode", "codex", "kimi", "pi"]);
+    assert.deepEqual(seen, ["claude", "opencode", "codex", "kimi", "pi", "mcode"]);
     assert.ok(result.every((item) => !item.required && !item.available));
   });
   it("reports daemon availability independently of optional adapter binaries", async () => {

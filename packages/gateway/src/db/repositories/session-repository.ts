@@ -39,7 +39,7 @@ export interface Session {
   errorMessage: string | null;
   createdAt: Date;
   updatedAt: Date;
-  /** Denormalized display name of the owning project (read queries only). */
+  /** Denormalized display name of the owning project (create and read results). */
   projectName?: string | null;
 }
 
@@ -88,13 +88,12 @@ export class SessionRepository {
       })
       .returning(sessionColumns)
       .get();
-    // create/update only return the bare session row (no project JOIN),
-    // but every read path (list/getById) enriches it with `projectName` for
-    // tab grouping. Re-fetch through getById so callers (POST /sessions,
-    // session.start) return the same shape the board does — otherwise the
-    // web client's sessionToTab loses the project group and the new tab lands
-    // in an anonymous bucket instead of under its project.
-    return this.getById(result.id)!;
+    // The provisioning guard above authorizes insertion. Public reads deliberately
+    // hide provisioning workspaces, so enrich the inserted row without re-reading it.
+    const project = this.drizzle.select({ name: projects.name }).from(projects)
+      .where(and(eq(projects.id, input.projectId), eq(projects.userId, this.userId)))
+      .get();
+    return { ...result, projectName: project?.name ?? null } as Session;
   }
 
   list(): Session[] {

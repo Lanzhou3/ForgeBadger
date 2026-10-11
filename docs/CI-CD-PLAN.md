@@ -37,6 +37,11 @@ Acceptance:
 - CLI, Gateway `node:test`, and Web Vitest suites pass.
 - Real Session Server/node-pty integration tests pass. This job runs on
   Linux/Ubuntu and does not exercise native Windows Session Server/ConPTY.
+- A separate `Windows CLI Shim Contracts` job runs the real Windows npm-shim
+  fixtures and Session Server platform contracts on `windows-latest` / Node 22.
+  Windows filesystem fixtures are skipped on POSIX; the POSIX no-op contract
+  still runs there. This job does not clear physical Windows/ConPTY or WSL
+  lifecycle acceptance gates.
 - Provider/cli-config-apply SSOT, Codex native-auth
   boundary, and session adapter-decoupling gates pass.
 - `git diff --check` reports no whitespace errors.

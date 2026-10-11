@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { it, type TestContext } from 'node:test';
+import { it, beforeEach, afterEach, type TestContext } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,6 +14,21 @@ import { readProjectGitStatus, summarizeGitStatus } from '../src/services/develo
 import { createPlatformTools } from '../src/services/agent/tools/index.js';
 import { executeAgentTool, createAgentToolRegistry } from '../src/services/agent/tool-registry.js';
 import { selectDiscoveredTools } from '../src/services/agent/tool-discovery.js';
+
+const configKeys = ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_NOSYSTEM'] as const;
+let savedConfig: Array<string | undefined>;
+beforeEach(() => {
+  savedConfig = configKeys.map(key => process.env[key]);
+  process.env.GIT_CONFIG_GLOBAL = process.platform === 'win32' ? 'NUL' : '/dev/null';
+  process.env.GIT_CONFIG_SYSTEM = process.platform === 'win32' ? 'NUL' : '/dev/null';
+  process.env.GIT_CONFIG_NOSYSTEM = '1';
+});
+afterEach(() => {
+  configKeys.forEach((key, index) => {
+    const value = savedConfig[index];
+    if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  });
+});
 
 function repo(t: TestContext, commit = true) {
   const root = mkdtempSync(join(tmpdir(), 'fb-status-'));
@@ -81,7 +96,7 @@ it('rejects active filters rather than running commands or changing Git normaliz
 it('does not execute fsmonitor, external diff or hooks', async t => {
   const f = repo(t), marker = join(f.root, 'executed');
   f.git('config', 'core.fsmonitor', `touch '${marker}'`); f.git('config', 'diff.external', `touch '${marker}'`);
-  writeFileSync(join(f.root, 'main.ts'), 'changed\n');
+  writeFileSync(join(f.root, 'main.ts'), 'changed without helpers\n');
   assert.equal((await readProjectGitStatus(f.root)).counts.total, 1);
   assert.equal(existsSync(marker), false);
 });
@@ -173,4 +188,19 @@ it('reports conflicted gitlinks without entering submodule worktrees', async t =
   const result = await readProjectGitStatus(f.root);
   assert.equal(result.counts.total, 1); assert.equal(result.counts.conflicted, 1);
   assert.equal(result.counts.staged, 0); assert.equal(result.counts.unstaged, 0);
+});
+
+
+it('honors explicit system-config exclusion without executing a configured filter', async t => {
+  const f = repo(t), config = join(f.root, 'system.gitconfig'), marker = join(f.root, 'filter-executed');
+  writeFileSync(config, `[filter "system-fixture"]\n process = touch ${marker}\n`);
+  f.git('add', 'system.gitconfig'); f.git('commit', '-qm', 'config fixture');
+  writeFileSync(join(f.root, 'main.ts'), 'changed\n');
+  process.env.GIT_CONFIG_SYSTEM = config;
+  delete process.env.GIT_CONFIG_NOSYSTEM;
+  await assert.rejects(readProjectGitStatus(f.root), /FILTER_UNSUPPORTED/);
+  assert.equal(existsSync(marker), false);
+  process.env.GIT_CONFIG_NOSYSTEM = '1';
+  assert.equal((await readProjectGitStatus(f.root)).counts.total, 1);
+  assert.equal(existsSync(marker), false);
 });

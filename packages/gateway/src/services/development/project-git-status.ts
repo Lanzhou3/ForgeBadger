@@ -81,7 +81,7 @@ function stagedGitlinks(data: Buffer, status: Buffer): Buffer {
 function safeEnvironment(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, LANG: 'C', LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0',
     GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1', GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: '', GIT_PROTOCOL_FROM_USER: '0' };
-  for (const key of ['HOME', 'XDG_CONFIG_HOME', 'USERPROFILE', 'SYSTEMROOT', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM']) {
+  for (const key of ['HOME', 'XDG_CONFIG_HOME', 'USERPROFILE', 'SYSTEMROOT', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_NOSYSTEM']) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
   return env;
