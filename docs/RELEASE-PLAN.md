@@ -253,6 +253,15 @@ native flow; never record credentials or OTPs in Git, command files or reports.
 If the publish result is ambiguous, query the exact version and compare
 integrity before retrying. Never claim success based only on the command launch.
 
+An accepted upload can return HTTP 202 before the version is installable.
+According to [npm's publish-time scanning announcement](https://github.blog/changelog/2026-07-28-npm-publish-time-malware-scanning-and-dual-use-metadata/),
+availability typically takes about five minutes and can take 15 minutes or
+longer, depending on load and package content/size. Poll the exact version
+with bounded waits and fresh registry reads; do not republish an accepted
+upload merely because the first read returns 404. If availability remains
+pending, record that state and check the maintainer's npm version history or
+notifications rather than declaring the release complete.
+
 Compare registry integrity with the tested tarball, install the exact registry
 version into a disposable prefix, and run its version/doctor checks with a fresh
 state directory. Then create annotated tag `v<version>` on the release source
@@ -315,6 +324,26 @@ to move a dist-tag back; do not unpublish as an automatic rollback.
 | `session-server.test.ts` | 1 | Resolve platform path fixtures and validate on native Windows |
 | `team-administration.test.ts` | 2 | Diagnose workspace preparation before claiming delivery/team workflow acceptance |
 | `windows-npm-shim.test.ts` | 6 | Resolve platform path fixtures and validate on native Windows |
+
+### 2026-10-11 published: 0.2.0-beta.0
+
+- Package: [forgebadger@0.2.0-beta.0](https://www.npmjs.com/package/forgebadger/v/0.2.0-beta.0).
+  Registry tags confirmed: `beta=0.2.0-beta.0`, `latest=0.1.3`.
+- Release source: `c1aee6843356b477a61014f9d195a73fa624bd38`; annotated Git
+  tag: `v0.2.0-beta.0`. This subsequent documentation record is outside the
+  frozen release artifact.
+- The exact installed/PTY-smoked tarball was published with `--ignore-scripts`.
+  It contains 8470 files and is 28,022,004 bytes compressed. Registry integrity
+  matched the tested artifact after it became publicly available at
+  `2026-10-11T11:07:22Z`.
+- SHA-256: `6e4512e9f1f05832a802907abdcffcffe8f3708b866093787b2145b69a44ef59`.
+- Registry integrity: `sha512-LoRjQieRb5ALAP5xoIwYvZaX7ThBB5vwKmhL2SZcfh5dG49365PDJejkVNQe84dpOvOIbf/nUUxkNp63IPtu/g==`.
+- A fresh install of the exact public registry version passed `--version` and
+  `doctor` on macOS arm64 / Node `24.16.0`, including loadable `node-pty` and
+  `better-sqlite3`. Publication used temporary Node `22.23.3` / npm `10.9.9`
+  after local TLS connection failures; the artifact was not rebuilt.
+- The candidate's full-regression and physical-platform/live-host limitations
+  above still apply. Install explicitly with `npm install -g forgebadger@beta`.
 
 ## 7. Release Acceptance
 
