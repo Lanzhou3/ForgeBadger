@@ -161,7 +161,7 @@ export default function TemplatesPage() {
         visibility: newTemplateVisibility,
         // A template must declare which CLI it targets; no implicit default.
         ...(newTemplateAdapter ? { adapter: newTemplateAdapter } : {}),
-        files: [{ filePath: defaultFilePath, content: defaultTemplateContent, fileType: "markdown" }],
+        files: [{ filePath: newTemplateAdapter === 'claude' ? 'CLAUDE.md' : defaultFilePath, content: defaultTemplateContent, fileType: "markdown" }],
       }),
     onSuccess: async ({ template }) => {
       setNotice(t("templates.created"));

@@ -795,10 +795,14 @@ Config conflict behavior:
   `409` until the caller supplies an explicit `skip` or `overwrite` decision.
 - `conflictType: "unsafe_path"` is always blocking and cannot be overridden.
 
-Config generation uses the project adapter:
+Config generation uses the bound template's adapter:
 
-- Claude Code projects write `.claude/CLAUDE.md`, `.claude/agents/*`, and
+- Claude Code projects write root `CLAUDE.md`, `.claude/agents/*`, and
   `.claude/skills/<skill-name>/SKILL.md`.
+  New custom Claude templates use `CLAUDE.md`; shared-only `AGENTS.md`
+  templates retain `AGENTS.md` and receive a root `CLAUDE.md` importing it.
+  If a template explicitly
+  includes both memory files, both are preserved.
 - OpenCode projects adapt the shared instructions into root `AGENTS.md`,
   `.opencode/agents/*`, `.opencode/commands/*`, and
   `.opencode/skills/<skill-name>/SKILL.md`.

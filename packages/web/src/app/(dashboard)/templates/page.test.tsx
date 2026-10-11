@@ -8,6 +8,7 @@ import TemplatesPage from "./page";
 
 const {
   listTemplatesMock,
+  discoverAdaptersMock,
   listCatalogItemsMock,
   getTemplateMock,
   listTemplateVersionsMock,
@@ -26,6 +27,7 @@ const {
   toastErrorMock,
 } = vi.hoisted(() => ({
   listTemplatesMock: vi.fn(),
+  discoverAdaptersMock: vi.fn(),
   listCatalogItemsMock: vi.fn(),
   getTemplateMock: vi.fn(),
   listTemplateVersionsMock: vi.fn(),
@@ -48,6 +50,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
+    discoverAdapters: discoverAdaptersMock,
     listTemplates: listTemplatesMock,
     listCatalogItems: listCatalogItemsMock,
     getTemplate: getTemplateMock,
@@ -98,6 +101,10 @@ describe("TemplatesPage sync block", () => {
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
+    discoverAdaptersMock.mockResolvedValue({ adapters: ['claude', 'codex'].map(id => ({
+      id, label: id, command: id, supportLevel: 'supported', launchEnabled: true,
+      configDir: `.${id}`, runtimeModes: ['terminal'], available: true, status: 'available',
+    })) });
     listTemplatesMock.mockResolvedValue({ templates: [template] });
     listCatalogItemsMock.mockResolvedValue({ items: [] });
     getTemplateMock.mockResolvedValue({ template: { ...template, files: [] } });
@@ -144,6 +151,26 @@ describe("TemplatesPage sync block", () => {
       ],
     });
   });
+
+  for (const [adapter, filePath] of [['claude', 'CLAUDE.md'], ['codex', 'AGENTS.md']]) {
+    it(`creates ${adapter} templates with native ${filePath} memory`, async () => {
+      Element.prototype.hasPointerCapture = vi.fn(() => false);
+      Element.prototype.releasePointerCapture = vi.fn();
+      Element.prototype.scrollIntoView = vi.fn();
+      createTemplateMock.mockResolvedValue({ template });
+      renderPage();
+      const name = document.querySelector('#new-template-name')!;
+      fireEvent.change(name, { target: { value: 'Native memory template' } });
+      const trigger = await screen.findByRole('combobox');
+      await waitFor(() => expect(trigger.hasAttribute('disabled')).toBe(false));
+      fireEvent.keyDown(trigger, { key: 'Enter' });
+      fireEvent.click(await screen.findByRole('option', { name: adapter }));
+      fireEvent.submit(name.closest('form')!);
+      await waitFor(() => expect(createTemplateMock).toHaveBeenCalledWith(expect.objectContaining({
+        adapter, files: [expect.objectContaining({ filePath })],
+      })));
+    });
+  }
 
   it("shows the error state with retry instead of the empty list when the query fails", async () => {
     listTemplatesMock.mockRejectedValue(new Error("gateway unreachable"));

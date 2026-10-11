@@ -28,7 +28,8 @@ function adaptTemplateFiles(
   adapter: AdapterId
 ): TemplateFileInput[] {
   if (adapter === "claude") {
-    return files.map((file) => {
+    const hasClaudeMemory = files.some(file => file.relativePath === 'CLAUDE.md' || file.relativePath === '.claude/CLAUDE.md');
+    const adapted = files.map((file) => {
       if (file.relativePath === ".claude/CLAUDE.md") {
         return {
           ...file,
@@ -37,6 +38,13 @@ function adaptTemplateFiles(
       }
       return file;
     });
+    // Native AGENTS support can be shadowed by ancestor memory or disabled
+    // plugins. Import shared memory explicitly without breaking its file path.
+    const sharedMemory = files.find(file => file.relativePath === 'AGENTS.md');
+    if (!hasClaudeMemory && sharedMemory) adapted.push({
+      id: `claude-memory:${sharedMemory.id}`, relativePath: 'CLAUDE.md', content: '@AGENTS.md\n', renderVariables: false,
+    });
+    return adapted;
   }
   const root = adapterConfigRoot(adapter);
   return files.flatMap((file) => {
