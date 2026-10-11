@@ -21,9 +21,10 @@ const copyTreeOptions = { recursive: true, dereference: true };
 // reference them through the canonical raw GitHub URL instead of repo-relative
 // paths (npmjs.com cannot resolve relative paths without a repository field,
 // and the monorepo `directory` field would resolve them wrongly anyway).
+// The public beta docs live on dev; there is no main branch in this repository.
 const brandAssetRawBaseUrl =
-  "https://raw.githubusercontent.com/Lanzhou3/ForgeBadger/main/packages/web/public/brand/";
-const githubBlobBaseUrl = "https://github.com/Lanzhou3/ForgeBadger/blob/main/";
+  "https://raw.githubusercontent.com/Lanzhou3/ForgeBadger/dev/packages/web/public/brand/";
+const githubBlobBaseUrl = "https://github.com/Lanzhou3/ForgeBadger/blob/dev/";
 
 const restoreWebNextEnv = await preserveFile(webNextEnv);
 
