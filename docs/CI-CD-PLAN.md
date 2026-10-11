@@ -169,6 +169,10 @@ Known skip:
 ### Phase 1 Terminal Gate Boundary
 
 CI requires `e2e/mvp1-smoke.spec.ts` as the stable control-plane happy path.
+Playwright starts Next through `packages/web/e2e/start-web-server.mjs`, which
+loads the root environment and invokes the Next CLI directly through Node.
+This keeps hostname/port overrides and lets Playwright terminate the server
+process group without an intermediate pnpm native process blocking cleanup.
 `e2e/gate-d-smoke.spec.ts` remains release/manual evidence unless the host
 supplies Gateway/Web loopback listeners, Session Server/node-pty, and the real CLI prerequisites
 needed for terminal behavior.

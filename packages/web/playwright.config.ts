@@ -48,7 +48,13 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
-    command: `FORGEBADGER_WEB_HOST=${webHost} FORGEBADGER_WEB_PORT=${webPort} NEXT_PUBLIC_GATEWAY_URL=${gatewayUrl} pnpm dev`,
+    // A direct Node launcher lets Playwright stop the whole server process group.
+    command: "node e2e/start-web-server.mjs",
+    env: {
+      FORGEBADGER_WEB_HOST: webHost,
+      FORGEBADGER_WEB_PORT: webPort,
+      NEXT_PUBLIC_GATEWAY_URL: gatewayUrl,
+    },
     url: webUrl,
     reuseExistingServer: !process.env.CI,
   },
