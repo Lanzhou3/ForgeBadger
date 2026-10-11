@@ -18,15 +18,15 @@ describe("trial feedback draft generator", () => {
       terminalRuntime: "session-server",
       claudeVersion: "2.1.152",
       startupPath: "source fallback",
-      webUrl: "http://127.0.0.1:48732",
-      gatewayUrl: "http://127.0.0.1:48731"
+      webUrl: "http://127.0.0.1:18333",
+      gatewayUrl: "http://127.0.0.1:18332"
     });
 
     assert.match(draft, /# ForgeBadger Trial Feedback Draft/);
     assert.match(draft, /Generated draft status: not submitted, not reviewed, not gate-clearing evidence/);
     assert.match(draft, /ForgeBadger version or commit: abc1234/);
     assert.match(draft, /Startup path: source fallback/);
-    assert.match(draft, /Gateway URL: http:\/\/127\.0\.0\.1:48731/);
+    assert.match(draft, /Gateway URL: http:\/\/127\.0\.0\.1:18332/);
     assert.match(draft, /Copilot memory write proposal tested: yes \/ no \/ skipped/);
     assert.match(draft, /`LIVE-PROVIDER`: Caveat/);
     assert.match(draft, /`FEISHU-BOT-WS`: Caveat/);
@@ -94,14 +94,14 @@ describe("trial feedback draft generator", () => {
       "--startup-path",
       "npm/CLI",
       "--web-url",
-      "http://127.0.0.1:48732",
+      "http://127.0.0.1:18333",
       "--gateway-url",
-      "http://127.0.0.1:48731"
+      "http://127.0.0.1:18332"
     ]), {
       outputPath: "/tmp/trial.md",
       startupPath: "npm/CLI",
-      webUrl: "http://127.0.0.1:48732",
-      gatewayUrl: "http://127.0.0.1:48731"
+      webUrl: "http://127.0.0.1:18333",
+      gatewayUrl: "http://127.0.0.1:18332"
     });
 
     assert.throws(() => parseDraftCliArgs(["--bad"]), /Unknown argument/);

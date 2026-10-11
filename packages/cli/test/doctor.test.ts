@@ -235,7 +235,7 @@ describe("runDoctor", () => {
     assert.equal(code, 0);
     assert.match(stdout.text, /^Environment: \w+ \w+, Node v\d+\.\d+\.\d+\n/);
     assert.match(stdout.text, new RegExp(`ForgeBadger state: ${escapeRegex(stateDir)} \\(not initialized\\)`));
-    assert.match(stdout.text, /Diagnostic defaults: gateway=http:\/\/127\.0\.0\.1:48731 web=http:\/\/127\.0\.0\.1:48732/);
+    assert.match(stdout.text, /Diagnostic defaults: gateway=http:\/\/127\.0\.0\.1:18332 web=http:\/\/127\.0\.0\.1:18333/);
     assert.match(stdout.text, /No supported AI CLI found on PATH; install at least one to create sessions:\n/);
     assert.match(stdout.text, / {2}claude: npm install -g @anthropic-ai\/claude-code\n/);
     assert.match(stdout.text, / {2}kimi: npm install -g @moonshot-ai\/kimi-code\n/);
@@ -387,8 +387,8 @@ function createRuntimeConfig(stateDir: string): RuntimeConfig {
     version: 1,
     stateDir,
     dbPath: `${stateDir}/forgebadger.db`,
-    gateway: { host: "127.0.0.1", port: 48731 },
-    web: { host: "127.0.0.1", port: 48732 },
+    gateway: { host: "127.0.0.1", port: 18332 },
+    web: { host: "127.0.0.1", port: 18333 },
     secrets: {
       masterKey: "a".repeat(64),
       jwtSecret: "abcdefghijklmnopqrstuvwxyz123456"

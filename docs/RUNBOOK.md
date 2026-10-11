@@ -41,7 +41,7 @@ Required for direct Gateway/source startup:
 
 Optional:
 
-- `FORGEBADGER_PORT` - default `3000`
+- `FORGEBADGER_PORT` - default `18332`
 - `FORGEBADGER_DB_PATH` - default `~/.forgebadger/forgebadger.db`
 - `FORGEBADGER_SESSION_PREFIX` - default `fb-`
 - `FORGEBADGER_SESSION_SERVER_IPC_PATH` - override the Session Server IPC endpoint (Windows named pipe / POSIX socket); per-platform default when unset
@@ -90,7 +90,7 @@ Use the installed CLI for local npm-distributed runtime checks:
 
 ```bash
 forgebadger doctor
-forgebadger start --gateway-port 48731 --web-port 48732
+forgebadger start --gateway-port 18332 --web-port 18333
 ```
 
 `forgebadger start` loads or creates runtime configuration and then starts
@@ -144,7 +144,7 @@ List sessions and their runtime state:
 
 ```bash
 curl -H "Authorization: Bearer <token>" \
-  http://127.0.0.1:48731/api/v1/sessions
+  http://127.0.0.1:18332/api/v1/sessions
 ```
 
 Watch session status events in real time:

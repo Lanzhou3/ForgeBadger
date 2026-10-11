@@ -131,7 +131,7 @@ describe("validateTrialFeedbackIntake", () => {
       "# ForgeBadger First-User Trial Runbook",
       "## Diagnostics",
       "Export diagnostics from the local Gateway after logging in:",
-      "curl -H \"authorization: Bearer <token>\" http://127.0.0.1:48731/api/v1/diagnostics/export",
+      "curl -H \"authorization: Bearer <token>\" http://127.0.0.1:18332/api/v1/diagnostics/export",
       "Open browser developer tools for the ForgeBadger Web console.",
       "Read Local Storage and use the `forgebadger.token` value."
     ].join("\n");

@@ -133,18 +133,18 @@ describe("forgebadger init CLI prototype", () => {
         templateId: "builtin-claude-code",
         credentialMode: "host_environment",
         dryRun: true,
-        env: { ...env, OLD_PRODUCT_GATEWAY_URL: "http://old.example:48731" }
+        env: { ...env, OLD_PRODUCT_GATEWAY_URL: "http://old.example:18332" }
       });
       const currentPlan = await createInitRenderPlan({
         projectPath,
         templateId: "builtin-claude-code",
         credentialMode: "host_environment",
         dryRun: true,
-        env: { ...env, FORGEBADGER_GATEWAY_URL: "http://current.example:48731" }
+        env: { ...env, FORGEBADGER_GATEWAY_URL: "http://current.example:18332" }
       });
 
-      assert.match(JSON.stringify(defaultPlan.files), /http:\/\/127\.0\.0\.1:48731/);
-      assert.match(JSON.stringify(currentPlan.files), /http:\/\/current\.example:48731/);
+      assert.match(JSON.stringify(defaultPlan.files), /http:\/\/127\.0\.0\.1:18332/);
+      assert.match(JSON.stringify(currentPlan.files), /http:\/\/current\.example:18332/);
     } finally {
       await rm(projectPath, { recursive: true, force: true });
       await rm(stateDir, { recursive: true, force: true });

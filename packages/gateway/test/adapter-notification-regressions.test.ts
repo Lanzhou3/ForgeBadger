@@ -18,16 +18,16 @@ describe("adapter notification regressions", () => {
   it("registers Claude API failures and preserves custom hooks when merging", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "fb-claude-failure-"));
     try {
-      const settings = buildForgeBadgerClaudeHookSettings("http://127.0.0.1:48731");
+      const settings = buildForgeBadgerClaudeHookSettings("http://127.0.0.1:18332");
       assert.deepEqual(settings.hooks.StopFailure, settings.hooks.Stop);
-      const result = await ensureClaudeNotificationSettings(root, "http://127.0.0.1:48731");
+      const result = await ensureClaudeNotificationSettings(root, "http://127.0.0.1:18332");
       const saved = JSON.parse(await readFile(result.path, "utf8"));
       saved.hooks.StopFailure.push({ matcher: "rate_limit", hooks: [{ type: "command", command: "echo custom" }] });
       await writeFile(result.path, JSON.stringify(saved));
-      await ensureClaudeNotificationSettings(root, "http://127.0.0.1:48731");
+      await ensureClaudeNotificationSettings(root, "http://127.0.0.1:18332");
       const merged = JSON.parse(await readFile(result.path, "utf8"));
       assert.deepEqual(merged.hooks.StopFailure, saved.hooks.StopFailure);
-      assert.equal((await ensureClaudeNotificationSettings(root, "http://127.0.0.1:48731")).changed, false);
+      assert.equal((await ensureClaudeNotificationSettings(root, "http://127.0.0.1:18332")).changed, false);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
@@ -39,7 +39,7 @@ describe("adapter notification regressions", () => {
       const originalWarn = console.warn;
       try {
         Object.assign(process.env, { PI_CODING_AGENT_DIR: root, FORGEBADGER_SESSION_ID: "session-1",
-          FORGEBADGER_ATTACH_TOKEN: "private-test-token", FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731" });
+          FORGEBADGER_ATTACH_TOKEN: "private-test-token", FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:18332" });
         let source = FORGEBADGER_OPENCODE_PLUGIN_TEMPLATE;
         if (adapter === "pi") source = await readFile((await ensurePiNotificationSettings()).path, "utf8");
         const file = path.join(root, "notify.mjs");

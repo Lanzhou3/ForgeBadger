@@ -26,8 +26,8 @@ function initializedInspection(stateDir: string): RuntimeConfigInspection {
   return {
     stateDir,
     initialized: true,
-    gateway: { host: "127.0.0.1", port: 48731 },
-    web: { host: "127.0.0.1", port: 48732 }
+    gateway: { host: "127.0.0.1", port: 18332 },
+    web: { host: "127.0.0.1", port: 18333 }
   };
 }
 
@@ -41,8 +41,8 @@ async function makeStateDir(): Promise<string> {
       version: 1,
       stateDir,
       dbPath: path.join(stateDir, "forgebadger.db"),
-      gateway: { host: "127.0.0.1", port: 48731 },
-      web: { host: "127.0.0.1", port: 48732 },
+      gateway: { host: "127.0.0.1", port: 18332 },
+      web: { host: "127.0.0.1", port: 18333 },
       secrets: { masterKey: "0".repeat(64), jwtSecret: "x".repeat(48) }
     })
   );
@@ -59,7 +59,7 @@ describe("runUninstall", () => {
     const code = await runUninstall({
       stateDir,
       env: {},
-      inspectConfig: async () => ({ stateDir, initialized: false, gateway: { host: "127.0.0.1", port: 48731 }, web: { host: "127.0.0.1", port: 48732 } }),
+      inspectConfig: async () => ({ stateDir, initialized: false, gateway: { host: "127.0.0.1", port: 18332 }, web: { host: "127.0.0.1", port: 18333 } }),
       removeDir: async () => {
         removed = true;
       },
@@ -156,7 +156,7 @@ describe("runUninstall", () => {
       yes: true,
       inspectConfig: async () => initializedInspection(stateDir),
       checkPort: async () => {
-        throw new Error("Port 127.0.0.1:48731 is not available");
+        throw new Error("Port 127.0.0.1:18332 is not available");
       },
       stderr: stderr.writer
     });
@@ -177,7 +177,7 @@ describe("runUninstall", () => {
       env: {},
       yes: true,
       force: true,
-      inspectConfig: async () => ({ stateDir, initialized: false, gateway: { host: "127.0.0.1", port: 48731 }, web: { host: "127.0.0.1", port: 48732 } }),
+      inspectConfig: async () => ({ stateDir, initialized: false, gateway: { host: "127.0.0.1", port: 18332 }, web: { host: "127.0.0.1", port: 18333 } }),
       checkPort: async () => {
         portChecked = true;
       },
@@ -218,7 +218,7 @@ describe("runUninstall", () => {
       stateDir,
       env: {},
       yes: true,
-      inspectConfig: async () => ({ stateDir, initialized: false, gateway: { host: "127.0.0.1", port: 48731 }, web: { host: "127.0.0.1", port: 48732 } }),
+      inspectConfig: async () => ({ stateDir, initialized: false, gateway: { host: "127.0.0.1", port: 18332 }, web: { host: "127.0.0.1", port: 18333 } }),
       checkPort: async () => {},
       stderr: stderr.writer
     });

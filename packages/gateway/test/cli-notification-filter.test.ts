@@ -88,7 +88,7 @@ it('Pi suppresses headless subagent events while preserving interactive completi
   const handlers=new Map<string,(event:Record<string,unknown>,context:{hasUI:boolean})=>Promise<void>|void>();
   const sent:Record<string,unknown>[]=[];
   try{
-    Object.assign(process.env,{PI_CODING_AGENT_DIR:root,FORGEBADGER_GATEWAY_URL:'http://127.0.0.1:48731',FORGEBADGER_SESSION_ID:'session',FORGEBADGER_ATTACH_TOKEN:'fixture'});
+    Object.assign(process.env,{PI_CODING_AGENT_DIR:root,FORGEBADGER_GATEWAY_URL:'http://127.0.0.1:18332',FORGEBADGER_SESSION_ID:'session',FORGEBADGER_ATTACH_TOKEN:'fixture'});
     globalThis.fetch=async(_url,init)=>{sent.push(JSON.parse(String(init?.body)));return Response.json({code:0});};
     const generated=await ensurePiNotificationSettings();const file=join(root,'notify.mjs');await writeFile(file,await readFile(generated.path,'utf8'));
     const module=await import(pathToFileURL(file).href) as {default:(api:unknown)=>void};

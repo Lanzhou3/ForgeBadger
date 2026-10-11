@@ -11,7 +11,7 @@ if (mode !== "dev" && mode !== "start") {
 } else {
   const env = await buildRootEnv();
   const host = env.FORGEBADGER_WEB_HOST || "127.0.0.1";
-  const port = env.FORGEBADGER_WEB_PORT || "48732";
+  const port = env.FORGEBADGER_WEB_PORT || "18333";
   const child = spawn("next", [mode, "-H", host, "-p", port], {
     env,
     stdio: "inherit",

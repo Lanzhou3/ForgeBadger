@@ -16,7 +16,7 @@ describe("loadEnv security configuration", () => {
       FORGEBADGER_JWT_SECRET: jwtSecret,
       FORGEBADGER_MASTER_KEY: masterKey,
       FORGEBADGER_PORT: "49831",
-      OLD_PRODUCT_PORT: "48731"
+      OLD_PRODUCT_PORT: "18332"
     });
 
     assert.equal(env.FORGEBADGER_JWT_SECRET, jwtSecret);
@@ -128,6 +128,7 @@ describe("loadEnv security configuration", () => {
     });
 
     assert.equal(env.FORGEBADGER_MASTER_KEY, hexMasterKey);
+    assert.equal(env.FORGEBADGER_PORT, 18332);
   });
 
   it("loads a custom session prefix", () => {

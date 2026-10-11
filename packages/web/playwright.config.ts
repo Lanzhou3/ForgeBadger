@@ -1,12 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const webPort = process.env.FORGEBADGER_WEB_PORT ?? "48732";
+const webPort = process.env.FORGEBADGER_WEB_PORT ?? "18333";
 const webHost = process.env.FORGEBADGER_WEB_HOST ?? "127.0.0.1";
 const webUrl = process.env.FORGEBADGER_WEB_URL ?? `http://${webHost}:${webPort}`;
 const gatewayUrl =
   process.env.NEXT_PUBLIC_GATEWAY_URL ??
   process.env.FORGEBADGER_GATEWAY_URL ??
-  "http://127.0.0.1:48731";
+  "http://127.0.0.1:18332";
 const chromiumExecutablePath = process.env.FORGEBADGER_PLAYWRIGHT_CHROMIUM_PATH;
 const noProxy = mergeNoProxy(process.env.NO_PROXY ?? process.env.no_proxy, [
   "127.0.0.1",

@@ -23,7 +23,7 @@ const runtimeSettingsBoolean = z
   .transform((value) => value === true || value === "true");
 
 const envSchema = z.object({
-  FORGEBADGER_PORT: z.coerce.number().int().positive().default(3000),
+  FORGEBADGER_PORT: z.coerce.number().int().positive().default(18332),
   FORGEBADGER_HOST: z.string().default("127.0.0.1"),
   FORGEBADGER_STATE_DIR: z.string(),
   FORGEBADGER_DB_PATH: z.string(),

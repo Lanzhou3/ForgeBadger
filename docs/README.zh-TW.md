@@ -135,9 +135,9 @@ pnpm install
 建立本地 `.env` 檔案。不要提交此檔案。
 
 ```bash
-FORGEBADGER_PORT=48731
-FORGEBADGER_WEB_PORT=48732
-NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
+FORGEBADGER_PORT=18332
+FORGEBADGER_WEB_PORT=18333
+NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:18332
 FORGEBADGER_MASTER_KEY=<使用-openssl-rand-hex-32-生成的64位hex字串>
 FORGEBADGER_JWT_SECRET=<32位以上隨機密鑰>
 ```
@@ -146,13 +146,13 @@ FORGEBADGER_JWT_SECRET=<32位以上隨機密鑰>
 
 ```bash
 pnpm --filter @forgebadger/gateway dev
-FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=48732 pnpm --filter @forgebadger/web dev
+FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=18333 pnpm --filter @forgebadger/web dev
 ```
 
 開啟 Web 控制台：
 
 ```text
-http://127.0.0.1:48732
+http://127.0.0.1:18333
 ```
 
 執行聚焦檢查：

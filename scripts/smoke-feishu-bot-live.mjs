@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const DEFAULT_GATEWAY_URL = "http://127.0.0.1:48731";
+const DEFAULT_GATEWAY_URL = "http://127.0.0.1:18332";
 const DEFAULT_DURATION_MS = 120_000;
 const DEFAULT_MAX_EVENTS = 2;
 const EVENT_SUBSCRIPTION = "im.message.receive_v1";

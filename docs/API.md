@@ -910,7 +910,7 @@ CI usage example:
 ```bash
 curl -fsS \
   -H "Authorization: Bearer $FORGEBADGER_TOKEN" \
-  "http://127.0.0.1:48731/api/v1/projects/$PROJECT_ID/config/compliance" \
+  "http://127.0.0.1:18332/api/v1/projects/$PROJECT_ID/config/compliance" \
   | jq -e '.data.compliance.status == "compliant"'
 ```
 
@@ -2049,7 +2049,7 @@ copyable configuration containing the token only in the creation dialog.
   "mcpServers": {
     "forgebadger": {
       "type": "http",
-      "url": "http://127.0.0.1:48731/mcp",
+      "url": "http://127.0.0.1:18332/mcp",
       "headers": { "Authorization": "Bearer <TOKEN>" }
     }
   }

@@ -168,9 +168,9 @@ pnpm install
 Create a local `.env` file. Do not commit it.
 
 ```bash
-FORGEBADGER_PORT=48731
-FORGEBADGER_WEB_PORT=48732
-NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
+FORGEBADGER_PORT=18332
+FORGEBADGER_WEB_PORT=18333
+NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:18332
 FORGEBADGER_MASTER_KEY=<64-hex-characters-from-openssl-rand-hex-32>
 FORGEBADGER_JWT_SECRET=<32+-character-random-secret>
 ```
@@ -179,13 +179,13 @@ Start the Gateway and Web console in separate shells:
 
 ```bash
 pnpm --filter @forgebadger/gateway dev
-FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=48732 pnpm --filter @forgebadger/web dev
+FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=18333 pnpm --filter @forgebadger/web dev
 ```
 
 Open the Web console:
 
 ```text
-http://127.0.0.1:48732
+http://127.0.0.1:18333
 ```
 
 Run focused checks:

@@ -11,16 +11,16 @@ import {
 
 describe("Claude notification settings", () => {
   it("builds HTTP forwarding hooks for permission and lifecycle events", () => {
-    const settings = buildForgeBadgerClaudeHookSettings("http://127.0.0.1:48731");
+    const settings = buildForgeBadgerClaudeHookSettings("http://127.0.0.1:18332");
 
     const permissionHook = settings.hooks.PermissionRequest[0]?.hooks[0];
     assert.equal(permissionHook?.type, "http");
-    assert.equal(permissionHook?.url, "http://127.0.0.1:48731/api/v1/session-hooks/cli-notification");
+    assert.equal(permissionHook?.url, "http://127.0.0.1:18332/api/v1/session-hooks/cli-notification");
     assert.equal(permissionHook?.headers?.["x-forgebadger-session-id"], "$FORGEBADGER_SESSION_ID");
     assert.equal(permissionHook?.headers?.["x-forgebadger-session-token"], "$FORGEBADGER_ATTACH_TOKEN");
     assert.deepEqual(permissionHook?.allowedEnvVars, ["FORGEBADGER_SESSION_ID", "FORGEBADGER_ATTACH_TOKEN"]);
     assert.deepEqual(settings.allowedHttpHookUrls, [
-      "http://127.0.0.1:48731/api/v1/session-hooks/cli-notification*"
+      "http://127.0.0.1:18332/api/v1/session-hooks/cli-notification*"
     ]);
     assert.deepEqual(settings.httpHookAllowedEnvVars, [
       "FORGEBADGER_SESSION_ID",
@@ -33,7 +33,7 @@ describe("Claude notification settings", () => {
     assert.equal(settings.hooks.Notification[0]?.matcher, "permission_prompt");
     const notificationHook = settings.hooks.Notification[0]?.hooks[0];
     assert.equal(notificationHook?.type, "http");
-    assert.equal(notificationHook?.url, "http://127.0.0.1:48731/api/v1/session-hooks/cli-notification");
+    assert.equal(notificationHook?.url, "http://127.0.0.1:18332/api/v1/session-hooks/cli-notification");
     assert.doesNotMatch(String(notificationHook?.url), /session-token-value|attach-token-value/);
     assert.equal(settings.hooks.SessionStart, undefined);
     assert.equal(settings.httpHookAllowedEnvVars.includes("FORGEBADGER_PORTFOLIO_WORKER_ACK_CAPABILITY"), false);
@@ -52,7 +52,7 @@ describe("Claude notification settings", () => {
       }, null, 2)
     );
 
-    const result = await ensureClaudeNotificationSettings(root, "http://127.0.0.1:48731");
+    const result = await ensureClaudeNotificationSettings(root, "http://127.0.0.1:18332");
 
     const settings = JSON.parse(await readFile(settingsPath, "utf8"));
     assert.equal(result.changed, true);
@@ -61,7 +61,7 @@ describe("Claude notification settings", () => {
     assert.equal(settings.hooks.PermissionRequest[0].hooks[0].type, "http");
     assert.equal(
       settings.hooks.PermissionRequest[0].hooks[0].url,
-      "http://127.0.0.1:48731/api/v1/session-hooks/cli-notification"
+      "http://127.0.0.1:18332/api/v1/session-hooks/cli-notification"
     );
     assert.equal(settings.hooks.Notification.some((group: { matcher?: string }) => group.matcher === "permission_prompt"), true);
   });
@@ -70,8 +70,8 @@ describe("Claude notification settings", () => {
     const root = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-hooks-stable-"));
     const settingsPath = path.join(root, ".claude", "settings.local.json");
 
-    const first = await ensureClaudeNotificationSettings(root, "http://127.0.0.1:48731");
-    const second = await ensureClaudeNotificationSettings(root, "http://127.0.0.1:48731");
+    const first = await ensureClaudeNotificationSettings(root, "http://127.0.0.1:18332");
+    const second = await ensureClaudeNotificationSettings(root, "http://127.0.0.1:18332");
 
     assert.equal(first.changed, true);
     // The hook is session-agnostic, so a second session must not rewrite the
@@ -103,12 +103,12 @@ describe("Claude notification settings", () => {
       )
     );
 
-    await ensureClaudeNotificationSettings(root, "http://127.0.0.1:48731");
+    await ensureClaudeNotificationSettings(root, "http://127.0.0.1:18332");
 
     const settings = JSON.parse(await readFile(settingsPath, "utf8"));
     assert.deepEqual(settings.allowedHttpHookUrls, [
       "https://hooks.example.com/*",
-      "http://127.0.0.1:48731/api/v1/session-hooks/cli-notification*"
+      "http://127.0.0.1:18332/api/v1/session-hooks/cli-notification*"
     ]);
     assert.deepEqual(settings.httpHookAllowedEnvVars, [
       "EXISTING_TOKEN",

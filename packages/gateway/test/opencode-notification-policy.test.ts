@@ -12,7 +12,7 @@ it('OpenCode only notifies root busy-to-idle and permissions still pending after
   const saved={...process.env};const originalFetch=globalThis.fetch;
   const sent:Record<string,unknown>[]=[];let pending:Array<{id:string;sessionID:string}>=[];
   try{
-    Object.assign(process.env,{FORGEBADGER_GATEWAY_URL:'http://127.0.0.1:48731',FORGEBADGER_SESSION_ID:'fb-session',FORGEBADGER_ATTACH_TOKEN:'fixture'});
+    Object.assign(process.env,{FORGEBADGER_GATEWAY_URL:'http://127.0.0.1:18332',FORGEBADGER_SESSION_ID:'fb-session',FORGEBADGER_ATTACH_TOKEN:'fixture'});
     globalThis.fetch=async(_url,init)=>{sent.push(JSON.parse(String(init?.body)));return Response.json({code:0});};
     const file=join(root,'plugin.mjs');await writeFile(file,FORGEBADGER_OPENCODE_PLUGIN_TEMPLATE);
     const module=await import(pathToFileURL(file).href) as {ForgeBadgerPermissionNotify:(input:unknown)=>Promise<{event:(input:{event:Event})=>Promise<void>}>};

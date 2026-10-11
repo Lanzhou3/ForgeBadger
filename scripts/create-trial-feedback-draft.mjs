@@ -4,8 +4,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_WEB_URL = "http://127.0.0.1:48732";
-const DEFAULT_GATEWAY_URL = "http://127.0.0.1:48731";
+const DEFAULT_WEB_URL = "http://127.0.0.1:18333";
+const DEFAULT_GATEWAY_URL = "http://127.0.0.1:18332";
 const DEFAULT_STARTUP_PATH = "npm/CLI / source fallback";
 const MAX_DRAFT_LINE_LENGTH = 180;
 

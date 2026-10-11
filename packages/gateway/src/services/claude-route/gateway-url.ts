@@ -6,6 +6,6 @@
 export function gatewayLoopbackUrl(env: NodeJS.ProcessEnv = process.env): string {
   const host = (env.FORGEBADGER_HOST ?? "").trim() || "127.0.0.1";
   const rawPort = Number(env.FORGEBADGER_PORT);
-  const port = Number.isInteger(rawPort) && rawPort > 0 ? rawPort : 3000;
+  const port = Number.isInteger(rawPort) && rawPort > 0 ? rawPort : 18332;
   return `http://${host}:${port}`;
 }

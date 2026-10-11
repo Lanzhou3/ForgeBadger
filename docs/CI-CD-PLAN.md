@@ -135,10 +135,10 @@ E2E requires a real Gateway plus Web console on the configured ports:
 
 ```bash
 export FORGEBADGER_HOST=127.0.0.1
-export FORGEBADGER_PORT=48731
-export FORGEBADGER_WEB_PORT=48732
-export FORGEBADGER_GATEWAY_URL=http://127.0.0.1:48731
-export NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
+export FORGEBADGER_PORT=18332
+export FORGEBADGER_WEB_PORT=18333
+export FORGEBADGER_GATEWAY_URL=http://127.0.0.1:18332
+export NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:18332
 export FORGEBADGER_DB_PATH=/tmp/forgebadger-ci.db
 export FORGEBADGER_MASTER_KEY=<64-hex-characters>
 export FORGEBADGER_JWT_SECRET=<32+-character-secret>

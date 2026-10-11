@@ -112,7 +112,7 @@ export async function createInitRenderPlan(input: CreateInitRenderPlanInput): Pr
     variables: {
       projectName: path.basename(targetRoot),
       projectRoot: targetRoot,
-      gatewayUrl: env.FORGEBADGER_GATEWAY_URL ?? "http://127.0.0.1:48731"
+      gatewayUrl: env.FORGEBADGER_GATEWAY_URL ?? "http://127.0.0.1:18332"
     },
     templateFiles: buildProjectConfigFiles({
       adapter: adapterForTemplate(template),

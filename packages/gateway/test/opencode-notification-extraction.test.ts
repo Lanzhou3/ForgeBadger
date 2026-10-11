@@ -122,7 +122,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("POSTs the expected body for a realistic permission.asked event", async () => {
     setEnv({
-      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731/",
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:18332/",
       FORGEBADGER_SESSION_ID: "sess-opencode-1",
       FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
@@ -134,7 +134,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
     assert.ok(captured, "expected a fetch call");
     assert.equal(
       captured?.url,
-      "http://127.0.0.1:48731/api/v1/session-hooks/cli-notification/sess-opencode-1"
+      "http://127.0.0.1:18332/api/v1/session-hooks/cli-notification/sess-opencode-1"
     );
     assert.equal(captured?.headers["content-type"], "application/json");
     assert.equal(captured?.headers["x-forgebadger-session-id"], "sess-opencode-1");
@@ -144,7 +144,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("falls back to a plain permission label when permission is not a string", async () => {
     setEnv({
-      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:18332",
       FORGEBADGER_SESSION_ID: "sess-opencode-1",
       FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
@@ -173,7 +173,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("does not invent a pending permission when properties are missing", async () => {
     setEnv({
-      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:18332",
       FORGEBADGER_SESSION_ID: "sess-opencode-1",
       FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
@@ -187,7 +187,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("derives tool_name from metadata.tool when tool is a reference object", async () => {
     setEnv({
-      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:18332",
       FORGEBADGER_SESSION_ID: "sess-opencode-1",
       FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
@@ -216,7 +216,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("falls back to OpenCode tool name when neither tool nor metadata.tool is present", async () => {
     setEnv({
-      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:18332",
       FORGEBADGER_SESSION_ID: "sess-opencode-1",
       FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
@@ -244,7 +244,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("does not notify for non permission.asked events", async () => {
     setEnv({
-      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:18332",
       FORGEBADGER_SESSION_ID: "sess-opencode-1",
       FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
@@ -258,7 +258,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("maps idle and error events to completion and failure notifications", async () => {
     setEnv({
-      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:18332",
       FORGEBADGER_SESSION_ID: "sess-opencode-1",
       FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
@@ -299,7 +299,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("no-ops without fetching when SESSION_ID is missing", async () => {
     setEnv({
-      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:18332",
       FORGEBADGER_ATTACH_TOKEN: "attach-token-123"
     });
     mockFetch();
@@ -312,7 +312,7 @@ describe("OpenCode plugin event extraction (realistic fixture)", () => {
 
   it("no-ops without fetching when ATTACH_TOKEN is missing", async () => {
     setEnv({
-      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731",
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:18332",
       FORGEBADGER_SESSION_ID: "sess-opencode-1"
     });
     mockFetch();

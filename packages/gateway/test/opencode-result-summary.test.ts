@@ -10,7 +10,7 @@ for(const sdk of ['v1','v2'] as const)it(`OpenCode ${sdk} freezes only completed
   const dir=await mkdtemp(join(tmpdir(),'fb-opencode-result-')),saved={...process.env},originalFetch=globalThis.fetch;
   const sent:Record<string,unknown>[]=[];
   try {
-    Object.assign(process.env,{FORGEBADGER_GATEWAY_URL:'http://127.0.0.1:48731',FORGEBADGER_SESSION_ID:'fixture',FORGEBADGER_ATTACH_TOKEN:'fixture'});
+    Object.assign(process.env,{FORGEBADGER_GATEWAY_URL:'http://127.0.0.1:18332',FORGEBADGER_SESSION_ID:'fixture',FORGEBADGER_ATTACH_TOKEN:'fixture'});
     globalThis.fetch=async(_url,init)=>{sent.push(JSON.parse(String(init?.body)));return Response.json({code:0});};
     const file=join(dir,'plugin.mjs');await writeFile(file,FORGEBADGER_OPENCODE_PLUGIN_TEMPLATE);
     const module=await import(pathToFileURL(file).href);
@@ -50,7 +50,7 @@ for(const mode of ['race','race-unknown','parts','bytes','eviction'] as const)it
   const sent:Record<string,unknown>[]=[];
   let defer=false,release:(()=>void)|undefined;
   try {
-    Object.assign(process.env,{FORGEBADGER_GATEWAY_URL:'http://127.0.0.1:48731',FORGEBADGER_SESSION_ID:'fixture',FORGEBADGER_ATTACH_TOKEN:'fixture'});
+    Object.assign(process.env,{FORGEBADGER_GATEWAY_URL:'http://127.0.0.1:18332',FORGEBADGER_SESSION_ID:'fixture',FORGEBADGER_ATTACH_TOKEN:'fixture'});
     globalThis.fetch=async(_url,init)=>{sent.push(JSON.parse(String(init?.body)));return Response.json({code:0});};
     const file=join(dir,'plugin.mjs');await writeFile(file,FORGEBADGER_OPENCODE_PLUGIN_TEMPLATE);
     const module=await import(pathToFileURL(file).href);

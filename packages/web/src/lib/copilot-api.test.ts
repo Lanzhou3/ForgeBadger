@@ -17,7 +17,7 @@ import {
   writeMemoryEntry,
 } from "./copilot-api";
 
-const BASE = "http://127.0.0.1:48731";
+const BASE = "http://127.0.0.1:18332";
 
 function mockEnvelope(data: unknown = {}) {
   return Promise.resolve({

@@ -15,10 +15,10 @@ describe("parseCliArgs", () => {
   });
 
   it("parses start ports and host", () => {
-    assert.deepEqual(parseCliArgs(["start", "--gateway-port", "48731", "--web-port", "48732", "--host", "127.0.0.1"]), {
+    assert.deepEqual(parseCliArgs(["start", "--gateway-port", "18332", "--web-port", "18333", "--host", "127.0.0.1"]), {
       command: "start",
-      gatewayPort: 48731,
-      webPort: 48732,
+      gatewayPort: 18332,
+      webPort: 18333,
       host: "127.0.0.1",
       openBrowser: false
     });

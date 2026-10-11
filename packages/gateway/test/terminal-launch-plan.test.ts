@@ -111,9 +111,9 @@ describe("createTerminalLaunchPlan", () => {
       sessionId: "s-5",
       shell: "sh",
       platform: "linux",
-      env: { FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731" }
+      env: { FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:18332" }
     });
-    assert.equal(plan.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
+    assert.equal(plan.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:18332");
   });
 });
 

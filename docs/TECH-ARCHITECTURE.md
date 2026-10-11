@@ -1550,7 +1550,7 @@ ConPTY + psmux + 浏览器 + AI CLI 完整生命周期仍由 `WINDOWS-WSL` 外�
 
 | 变量名 | 必需 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `FORGEBADGER_PORT` | ❌ | 3000 | Gateway HTTP/WS 端口 |
+| `FORGEBADGER_PORT` | ❌ | 18332 | Gateway HTTP/WS 端口 |
 | `FORGEBADGER_DB_PATH` | ❌ | `~/.forgebadger/forgebadger.db` | SQLite 数据库路径 |
 | `FORGEBADGER_MASTER_KEY` | ✅ | — | AES 加密密钥（推荐 64 字符 hex） |
 | `FORGEBADGER_JWT_SECRET` | ✅ | — | JWT 签名密钥 |

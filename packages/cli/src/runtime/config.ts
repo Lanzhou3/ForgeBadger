@@ -42,8 +42,8 @@ export interface RuntimeConfigInspection {
   config?: RuntimeConfig;
 }
 
-const DEFAULT_GATEWAY = { host: "127.0.0.1", port: 48731 } as const;
-const DEFAULT_WEB = { host: "127.0.0.1", port: 48732 } as const;
+const DEFAULT_GATEWAY = { host: "127.0.0.1", port: 18332 } as const;
+const DEFAULT_WEB = { host: "127.0.0.1", port: 18333 } as const;
 
 export async function loadOrCreateRuntimeConfig(
   options: LoadRuntimeConfigOptions = {}

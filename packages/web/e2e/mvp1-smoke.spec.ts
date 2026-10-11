@@ -8,7 +8,7 @@ import { fillRecoveryKey } from "./register-user";
 const gatewayUrl =
   process.env.NEXT_PUBLIC_GATEWAY_URL ??
   process.env.FORGEBADGER_GATEWAY_URL ??
-  "http://127.0.0.1:48731";
+  "http://127.0.0.1:18332";
 
 test("MVP-1 management console smoke", async ({ page }) => {
   const suffix = uniqueSuffix();
@@ -18,7 +18,7 @@ test("MVP-1 management console smoke", async ({ page }) => {
   const projectPath = `/tmp/forgebadger-mvp1-${suffix}`;
   const templateName = `MVP1 Template ${suffix}`;
 
-  // The dev runtime script defaults to port 48731, so pin this page to the test Gateway.
+  // The dev runtime script defaults to port 18332, so pin this page to the test Gateway.
   await page.addInitScript((url) => {
     window.localStorage.setItem("forgebadger-language", "en");
     window.__FORGEBADGER_RUNTIME__ = { gatewayBaseUrl: url };

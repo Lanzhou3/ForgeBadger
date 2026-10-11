@@ -728,7 +728,7 @@ Plan B: 降级方案
 
 | 变量 | 必需 | 默认值 | 说明 |
 |------|------|--------|------|
-| `FORGEBADGER_PORT` | ❌ | 3000 | Gateway 端口 |
+| `FORGEBADGER_PORT` | ❌ | 18332 | Gateway 端口 |
 | `FORGEBADGER_DB_PATH` | ❌ | `~/.forgebadger/forgebadger.db` | SQLite 路径 |
 | `FORGEBADGER_MASTER_KEY` | ✅ | — | AES 加密密钥（推荐 64 字符 hex） |
 | `FORGEBADGER_JWT_SECRET` | ✅ | — | JWT 签名密钥 |

@@ -67,11 +67,11 @@ Typical local `.env` shape:
 
 ```bash
 FORGEBADGER_HOST=127.0.0.1
-FORGEBADGER_PORT=48731
+FORGEBADGER_PORT=18332
 FORGEBADGER_WEB_HOST=127.0.0.1
-FORGEBADGER_WEB_PORT=48732
-FORGEBADGER_GATEWAY_URL=http://127.0.0.1:48731
-NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
+FORGEBADGER_WEB_PORT=18333
+FORGEBADGER_GATEWAY_URL=http://127.0.0.1:18332
+NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:18332
 FORGEBADGER_DB_PATH=/absolute/path/to/forgebadger.db
 FORGEBADGER_MASTER_KEY=<64-hex-characters>
 FORGEBADGER_JWT_SECRET=<32+-character-secret>
@@ -145,11 +145,11 @@ For development or manual smoke:
 
 ```bash
 pnpm --filter @forgebadger/gateway dev
-FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=48732 pnpm --filter @forgebadger/web dev
+FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=18333 pnpm --filter @forgebadger/web dev
 ```
 
 The Gateway must be reachable at `FORGEBADGER_GATEWAY_URL`. The browser must load
-the Web console at `http://localhost:48732` or the forwarded host configured by
+the Web console at `http://localhost:18333` or the forwarded host configured by
 the operator.
 
 ## 6. NPM Release Candidate

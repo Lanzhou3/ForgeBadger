@@ -126,7 +126,7 @@ function getGatewayUrl(): string {
   return (
     process.env.FORGEBADGER_GATEWAY_URL
     || process.env.NEXT_PUBLIC_GATEWAY_URL
-    || `http://${process.env.FORGEBADGER_HOST || "127.0.0.1"}:${process.env.FORGEBADGER_PORT || "3000"}`
+    || `http://${process.env.FORGEBADGER_HOST || "127.0.0.1"}:${process.env.FORGEBADGER_PORT || "18332"}`
   );
 }
 

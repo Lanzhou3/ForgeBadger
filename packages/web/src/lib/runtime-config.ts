@@ -8,7 +8,7 @@ declare global {
   }
 }
 
-const DEFAULT_GATEWAY_BASE_URL = "http://127.0.0.1:48731";
+const DEFAULT_GATEWAY_BASE_URL = "http://127.0.0.1:18332";
 
 function nonEmpty(value: string | undefined): string | undefined {
   const trimmed = value?.trim();

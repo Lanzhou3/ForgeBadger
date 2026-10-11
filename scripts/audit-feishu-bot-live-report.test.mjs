@@ -91,7 +91,7 @@ function buildGateClearingReport() {
     mode: "real_feishu_bot_long_connection",
     gateClearingEvidence: true,
     publicCallbackRequired: false,
-    gatewayUrl: "http://127.0.0.1:48731",
+    gatewayUrl: "http://127.0.0.1:18332",
     eventSubscription: "im.message.receive_v1",
     durationMs: 120000,
     maxEvents: 2,

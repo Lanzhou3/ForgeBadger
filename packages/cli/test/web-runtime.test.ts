@@ -42,14 +42,14 @@ describe("writeWebRuntimeConfig", () => {
     // Act
     const filePath = await writeWebRuntimeConfig({
       webPublicDir: path.join(root, "nested", "public"),
-      gatewayBaseUrl: "http://127.0.0.1:48731"
+      gatewayBaseUrl: "http://127.0.0.1:18332"
     });
 
     // Assert
     assert.equal(filePath, path.join(root, "nested", "public", "forgebadger-runtime.js"));
     assert.equal(
       await readFile(filePath, "utf8"),
-      'window.__FORGEBADGER_RUNTIME__ = {"gatewayBaseUrl":"http://127.0.0.1:48731"};\n'
+      'window.__FORGEBADGER_RUNTIME__ = {"gatewayBaseUrl":"http://127.0.0.1:18332"};\n'
     );
     assert.doesNotMatch(await readFile(filePath, "utf8"), /MASTER_KEY|JWT|secret/i);
   });

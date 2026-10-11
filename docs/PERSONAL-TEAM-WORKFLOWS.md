@@ -163,17 +163,17 @@ before disabling accounts that still own teams/projects.
 The supported private-host topology keeps Gateway and Web on loopback and forwards
 both over each member's authenticated SSH connection. Do not bind the Gateway to a
 public interface or enable broad Origins just to reach it. On the host use
-`FORGEBADGER_HOST=127.0.0.1`, `FORGEBADGER_PORT=48731`,
-`FORGEBADGER_WEB_HOST=127.0.0.1`, `FORGEBADGER_WEB_PORT=48732`, and build Web with
-`NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731`. Each member runs:
+`FORGEBADGER_HOST=127.0.0.1`, `FORGEBADGER_PORT=18332`,
+`FORGEBADGER_WEB_HOST=127.0.0.1`, `FORGEBADGER_WEB_PORT=18333`, and build Web with
+`NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:18332`. Each member runs:
 
 ```sh
 ssh -N -o ExitOnForwardFailure=yes \
-  -L 127.0.0.1:48731:127.0.0.1:48731 \
-  -L 127.0.0.1:48732:127.0.0.1:48732 teammate@your-private-host
+  -L 127.0.0.1:18332:127.0.0.1:18332 \
+  -L 127.0.0.1:18333:127.0.0.1:18333 teammate@your-private-host
 ```
 
-Open `http://127.0.0.1:48732` locally and use an individual ForgeBadger account. Verify
+Open `http://127.0.0.1:18333` locally and use an individual ForgeBadger account. Verify
 the host key through your normal trusted channel; use distinct SSH keys. Restrict the
 SSH account to the permitted forwarding destinations when shell access is unnecessary.
 The same local ports on different members' computers do not collide. If those ports

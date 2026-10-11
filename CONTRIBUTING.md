@@ -21,7 +21,7 @@ cloud service or generic project-management suite.
 ```bash
 pnpm install
 pnpm --filter @forgebadger/gateway dev
-FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=48732 pnpm --filter @forgebadger/web dev
+FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=18333 pnpm --filter @forgebadger/web dev
 ```
 
 Use a local `.env` and never commit it. Required secrets include

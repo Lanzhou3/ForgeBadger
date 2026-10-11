@@ -249,7 +249,7 @@ async function mockModelsApis(
           routing: {
             enabled: false,
             hasToken: false,
-            gatewayUrl: "http://127.0.0.1:48731",
+            gatewayUrl: "http://127.0.0.1:18332",
             assignment: null,
           },
         }),

@@ -18,10 +18,10 @@ describe("local release smoke harness", () => {
     });
 
     assert.equal(env.FORGEBADGER_HOST, "127.0.0.1");
-    assert.equal(env.FORGEBADGER_PORT, "48731");
-    assert.equal(env.FORGEBADGER_WEB_PORT, "48732");
-    assert.equal(env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
-    assert.equal(env.NEXT_PUBLIC_GATEWAY_URL, "http://127.0.0.1:48731");
+    assert.equal(env.FORGEBADGER_PORT, "18332");
+    assert.equal(env.FORGEBADGER_WEB_PORT, "18333");
+    assert.equal(env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:18332");
+    assert.equal(env.NEXT_PUBLIC_GATEWAY_URL, "http://127.0.0.1:18332");
     assert.equal(env.FORGEBADGER_DB_PATH, path.join("/tmp/forgebadger-smoke", "forgebadger-smoke.db"));
 
     assert.deepEqual(redactSmokeEnvironment(env), {
