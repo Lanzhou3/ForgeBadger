@@ -1,5 +1,4 @@
-import { type FormEvent, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Copy, Eye, EyeOff, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +36,11 @@ interface CredentialTabProps {
   t: Translate;
 }
 
+function matchesActiveCredential(current: ProviderCredentialSummary, snapshot: ProviderCredentialSummary): boolean {
+  return current.id === snapshot.id && current.providerProfileId === snapshot.providerProfileId
+    && current.status === 'active' && current.generation === snapshot.generation;
+}
+
 export function CredentialTab({
   credentials,
   selectedCredentialId,
@@ -59,30 +63,57 @@ export function CredentialTab({
   const [revealTarget, setRevealTarget] = useState<ProviderCredentialSummary | null>(null);
   const [revealPassword, setRevealPassword] = useState("");
   const [revealError, setRevealError] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState<{ credentialId: string; secret: string } | null>(null);
+  const [revealed, setRevealed] = useState<{ credential: ProviderCredentialSummary; secret: string } | null>(null);
+  const [isRevealing, setIsRevealing] = useState(false);
+  const revealGeneration = useRef(0);
+
+  // Closing, changing targets and unmounting invalidate in-flight responses.
+  // This request deliberately stays outside TanStack's shared MutationCache.
+  useEffect(() => () => { revealGeneration.current++; }, []);
+
+  function isCurrentCredential(credential: ProviderCredentialSummary) {
+    return credentials.some(current => matchesActiveCredential(current, credential));
+  }
+
+  useEffect(() => {
+    if (revealed && !credentials.some(current => matchesActiveCredential(current, revealed.credential))) {
+      setRevealed(null);
+    }
+    if (revealTarget && !credentials.some(current => matchesActiveCredential(current, revealTarget))) {
+      revealGeneration.current++;
+      setRevealTarget(null);
+      setRevealPassword('');
+      setRevealError(null);
+      setIsRevealing(false);
+    }
+  }, [credentials, revealed, revealTarget]);
 
   // Reset the reveal flow back to the masked state (dialog closed, no secret).
   function resetRevealState() {
+    revealGeneration.current++;
     setRevealTarget(null);
     setRevealPassword("");
     setRevealError(null);
+    setIsRevealing(false);
   }
 
-  const revealMutation = useMutation({
-    mutationFn: () => {
-      if (!revealTarget) throw new Error("No credential selected");
-      return revealProviderCredential(revealTarget.providerProfileId, revealTarget.id, revealPassword);
-    },
-    onSuccess: (result) => {
-      if (revealTarget) {
-        setRevealed({ credentialId: revealTarget.id, secret: result.secret });
-      }
+  async function revealSecret() {
+    if (!revealTarget || !revealPassword || isRevealing) return;
+    const credential = revealTarget;
+    const generation = ++revealGeneration.current;
+    setIsRevealing(true);
+    setRevealError(null);
+    try {
+      const result = await revealProviderCredential(credential.providerProfileId, credential.id, revealPassword);
+      if (generation !== revealGeneration.current) return;
+      setRevealed({ credential, secret: result.secret });
       resetRevealState();
-    },
-    onError: (error) => {
+    } catch (error) {
+      if (generation !== revealGeneration.current) return;
       setRevealError(error instanceof Error ? error.message : t("models.credentialRevealFailed"));
-    },
-  });
+      setIsRevealing(false);
+    }
+  }
 
   function openRevealDialog(credential: ProviderCredentialSummary) {
     resetRevealState();
@@ -140,7 +171,7 @@ export function CredentialTab({
       ) : (
         <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
           {credentials.map((credential, index) => {
-            const activeReveal = revealed && revealed.credentialId === credential.id ? revealed : null;
+            const activeReveal = revealed && revealed.credential.id === credential.id && isCurrentCredential(revealed.credential) ? revealed : null;
             return (
             <div
               key={credential.id}
@@ -214,7 +245,7 @@ export function CredentialTab({
                   className="size-8 text-muted-foreground hover:text-brand"
                   title={t("models.rotate")}
                   aria-label={t("models.rotate")}
-                  onClick={() => onOpenRotate(credential.id)}
+                  onClick={() => { resetRevealState(); setRevealed(null); onOpenRotate(credential.id); }}
                 >
                   <RefreshCw className="size-4" />
                 </Button>
@@ -226,7 +257,7 @@ export function CredentialTab({
                   disabled={isDeleting}
                   title={t("models.deleteCredential")}
                   aria-label={t("models.deleteCredential")}
-                  onClick={() => onDeleteCredential(credential.id)}
+                  onClick={() => { resetRevealState(); setRevealed(null); onDeleteCredential(credential.id); }}
                 >
                   <Trash2 className="size-4" />
                 </Button>
@@ -293,8 +324,7 @@ export function CredentialTab({
             className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              if (!revealPassword || revealMutation.isPending) return;
-              revealMutation.mutate();
+              void revealSecret();
             }}
           >
             <DialogHeader>
@@ -320,12 +350,11 @@ export function CredentialTab({
               <Button
                 type="button"
                 variant="outline"
-                disabled={revealMutation.isPending}
                 onClick={closeRevealDialog}
               >
                 {t("common.cancel")}
               </Button>
-              <Button type="submit" disabled={revealMutation.isPending || !revealPassword}>
+              <Button type="submit" disabled={isRevealing || !revealPassword}>
                 <Eye className="size-4" />
                 {t("models.revealConfirm")}
               </Button>
