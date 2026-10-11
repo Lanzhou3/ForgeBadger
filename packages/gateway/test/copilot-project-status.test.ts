@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { it, beforeEach, afterEach, type TestContext } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync, existsSync, readFileSync, statSync, utimesSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from "node:url";
@@ -204,3 +204,32 @@ it('honors explicit system-config exclusion without executing a configured filte
   assert.equal((await readProjectGitStatus(f.root)).counts.total, 1);
   assert.equal(existsSync(marker), false);
 });
+
+
+for (const splitIndex of [false, true]) {
+  it(`preserves racy-index detection for same-size edits (${splitIndex ? 'split' : 'ordinary'} index)`, async t => {
+    const f = repo(t, false), file = join(f.root, 'main.ts'), gitDir = join(f.root, '.git');
+    f.git('config', 'core.trustctime', 'false');
+    const timestamp = new Date('2000-01-01T00:00:00Z');
+    writeFileSync(file, 'initial\n'); utimesSync(file, timestamp, timestamp);
+    f.git('add', '.'); f.git('commit', '-qm', 'racy index fixture');
+    if (splitIndex) f.git('update-index', '--split-index');
+    const indexes = readdirSync(gitDir).filter(name => name === 'index' || name.startsWith('sharedindex.'));
+    // An index older than its entries makes Git verify content even when cached
+    // file size and mtime match. A freshly copied index must not erase that proof.
+    for (const name of indexes) utimesSync(join(gitDir, name), timestamp, new Date(timestamp.getTime() - 1000));
+    writeFileSync(file, 'changed\n'); utimesSync(file, timestamp, timestamp);
+    const native = execFileSync('git', ['-C', f.root, 'status', '--porcelain'], {
+      encoding: 'utf8', env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+    });
+    assert.match(native, / M main\.ts/);
+    const originals = indexes.map(name => ({ path: join(gitDir, name), bytes: readFileSync(join(gitDir, name)), mtime: statSync(join(gitDir, name)).mtimeMs }));
+    const snapshot = await readProjectGitStatus(f.root);
+    assert.equal(snapshot.counts.total, 1); assert.equal(snapshot.counts.unstaged, 1); assert.equal(snapshot.clean, false);
+    writeFileSync(file, 'initial\n'); utimesSync(file, timestamp, timestamp);
+    assert.equal((await readProjectGitStatus(f.root)).clean, true);
+    for (const original of originals) {
+      assert.deepEqual(readFileSync(original.path), original.bytes); assert.equal(statSync(original.path).mtimeMs, original.mtime);
+    }
+  });
+}
