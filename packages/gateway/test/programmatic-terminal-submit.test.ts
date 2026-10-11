@@ -29,6 +29,64 @@ const STAGED_PANES = {
 } as const;
 
 describe("programmatic terminal submit classifiers", () => {
+  for (const adapter of ['codex', 'claude', 'opencode', 'kimi', 'pi'] as const) {
+    it(`requires an empty recognized ${adapter} composer after folded or clipped staging`, () => {
+      const needle = programmaticDeliveryNeedle('review changes and verify every boundary condition');
+      const staged = STAGED_PANES[adapter].replace('修复登录流程', '[Pasted 400 characters]');
+      assert.equal(composerContainsStagedTask(adapter, staged, 'task', needle, READY_PANES[adapter]), true);
+      for (const current of [staged + '\nfooter refreshed', staged.replace('400', '401'), '', 'Disconnected', 'Trust this directory?']) {
+        assert.equal(isProgrammaticTaskConsumed(adapter, staged, current, needle), false, current);
+      }
+      assert.equal(isProgrammaticTaskConsumed(adapter, staged, READY_PANES[adapter], needle), true);
+    });
+  }
+  it('confirms folded PI input only after the composer clears into its live busy footer', () => {
+    const staged = '  /app/workspace/project\n  0.0%/262k (auto)\n  [paste #2 +20 lines]';
+    const busy = '  ── ⠦ Working ───────────────────────────────\n  \n  ──────────────────────────────────────────\n  /app/workspace/project\n  5.5%/262k (auto)';
+    const needle = programmaticDeliveryNeedle('Review changes and verify boundaries');
+    assert.equal(isProgrammaticTaskConsumed('pi', staged, busy, needle), true);
+    assert.equal(isProgrammaticTaskConsumed('pi', staged, busy + '\n[paste #2 +20 lines]', needle), false);
+  });
+  it('ignores historical Codex busy hints above the current folded composer', () => {
+    const staged = '› [Pasted 400 characters]\n\nmodel · cwd';
+    const current = 'Old turn: esc to interrupt\n' + staged;
+    const needle = programmaticDeliveryNeedle('Review changes and verify boundaries');
+    assert.match(currentProgrammaticComposer('codex', current), /Pasted 400 characters/);
+    assert.equal(isProgrammaticTaskConsumed('codex', staged, current, needle), false);
+    assert.equal(isProgrammaticTaskConsumed('codex', staged, 'Historical esc to interrupt\nDisconnected', needle), false);
+    assert.equal(isProgrammaticTaskConsumed('codex', staged, staged + '\nWorking · esc to interrupt', needle), true);
+  });
+  it('confirms folded Codex input from a standalone busy footer with a known spinner', () => {
+    const staged = '› [Pasted 400 characters]\n\nmodel · cwd';
+    const needle = programmaticDeliveryNeedle('Review changes and verify boundaries');
+    // Codex's upstream status-indicator snapshot renders a leading bullet;
+    // braille spinner frames must also survive terminal-control stripping.
+    for (const spinner of ['', '• ', ...Array.from('⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏', frame => `${frame} `)]) {
+      for (const status of ['Working', 'Thinking']) {
+        const busy = `  ${spinner}${status} (3s • esc to interrupt)\n\n  model · cwd`;
+        assert.equal(isProgrammaticTaskConsumed('codex', staged, busy, needle), true, busy);
+        assert.equal(isProgrammaticComposerReady('codex', busy), false, busy);
+      }
+    }
+    const colored = '\u001b[2m  ⠋ Working (3s • esc to interrupt)\u001b[0m';
+    assert.equal(isProgrammaticTaskConsumed('codex', staged, colored, needle), true);
+  });
+  it('does not confirm folded Codex input from stale or unrecognized spinner lines', () => {
+    const staged = '› [Pasted 400 characters]\n\nmodel · cwd';
+    const needle = programmaticDeliveryNeedle('Review changes and verify boundaries');
+    const busy = '  ⠋ Working (3s • esc to interrupt)';
+    for (const current of [
+      `${busy}\n${staged}`,
+      `${busy}\nold output\nmore output\nDisconnected\nunknown screen`,
+      'Log: ⠋ Working (3s • esc to interrupt)',
+      '✓ Working (3s • esc to interrupt)',
+      '⠋ Working (3s)',
+      '⠋ Waiting (3s • esc to interrupt)'
+    ]) {
+      assert.equal(isProgrammaticTaskConsumed('codex', staged, current, needle), false, current);
+    }
+    assert.match(currentProgrammaticComposer('codex', `${busy}\n${staged}`), /Pasted 400 characters/);
+  });
   it('recognizes Claude folded paste only in the current composer with matching newline count', () => {
     const message = Array.from({ length: 35 }, (_, i) => `review line ${i}`).join('\n');
     const needle = programmaticDeliveryNeedle(message);

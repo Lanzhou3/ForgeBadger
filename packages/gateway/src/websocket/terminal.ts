@@ -67,10 +67,10 @@ export class TerminalInputBuffer {
   private readonly pendingInput: string[] = [];
   private pendingBytes = 0;
 
-  constructor(private readonly assertWritable: () => void = () => {}) {}
+  constructor(private readonly assertWritable: (data: string) => void = () => {}) {}
 
   writeOrStore(pty: TerminalWritable | undefined, data: string): void {
-    this.assertWritable();
+    this.assertWritable(data);
     if (pty) {
       pty.write(data);
       return;
@@ -87,7 +87,7 @@ export class TerminalInputBuffer {
     const pending = this.pendingInput.splice(0);
     this.pendingBytes = 0;
     for (const data of pending) {
-      this.assertWritable();
+      this.assertWritable(data);
       pty.write(data);
     }
     this.pendingInput.length = 0;
@@ -327,10 +327,7 @@ async function handleTerminalSocket(
 ): Promise<void> {
   let pty: SessionServerPty | undefined;
   let ptyExited = false;
-  const inputBuffer = new TerminalInputBuffer(() => {
-    sessionManager.assertManualInputAllowed(userId, sessionId);
-    sessionManager.noteManualInput(userId, sessionId);
-  });
+  const inputBuffer = new TerminalInputBuffer(data => sessionManager.assertTerminalInputAllowed(userId, sessionId, data));
   const resizeBuffer = new TerminalResizeBuffer();
   let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
   let authorizationLease: TerminalRuntimeAuthorizationLease | undefined;

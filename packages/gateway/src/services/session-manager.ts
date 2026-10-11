@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { TaskDispatchEvidenceRepository } from '../db/repositories/task-dispatch-evidence-repository.js';
 import { basename } from "node:path";
 import { redactSensitiveContent } from "../lib/redaction.js";
+import { isTerminalWheelInput } from '../lib/terminal-wheel-input.js';
 
 import type { LaunchPlan } from "../adapters/claude.js";
 import { isAdapterId, type AdapterId } from "./adapter-discovery.js";
@@ -898,6 +899,18 @@ export class InMemorySessionManager {
     const session = this.requireOwnedSession(userId, id);
     if(this.db) assertManagedSessionAccess(this.db,userId,id,session.launchPlan.cwd);
     this.writerLeases.assertManualInputAllowed({ userId, sessionId: id, workspace: session.launchPlan.cwd });
+  }
+
+  /** Viewer scroll keeps task evidence and writer ownership intact. */
+  assertTerminalInputAllowed(userId: string, id: string, data: string): void {
+    if (!isTerminalWheelInput(data)) {
+      this.assertManualInputAllowed(userId, id);
+      this.noteManualInput(userId, id);
+      return;
+    }
+    if (this.stoppingSessions.has(id)) throw new Error('SESSION_STOP_IN_PROGRESS');
+    const session = this.requireOwnedSession(userId, id);
+    if (this.db) assertManagedSessionAccess(this.db, userId, id, session.launchPlan.cwd);
   }
 
   takeoverSession(userId: string, id: string): void {

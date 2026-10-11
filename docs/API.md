@@ -2109,6 +2109,13 @@ Client to server:
 { "type": "terminal_input", "payload": { "data": "..." } }
 ```
 
+While an automated workspace writer holds the lease, keyboard input, clicks,
+motion reports and mixed chunks require takeover. Pure vertical SGR wheel
+reports (buttons 64/65, 68/69, 72/73 or 80/81) remain available for viewer
+scrolling. They retain session ownership and runtime/project authorization
+checks, including buffered-input flush, and do not mark task evidence as
+manual intervention. Input size and mouse rate limits still apply.
+
 Server to client:
 
 ```json

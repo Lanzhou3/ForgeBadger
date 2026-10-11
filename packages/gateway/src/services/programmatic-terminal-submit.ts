@@ -69,12 +69,21 @@ function codexComposer(lines: string[]): string {
   // composer until Codex returns to its empty prompt (or opens queue input).
   // v0.155.1 also renders "tab to queue message" on an unsubmitted paste;
   // that hint alone is not proof that input was consumed.
-  if (lines.some((line) => /esc to interrupt/i.test(line))) {
+  if (isCodexRunning(lines)) {
     return "";
   }
   const start = lastIndexMatching(lines, /^\s*›(?:\s|$)/);
   if (start < 0) return "";
   return lines.slice(start).join("\n");
+}
+
+function isCodexRunning(lines: string[]): boolean {
+  const start = lastIndexMatching(lines, /^\s*›(?:\s|$)/);
+  // Busy hints above the latest prompt belong to scrollback, not this input.
+  // With no prompt frame, require the explicit standalone running screen.
+  // Accept known spinner frames, while keeping arbitrary text prefixes excluded.
+  if (start < 0) return lines.slice(-4).some(line => /^\s*(?:[•⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+)?(?:Working|Thinking)\b.*esc to interrupt/iu.test(line));
+  return lines.slice(start + 1).some(line => /esc to interrupt/i.test(line));
 }
 
 function claudeComposer(lines: string[]): string {
@@ -309,10 +318,19 @@ export function isProgrammaticTaskConsumed(
   needle: string
 ): boolean {
   if (normalizeComparable(currentPane) === normalizeComparable(stagedPane)) return false;
-  if (adapter === 'claude' && CLAUDE_PASTE_COMPOSER.test(normalizeComparable(currentProgrammaticComposer(adapter, stagedPane)))) {
-    // A footer redraw, a partially painted marker or an unknown screen is not
-    // evidence of consumption. Require the composer to return to empty.
-    return isProgrammaticComposerReady(adapter, currentPane);
+  if (!composerContainsNeedle(adapter, stagedPane, needle)) {
+    // Folded/clipped staging was proved under the writer lease rather than by
+    // the literal needle. Its continued absence proves nothing about Enter.
+    // Require a recognized empty composer or an explicit running footer.
+    if (isProgrammaticComposerReady(adapter, currentPane)) return true;
+    if (adapter === 'pi') {
+      const lines = stripTerminalControl(currentPane).split('\n');
+      const statusIndex = lastIndexMatching(lines, PI_STATUS_LINE);
+      const footer = lines.slice(Math.max(0, statusIndex - PI_FOOTER_WINDOW));
+      return statusIndex >= 1 && currentProgrammaticComposer(adapter, currentPane) === ''
+        && footer.some(line => PI_BUSY_BAR.test(line)) && !footer.some(line => PI_FOLD_MARKER.test(line));
+    }
+    return adapter === 'codex' && isCodexRunning(stripTerminalControl(currentPane).split('\n'));
   }
   return !composerContainsNeedle(adapter, currentPane, needle);
 }
