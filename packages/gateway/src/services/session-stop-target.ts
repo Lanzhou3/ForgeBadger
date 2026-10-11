@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { McpSessionObservationRepository } from '../db/repositories/mcp-session-observation-repository.js';
 import { z } from 'zod';
 import type { Database } from '../db/types.js';
 import { SessionRepository, type Session } from '../db/repositories/session-repository.js';
@@ -69,11 +70,18 @@ interface ObservationRow { input_json: string; result_json: string; completed_at
 /** The model supplies a reference, never the identity displayed on the approval card. */
 export function resolveSessionStopTarget(ctx: CommandContext, input: z.infer<typeof stopSessionInput>): SessionStopTarget | undefined {
   if (!input.observationId || !input.expectedTitle) {
-    if (ctx.actionOrigin?.kind === 'copilot' || input.observationId || input.expectedTitle)
+    if (ctx.mcpTokenId || ctx.actionOrigin?.kind === 'copilot' || input.observationId || input.expectedTitle)
       throw new PlatformNoEffectError('SESSION_STOP_OBSERVATION_REQUIRED: Read get_session_output and use its target before stopping.');
     return undefined; // Direct owner terminal controls remain compatible.
   }
-  const row = ctx.db.prepare(`SELECT s.input_json,s.result_json,s.completed_at,r.conversation_id
+  const observation = ctx.mcpTokenId
+    ? new McpSessionObservationRepository(ctx.db, ctx.userId, ctx.mcpTokenId).get(input.observationId) : undefined;
+  const row = ctx.mcpTokenId ? (observation ? {
+    input_json: JSON.stringify({ sessionId: observation.metadata.sessionId }),
+    result_json: JSON.stringify({ live: true, sessionId: observation.metadata.sessionId,
+      target: { ...observation.metadata, terminalExcerpt: '' } }),
+    completed_at: observation.createdAt, conversation_id: ''
+  } : undefined) : ctx.db.prepare(`SELECT s.input_json,s.result_json,s.completed_at,r.conversation_id
     FROM copilot_run_steps s JOIN copilot_runs r ON r.id=s.run_id AND r.user_id=s.user_id
     WHERE s.user_id=? AND s.id=? AND s.tool_name='get_session_output' AND s.status='completed'`)
     .get(ctx.userId, input.observationId) as ObservationRow | undefined;

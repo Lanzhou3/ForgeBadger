@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Plug, Trash2 } from "lucide-react";
+import { Copy, Pencil, Plug, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ import {
   revokeMcpToken,
   runtimeSettingsValue,
   updateRuntimeSettings,
+  updateMcpTokenProjects,
   type McpToken,
   type McpTokenScope,
 } from "@/lib/api";
@@ -59,6 +60,7 @@ export function McpIntegrationSettings() {
   const [expiresInHours, setExpiresInHours] = useState<number | null>(null);
   const [plaintextToken, setPlaintextToken] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<McpToken | null>(null);
+  const [editing, setEditing] = useState<McpToken | null>(null);
   const [confirmEnable, setConfirmEnable] = useState(false);
 
   const status = useQuery({ queryKey: mcpStatusKey, queryFn: getMcpStatus, retry: false });
@@ -143,10 +145,10 @@ export function McpIntegrationSettings() {
     const active = scopes.includes(scope);
     // Keep at least one scope selected.
     if (active && scopes.length === 1) return;
-    if (scope === "cli_dispatch" && !active) {
-      setScopes([...new Set<McpTokenScope>([...scopes, "operate", "cli_dispatch"])]);
+    if ((scope === "cli_dispatch" || scope === "lifecycle") && !active) {
+      setScopes([...new Set<McpTokenScope>([...scopes, "operate", scope])]);
     } else if (scope === "operate" && active) {
-      const remaining = scopes.filter((item) => item !== "operate" && item !== "cli_dispatch");
+      const remaining = scopes.filter((item) => item !== "operate" && item !== "cli_dispatch" && item !== "lifecycle");
       setScopes(remaining.length > 0 ? remaining : ["read"]);
     } else {
       setScopes(active ? scopes.filter((item) => item !== scope) : [...scopes, scope]);
@@ -215,12 +217,14 @@ export function McpIntegrationSettings() {
                 )}
               </div>
             )}
-            {enabled && <McpTokensSection endpoint={endpoint} scopes={scopes} onToggleScope={toggleScope} onCreate={handleCreate} creating={createMutation.isPending} name={name} onNameChange={setName} projectIds={projectIds} onProjectIdsChange={setProjectIds} projects={projects.data?.projects ?? []} projectsLoading={projects.isLoading} projectsError={projects.isError} onAllScopes={() => setScopes(["read", "operate", "cli_dispatch"])} expiresInHours={expiresInHours} onExpiresInHoursChange={setExpiresInHours} tokens={tokens.data?.tokens ?? undefined} loading={tokens.isLoading} error={tokens.isError} onRevoke={setRevoking} />}
+            {enabled && <McpTokensSection endpoint={endpoint} scopes={scopes} onToggleScope={toggleScope} onCreate={handleCreate} creating={createMutation.isPending} name={name} onNameChange={setName} projectIds={projectIds} onProjectIdsChange={setProjectIds} projects={projects.data?.projects ?? []} projectsLoading={projects.isLoading} projectsError={projects.isError} onAllScopes={() => setScopes(["read", "operate", "cli_dispatch", "lifecycle"])} expiresInHours={expiresInHours} onExpiresInHoursChange={setExpiresInHours} tokens={tokens.data?.tokens ?? undefined} loading={tokens.isLoading} error={tokens.isError} onRevoke={setRevoking} onEdit={token => { setEditing(token); void projects.refetch(); }} />}
           </>
         )}
       </CardContent>
 
       <McpPlaintextDialog endpoint={endpoint} plaintext={plaintextToken} onClose={() => setPlaintextToken(null)} onCopy={copyText} />
+      {editing && <McpTokenProjectsDialog key={editing.id} token={editing} projects={projects.data?.projects ?? []}
+        loading={projects.isLoading || projects.isFetching} error={projects.isError} onClose={() => setEditing(null)} />}
       <ConfirmDialog
         open={confirmEnable}
         pending={mcpSwitchMutation.isPending}
@@ -276,6 +280,7 @@ function McpTokensSection({  endpoint,
   loading,
   error,
   onRevoke,
+  onEdit,
 }: {
   endpoint: string;
   scopes: McpTokenScope[];
@@ -296,6 +301,7 @@ function McpTokensSection({  endpoint,
   loading: boolean;
   error: boolean;
   onRevoke: (token: McpToken) => void;
+  onEdit: (token: McpToken) => void;
 }) {
   const locale = useUiLocale();
   const { t } = useLanguage();
@@ -347,6 +353,10 @@ function McpTokensSection({  endpoint,
               <Checkbox checked={scopes.includes("cli_dispatch")} onCheckedChange={() => onToggleScope("cli_dispatch")} aria-label={t("settings.mcpScopeCliDispatch")} />
               {t("settings.mcpScopeCliDispatch")}
             </label>
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+              <Checkbox checked={scopes.includes("lifecycle")} onCheckedChange={() => onToggleScope("lifecycle")} aria-label={t("settings.mcpScopeLifecycle")} />
+              {t("settings.mcpScopeLifecycle")}
+            </label>
             <Button type="button" variant="outline" size="sm" className="h-8" onClick={onAllScopes}>{t("settings.mcpAllPermissions")}</Button>
             <Button
               type="submit"
@@ -377,6 +387,7 @@ function McpTokensSection({  endpoint,
           <p className="pb-1 text-xs text-muted-foreground">{t("settings.mcpLifetimeHelp")}</p>
         </div>
         <p className="text-xs text-muted-foreground">{t("settings.mcpScopeOperateHelp")}</p>
+        <p className="text-xs text-muted-foreground">{t("settings.mcpLifecycleHelp")}</p>
       </form>
 
       <div className="rounded-md border border-border/70">
@@ -397,7 +408,7 @@ function McpTokensSection({  endpoint,
                 <span className="min-w-0 truncate text-sm font-medium">{token.name}</span>
                 {token.scopes.map((scope) => (
                   <Badge key={scope} variant={scope === "operate" ? "secondary" : "outline"}>
-                    {scope === "operate" ? t("settings.mcpScopeOperate") : scope === "cli_dispatch" ? t("settings.mcpScopeCliDispatch") : t("settings.mcpScopeRead")}
+                    {scope === "lifecycle" ? t("settings.mcpScopeLifecycle") : scope === "operate" ? t("settings.mcpScopeOperate") : scope === "cli_dispatch" ? t("settings.mcpScopeCliDispatch") : t("settings.mcpScopeRead")}
                   </Badge>
                 ))}
                 {token.projectIds && <span className="text-xs text-muted-foreground">{token.projectIds.map(id => projects.find(project => project.id === id)?.name ?? t("settings.mcpUnavailableProject")).join("、")}</span>}
@@ -412,6 +423,13 @@ function McpTokensSection({  endpoint,
                     ? `${t("settings.mcpLastUsed")}: ${new Date(token.lastUsedAt).toLocaleString(locale)}`
                     : t("settings.mcpNeverUsed")}
                 </span>
+                {!token.revoked && (
+                  <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0"
+                    aria-label={`${t("settings.mcpEditProjects")} ${token.name}`} onClick={() => onEdit(token)}
+                    disabled={!!token.expiresAt && Date.parse(token.expiresAt) <= Date.now()}>
+                    <Pencil className="size-3.5" />
+                  </Button>
+                )}
                 {!token.revoked && (
                   <Button
                     type="button"
@@ -443,7 +461,8 @@ function McpProjectPicker({ projects, loading, error, selected, onChange }: {
   const { t } = useLanguage();
   const [search, setSearch] = useState("");
   const visible = projects.filter(project => `${project.name} ${project.path}`.toLowerCase().includes(search.trim().toLowerCase()));
-  return <fieldset className="space-y-2 rounded-md border border-border/70 p-3">
+  const unavailable = loading || error ? [] : selected.filter(id => !projects.some(project => project.id === id));
+  return <fieldset className="min-w-0 space-y-2 rounded-md border border-border/70 p-3">
     <legend className="px-1 text-xs font-medium">{t("settings.mcpProjects")} · {selected.length}</legend>
     <div className="flex items-center gap-2">
       <Input aria-label={t("settings.mcpSearchProjects")} placeholder={t("settings.mcpSearchProjects")} value={search} onChange={event => setSearch(event.target.value)} className="h-8 min-w-0 text-xs" />
@@ -458,7 +477,41 @@ function McpProjectPicker({ projects, loading, error, selected, onChange }: {
         </label>)}
       </div>}
     <p className="text-xs text-muted-foreground">{t("settings.mcpProjectsHelp")}</p>
+    {unavailable.map(id => <label key={id} className="flex items-center gap-2 text-xs text-muted-foreground">
+      <Checkbox checked aria-label={`${t("settings.mcpUnavailableProject")} ${id}`} onCheckedChange={() => onChange(selected.filter(value => value !== id))} />
+      {t("settings.mcpUnavailableProject")} · {id}
+    </label>)}
   </fieldset>;
+}
+
+function McpTokenProjectsDialog({ token, projects, loading, error, onClose }: {
+  token: McpToken; projects: Project[]; loading: boolean; error: boolean; onClose: () => void;
+}) {
+  const { t } = useLanguage(), queryClient = useQueryClient();
+  const [selected, setSelected] = useState(token.projectIds ?? []);
+  const mutation = useMutation({ mutationFn: updateMcpTokenProjects, onError: () => {
+    void queryClient.invalidateQueries({ queryKey: mcpTokensKey });
+  }, onSuccess: () => {
+    void queryClient.invalidateQueries({ queryKey: mcpTokensKey }); onClose();
+  } });
+  const unavailable = selected.some(id => !projects.some(project => project.id === id));
+  return <Dialog open onOpenChange={open => { if (!open && !mutation.isPending) onClose(); }}>
+    <DialogContent className="max-h-[calc(100dvh-2rem)] grid-cols-[minmax(0,1fr)] overflow-y-auto">
+      <DialogHeader>
+        <DialogTitle>{t("settings.mcpEditProjects")} · {token.name}</DialogTitle>
+        <DialogDescription>{t("settings.mcpEditProjectsHelp")}</DialogDescription>
+      </DialogHeader>
+      <McpProjectPicker projects={projects} loading={loading} error={error} selected={selected} onChange={setSelected} />
+      {mutation.isError && <p role="alert" className="text-xs text-destructive">{mutation.error instanceof GatewayApiError ? mutation.error.message : t("settings.mcpProjectsSaveFailed")}</p>}
+      <DialogFooter>
+        <Button variant="outline" disabled={mutation.isPending} onClick={onClose}>{t("common.cancel")}</Button>
+        <Button disabled={mutation.isPending || loading || error || unavailable || selected.length === 0 || selected.length > 200}
+          onClick={() => mutation.mutate({ id: token.id, projectIds: selected, expectedProjectIds: token.projectIds ?? null })}>
+          {mutation.isPending ? t("common.loading") : t("common.save")}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>;
 }
 
 function mcpClientConfig(endpoint: string, token: string): string {

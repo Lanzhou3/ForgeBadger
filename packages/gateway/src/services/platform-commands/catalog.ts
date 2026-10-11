@@ -5,6 +5,7 @@ import {mutateAssignedTask} from '../project-manager/tasks.js';
 import {assertLegacyTaskExecution} from '../project-manager/access.js';
 import { importProject, applyMcpConfig } from '../mcp/project-workflow.js';
 import { createDevelopmentCommands } from '../development/commands.js';
+import { createMcpLifecycleCommands } from '../mcp/lifecycle.js';
 import { getAdapterLaunchStatus } from '../adapter-discovery.js';
 import { createHash } from 'node:crypto';
 import { createManagementCommands } from '../project-manager/management.js';
@@ -100,6 +101,7 @@ import { assertNewProjectResource } from '../../db/repositories/managed-project-
 
 export function createPlatformCommands(): Map<string, PlatformCommand> {
     const commands: PlatformCommand[] = [
+        ...createMcpLifecycleCommands(),
         command({ id: 'project.create', effect: 'external', inputSchema: projectCreateInput,
             resolve(_ctx, input) {
                 const v = projectCreateInput.parse(input);

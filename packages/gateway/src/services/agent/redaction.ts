@@ -67,7 +67,7 @@ function redactAgentTextInternal(text: string, preserveCodeReferences: boolean):
         ? `${key}${separator}[REDACTED]` : match
   );
   return plainAssignments
-    .replace(/sk-[A-Za-z0-9_-]{6,}/gi, "[REDACTED]")
+    .replace(/(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{6,}/gi, "[REDACTED]")
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
     .replace(/ChatGPT-Account-Id\s*[:=]\s*[^\s,;]+/gi, "ChatGPT-Account-Id=[REDACTED]");
 }

@@ -117,8 +117,14 @@ const DESCRIPTIVE_FIELDS: Record<string, readonly string[]> = {
   update_project: ['description'],
   pm_create_work_item: ['title', 'description', 'acceptanceCriteria'],
   pm_update_work_item: ['title', 'description'],
-  pm_update_management: ['nextAction']
+  pm_update_management: ['nextAction'],
+  pm_set_goal: ['summary', 'constraints', 'acceptanceCriteria'],
+  pm_update_task_plan: ['title', 'description', 'acceptanceCriteria'],
+  pm_manage_stage: ['name', 'description'],
+  pm_review_task: ['note']
 };
+
+const DESCRIPTIVE_LIST_FIELDS = new Set(['acceptanceCriteria', 'constraints']);
 
 function executableInput(toolName: string, input: unknown): unknown {
   if(toolName==='submit_development_task') {
@@ -131,7 +137,7 @@ function executableInput(toolName: string, input: unknown): unknown {
   return Object.fromEntries(Object.entries(input).map(([key, value]) => {
     if (!fields.includes(key)) return [key, value];
     if (typeof value === 'string') return [key, ''];
-    if (key === 'acceptanceCriteria' && Array.isArray(value) && value.every(v => typeof v === 'string')) return [key, []];
+    if (DESCRIPTIVE_LIST_FIELDS.has(key) && Array.isArray(value) && value.every(v => typeof v === 'string')) return [key, []];
     return [key, value];
   }));
 }

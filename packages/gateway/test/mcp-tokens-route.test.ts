@@ -147,6 +147,28 @@ describe("mcp token management routes", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
+  it("allows permanent or optional finite lifecycle grants while requiring selected projects and operate", async () => {
+    const user = users.create('lifecycle@example.test', 'hash');
+    const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'fb-lifecycle-grant-')));
+    try {
+      const project = new ProjectRepository(db, user.id).create({ name: 'Lifecycle', path: root, aiTool: 'codex' });
+      const body = { name: 'lifecycle', scopes: ['read', 'operate', 'lifecycle'], projectIds: [project.id], expiresInHours: 24 };
+      const headers = bearer(user.id, user.email);
+      const accepted = await makeRequest(app, 'POST', '/api/v1/mcp/tokens', body, headers);
+      assert.equal(accepted.status, 201); assert.deepEqual(accepted.body.data.token.scopes, body.scopes);
+      for (const expiresInHours of [null, undefined, 720]) {
+        const result = await makeRequest(app, 'POST', '/api/v1/mcp/tokens', { ...body, expiresInHours }, headers);
+        assert.equal(result.status, 201);
+        if (typeof expiresInHours === 'number') assert.ok(Date.parse(result.body.data.token.expiresAt) > Date.now() + 719 * 3600000);
+        else assert.equal(result.body.data.token.expiresAt, null);
+      }
+      for (const changes of [{ scopes: ['read', 'lifecycle'] }, { expiresInHours: 0 }, { expiresInHours: 87601 }, { projectIds: undefined }, { projectIds: undefined, allowedRoot: root }]) {
+        const result = await makeRequest(app, 'POST', '/api/v1/mcp/tokens', { ...body, ...changes }, headers);
+        assert.equal(result.status, 400); assert.equal(result.body.code, 1);
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it("hides and protects tokens across tenants", async () => {
     // Arrange
     const owner = users.create("owner@example.com", "hash", { role: "admin" });

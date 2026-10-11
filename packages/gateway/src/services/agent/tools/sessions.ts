@@ -6,6 +6,8 @@
  * platform-access service.
  */
 import { z } from "zod";
+import { randomUUID } from 'node:crypto';
+import { McpSessionObservationRepository } from '../../../db/repositories/mcp-session-observation-repository.js';
 import { createSessionStopTarget, sessionRuntimeRevision } from "../../session-stop-target.js";
 import {
   getSessionDetail,
@@ -98,7 +100,10 @@ export function createSessionTools(): AgentTool[] {
             const stable = fresh && before === sessionRuntimeRevision(fresh, sessionManager);
             const tail = ring.getTail(maxLines ?? 80);
             const target = snapshot.live && stable
-              ? createSessionStopTarget(db, fresh, sessionManager, context.stepId, snapshot.output) : undefined;
+              ? createSessionStopTarget(db, fresh, sessionManager,
+                typeof context.mcpTokenId === 'string' ? randomUUID() : context.stepId, snapshot.output) : undefined;
+            if (target && typeof context.mcpTokenId === 'string')
+              new McpSessionObservationRepository(db, userId, context.mcpTokenId).save(target);
             // Keep identity intact under the tool registry's 48 KiB wire limit.
             const output = tail.output.slice(-5000);
             return { sessionId, found: true, live: snapshot.live && !!stable, source: 'session_server',

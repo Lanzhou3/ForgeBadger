@@ -50,6 +50,16 @@ describe("security policy", () => {
     assert.equal(decision.action, "require_approval");
   });
 
+  it("limits lifecycle prose exemptions to declared scalar and string-list fields", () => {
+    const evaluate = (input: unknown) => policy.evaluate({ userId: 'u1', toolName: 'pm_update_task_plan',
+      toolRisk: 'operate', requiresApproval: true, input });
+    assert.equal(evaluate({ title: 'Reject ../ traversal', acceptanceCriteria: ['rm -rf /tmp/example'] }).action, 'require_approval');
+    for (const input of [{ stageId: '../secret' }, { title: { command: 'rm -rf /tmp/example' } },
+      { acceptanceCriteria: [{ path: '../secret' }] }, { unknown: '../secret' }, { '../secret': 'ordinary' }]) {
+      assert.equal(evaluate(input).action, 'deny');
+    }
+  });
+
   it("auto-approves create_project under home directory", () => {
     const decision = policy.evaluate({
       userId: "u1",

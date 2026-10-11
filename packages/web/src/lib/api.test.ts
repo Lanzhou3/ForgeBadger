@@ -137,6 +137,13 @@ describe("api client", () => {
     vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({})));
   });
 
+  it("updates authorization projects on the existing token using a strict PATCH body", async () => {
+    await apiModule.updateMcpTokenProjects({ id: 'token/id', projectIds: ['p1', 'p2'], expectedProjectIds: ['p1'] });
+    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:18332/api/v1/mcp/tokens/token%2Fid', expect.objectContaining({
+      method: 'PATCH', body: JSON.stringify({ projectIds: ['p1', 'p2'], expectedProjectIds: ['p1'] }),
+    }));
+  });
+
   it("reports aborted gateway requests as a clear timeout error", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new DOMException("signal is aborted without reason", "AbortError"))));
 

@@ -11,6 +11,8 @@ export interface CommandContext {
     /** Trusted command only: checkpoint its own synchronous resource mutation. */
     checkpointResources?: (() => void) | undefined;
     userId: string;
+    /** Trusted external caller identity; never accepted from command input. */
+    mcpTokenId?: string | undefined;
     sessionManager?: InMemorySessionManager;
     masterKey?: string;
     adapterCommandRunner?: import('../../lib/dependency-check.js').CommandRunner | undefined;

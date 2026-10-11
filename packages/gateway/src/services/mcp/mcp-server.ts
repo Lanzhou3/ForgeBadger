@@ -33,7 +33,7 @@ import { ProjectManagerRepository, type ProjectManagerWorkItem } from "../../db/
 import type { Database } from "../../db/types.js";
 import type { CommandRunner } from "../../lib/dependency-check.js";
 import { createSecurityPolicy, logSecurityDecision, type SecurityPolicyInput } from "../agent/security-policy.js";
-import { redactAgentErrorMessage, redactAgentValue } from "../agent/redaction.js";
+import { containsSensitiveAgentValue, redactAgentErrorMessage, redactAgentValue } from "../agent/redaction.js";
 import {
   executeAgentTool,
   zodToJsonSchema,
@@ -48,9 +48,13 @@ import { checkAgentScope } from "../platform-commands/agent-scope.js";
 import type { InMemorySessionManager } from "../session-manager.js";
 import { resolveTaskPacketSession } from "../project-manager/task-packets.js";
 import { assertMcpTokenAuthority } from "./token-authority.js";
+import { createMcpLifecycleTools } from "./lifecycle-tools.js";
+import { MCP_LIFECYCLE_WRITE_TOOLS, assertLifecycleAuthority } from "./lifecycle.js";
 
 const MCP_CLI_TOOLS = new Set(["pm_execute_task_packet", "dispatch_task_to_session", "import_project", "apply_project_config", "list_templates", "preview_project_config"]);
 const MCP_SCOPED_TOOLS = new Set([
+  ...MCP_LIFECYCLE_WRITE_TOOLS, 'pm_get_plan', 'pm_get_handoff',
+  'get_project_git_status', 'read_project_diff', 'list_development_tasks', 'get_development_task',
   "list_projects", "get_project", "list_sessions", "get_session", "get_session_output", "get_session_writer",
   "list_templates", "preview_project_config", "create_project", "import_project",
   "apply_project_config", "pm_create_work_item", "pm_update_work_item",
@@ -93,11 +97,17 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
   const preferences = new CopilotToolPreferenceRepository(deps.db, deps.userId);
   const canOperate = deps.scopes.includes("operate");
   const canDispatch = canOperate && deps.scopes.includes("cli_dispatch");
+  let canLifecycle = canOperate && deps.scopes.includes("lifecycle");
+  if (canLifecycle) {
+    try { assertLifecycleAuthority({ db: deps.db, userId: deps.userId, mcpTokenId: deps.tokenId }); }
+    catch { canLifecycle = false; }
+  }
+  const hasWriteReceipts = canDispatch || canLifecycle;
   const selectedProjects = usesSelectedProjects(deps);
   const scoped = canDispatch || selectedProjects;
-  const candidates = [...createPlatformTools(), ...createMcpProjectTools()];
+  const candidates = [...createPlatformTools(), ...createMcpProjectTools(), ...createMcpLifecycleTools()];
   const tools = candidates.filter(
-    (tool) => MCP_ALLOWED_TOOLS.has(tool.name) && (tool.risk === "read" || canOperate) && preferences.isEnabled(tool.name) && !toolUnavailableReason(tool.name, !!deps.sessionManager) && (!MCP_CLI_TOOLS.has(tool.name) || canDispatch) && (!scoped || MCP_SCOPED_TOOLS.has(tool.name)) && (!selectedProjects || !MCP_SELECTED_PROJECT_EXCLUDED.has(tool.name))
+    (tool) => MCP_ALLOWED_TOOLS.has(tool.name) && (tool.risk === "read" || canOperate) && (!MCP_LIFECYCLE_WRITE_TOOLS.has(tool.name) || canLifecycle) && preferences.isEnabled(tool.name) && !toolUnavailableReason(tool.name, !!deps.sessionManager) && (!MCP_CLI_TOOLS.has(tool.name) || canDispatch) && (!scoped || MCP_SCOPED_TOOLS.has(tool.name)) && (!selectedProjects || !MCP_SELECTED_PROJECT_EXCLUDED.has(tool.name))
   );
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
 
@@ -110,12 +120,12 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
     tools: [...tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
-      inputSchema: mcpInputSchema(tool, canDispatch)
-    })), ...(canDispatch ? [{ name: "get_mcp_operation", description: "Read the durable receipt for a prior MCP operationId without replaying it.", inputSchema: { type: "object", properties: { operationId: { type: "string" } }, required: ["operationId"], additionalProperties: false } }] : [])]
+      inputSchema: mcpInputSchema(tool, hasWriteReceipts)
+    })), ...(hasWriteReceipts ? [{ name: "get_mcp_operation", description: "Read the durable receipt for a prior MCP operationId without replaying it.", inputSchema: { type: "object", properties: { operationId: { type: "string" } }, required: ["operationId"], additionalProperties: false } }] : [])]
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    if (request.params.name === "get_mcp_operation" && canDispatch) {
+    if (request.params.name === "get_mcp_operation" && hasWriteReceipts) {
       try {
         const operationId = (request.params.arguments as { operationId?: unknown } | undefined)?.operationId;
         if (typeof operationId !== "string" || !operationIdPattern.test(operationId)) throw new Error("Invalid operationId");
@@ -153,12 +163,17 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
 
 async function executeMcpTool(tool: AgentTool, rawInput: unknown, deps: McpBridgeDeps): Promise<unknown> {
   assertMcpTokenAuthority(deps.db, deps.userId, deps.tokenId);
+  // Include operationId and raw field names before normalization; both can
+  // reach durable intent records. Match native Copilot's admission boundary.
+  if (containsSensitiveAgentValue(rawInput)) throw new Error('Tool input contains credential-shaped content');
   const hasCliScope = deps.scopes.includes("cli_dispatch");
+  const hasWriteReceipts = hasCliScope || deps.scopes.includes("lifecycle");
+  if (MCP_LIFECYCLE_WRITE_TOOLS.has(tool.name)) assertLifecycleAuthority({ db: deps.db, userId: deps.userId, mcpTokenId: deps.tokenId });
   const selectedProjects = usesSelectedProjects(deps);
   const scoped = hasCliScope || selectedProjects;
-  const operationId = tool.risk === "operate" && hasCliScope && rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)
+  const operationId = tool.risk === "operate" && hasWriteReceipts && rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)
     ? (rawInput as Record<string, unknown>).operationId : undefined;
-  if (tool.risk === "operate" && hasCliScope && (typeof operationId !== "string" || !operationIdPattern.test(operationId))) {
+  if (tool.risk === "operate" && hasWriteReceipts && (typeof operationId !== "string" || !operationIdPattern.test(operationId))) {
     throw new Error("A stable operationId is required for MCP writes");
   }
   const toolInput = operationId === undefined ? rawInput : Object.fromEntries(Object.entries(rawInput as Record<string, unknown>).filter(([key]) => key !== "operationId"));
@@ -170,12 +185,17 @@ async function executeMcpTool(tool: AgentTool, rawInput: unknown, deps: McpBridg
 
   const context: AgentToolContext = {
     userId: deps.userId,
+    mcpTokenId: deps.tokenId,
     db: deps.db,
     masterKey: deps.masterKey,
     ...(scoped && (tool.name === "list_projects" || tool.name === "list_sessions") ? { allowedProjectIds: allowedMcpProjectIds(deps) } : {}),
-    externalAuthorize: (resources?: import("../platform-commands/types.js").CommandResources) => assertMcpTokenAuthority(deps.db, deps.userId, deps.tokenId, resources),
-    availableToolNames: [...createPlatformTools(), ...createMcpProjectTools()].filter(candidate =>
+    externalAuthorize: (resources?: import("../platform-commands/types.js").CommandResources) => {
+      if (MCP_LIFECYCLE_WRITE_TOOLS.has(tool.name)) assertLifecycleAuthority({ db: deps.db, userId: deps.userId, mcpTokenId: deps.tokenId });
+      assertMcpTokenAuthority(deps.db, deps.userId, deps.tokenId, resources);
+    },
+    availableToolNames: [...createPlatformTools(), ...createMcpProjectTools(), ...createMcpLifecycleTools()].filter(candidate =>
       (candidate.risk === "read" || deps.scopes.includes("operate")) &&
+      (!MCP_LIFECYCLE_WRITE_TOOLS.has(candidate.name) || (deps.scopes.includes("operate") && deps.scopes.includes("lifecycle"))) &&
       new CopilotToolPreferenceRepository(deps.db, deps.userId).isEnabled(candidate.name) &&
       !toolUnavailableReason(candidate.name, !!deps.sessionManager) &&
       MCP_ALLOWED_TOOLS.has(candidate.name) &&
@@ -263,7 +283,7 @@ function assertMcpReadInput(deps: McpBridgeDeps, name: string, input: unknown): 
     if (name === "pm_list_task_packets") {
       const items = repo.listWorkItems(values.projectId, typeof values.limit === "number" ? { limit: values.limit } : {});
       for (const item of items) assertMcpTaskSession(deps, values.projectId, item);
-    } else if (["pm_get_task_packet", "pm_get_task_progress", "pm_get_work_item"].includes(name) && typeof values.workItemId === "string") {
+    } else if (["pm_get_task_packet", "pm_get_task_progress", "pm_get_work_item", "pm_get_handoff"].includes(name) && typeof values.workItemId === "string") {
       const item = repo.getWorkItem(values.projectId, values.workItemId);
       if (item) assertMcpTaskSession(deps, values.projectId, item);
     }
@@ -332,6 +352,11 @@ function mcpOperationKey(tokenId: string, operationId: string): string {
 function mcpInputSchema(tool: AgentTool, hasCliScope: boolean): Record<string, unknown> {
   const schema = tool.modelInputSchema ?? zodToJsonSchema(tool.inputSchema);
   if (tool.risk !== "operate" || !hasCliScope) return schema;
+  return withOperationId(schema);
+}
+
+function withOperationId(schema: Record<string, unknown>): Record<string, unknown> {
+  if (Array.isArray(schema.anyOf)) return { ...schema, anyOf: schema.anyOf.map(branch => withOperationId(branch as Record<string, unknown>)) };
   return {
     ...schema,
     properties: { ...(schema.properties as Record<string, unknown> | undefined), operationId: { type: "string", description: "Stable caller-generated ID; reuse on retry and inspect get_mcp_operation before any new attempt." } },

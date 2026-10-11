@@ -3,8 +3,9 @@ import { expect, test, type Page } from "@playwright/test";
 // Real tokens have 48 hex digits. Short placeholders miss intrinsic grid overflow.
 const plaintext = `fbmcp_${"a".repeat(48)}`;
 
-async function mockMcpSettings(page: Page) {
+async function mockMcpSettings(page: Page, editing = false) {
   const user = { id: "mcp-qa", email: "mcp-qa@example.test", role: "user", status: "active" };
+  let tokens = editing ? [{ id: 't1', name: 'layout-test', projectIds: ['p1'], scopes: ['read'], expiresAt: null, revoked: false }] : [];
   await page.addInitScript(user => {
     localStorage.setItem("forgebadger-language", "zh-CN");
     localStorage.setItem("forgebadger.token", "fixture");
@@ -15,17 +16,55 @@ async function mockMcpSettings(page: Page) {
     const pathname = new URL(route.request().url()).pathname;
     let data: unknown;
     if (pathname === "/api/v1/auth/me") data = user;
-    else if (pathname === "/api/v1/mcp") data = { enabled: true, endpoint: "http://127.0.0.1:48731/mcp" };
-    else if (pathname === "/api/v1/projects") data = { projects: [{ id: "p1", name: "Test project", path: "/projects/test" }] };
+    else if (pathname === "/api/v1/mcp") data = { enabled: true, endpoint: "http://127.0.0.1:18332/mcp" };
+    else if (pathname === "/api/v1/projects") data = { projects: editing
+      ? [{ id: 'p1', name: 'Test project', path: `/projects/${'long-directory-name-'.repeat(8)}` },
+        { id: 'p2', name: 'Other project', path: `/projects/${'another-long-directory-'.repeat(8)}` }]
+      : [{ id: "p1", name: "Test project", path: "/projects/test" }] };
+    else if (pathname === '/api/v1/mcp/tokens/t1' && route.request().method() === 'PATCH') {
+      tokens = [{ ...tokens[0]!, projectIds: route.request().postDataJSON().projectIds }];
+      data = { token: tokens[0] };
+    }
     else if (pathname === "/api/v1/mcp/tokens") {
       data = route.request().method() === "POST"
         ? { token: { id: "t1", name: "layout-test", projectIds: ["p1"], scopes: ["read"], expiresAt: null, revoked: false }, plaintext }
-        : { tokens: [] };
+        : { tokens };
     } else if (pathname === "/api/v1/notifications") data = { notifications: [], unreadCount: 0 };
     else if (pathname.endsWith("/unread-count")) data = { count: 0 };
     else if (pathname === "/api/v1/copilot/status") data = { enabled: false };
     else throw new Error(`Unhandled MCP fixture request: ${pathname}`);
     await route.fulfill({ json: { code: 0, data, message: "" } });
+  });
+}
+
+for (const viewport of [{ width: 390, height: 844 }, { width: 1024, height: 500 }]) {
+  test(`MCP project authorization remains editable at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport);
+    await mockMcpSettings(page, true);
+    await page.goto('/settings?section=integrations');
+    await page.getByRole('button', { name: '编辑授权项目 layout-test', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toHaveCSS('opacity', '1');
+    const bounds = await dialog.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+        scrollWidth: element.scrollWidth, clientWidth: element.clientWidth };
+    });
+    expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.clientWidth);
+    expect(bounds.left).toBeGreaterThanOrEqual(15);
+    expect(bounds.right).toBeLessThanOrEqual(viewport.width - 15);
+    expect(bounds.top).toBeGreaterThanOrEqual(15);
+    expect(bounds.bottom).toBeLessThanOrEqual(viewport.height - 15);
+    await dialog.getByLabel('Test project', { exact: true }).click();
+    await dialog.getByLabel('Other project', { exact: true }).click();
+    const save = dialog.getByRole('button', { name: '保存', exact: true });
+    await save.scrollIntoViewIfNeeded();
+    await expect(save).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath('mcp-project-dialog.png') });
+    const updated = page.waitForResponse(response => response.url().endsWith('/api/v1/mcp/tokens/t1') && response.request().method() === 'PATCH');
+    await save.click();
+    expect((await updated).request().postDataJSON()).toEqual({ projectIds: ['p2'], expectedProjectIds: ['p1'] });
+    await expect(dialog).toHaveCount(0);
   });
 }
 

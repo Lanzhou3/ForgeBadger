@@ -823,6 +823,7 @@ export interface ProviderCredentialSummary {
   label: string | null;
   status: string;
   secretPreview: string;
+  generation?: number;
 }
 
 export interface SessionActivity {
@@ -2187,7 +2188,7 @@ export interface McpStatus {
   endpoint: string;
 }
 
-export type McpTokenScope = "read" | "operate" | "cli_dispatch";
+export type McpTokenScope = "read" | "operate" | "cli_dispatch" | "lifecycle";
 
 export interface McpToken {
   id: string;
@@ -2228,6 +2229,14 @@ export async function createMcpToken(input: {
 export async function revokeMcpToken(id: string): Promise<{ revoked: boolean }> {
   return fetchJson<{ revoked: boolean }>(`/api/v1/mcp/tokens/${encodeURIComponent(id)}`, {
     method: "DELETE",
+  });
+}
+
+export async function updateMcpTokenProjects(input: {
+  id: string; projectIds: string[]; expectedProjectIds: string[] | null;
+}): Promise<{ token: McpToken }> {
+  return fetchJson<{ token: McpToken }>(`/api/v1/mcp/tokens/${encodeURIComponent(input.id)}`, {
+    method: 'PATCH', body: JSON.stringify({ projectIds: input.projectIds, expectedProjectIds: input.expectedProjectIds }),
   });
 }
 

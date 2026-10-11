@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { LanguageProvider } from "@/hooks/use-language";
 import { McpIntegrationSettings } from "@/components/settings/McpIntegrationSettings";
 
@@ -21,12 +21,14 @@ const {
   listMcpTokensMock,
   createMcpTokenMock,
   revokeMcpTokenMock,
+  updateMcpTokenProjectsMock,
 } = vi.hoisted(() => ({
   listProjectsMock: vi.fn(),
   getMcpStatusMock: vi.fn(),
   listMcpTokensMock: vi.fn(),
   createMcpTokenMock: vi.fn(),
   revokeMcpTokenMock: vi.fn(),
+  updateMcpTokenProjectsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -38,11 +40,12 @@ vi.mock("@/lib/api", async (importOriginal) => {
     listMcpTokens: listMcpTokensMock,
     createMcpToken: createMcpTokenMock,
     revokeMcpToken: revokeMcpTokenMock,
+    updateMcpTokenProjects: updateMcpTokenProjectsMock,
   };
 });
 
-const statusEnabled = { enabled: true, endpoint: "http://127.0.0.1:48731/mcp" };
-const statusDisabled = { enabled: false, endpoint: "http://127.0.0.1:48731/mcp" };
+const statusEnabled = { enabled: true, endpoint: "http://127.0.0.1:18332/mcp" };
+const statusDisabled = { enabled: false, endpoint: "http://127.0.0.1:18332/mcp" };
 
 function renderPanel() {
   return render(
@@ -71,7 +74,7 @@ describe("McpIntegrationSettings", () => {
   it("shows the endpoint and a create form when the service is enabled", async () => {
     renderPanel();
     await waitFor(() => expect(screen.getByText("服务已启用")).toBeTruthy());
-    expect(screen.getByText("http://127.0.0.1:48731/mcp")).toBeTruthy();
+    expect(screen.getByText("http://127.0.0.1:18332/mcp")).toBeTruthy();
     expect(screen.getByText("创建令牌")).toBeTruthy();
     expect(screen.queryByText("FORGEBADGER_MCP_ENABLED=true")).toBeNull();
   });
@@ -112,6 +115,36 @@ describe("McpIntegrationSettings", () => {
     await waitFor(() => expect(screen.getByText("fbmcp_secret")).toBeTruthy());
     expect(screen.getByText("访问令牌已创建")).toBeTruthy();
     expect(screen.getByText(/明文令牌只显示这一次/)).toBeTruthy();
+  });
+
+  it("edits authorized projects without recreating the existing token", async () => {
+    listMcpTokensMock.mockResolvedValue({ tokens: [{ id: 't1', name: 'agent', projectIds: ['p1'], scopes: ['read', 'operate', 'lifecycle'],
+      allowedRoot: null, expiresAt: null, createdAt: '2026-01-01T00:00:00.000Z', lastUsedAt: null, revoked: false }] });
+    updateMcpTokenProjectsMock.mockResolvedValue({ token: { id: 't1', projectIds: ['p1', 'p2'] } });
+    renderPanel();
+    fireEvent.click(await screen.findByLabelText('编辑授权项目 agent'));
+    const dialog = within(await screen.findByRole('dialog'));
+    expect((await dialog.findByLabelText('Project A')).getAttribute('data-state')).toBe('checked');
+    fireEvent.click(await dialog.findByLabelText('Project B'));
+    fireEvent.click(dialog.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(updateMcpTokenProjectsMock).toHaveBeenCalledWith({ id: 't1', projectIds: ['p1', 'p2'], expectedProjectIds: ['p1'] }, expect.anything()));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(createMcpTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves edited selections and shows save failures", async () => {
+    listMcpTokensMock.mockResolvedValue({ tokens: [{ id: 't1', name: 'agent', projectIds: ['p1'], scopes: ['read'],
+      allowedRoot: null, expiresAt: null, createdAt: '2026-01-01T00:00:00.000Z', lastUsedAt: null, revoked: false }] });
+    updateMcpTokenProjectsMock.mockRejectedValue(new Error('Unavailable'));
+    renderPanel();
+    fireEvent.click(await screen.findByLabelText('编辑授权项目 agent'));
+    const dialog = within(await screen.findByRole('dialog'));
+    fireEvent.click(await dialog.findByLabelText('Project B'));
+    fireEvent.click(dialog.getByRole('button', { name: '保存' }));
+    await dialog.findByText('授权项目保存失败，请重试。');
+    expect(dialog.getByLabelText('Project B').getAttribute('data-state')).toBe('checked');
+    fireEvent.click(dialog.getByRole('button', { name: '清空' }));
+    expect(dialog.getByRole('button', { name: '保存' }).hasAttribute('disabled')).toBe(true);
   });
 
   it("keeps at least one scope selected and confirms before revoking", async () => {
@@ -158,13 +191,39 @@ describe("McpIntegrationSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "全部权限" }));
     expect(screen.queryByPlaceholderText("/path/to/projects")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "创建令牌" }));
-    await waitFor(() => expect(createMcpTokenMock).toHaveBeenCalledWith({ name: "full", scopes: ["read", "operate", "cli_dispatch"], projectIds: ["p1", "p2"], expiresInHours: null }, expect.anything()));
+    expect((screen.getByRole("option", { name: "永久有效" }) as HTMLOptionElement).disabled).toBe(false);
+    await waitFor(() => expect(createMcpTokenMock).toHaveBeenCalledWith({ name: "full", scopes: ["read", "operate", "cli_dispatch", "lifecycle"], projectIds: ["p1", "p2"], expiresInHours: null }, expect.anything()));
     await screen.findByRole("dialog");
     const config = screen.getByRole("dialog").querySelector("pre")!.textContent!;
     expect(JSON.parse(config).mcpServers.forgebadger.headers.Authorization).toBe("Bearer fbmcp_secret");
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
     expect(screen.queryByText("fbmcp_secret")).toBeNull();
     expect(document.body.textContent).not.toContain("Bearer fbmcp_secret");
+  });
+
+  it("requires operate for lifecycle without forcing expiry and removes it with operate", async () => {
+    renderPanel();
+    await screen.findByLabelText("Project A");
+    fireEvent.click(screen.getByLabelText("生命周期管理"));
+    expect(screen.getByLabelText("可操作").getAttribute("data-state")).toBe("checked");
+    expect(screen.queryByLabelText("有效小时数")).toBeNull();
+    expect((screen.getByRole("option", { name: "永久有效" }) as HTMLOptionElement).disabled).toBe(false);
+    fireEvent.click(screen.getByLabelText("可操作"));
+    expect(screen.getByLabelText("生命周期管理").getAttribute("data-state")).toBe("unchecked");
+  });
+
+  it("preserves a chosen finite lifetime when selecting lifecycle or all permissions", async () => {
+    renderPanel();
+    await screen.findByLabelText("Project A");
+    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "finite" } });
+    fireEvent.click(screen.getByLabelText("Project A"));
+    fireEvent.change(screen.getByLabelText("有效期"), { target: { value: "limited" } });
+    fireEvent.change(screen.getByLabelText("有效小时数"), { target: { value: "720" } });
+    fireEvent.click(screen.getByLabelText("生命周期管理"));
+    expect((screen.getByLabelText("有效小时数") as HTMLInputElement).value).toBe("720");
+    fireEvent.click(screen.getByRole("button", { name: "全部权限" }));
+    fireEvent.click(screen.getByRole("button", { name: "创建令牌" }));
+    await waitFor(() => expect(createMcpTokenMock).toHaveBeenCalledWith({ name: "finite", scopes: ["read", "operate", "cli_dispatch", "lifecycle"], projectIds: ["p1"], expiresInHours: 720 }, expect.anything()));
   });
 
   it("searches projects and submits a finite lifetime", async () => {

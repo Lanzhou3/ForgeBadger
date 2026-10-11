@@ -6,7 +6,7 @@ import { mcpAccessTokens } from "../schema.js";
 import type { Database } from "../types.js";
 import { hashToken } from "./auth-session-repository.js";
 
-export type McpTokenScope = "read" | "operate" | "cli_dispatch";
+export type McpTokenScope = "read" | "operate" | "cli_dispatch" | "lifecycle";
 
 export interface McpAccessToken {
   id: string;
@@ -44,7 +44,7 @@ export function parseMcpTokenScopes(raw: string): McpTokenScope[] {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return ["read"];
-    return parsed.filter((scope): scope is McpTokenScope => scope === "read" || scope === "operate" || scope === "cli_dispatch");
+    return parsed.filter((scope): scope is McpTokenScope => scope === "read" || scope === "operate" || scope === "cli_dispatch" || scope === "lifecycle");
   } catch {
     return ["read"];
   }
@@ -104,6 +104,15 @@ export class McpTokenRepository {
       isNull(mcpAccessTokens.revokedAt),
       or(isNull(mcpAccessTokens.expiresAt), gt(mcpAccessTokens.expiresAt, new Date()))
     )).get() as McpAccessToken | undefined;
+  }
+
+  updateProjects(id: string, userId: string, projects: McpAllowedProject[], expectedProjects: string | null): McpAccessToken | undefined {
+    return this.drizzle.update(mcpAccessTokens)
+      .set({ allowedProjects: JSON.stringify(projects), allowedRoot: null })
+      .where(and(eq(mcpAccessTokens.id, id), eq(mcpAccessTokens.userId, userId), isNull(mcpAccessTokens.revokedAt),
+        or(isNull(mcpAccessTokens.expiresAt), gt(mcpAccessTokens.expiresAt, new Date())),
+        expectedProjects === null ? isNull(mcpAccessTokens.allowedProjects) : eq(mcpAccessTokens.allowedProjects, expectedProjects)))
+      .returning().get() as McpAccessToken | undefined;
   }
 
   revokeByIdAndUser(id: string, userId: string): boolean {

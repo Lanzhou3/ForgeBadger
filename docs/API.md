@@ -1940,6 +1940,7 @@ Changed hook bundles are loaded by CLI sessions on their next restart.
 - `POST /mcp` (MCP Streamable HTTP, JSON-RPC; not part of `/api/v1`)
 - `POST /api/v1/mcp/tokens`
 - `GET /api/v1/mcp/tokens`
+- `PATCH /api/v1/mcp/tokens/:id`
 - `DELETE /api/v1/mcp/tokens/:id`
 
 The Gateway can expose a Model Context Protocol server for external AI agents
@@ -1952,12 +1953,33 @@ response envelope.
 
 Authentication uses access tokens managed through the REST routes
 above (standard JWT/session auth + envelope). `POST /api/v1/mcp/tokens` accepts
-`{ name, scopes?, projectIds, expiresInHours }` for new project grants.
+`{ name, scopes?, projectIds, expiresInHours? }` for new project grants.
 `projectIds` selects 1–200 existing projects owned by the caller; duplicates are
-removed. The server stores IDs and canonical directory snapshots. An explicit
-`expiresInHours: null` means permanent until revoked; an integer from 1 to
-87600 selects a finite lifetime. Scopes are `read`, `operate`, and
-`cli_dispatch` (default `read`); `cli_dispatch` also requires `operate`.
+removed. The server stores IDs and canonical directory snapshots. Omitting
+`expiresInHours` or passing `null` means permanent until revoked; an integer from 1 to
+87600 selects a finite lifetime. Scopes are `read`, `operate`, `cli_dispatch`
+and `lifecycle` (default `read`); `cli_dispatch` and `lifecycle` require `operate`.
+`lifecycle` additionally requires selected projects. All selected-project scopes
+support permanent authorization (`expiresInHours: null` or omitted); an optional
+finite lifetime remains supported. Legacy directory tokens cannot gain lifecycle writes.
+MCP tool inputs containing credential-shaped material (including `operationId`)
+are rejected before durable intent creation. Lifecycle planning prose can describe
+unsafe commands or traversal examples; paths, evidence references and unknown fields
+remain subject to the security policy.
+
+`PATCH /api/v1/mcp/tokens/:id` accepts only
+`{projectIds, expectedProjectIds}` through the owner's JWT/session authentication.
+It edits an active token's selected projects without regenerating its credential
+or changing scopes/lifetime; returns `{token}` metadata, never plaintext/hash.
+Supply the last listed `projectIds` as `expectedProjectIds` (or `null` for a legacy
+grant). A stale selection or changed full authorization snapshot returns `409`;
+reload the token list before retrying. New selections undergo the same tenant,
+canonical-directory and nested-project checks as creation. Legacy tokens can
+explicitly convert to selected-project grants; their legacy root is cleared.
+Revoked/expired/foreign tokens are refused, and MCP Bearer tokens cannot edit
+their own grants. Every subsequent MCP request and pending action rechecks the
+updated grant, so removed projects lose platform authorization immediately.
+
 All scopes on a project grant are limited to the selected projects. Missing,
 foreign, moved, or retargeted project directories are refused. A parent project
 cannot expose an unselected nested project: select nested projects together;
@@ -2026,7 +2048,7 @@ conversation. Error responses on this endpoint use JSON-RPC error envelopes
 envelope. Tenant isolation is unchanged â all tools
 execute with the token owner's `userId`.
 
-Every operate call made with a `cli_dispatch` token requires a stable
+Every operate call made with a `cli_dispatch` or `lifecycle` token requires a stable
 `operationId` (1–100 ASCII letters, digits, `_` or `-`, beginning with a letter
 or digit). Reuse it with the same payload on retry. `get_mcp_operation` returns
 the durable intent and receipt, including indeterminate outcomes without
@@ -2042,6 +2064,47 @@ files only, and refuses modified or unsafe files. Task-packet dispatch uses
 Session Server. Completion evidence can
 advance a task to `ready_for_review`, not independently verified or `done`.
 Native CLI trust prompts require the owner at the terminal.
+
+MCP live `get_session_output` returns a server-issued stop target. Copy
+`target.observationId` and `target.taskTitle` into `stop_session` as
+`observationId` and `expectedTitle`. Observations expire after 15 minutes and
+are bound to the token, tenant, session, runtime generation and observed title.
+They survive Gateway/database reopening. Only identity metadata is persisted;
+terminal output is never stored in SQLite. Cached output cannot authorize stop.
+Another token, a changed runtime/title, or unverified shared Codex daemon is
+refused. A confirmed stop receipt can be replayed under the same operation ID
+without another process stop.
+
+Scoped credentials also expose existing `get_project_git_status`,
+`read_project_diff`, `list_development_tasks`, `get_development_task` and two
+planning reads: `pm_get_plan {projectId, offset?, limit?}` returns a full-plan
+`planDigest`, compact goal summary, abbreviated task/stage labels and paged
+arrays (max 50). `nextOffset` applies to each array; `counts` includes all rows.
+`pm_get_handoff {projectId, workItemId, offset?, limit?}` pages acceptance criteria
+and declared evidence (max 5) with task revision and outstanding delivery gates.
+Both retain identity/digest/revision within the normal tool output limit.
+
+The opt-in `lifecycle` scope adds these private-project writes. Every call uses
+PlatformActions, a stable `operationId` and current token authority; settings
+do not silently upgrade existing credentials.
+
+| Tool | Required concurrency/effect boundary |
+| --- | --- |
+| `pm_set_goal` | `expectedPlanDigest`; goal summary, constraints and criteria |
+| `pm_manage_stage` | `expectedPlanDigest`; `action=create/update/delete/reorder`; delete requires `confirm=true`; reorder lists unique IDs |
+| `pm_manage_dependency` | `expectedPlanDigest`; task and blocker IDs, `action=add/remove`; cycles and done/cancelled target mutations rejected |
+| `pm_update_task_plan` | `expectedRevision`; criteria, stage and metadata; done/cancelled plans immutable |
+| `pm_attach_evidence` | `expectedRevision`; references are declared; reserved delivery/verification kinds and secret material rejected |
+| `pm_review_task` | `expectedRevision`; ready-for-review task, `decision=accepted/changes_requested`, note; acceptance covers every current criterion by index and existing evidence reference, with all dependencies done |
+| `pm_delete_work_item` | `expectedRevision`, `confirm=true`; no delivery history, live/unconfirmed execution or raced session binding |
+
+`pm_review_task` acceptance records `completionSource=operator_declared`; it
+does not create test, integration or deployment receipts. Changes requested
+return the task to `in_progress`. Team-governed/managed-delivery projects must
+use the native delivery workflow and cannot bypass its verifier/reviewer gates.
+Task packet CLI execution remains the authorized code/check/Git execution path;
+handoff does not publish a PR, merge a branch or deploy a release. Release stays
+an explicit, target-specific owner approval.
 
 JSON connection template for clients supporting `mcpServers` (other clients,
 including Codex TOML configuration, use their own format for the same URL and
