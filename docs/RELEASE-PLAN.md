@@ -1,16 +1,15 @@
 # ForgeBadger Release Plan
 
-> Status: local-first beta release readiness | Date: 2026-05-10
+> Status: local-first beta release process | Updated: 2026-10-11
 
 This plan covers the current local/self-hosted release shape: one Gateway
 process and one Web console process. It does not cover cloud multi-tenant
 hosting, billing, external worker pools, or hosted plugin marketplaces.
 
-Phase A local-first browser terminal evidence is closed by the 2026-05-07 real
-browser and Claude Code permission prompt reports. Phase B Codex Background
-Tasks are accepted for beta feedback as a guarded observable control plane:
-Web prompt/turn input remains disabled, and `/turn` is still a feature-flagged
-Gateway prototype route.
+Release evidence belongs to the exact source commit and npm tarball being
+published. Historical acceptance must be rechecked; it does not make a new
+candidate ready. Codex uses Session Server terminal sessions. The retired
+app-server/turn-input control plane is outside release scope.
 
 ## 1. Release Scope
 
@@ -47,7 +46,7 @@ Next.js client that talks to the Gateway through `NEXT_PUBLIC_GATEWAY_URL`.
 Minimum runtime dependencies:
 
 - Node.js 20.12 through 24.
-- pnpm 10 or newer.
+- pnpm from root `packageManager` (currently `pnpm@12.6.0`).
 - A loadable node-pty native module on the supported host.
 - Claude Code CLI on `PATH` for Claude sessions.
 - OpenCode and/or Codex CLI on `PATH` only when those adapters are in scope.
@@ -124,7 +123,7 @@ node --test scripts/smoke-local-release.test.mjs
 pnpm -r typecheck
 pnpm -r test
 pnpm -r build
-pnpm --dir packages/gateway test test/model-provider-routes.test.ts test/model-provider-repository.test.ts test/model-config-apply.test.ts test/codex-provider-env.test.ts test/session-adapter-decoupling.test.ts
+pnpm --dir packages/gateway test test/model-provider-routes.test.ts test/model-provider-repository.test.ts test/cli-config-apply.test.ts test/codex-provider-env.test.ts test/session-adapter-decoupling.test.ts
 git diff --check
 ```
 
@@ -152,33 +151,178 @@ The Gateway must be reachable at `FORGEBADGER_GATEWAY_URL`. The browser must loa
 the Web console at `http://localhost:18333` or the forwarded host configured by
 the operator.
 
-## 6. NPM Release Candidate
+## 6. Repeatable npm Release Procedure
 
-Required checks:
+Registry semantics: [npm publish](https://docs.npmjs.com/cli/v11/commands/npm-publish/)
+and [npm dist-tag](https://docs.npmjs.com/cli/v11/commands/npm-dist-tag/).
+
+Only `packages/cli` is published as `forgebadger`; Gateway/Web are private
+workspace packages bundled into that CLI. A release is bound to one clean
+source commit, an immutable tarball, its SHA-512 integrity and one npm dist-tag.
+Local state and credentials must never enter the package or release notes.
+
+### A. Select source, version and channel
+
+1. Start from a clean checkout. Fetch and compare the target branch with its
+   remote; do not publish uncommitted source or claim unrelated CI runs.
+2. Query the public registry and check the maintainer identity without reading
+   or printing npm tokens:
+
+   ```bash
+   npm whoami --registry=https://registry.npmjs.org
+   npm owner ls forgebadger --registry=https://registry.npmjs.org
+   npm view forgebadger dist-tags versions --json --registry=https://registry.npmjs.org
+   ```
+
+3. Set a never-published version in `packages/cli/package.json` and record
+   release notes below. Commit the version/docs before creating artifacts.
+   Versions cannot be overwritten; use a new version for a corrective release.
+4. A prerelease such as `0.2.0-beta.0` uses `--tag beta`; a fully accepted
+   stable release uses `--tag latest`. Never promote a beta to `latest` as an
+   implicit side effect. `npm install forgebadger` follows `latest`.
+5. If npm cannot write its default cache in a restricted environment, supply
+   a disposable `--cache` directory. Do not change ownership of the user's
+   entire npm directory as part of publishing.
+
+### B. Verify the frozen candidate
+
+Run the commands below and keep sanitized output with the source SHA. Existing
+results may be reused only when they apply to unchanged source on the same
+host; rerun version-sensitive CLI tests after a version change.
 
 ```bash
+node --test scripts/*.test.mjs
+pnpm validate:brand
+pnpm validate:db-migrations
+pnpm trial:readiness-validate
 pnpm -r typecheck
 pnpm -r test
-pnpm -r build
-pnpm build:npm
-pnpm pack:npm
-pnpm verify:npm
-pnpm smoke:npm
+pnpm --dir packages/gateway test test/session-server-daemon-lifecycle.test.ts
+pnpm --dir packages/gateway test test/model-provider-routes.test.ts test/model-provider-repository.test.ts test/cli-config-apply.test.ts test/codex-provider-env.test.ts test/session-adapter-decoupling.test.ts
+git diff --check
 ```
 
-Before publishing, inspect the `npm pack --dry-run` output from `pnpm pack:npm`
-and confirm the package does not include local config, database files, logs,
-API keys, `.claude`, `.codex`, `.opencode`, SQLite databases, internal
-development artifacts, symlinks, or build-host-native Web binaries. The
-verifier also requires the published CLI to declare every direct Gateway
-runtime dependency.
+Run the relevant real-Gateway browser smoke and security/terminal regressions
+from `docs/CI-CD-PLAN.md`. Record pass, failure and environment limitations
+separately. Native Windows/WSL and live AI-provider evidence remain caveats
+until those hosts/accounts are actually tested.
+
+Stable publication requires the automated gates to pass (or a documented
+missing-environment skip). A beta may carry explicitly accepted, bounded
+pre-existing failures only when the record includes the failing cases, baseline
+comparison, affected feature checks and follow-up. A baseline failure is not a
+pass or an environment skip. Failed package integrity, install/startup/PTY smoke,
+secret filtering, tenant isolation or the new feature's regressions block both
+channels. Do not silently weaken tests to make a release pass.
+
+### C. Build, inspect and install the exact package
+
+`pnpm smoke:npm` builds Gateway/Web/CLI, verifies artifacts, packs the CLI,
+installs the tarball into a disposable prefix, and tests doctor, Gateway/Web
+startup, auth, project import and real Session Server PTY input/output/stop.
+Retain its tarball for publication:
+
+```bash
+FORGEBADGER_KEEP_NPM_SMOKE_ROOT=1 pnpm smoke:npm
+pnpm verify:npm
+```
+
+Save the printed `Packed tarball` path as `release_tarball`; do not pack again
+between smoke and publication. Inspect the exact archive using
+`tar -tzf "$release_tarball"` and
+`npm publish "$release_tarball" --dry-run --ignore-scripts --access public --tag beta --registry=https://registry.npmjs.org`.
+Check name/version, the files whitelist, migrated DB assets and Web standalone
+runtime. No `.env`, databases, logs, credentials, override directories,
+symlinks or build-host native Web binaries may ship. Record file count, size,
+SHA-512 integrity and source SHA; keep temporary artifacts outside the repo.
+Reconfirm the candidate has no source drift or version collision.
+
+### D. Publish and confirm
+
+Publish that tested tarball with an explicit channel and public registry:
+
+```bash
+npm publish "$release_tarball" --ignore-scripts --access public --tag beta --registry=https://registry.npmjs.org
+npm view forgebadger@0.2.0-beta.0 version dist.integrity dist.tarball --json --registry=https://registry.npmjs.org
+npm view forgebadger dist-tags --json --registry=https://registry.npmjs.org
+```
+
+Replace the example version/tag only with the selected release values. If npm
+requires browser authentication or 2FA, let the maintainer complete npm's
+native flow; never record credentials or OTPs in Git, command files or reports.
+If the publish result is ambiguous, query the exact version and compare
+integrity before retrying. Never claim success based only on the command launch.
+
+Compare registry integrity with the tested tarball, install the exact registry
+version into a disposable prefix, and run its version/doctor checks with a fresh
+state directory. Then create annotated tag `v<version>` on the release source
+commit and push the source branch plus that exact tag. Do not claim a GitHub
+Release, CI success or provenance attestation unless actually produced.
+
+Retain the release record and sanitized evidence; remove only the test's own
+services/state. On a beta publish, confirm `latest` still points to the previous
+stable version. Recovery uses a new version or an explicit maintainer decision
+to move a dist-tag back; do not unpublish as an automatic rollback.
+
+### 2026-10-11 candidate: 0.2.0-beta.0
+
+- Source baseline: `7a04a310`; the release commit adds this procedure and version.
+- Channel: `beta`, explicitly selected by the maintainer. Previous `latest`:
+  `0.1.3`; stable promotion is outside this release.
+- Changes: default loopback Gateway/Web ports `18332`/`18333`; native Claude
+  template memory; credential reveal response isolation; Copilot tool/context
+  boundaries; read-only terminal wheel reports and task input consumption;
+  scoped MCP lifecycle tools, live project-grant editing and stop observations;
+  mobile authorization dialog fix; Windows directory-picker diagnostics.
+- Compatibility: existing persisted runtime ports are retained. New/default
+  installs use the new ports. Existing MCP tokens are not silently given the
+  lifecycle scope. Terminal observations persist identity only, never output.
+- Evidence before version bump: Web tests 1157 passed, CLI tests 127 passed,
+  script harness 136 passed; MCP/Claude/security subset 238 passed; real
+  WebSocket/PTY subset 49 passed and shell cancellation/stop subset 4 passed;
+  core browser suite 25 passed and Project Manager suite 6 passed; real Gateway
+  MCP create/edit/authority-denial/revoke flow passed. Some browser cases mock
+  HTTP; the real-Gateway flows are recorded separately.
+- Known limitations: full Gateway regression had 45 failures also present in
+  the HEAD baseline; 4 PTY stop cases subsequently passed outside the sandbox.
+  The current release rerun is recorded below. Broader E2E includes
+  pre-existing interface/fixture mismatches. Neither suite is claimed fully
+  green. Physical Windows/ConPTY, live provider accounts and real AI CLI
+  automatic execution remain unverified. Beta use must retain these caveats.
+- Follow-up before stable: clear the full-regression failures and stale E2E
+  contracts, obtain required platform/live-host evidence, rerun the frozen
+  candidate gates, and publish a new stable version through explicit acceptance.
+- Current candidate checks: CLI **127/127**, Web **1157/1157**, root harness
+  **136/136**, and mandatory Gateway release subset **302/302** passed.
+  Workspace typecheck, brand, migration and trial-readiness validation passed.
+- Full suite on macOS, Node `24.16.0`, pnpm `12.6.0`:
+  Gateway **2952 tests: 2905 passed, 42 failed, 5 skipped**. 41 failures match
+  the previous HEAD failure list; the previously skipped real collaboration
+  PTY case also fails in the old `54fc87a1` baseline outside the sandbox.
+  Thus all 42 failing names reproduce in baseline evidence. The failures are
+  retained as beta limitations, not cleared by the focused tests.
+
+| Failing test file | Cases | Follow-up before stable |
+| --- | ---: | --- |
+| `adapter-updates-route.test.ts` | 1 | Align adapter/account fixtures and verify the native CLI boundary |
+| `adapter-updates.test.ts` | 1 | Align adapter/account fixtures and verify the native CLI boundary |
+| `cli-account-routes.test.ts` | 1 | Align adapter/account fixtures and verify the native CLI boundary |
+| `collaboration-workflow.test.ts` | 14 | Diagnose workspace preparation before claiming delivery/team workflow acceptance |
+| `copilot-playbook-migration.test.ts` | 1 | Diagnose historical playbook migration and backup fixture |
+| `dependency-check.test.ts` | 1 | Align adapter/account fixtures and verify the native CLI boundary |
+| `mcode-account.test.ts` | 9 | Align adapter/account fixtures and verify the native CLI boundary |
+| `project-template-binding.test.ts` | 5 | Align adapter-specific template boundary fixtures and rerun tenant cases |
+| `session-server.test.ts` | 1 | Resolve platform path fixtures and validate on native Windows |
+| `team-administration.test.ts` | 2 | Diagnose workspace preparation before claiming delivery/team workflow acceptance |
+| `windows-npm-shim.test.ts` | 6 | Resolve platform path fixtures and validate on native Windows |
 
 ## 7. Release Acceptance
 
 A release candidate is acceptable only when:
 
 - Required automated checks in `docs/CI-CD-PLAN.md` pass or have recorded
-  skip reasons.
+  environment skip reasons; any beta-only baseline exception follows section 6.
+  This does not claim stable release acceptance.
 - Manual smoke in `docs/SMOKE-TEST.md` passes for auth, projects, config sync,
   sessions, terminal attach, notifications, Templates, Skills, plugins,
   usage, and snapshots.

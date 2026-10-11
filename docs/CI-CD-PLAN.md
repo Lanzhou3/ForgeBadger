@@ -260,11 +260,16 @@ construction, but secret values and unsanitized user input are not acceptable.
 
 Gate 1 - Candidate readiness:
 
-- Release branch is rebased or merged onto `master`.
+- Stable release candidates are rebased or merged onto `master`. A maintainer-selected
+  beta can use a clean, frozen `dev` commit with an explicit prerelease version/tag.
 - `docs/RELEASE-PLAN.md`, `docs/SMOKE-TEST.md`, and this plan are current.
 - Migration impact is understood and database backup instructions are present.
 
 Gate 2 - Automated verification:
+
+Stable candidates require the checks below. Beta exceptions must follow the
+bounded failure record and non-waivable package/security gates in
+`docs/RELEASE-PLAN.md` section 6; a failed check is never reported as passed.
 
 - Static and unit checks pass.
 - Gateway build passes.

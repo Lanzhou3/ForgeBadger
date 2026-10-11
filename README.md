@@ -20,6 +20,12 @@ WebSocket.
 
 ## Project Status
 
+The `beta` npm channel is for opt-in prerelease testing (`npm install -g
+forgebadger@beta`). Beta releases retain documented regression and platform
+limitations; they do not replace `latest`. See the
+[release procedure and candidate limitations](https://github.com/Lanzhou3/ForgeBadger/blob/dev/docs/RELEASE-PLAN.md#6-repeatable-npm-release-procedure)
+before using a prerelease for production work.
+
 ForgeBadger is in MVP / local-first release-candidate development. The core
 Gateway, Web console, persistent terminal flow, authentication, encrypted API key
 storage, project setup, adapter discovery, provider model profiles, live model
