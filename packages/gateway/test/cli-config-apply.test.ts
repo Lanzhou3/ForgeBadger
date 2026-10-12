@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { parse as parseToml } from "smol-toml";
 
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
@@ -75,7 +76,7 @@ function createFixture(db: Database.Database, userId: string, adapter: AdapterId
     anthropicBaseUrl: "https://api.deepseek.com/anthropic",
     openaiBaseUrl: "https://api.deepseek.com/v1",
     authType: "api_key",
-    apiFormat: adapter === "claude" || adapter === "kimi" ? "anthropic" : "openai-compatible",
+    apiFormat: adapter === "claude" || adapter === "kimi" ? "anthropic" : adapter === "codex" ? "openai-responses" : "openai-compatible",
     supportedAdapters: [adapter]
   });
   const model = repo.createModelProfile({
@@ -416,6 +417,128 @@ describe("cli-config apply service", () => {
       assert.match(configToml, /\[providers\.relay\]/u);
       assert.match(configToml, /type = "openai"/u);
       assert.match(configToml, /base_url = "https:\/\/relay\.example\.com\/v1"/u);
+    });
+
+    it("writes the capability projection, display_name, and thinking efforts for Kimi models", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-kimi-capabilities@example.com", "hash");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-apply-kimi-cap-");
+      const fixture = createFixture(db, user.id, "kimi");
+      fixture.repo.updateModelProfile(fixture.modelId, {
+        name: "Qwen 3.8",
+        capabilities: ["chat", "code", "vision", "video", "reasoning", "tools"],
+        supportEfforts: ["low", "high", "xhigh"],
+        defaultEffort: "high"
+      });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "kimi",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+
+      const doc = parseToml(await readFile(path.join(root, "config.toml"), "utf8")) as {
+        models: Record<string, Record<string, unknown>>;
+      };
+      const entry = doc.models["kimi-provider/kimi-model-1"];
+      assert.ok(entry);
+      // chat/code have no Kimi Code counterpart and are not projected.
+      assert.deepEqual(entry.capabilities, ["image_in", "video_in", "thinking", "tool_use"]);
+      assert.equal(entry.display_name, "Qwen 3.8");
+      assert.deepEqual(entry.support_efforts, ["low", "high", "xhigh"]);
+      assert.equal(entry.default_effort, "high");
+    });
+
+    it("merges hand-written Kimi model entries instead of wiping them", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-kimi-merge@example.com", "hash");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-apply-kimi-merge-");
+      const fixture = createFixture(db, user.id, "kimi");
+      // A hand-written entry from before the merge-style writer: extra
+      // capabilities, a custom context size, a custom tool, and effort keys.
+      await writeFile(path.join(root, "config.toml"), [
+        '[providers.kimi-provider]',
+        'type = "anthropic"',
+        'api_key = "sk-stale"',
+        'base_url = "https://api.deepseek.com/anthropic"',
+        "",
+        '[models."kimi-provider/kimi-model-1"]',
+        'provider = "kimi-provider"',
+        'model = "kimi-model-1"',
+        'capabilities = ["audio_in"]',
+        'max_context_size = 196608',
+        'display_name = "Hand renamed"',
+        'dynamically_loaded_tools = "some-tool"',
+        'support_efforts = ["low"]',
+        'default_effort = "low"'
+      ].join("\n"), "utf8");
+      fixture.repo.updateModelProfile(fixture.modelId, { capabilities: ["vision"] });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "kimi",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+
+      const doc = parseToml(await readFile(path.join(root, "config.toml"), "utf8")) as {
+        models: Record<string, Record<string, unknown>>;
+      };
+      const entry = doc.models["kimi-provider/kimi-model-1"];
+      assert.ok(entry);
+      // capabilities is a union: the hand-written tag survives, the projected
+      // one is appended.
+      assert.deepEqual(entry.capabilities, ["audio_in", "image_in"]);
+      // No contextWindow on the profile: the entry's own positive value wins.
+      assert.equal(entry.max_context_size, 196608);
+      // Unmanaged keys survive the re-apply.
+      assert.equal(entry.dynamically_loaded_tools, "some-tool");
+      // Managed keys track the profile: display_name is overridden, and the
+      // effort keys are removed because the profile declares none.
+      assert.equal(entry.display_name, "Default Model");
+      assert.equal(entry.support_efforts, undefined);
+      assert.equal(entry.default_effort, undefined);
+      // The stale provider secret is replaced by the vault credential.
+      const providers = (parseToml(await readFile(path.join(root, "config.toml"), "utf8")) as {
+        providers: Record<string, Record<string, string>>;
+      }).providers;
+      assert.equal(providers["kimi-provider"]?.api_key, "sk-kimi-secret");
+    });
+
+    it("writes and clears Kimi thinking efforts as managed keys", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-kimi-efforts@example.com", "hash");
+      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-apply-kimi-efforts-");
+      const fixture = createFixture(db, user.id, "kimi");
+      fixture.repo.updateModelProfile(fixture.modelId, {
+        supportEfforts: ["low", "medium", "high"],
+        defaultEffort: "medium"
+      });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "kimi",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+      let doc = parseToml(await readFile(path.join(root, "config.toml"), "utf8")) as {
+        models: Record<string, Record<string, unknown>>;
+      };
+      let entry = doc.models["kimi-provider/kimi-model-1"];
+      assert.ok(entry);
+      assert.deepEqual(entry.support_efforts, ["low", "medium", "high"]);
+      assert.equal(entry.default_effort, "medium");
+
+      // Clearing the profile's effort declaration removes the keys on the
+      // next apply instead of pinning stale values.
+      fixture.repo.updateModelProfile(fixture.modelId, { supportEfforts: [], defaultEffort: null });
+      await settle(15);
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "kimi",
+        providerProfileId: fixture.providerId, resolveHost: publicResolver
+      });
+      doc = parseToml(await readFile(path.join(root, "config.toml"), "utf8")) as {
+        models: Record<string, Record<string, unknown>>;
+      };
+      entry = doc.models["kimi-provider/kimi-model-1"];
+      assert.ok(entry);
+      assert.equal(entry.support_efforts, undefined);
+      assert.equal(entry.default_effort, undefined);
     });
 
     it("removes a stale ANTHROPIC_API_KEY when applying a token-based provider", async () => {
@@ -875,6 +998,35 @@ describe("cli-config apply service", () => {
       assert.equal(existsSync(path.join(root, "settings.json")), false);
     });
 
+    it("applies a loopback endpoint at apply time when allowPrivateNetworks is trusted", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-local-net@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-local-net-");
+      const repo = new ModelProviderRepository(db, user.id, masterKey);
+      const provider = repo.createProviderProfile({
+        name: "Ollama",
+        providerKey: "ollama",
+        anthropicBaseUrl: "http://127.0.0.1:1234/anthropic",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"],
+        allowPlaintextHttp: true,
+        allowPrivateNetworks: true
+      });
+      repo.createModelProfile({ providerProfileId: provider.id, name: "Default", modelId: "claude-model-1", isDefault: true });
+      repo.createCredential({ providerProfileId: provider.id, plaintextSecret: "sk-claude-secret" });
+
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: provider.id, resolveHost: publicResolver
+      });
+
+      const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
+        env: Record<string, string>;
+      };
+      assert.equal(doc.env.ANTHROPIC_BASE_URL, "http://127.0.0.1:1234/anthropic");
+    });
+
     it("rejects unknown providers, unsupported adapters, and cross-tenant profiles", async () => {
       const db = createTestDb();
       const users = new UserRepository(db);
@@ -1031,6 +1183,124 @@ describe("cli-config apply service", () => {
       })();
       assert.ok(malformed instanceof CliConfigApplyError);
       assert.equal(malformed.code, "CLI_CONFIG_BACKUP_NOT_FOUND");
+    });
+  });
+
+  describe("codex wire API probe guard", () => {
+    it("refuses a chat-wire apply the installed Codex would reject, without writing", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-codex-chat-refuse@example.com", "hash");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-apply-codex-refuse-");
+      const fixture = createFixture(db, user.id, "codex");
+      let probeCalls = 0;
+
+      const error = await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "codex",
+        providerProfileId: fixture.providerId,
+        modelProfileId: fixture.modelId,
+        credentialId: fixture.credentialId,
+        codexWireApi: "chat",
+        resolveHost: publicResolver,
+        codexConfigProbe: async (toml) => {
+          probeCalls += 1;
+          assert.match(toml, /experimental_bearer_token = "sk-codex-secret"/u);
+          return {
+            status: "unsupported",
+            codexVersion: "codex-cli 0.157.1",
+            detail: "`wire_api = \"chat\"` is no longer supported.\nin `model_providers.codex-provider.wire_api`"
+          };
+        }
+      }).catch((caught: unknown) => caught);
+
+      assert.ok(error instanceof CliConfigApplyError);
+      assert.equal(error.code, "CLI_CONFIG_APPLY_CODEX_WIRE_API_UNSUPPORTED");
+      assert.match(error.message, /no longer supports wire_api = "chat"/u);
+      assert.match(error.message, /codex-cli 0\.157\.1/u);
+      assert.match(error.message, /model_providers\.codex-provider\.wire_api/u);
+      assert.equal(probeCalls, 1);
+      // Nothing was written and no backup was recorded for a refused apply.
+      assert.equal(existsSync(path.join(root, "config.toml")), false);
+    });
+
+    it("flags the plan in preview without blocking other warnings", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("preview-codex-chat@example.com", "hash");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-preview-codex-chat-");
+      const fixture = createFixture(db, user.id, "codex");
+
+      const preview = await previewCliConfigApply({
+        db, userId: user.id, masterKey, adapter: "codex",
+        providerProfileId: fixture.providerId,
+        modelProfileId: fixture.modelId,
+        credentialId: fixture.credentialId,
+        codexWireApi: "chat",
+        resolveHost: publicResolver,
+        codexConfigProbe: async () => ({
+          status: "unsupported",
+          codexVersion: "codex-cli 0.157.1",
+          detail: "`wire_api = \"chat\"` is no longer supported."
+        })
+      });
+
+      assert.ok(preview.warnings.includes("CODEX_WIRE_API_UNSUPPORTED"));
+      assert.ok(
+        preview.warnings.some((warning) => warning.includes("no longer supports wire_api = \"chat\""))
+      );
+      // The generic TOML-normalization warning still rides along.
+      assert.ok(
+        preview.warnings.some((warning) => warning.includes("normalize TOML"))
+      );
+      // Preview never writes.
+      assert.equal(existsSync(path.join(root, "config.toml")), false);
+    });
+
+    it("skips the probe for responses-wire plans", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-codex-responses-skip@example.com", "hash");
+      const root = await useConfigRoot("CODEX_HOME", "forgebadger-apply-codex-skip-");
+      const fixture = createFixture(db, user.id, "codex");
+      let probeCalls = 0;
+
+      const result = await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "codex",
+        providerProfileId: fixture.providerId,
+        modelProfileId: fixture.modelId,
+        credentialId: fixture.credentialId,
+        codexWireApi: "responses",
+        resolveHost: publicResolver,
+        codexConfigProbe: async () => {
+          probeCalls += 1;
+          return { status: "unsupported" };
+        }
+      });
+
+      assert.equal(result.changed, true);
+      assert.equal(probeCalls, 0);
+      const configToml = await readFile(path.join(root, "config.toml"), "utf8");
+      assert.match(configToml, /wire_api = "responses"/u);
+    });
+
+    it("proceeds when the probe is skipped or reports supported", async () => {
+      for (const status of ["skipped", "supported"] as const) {
+        const db = createTestDb();
+        const user = new UserRepository(db).create(`apply-codex-${status}@example.com`, "hash");
+        const root = await useConfigRoot("CODEX_HOME", `forgebadger-apply-codex-${status}-`);
+        const fixture = createFixture(db, user.id, "codex");
+
+        const result = await applyCliConfigToAdapter({
+          db, userId: user.id, masterKey, adapter: "codex",
+          providerProfileId: fixture.providerId,
+          modelProfileId: fixture.modelId,
+          credentialId: fixture.credentialId,
+          codexWireApi: "chat",
+          resolveHost: publicResolver,
+          codexConfigProbe: async () => ({ status })
+        });
+
+        assert.equal(result.changed, true);
+        const configToml = await readFile(path.join(root, "config.toml"), "utf8");
+        assert.match(configToml, /wire_api = "chat"/u);
+      }
     });
   });
 });

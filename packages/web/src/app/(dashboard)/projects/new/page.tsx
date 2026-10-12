@@ -153,7 +153,7 @@ export default function NewProjectPage() {
                 <Button
                   type="submit"
                   size="sm"
-                  className="bg-brand text-brand-foreground hover:bg-brand/90"
+                  variant="brand"
                   disabled={mutation.isPending}
                 >
                   {mutation.isPending ? t("projects.creating") : t("projects.create")}

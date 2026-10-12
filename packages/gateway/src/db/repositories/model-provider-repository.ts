@@ -2,11 +2,18 @@ import { randomUUID } from "node:crypto";
 
 import type { Database } from "../types.js";
 import { decryptSecret, encryptSecret, type EncryptedSecret } from "../../crypto/secret-box.js";
+import { isCanonicalAdapterId, type CanonicalAdapterId } from "../../lib/adapter-ids.js";
 import { assertPublicHttpsEndpoint } from "../../services/network-policy.js";
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
-export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi";
+/**
+ * Wire protocol the provider endpoint speaks, not the vendor: Anthropic
+ * Messages, OpenAI Responses (/responses), OpenAI Chat Completions
+ * (/chat/completions, the safe default for third-party relays and local
+ * services like Ollama/vLLM), and Gemini native generateContent.
+ */
+export type ProviderApiFormat = "anthropic" | "openai-responses" | "openai-compatible" | "google";
+export type ProviderAdapter = CanonicalAdapterId;
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 
 export interface ProviderProfile {
@@ -25,6 +32,7 @@ export interface ProviderProfile {
   defaultHeaders: Record<string, string>;
   opencodeNpm: string | null;
   allowPlaintextHttp: boolean;
+  allowPrivateNetworks: boolean;
   status: string;
   createdAt: number | null;
   updatedAt: number | null;
@@ -43,6 +51,8 @@ export interface ModelProfile {
   modelId: string;
   capabilities: string[];
   contextWindow: number | null;
+  supportEfforts: string[];
+  defaultEffort: string | null;
   status: string;
   isDefault: boolean;
   sortOrder: number;
@@ -77,6 +87,7 @@ export interface CreateProviderProfileInput {
   defaultHeaders?: Record<string, string>;
   opencodeNpm?: string | null;
   allowPlaintextHttp?: boolean;
+  allowPrivateNetworks?: boolean;
 }
 
 export interface CreateModelProfileInput {
@@ -85,6 +96,8 @@ export interface CreateModelProfileInput {
   modelId: string;
   capabilities?: string[];
   contextWindow?: number | null;
+  supportEfforts?: string[];
+  defaultEffort?: string | null;
   isDefault?: boolean;
 }
 
@@ -93,6 +106,8 @@ export interface UpdateModelProfileInput {
   modelId?: string;
   capabilities?: string[];
   contextWindow?: number | null;
+  supportEfforts?: string[];
+  defaultEffort?: string | null;
   isDefault?: boolean;
 }
 
@@ -118,6 +133,7 @@ interface ProviderProfileRow {
   default_headers: string;
   opencode_npm: string | null;
   allow_plaintext_http: number;
+  allow_private_networks: number;
   status: string;
   created_at: number | null;
   updated_at: number | null;
@@ -136,6 +152,8 @@ interface ModelProfileRow {
   model_id: string;
   capabilities: string;
   context_window: number | null;
+  support_efforts: string;
+  default_effort: string | null;
   status: string;
   is_default: number;
   sort_order: number;
@@ -171,8 +189,8 @@ export class ModelProviderRepository {
       INSERT INTO model_provider_profiles (
         id, user_id, provider_key, name, base_url, anthropic_base_url, openai_base_url,
         region, product_type, auth_type, api_format, supported_adapters, default_headers,
-        opencode_npm, allow_plaintext_http, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+        opencode_npm, allow_plaintext_http, allow_private_networks, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
     `).run(
       id,
       this.userId,
@@ -189,6 +207,7 @@ export class ModelProviderRepository {
       JSON.stringify(input.defaultHeaders ?? {}),
       emptyToNull(input.opencodeNpm),
       input.allowPlaintextHttp ? 1 : 0,
+      input.allowPrivateNetworks ? 1 : 0,
       now,
       now
     );
@@ -242,14 +261,16 @@ export class ModelProviderRepository {
       supportedAdapters: input.supportedAdapters ?? existing.supportedAdapters,
       defaultHeaders: input.defaultHeaders ?? existing.defaultHeaders,
       opencodeNpm: input.opencodeNpm === undefined ? existing.opencodeNpm : input.opencodeNpm,
-      allowPlaintextHttp: input.allowPlaintextHttp ?? existing.allowPlaintextHttp
+      allowPlaintextHttp: input.allowPlaintextHttp ?? existing.allowPlaintextHttp,
+      allowPrivateNetworks: input.allowPrivateNetworks ?? existing.allowPrivateNetworks
     };
     assertProviderEndpointsSafe(next);
     this.db.prepare(`
       UPDATE model_provider_profiles
       SET provider_key = ?, name = ?, base_url = ?, anthropic_base_url = ?, openai_base_url = ?,
         region = ?, product_type = ?, auth_type = ?, api_format = ?, supported_adapters = ?,
-        default_headers = ?, opencode_npm = ?, allow_plaintext_http = ?, updated_at = ?
+        default_headers = ?, opencode_npm = ?, allow_plaintext_http = ?, allow_private_networks = ?,
+        updated_at = ?
       WHERE id = ? AND user_id = ?
     `).run(
       normalizeProviderKey(next.providerKey),
@@ -265,6 +286,7 @@ export class ModelProviderRepository {
       JSON.stringify(next.defaultHeaders),
       emptyToNull(next.opencodeNpm),
       next.allowPlaintextHttp ? 1 : 0,
+      next.allowPrivateNetworks ? 1 : 0,
       Date.now(),
       id,
       this.userId
@@ -289,8 +311,9 @@ export class ModelProviderRepository {
     this.db.prepare(`
       INSERT INTO model_profiles (
         id, user_id, provider_profile_id, name, model_id, capabilities,
-        context_window, status, is_default, sort_order, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 0, ?, ?)
+        context_window, support_efforts, default_effort,
+        status, is_default, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 0, ?, ?)
     `).run(
       id,
       this.userId,
@@ -299,6 +322,8 @@ export class ModelProviderRepository {
       input.modelId,
       JSON.stringify(input.capabilities ?? []),
       input.contextWindow ?? null,
+      JSON.stringify(input.supportEfforts ?? []),
+      input.defaultEffort ?? null,
       input.isDefault ? 1 : 0,
       now,
       now
@@ -341,11 +366,14 @@ export class ModelProviderRepository {
       modelId: input.modelId ?? existing.modelId,
       capabilities: input.capabilities ?? existing.capabilities,
       contextWindow: input.contextWindow === undefined ? existing.contextWindow : input.contextWindow,
+      supportEfforts: input.supportEfforts ?? existing.supportEfforts,
+      defaultEffort: input.defaultEffort === undefined ? existing.defaultEffort : input.defaultEffort,
       isDefault: input.isDefault ?? existing.isDefault
     };
     this.db.prepare(`
       UPDATE model_profiles
       SET name = ?, model_id = ?, capabilities = ?, context_window = ?,
+        support_efforts = ?, default_effort = ?,
         is_default = ?, updated_at = ?
       WHERE id = ? AND user_id = ?
     `).run(
@@ -353,6 +381,8 @@ export class ModelProviderRepository {
       next.modelId,
       JSON.stringify(next.capabilities),
       next.contextWindow ?? null,
+      JSON.stringify(next.supportEfforts),
+      next.defaultEffort ?? null,
       next.isDefault ? 1 : 0,
       now,
       id,
@@ -467,11 +497,11 @@ export class ModelProviderRepository {
   }
 }
 
-function assertProviderEndpointsSafe(input: Pick<CreateProviderProfileInput, "authType" | "baseUrl" | "anthropicBaseUrl" | "openaiBaseUrl" | "allowPlaintextHttp">): void {
+function assertProviderEndpointsSafe(input: Pick<CreateProviderProfileInput, "authType" | "baseUrl" | "anthropicBaseUrl" | "openaiBaseUrl" | "allowPlaintextHttp" | "allowPrivateNetworks">): void {
   if (input.authType === "none") return;
   const endpoints = [input.baseUrl, input.anthropicBaseUrl, input.openaiBaseUrl].filter((value): value is string => Boolean(value));
   if (endpoints.length === 0) throw new Error("Credential-bearing providers require an endpoint");
-  for (const endpoint of endpoints) assertPublicHttpsEndpoint(endpoint, { allowPlaintextHttp: input.allowPlaintextHttp });
+  for (const endpoint of endpoints) assertPublicHttpsEndpoint(endpoint, { allowPlaintextHttp: input.allowPlaintextHttp, allowPrivateNetworks: input.allowPrivateNetworks });
 }
 
 function toProviderProfile(row: ProviderProfileRow): ProviderProfile {
@@ -491,6 +521,7 @@ function toProviderProfile(row: ProviderProfileRow): ProviderProfile {
     defaultHeaders: parseJsonObject(row.default_headers),
     opencodeNpm: row.opencode_npm,
     allowPlaintextHttp: row.allow_plaintext_http === 1,
+    allowPrivateNetworks: row.allow_private_networks === 1,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -511,6 +542,8 @@ function toModelProfile(row: ModelProfileRow): ModelProfile {
     modelId: row.model_id,
     capabilities: parseJsonArray(row.capabilities),
     contextWindow: row.context_window,
+    supportEfforts: parseJsonArray(row.support_efforts),
+    defaultEffort: row.default_effort,
     status: row.status,
     isDefault: Boolean(row.is_default),
     sortOrder: row.sort_order,
@@ -565,7 +598,7 @@ function parseJsonObject(value: string): Record<string, string> {
 }
 
 function isProviderAdapter(value: string): value is ProviderAdapter {
-  return value === "claude" || value === "opencode" || value === "codex" || value === "kimi" || value === "pi";
+  return isCanonicalAdapterId(value);
 }
 
 function normalizeSupportedAdapters(adapters: ProviderAdapter[]): ProviderAdapter[] {

@@ -128,7 +128,7 @@ export interface ProjectManagerStarterPack {
   id: string;
   name: string;
   description: string;
-  recommendedAdapter: "claude" | "opencode" | "codex" | "kimi" | "pi";
+  recommendedAdapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
   promptFrame: string;
   acceptanceChecklist: string[];
   verificationGuidance: string[];
@@ -390,6 +390,52 @@ export interface UpdateFeishuIntegrationConfigInput {
   commandPrefix?: string;
 }
 
+export type ChannelPlatform = "feishu" | "telegram";
+
+export interface TelegramChannelAccount {
+  id: string;
+  botUsername: string | null;
+  enabled: boolean;
+  secretConfigured: boolean;
+  connectionState: string;
+  configRevision: number;
+  lastConnectedAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  updatedAt: string;
+}
+
+export interface SaveTelegramChannelAccountInput {
+  botToken?: string;
+  enabled: boolean;
+}
+
+export interface TelegramIntegrationConfig {
+  enabled: boolean;
+  emergencyDisabled: boolean;
+  allowedChatIds: string[];
+}
+
+export interface UpdateTelegramIntegrationConfigInput {
+  enabled?: boolean;
+  emergencyDisabled?: boolean;
+  allowedChatIds?: string[];
+}
+
+export interface ChannelDiagnosticCheck {
+  status?: 'passed' | 'failed' | 'untested' | 'pending';
+  key: "credentials" | "connection" | "identity" | "route" | "model" | "delivery";
+  ok: boolean;
+  detail: string;
+  fixHint: string;
+}
+
+export interface ChannelDiagnostics {
+  channel: ChannelPlatform;
+  generatedAt: number;
+  checks: ChannelDiagnosticCheck[];
+}
+
 export interface FeishuUserMapping {
   id: string;
   feishuUserId: string;
@@ -466,6 +512,52 @@ export interface Skill {
   version?: string;
   visibility?: "private" | "shared" | "admin";
   isEnabled: boolean;
+  /** JSON-serialized SkillRemoteProvenance for skills installed from a remote repository. */
+  remoteProvenance?: string | null;
+}
+
+export interface SkillRemoteProvenanceLastCheck {
+  checkedAt: string;
+  latestCommitSha: string;
+  updateAvailable: boolean;
+}
+
+export interface SkillRemoteProvenance {
+  storage?: "database";
+  legacyGlobalMirror?: boolean;
+  sourceUrl?: string;
+  packageHash?: string;
+  kind: "github" | "marketplace" | string;
+  repo: string;
+  ref: string;
+  path?: string;
+  resolvedCommitSha: string;
+  contentHash: string;
+  installedAt: string;
+  marketplaceSourceId?: string;
+  pluginName?: string;
+  lastCheck?: SkillRemoteProvenanceLastCheck;
+}
+
+export function parseSkillRemoteProvenance(
+  skill: Pick<Skill, "remoteProvenance">
+): SkillRemoteProvenance | null {
+  const raw = skill.remoteProvenance;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<SkillRemoteProvenance> | null;
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof parsed.repo !== "string" ||
+      typeof parsed.resolvedCommitSha !== "string"
+    ) {
+      return null;
+    }
+    return parsed as SkillRemoteProvenance;
+  } catch {
+    return null;
+  }
 }
 
 export interface SkillDiscovery {
@@ -546,8 +638,27 @@ export interface ProjectSkill {
 }
 
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
-export type ProviderApiFormat = "anthropic" | "openai" | "openai-compatible" | "google" | "bedrock" | "local";
-export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi";
+/** Wire protocol the provider endpoint speaks (not the vendor). */
+export type ProviderApiFormat = "anthropic" | "openai-responses" | "openai-compatible" | "google";
+export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
+
+/**
+ * Canonical adapter id list for the web surface.
+ *
+ * The gateway derives `AdapterDiscovery["id"]` from its own single source, but
+ * the hand-written unions above still had to be extended one adapter at a
+ * time — and that already drifted (several pickers shipped without `pi`).
+ * UIs that enumerate adapters should build from this instead of re-spelling
+ * the list.
+ */
+export const runtimeAdapterIds = [
+  "claude",
+  "opencode",
+  "codex",
+  "kimi",
+  "pi",
+  "mcode"
+] as const satisfies readonly ProviderSupportedAdapter[];
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 
 export interface ProviderProfile {
@@ -564,6 +675,7 @@ export interface ProviderProfile {
   supportedAdapters: ProviderSupportedAdapter[];
   opencodeNpm?: string | null;
   allowPlaintextHttp?: boolean;
+  allowPrivateNetworks?: boolean;
   status: string;
 }
 
@@ -579,6 +691,8 @@ export interface ModelProfile {
   modelId: string;
   capabilities: string[];
   contextWindow: number | null;
+  supportEfforts: string[];
+  defaultEffort: string | null;
   status: string;
   isDefault: boolean;
 }
@@ -605,6 +719,64 @@ export interface ProviderBalanceResult {
   balances: ProviderBalanceEntry[];
   checkedAt: string;
   cached?: boolean;
+}
+
+/**
+ * Read-only view of a CLI's native login state / subscription quota, as
+ * reported by GET /cli-accounts. Mirrors the gateway cli-account types.
+ */
+export type CliAccountAdapter = "claude" | "codex" | "kimi" | "mcode";
+
+/**
+ * Adapters the gateway can observe a native login/quota for. Narrower than
+ * {@link runtimeAdapterIds}: opencode and pi ship no account surface, so the
+ * gateway answers 400 for them and the quota panel must not probe them.
+ */
+export const CLI_ACCOUNT_ADAPTERS = ["claude", "codex", "kimi", "mcode"] as const satisfies
+  readonly CliAccountAdapter[];
+
+export type CliLoginState = "ready" | "custom_endpoint" | "not_authenticated" | "cli_missing" | "unknown";
+
+export interface CliLoginStatus {
+  adapter: CliAccountAdapter;
+  state: CliLoginState;
+  /** Login method, e.g. claude "claude.ai", codex "chatgpt"|"api", kimi "oauth"|"api_key". */
+  method?: string;
+  /** Human-facing account hint (e.g. email) when the CLI exposes one. */
+  accountLabel?: string;
+  /** Machine-readable qualifier for ambiguous states (e.g. "token_expired"). */
+  detailCode?: string;
+}
+
+export type CliQuotaUnsupportedReason =
+  | "keychain"
+  | "no_native_login"
+  | "api_key_mode"
+  | "token_expired"
+  | "upstream_error";
+
+export interface CliQuotaEntry {
+  label: string;
+  unit: "percent" | "count" | "currency";
+  /** 0-100 usage percentage when the endpoint reports one. */
+  usedPercent?: number;
+  remaining?: number;
+  limit?: number;
+  /** ISO timestamp when the quota window resets, when reported. */
+  resetsAt?: string;
+}
+
+export interface CliQuotaResult {
+  supported: boolean;
+  unsupportedReason?: CliQuotaUnsupportedReason;
+  planLabel?: string;
+  entries: CliQuotaEntry[];
+  fetchedAt: string;
+}
+
+export interface CliAccountOverview {
+  login: CliLoginStatus;
+  quota?: CliQuotaResult;
 }
 
 export interface AppliedProviderInfo {
@@ -651,6 +823,7 @@ export interface ProviderCredentialSummary {
   label: string | null;
   status: string;
   secretPreview: string;
+  generation?: number;
 }
 
 export interface SessionActivity {
@@ -796,7 +969,7 @@ export interface TokenDailyPoint {
 }
 
 export interface UsageSyncResultItem {
-  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi";
+  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
   scanned: number;
   inserted: number;
 }
@@ -807,7 +980,7 @@ export interface UsageSyncResult {
 }
 
 export interface AdapterDiscovery {
-  id: "claude" | "opencode" | "codex" | "kimi" | "pi";
+  id: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
   label: string;
   command: string;
   supportLevel: "supported" | "prototype";
@@ -821,6 +994,34 @@ export interface AdapterDiscovery {
 }
 
 export type RuntimeAdapterId = AdapterDiscovery["id"];
+
+export interface AdapterUpdateStatus {
+  id: RuntimeAdapterId;
+  state: "missing" | "check_failed" | "up_to_date" | "update_available";
+  installedVersion?: string;
+  latestVersion?: string;
+  latestSource?: "npm" | "homebrew";
+  command: string;
+  installCommand: string;
+  installRequiresNode?: string;
+  error?: string;
+}
+
+export interface AdapterInstallResult {
+  id: RuntimeAdapterId;
+  command: string;
+  installedVersion?: string;
+  commandAvailable: boolean;
+}
+
+export interface AdapterUpdateResult {
+  id: RuntimeAdapterId;
+  previousVersion: string;
+  installedVersion: string;
+  latestVersion: string;
+  command: string;
+  versionStillBehind: boolean;
+}
 
 export type CredentialMode = "host_environment" | "stored_encrypted_key";
 
@@ -853,26 +1054,58 @@ export interface SkillInstallInput {
   enable?: boolean;
 }
 
-export interface RemoteSkillPreview {
-  name: string;
-  description?: string;
-  version: string;
-  content: string;
-  sizeBytes: number;
-  provenance: {
-    sourceId: string;
-    url: string;
-    kind: "manifest" | "raw-skill";
-    skillId?: string;
-    fetchedAt: string;
-  };
+export interface GitHubSkillSourcePreviewInput {
+  /** "owner/repo" or "owner/repo/sub/path" shorthand. */
+  repo: string;
+  ref?: string;
 }
 
-export interface SkillSourcePreviewInput {
-  sourceId: string;
-  url: string;
-  skillId?: string;
+export interface GitHubSkillPreviewEntry {
+  path: string;
+  name: string;
+  description?: string;
+  version?: string;
+}
+
+export interface GitHubSkillSourcePreview {
+  sha: string;
+  /** Normalized "owner/repo" of the previewed source (may differ from the input shorthand). */
+  repo?: string;
+  skills: GitHubSkillPreviewEntry[];
+}
+
+export interface SkillUpdateCheckResult {
+  updateAvailable: boolean;
+  currentSha: string;
+  latestSha: string;
+}
+
+export interface SkillUpdateCheckEntry {
+  skillId: string;
+  name: string;
+  updateAvailable: boolean;
+  currentSha: string;
+  latestSha: string;
+  error?: string;
+}
+
+export interface SkillUpdateCheckSummary {
+  results: SkillUpdateCheckEntry[];
+}
+
+export interface MarketplaceRefreshInput {
+  /** "owner/repo" shorthand of a GitHub marketplace repository. */
+  repo: string;
+  label?: string;
   timeoutMs?: number;
+}
+
+export interface MarketplaceRefreshResult {
+  source: CatalogSource;
+  items: CatalogItem[];
+  skipped?: { name: string; reason: string }[];
+  sha?: string;
+  marketplaceName?: string | null;
 }
 
 export interface ApiKeySummary {
@@ -969,6 +1202,8 @@ export interface DashboardStats {
 export interface DashboardHealthItem {
   healthy: boolean;
   count?: number;
+  /** Stable machine key for the current state; map via dashboard-copy. Optional for older Gateways. */
+  code?: string;
   message: string;
 }
 
@@ -1033,39 +1268,40 @@ export function apiUrl(path: string): string {
 }
 
 export async function fetchJson<T = unknown>(path: string, options: ApiRequestOptions = {}) {
-  const token = getToken();
-  const { request, cleanup } = buildApiRequest(options, token);
-  const res = await fetch(apiUrl(path), request).catch(normalizeFetchError).finally(cleanup);
-  const envelope = await readApiEnvelope<T>(res);
-  if (!res.ok) {
-    handleUnauthorized(path, token !== null, res.status);
-    throw errorFromResponse(res, envelope);
-  }
-  if (!envelope) {
-    throw new GatewayApiError("API request failed", res.status);
-  }
-  if (envelope.code !== 0) {
-    throw errorFromEnvelope(envelope, res.status);
-  }
-  return envelope.data as T;
+  return (await fetchEnvelope<T>(path, options)).data as T;
 }
 
 export async function fetchEnvelope<T = unknown>(path: string, options: ApiRequestOptions = {}) {
   const token = getToken();
   const { request, cleanup } = buildApiRequest(options, token);
-  const res = await fetch(apiUrl(path), request).catch(normalizeFetchError).finally(cleanup);
-  const envelope = await readApiEnvelope<T>(res);
-  if (!res.ok) {
-    handleUnauthorized(path, token !== null, res.status);
-    throw errorFromResponse(res, envelope);
+  try {
+    return await awaitApiRequest(async () => {
+      const res = await fetch(apiUrl(path), request);
+      const envelope = await readApiEnvelope<T>(res);
+      request.signal!.throwIfAborted();
+      if (!res.ok) {
+        handleUnauthorized(path, token !== null, res.status);
+        throw errorFromResponse(res, envelope);
+      }
+      if (!envelope) throw new GatewayApiError("API request failed", res.status);
+      if (envelope.code !== 0) throw errorFromEnvelope(envelope, res.status);
+      return envelope;
+    }, request.signal!);
+  } catch (error) {
+    normalizeFetchError(error);
+  } finally {
+    cleanup();
   }
-  if (!envelope) {
-    throw new GatewayApiError("API request failed", res.status);
-  }
-  if (envelope.code !== 0) {
-    throw errorFromEnvelope(envelope, res.status);
-  }
-  return envelope;
+}
+
+/** The deadline includes headers, body consumption and envelope validation. */
+function awaitApiRequest<T>(read: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    read().then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
 
 function buildApiRequest(options: ApiRequestOptions, token: string | null): {
@@ -1073,14 +1309,22 @@ function buildApiRequest(options: ApiRequestOptions, token: string | null): {
   cleanup: () => void;
 } {
   const { timeoutMs = DEFAULT_API_TIMEOUT_MS, ...requestOptions } = options;
-  const controller = requestOptions.signal ? undefined : new AbortController();
-  const timeout = controller
-    ? setTimeout(() => controller.abort(), timeoutMs)
-    : undefined;
+  const controller = new AbortController();
+  const caller = requestOptions.signal;
+  const cancel = () => controller.abort(new GatewayApiError(
+    "Gateway request cancelled. Sync the operation status before retrying.",
+    undefined, { code: "GATEWAY_REQUEST_CANCELLED" }
+  ));
+  if (caller?.aborted) cancel();
+  else caller?.addEventListener("abort", cancel, { once: true });
+  const timeout = setTimeout(() => controller.abort(new GatewayApiError(
+    "Gateway request timed out. Check that the Gateway service is running.",
+    undefined, { code: "GATEWAY_REQUEST_TIMEOUT" }
+  )), timeoutMs);
   return {
     request: {
       ...requestOptions,
-      signal: requestOptions.signal ?? controller?.signal,
+      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -1088,9 +1332,8 @@ function buildApiRequest(options: ApiRequestOptions, token: string | null): {
       },
     },
     cleanup: () => {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
+      clearTimeout(timeout);
+      caller?.removeEventListener("abort", cancel);
     },
   };
 }
@@ -1118,9 +1361,15 @@ const AUTH_CREDENTIAL_PATHS = [
   "/api/v1/auth/reset-password"
 ];
 
+/** Provider-credential reveal also answers 401 for a wrong account password. */
+function isPasswordChallengePath(path: string): boolean {
+  return /^\/api\/v1\/model-providers\/[^/]+\/credentials\/[^/]+\/reveal$/u.test(path);
+}
+
 function handleUnauthorized(path: string, hadToken: boolean, status: number): void {
   if (status !== 401 || !hadToken) return;
   if (AUTH_CREDENTIAL_PATHS.some((authPath) => path.startsWith(authPath))) return;
+  if (isPasswordChallengePath(path)) return;
   if (typeof window === "undefined") return;
   clearToken();
   clearUser();
@@ -1253,11 +1502,20 @@ export async function saveFeishuAppAccount(input: {
   return data.account;
 }
 
+const CONNECTION_HEALTH_FALLBACK: FeishuConnectionHealth = {
+  state: "disabled",
+  accountId: null,
+  configRevision: null,
+  reconnectAttempt: 0,
+  lastConnectedAt: null,
+  lastErrorMessage: null
+};
+
 export async function getFeishuChannelAccount(): Promise<FeishuChannelAccount | null> {
   const data = await fetchJson<{ account: FeishuChannelAccount | null }>("/api/v1/integrations/feishu/account", {
     cache: "no-store"
   });
-  return data.account;
+  return data.account ?? null;
 }
 
 export async function saveFeishuChannelAccount(input: {
@@ -1276,7 +1534,7 @@ export async function getFeishuConnectionHealth(): Promise<FeishuConnectionHealt
   const data = await fetchJson<{ health: FeishuConnectionHealth }>("/api/v1/integrations/feishu/health", {
     cache: "no-store"
   });
-  return data.health;
+  return data.health ?? CONNECTION_HEALTH_FALLBACK;
 }
 
 export async function emergencyStopFeishu(): Promise<void> {
@@ -1315,6 +1573,62 @@ export async function replaceFeishuUserMappings(
     body: JSON.stringify({ mappings })
   });
   return data.mappings;
+}
+
+export async function getTelegramChannelAccount(): Promise<TelegramChannelAccount | null> {
+  const data = await fetchJson<{ account: TelegramChannelAccount | null }>("/api/v1/integrations/telegram/account", {
+    cache: "no-store"
+  });
+  return data.account ?? null;
+}
+
+export async function saveTelegramChannelAccount(
+  input: SaveTelegramChannelAccountInput
+): Promise<TelegramChannelAccount> {
+  const data = await fetchJson<{ account: TelegramChannelAccount }>("/api/v1/integrations/telegram/account", {
+    method: "PUT",
+    body: JSON.stringify(input)
+  });
+  return data.account;
+}
+
+export async function getTelegramConnectionHealth(): Promise<FeishuConnectionHealth> {
+  const data = await fetchJson<{ health: FeishuConnectionHealth }>("/api/v1/integrations/telegram/health", {
+    cache: "no-store"
+  });
+  return data.health ?? CONNECTION_HEALTH_FALLBACK;
+}
+
+export async function getTelegramIntegrationConfig(): Promise<TelegramIntegrationConfig> {
+  const data = await fetchJson<{ config: TelegramIntegrationConfig }>("/api/v1/integrations/telegram/config", {
+    cache: "no-store"
+  });
+  return data.config ?? { enabled: true, emergencyDisabled: false, allowedChatIds: [] };
+}
+
+export async function updateTelegramIntegrationConfig(
+  input: UpdateTelegramIntegrationConfigInput
+): Promise<TelegramIntegrationConfig> {
+  const data = await fetchJson<{ config: TelegramIntegrationConfig }>("/api/v1/integrations/telegram/config", {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+  return data.config ?? { enabled: true, emergencyDisabled: false, allowedChatIds: [] };
+}
+
+export async function emergencyStopTelegram(): Promise<void> {
+  await fetchJson("/api/v1/integrations/telegram/emergency-stop", { method: "POST", body: "{}" });
+}
+
+export async function getChannelDiagnostics(channel: ChannelPlatform): Promise<ChannelDiagnostics> {
+  const data = await fetchJson<ChannelDiagnostics>(`/api/v1/channels/${channel}/diagnostics`, {
+    cache: "no-store"
+  });
+  return {
+    channel: data.channel ?? channel,
+    generatedAt: typeof data.generatedAt === "number" ? data.generatedAt : 0,
+    checks: Array.isArray(data.checks) ? data.checks : []
+  };
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
@@ -1486,6 +1800,29 @@ export async function clearServerNotifications(): Promise<{ deleted: number }> {
 
 export async function discoverAdapters(): Promise<{ adapters: AdapterDiscovery[] }> {
   return fetchJson("/api/v1/adapters/discovery") as Promise<{ adapters: AdapterDiscovery[] }>;
+}
+
+export async function getAdapterOrder(): Promise<{ order: RuntimeAdapterId[] }> {
+  return fetchJson("/api/v1/adapters/order") as Promise<{ order: RuntimeAdapterId[] }>;
+}
+
+export async function putAdapterOrder(order: RuntimeAdapterId[]): Promise<{ order: RuntimeAdapterId[] }> {
+  return fetchJson("/api/v1/adapters/order", {
+    method: "PUT",
+    body: JSON.stringify({ order })
+  }) as Promise<{ order: RuntimeAdapterId[] }>;
+}
+
+export async function checkAdapterUpdates(refresh = false): Promise<{ updates: AdapterUpdateStatus[]; canUpdate: boolean; canInstall: boolean }> {
+  return fetchJson(`/api/v1/adapters/updates${refresh ? "?refresh=true" : ""}`) as Promise<{ updates: AdapterUpdateStatus[]; canUpdate: boolean; canInstall: boolean }>;
+}
+
+export async function updateAdapter(id: RuntimeAdapterId): Promise<AdapterUpdateResult> {
+  return fetchJson(`/api/v1/adapters/${id}/update`, { method: "POST", timeoutMs: 200_000 }) as Promise<AdapterUpdateResult>;
+}
+
+export async function installAdapter(id: RuntimeAdapterId): Promise<AdapterInstallResult> {
+  return fetchJson(`/api/v1/adapters/${id}/install`, { method: "POST", timeoutMs: 330_000 }) as Promise<AdapterInstallResult>;
 }
 
 export async function createGateASession(cwd: string): Promise<GateASession> {
@@ -1851,12 +2188,15 @@ export interface McpStatus {
   endpoint: string;
 }
 
-export type McpTokenScope = "read" | "operate";
+export type McpTokenScope = "read" | "operate" | "cli_dispatch" | "lifecycle";
 
 export interface McpToken {
   id: string;
   name: string;
   scopes: McpTokenScope[];
+  allowedRoot: string | null;
+  projectIds: string[] | null;
+  expiresAt: string | null;
   createdAt: string;
   lastUsedAt: string | null;
   revoked: boolean;
@@ -1876,6 +2216,9 @@ export async function listMcpTokens(): Promise<{ tokens: McpToken[] }> {
 export async function createMcpToken(input: {
   name: string;
   scopes: McpTokenScope[];
+  allowedRoot?: string;
+  projectIds?: string[];
+  expiresInHours?: number | null;
 }): Promise<{ token: McpToken; plaintext: string }> {
   return fetchJson<{ token: McpToken; plaintext: string }>("/api/v1/mcp/tokens", {
     method: "POST",
@@ -1886,6 +2229,14 @@ export async function createMcpToken(input: {
 export async function revokeMcpToken(id: string): Promise<{ revoked: boolean }> {
   return fetchJson<{ revoked: boolean }>(`/api/v1/mcp/tokens/${encodeURIComponent(id)}`, {
     method: "DELETE",
+  });
+}
+
+export async function updateMcpTokenProjects(input: {
+  id: string; projectIds: string[]; expectedProjectIds: string[] | null;
+}): Promise<{ token: McpToken }> {
+  return fetchJson<{ token: McpToken }>(`/api/v1/mcp/tokens/${encodeURIComponent(input.id)}`, {
+    method: 'PATCH', body: JSON.stringify({ projectIds: input.projectIds, expectedProjectIds: input.expectedProjectIds }),
   });
 }
 
@@ -2510,6 +2861,16 @@ export async function generateConfig(
 }
 
 // Sessions
+export interface SessionWorkState {
+  sessionId: string;
+  state: "working" | "idle" | "unknown";
+  updatedAt: number;
+}
+
+export function getSessionWorkStates(): Promise<{ states: SessionWorkState[]; snapshotAt: number }> {
+  return fetchJson("/api/v1/sessions/work-state") as Promise<{ states: SessionWorkState[]; snapshotAt: number }>;
+}
+
 export function listSessions(): Promise<{ sessions: Session[] }>;
 export function listSessions(params: { projectId?: string }): Promise<{ sessions: Session[] }>;
 export async function listSessions(params: { projectId?: string } = {}): Promise<{ sessions: Session[] }> {
@@ -2533,9 +2894,23 @@ export async function updateSessionLastPrompt(
   }) as Promise<{ session: Session }>;
 }
 
+export type TerminalShell = "pwsh" | "powershell" | "cmd" | "bash" | "zsh" | "sh";
+
+export interface TerminalShellAvailability {
+  shell: TerminalShell;
+  available: boolean;
+  command: string;
+}
+
+/** Probe which shells are installed on this host (launch-dialog defaults). */
+export async function listTerminalShells(): Promise<{ platform: string; shells: TerminalShellAvailability[] }> {
+  return fetchJson("/api/v1/sessions/shells") as Promise<{ platform: string; shells: TerminalShellAvailability[] }>;
+}
+
 export async function createSession(data: {
   projectId: string;
-  aiTool?: RuntimeAdapterId;
+  aiTool?: RuntimeAdapterId | "terminal";
+  shell?: TerminalShell;
 }): Promise<{ session: Session }> {
   return fetchJson("/api/v1/sessions", { method: "POST", body: JSON.stringify(data) }) as Promise<{ session: Session }>;
 }
@@ -2548,12 +2923,13 @@ export async function startSession(id: string): Promise<unknown> {
   return fetchJson(`/api/v1/sessions/${id}/start`, { method: "POST" });
 }
 
-export async function stopSession(id: string): Promise<unknown> {
+export async function stopSession(id: string): Promise<{ session: { warning?: string; terminalStopped?: boolean; stopScope?: string; externalExecutionStopped?: null } }> {
   return fetchJson(`/api/v1/sessions/${id}/stop`, { method: "POST" });
 }
 
-export async function deleteSession(id: string): Promise<unknown> {
-  return fetchJson(`/api/v1/sessions/${id}`, { method: "DELETE" });
+export async function deleteSession(id: string, options?: { force?: boolean }): Promise<unknown> {
+  const suffix = options?.force ? "?force=true" : "";
+  return fetchJson(`/api/v1/sessions/${id}${suffix}`, { method: "DELETE" });
 }
 
 export async function connectSession(id: string): Promise<{ session: Session }> {
@@ -2600,6 +2976,15 @@ export async function refreshCatalog(data: {
   }) as Promise<{ source: CatalogSource; items: CatalogItem[] }>;
 }
 
+export async function refreshMarketplace(
+  data: MarketplaceRefreshInput
+): Promise<MarketplaceRefreshResult> {
+  return fetchJson("/api/v1/catalog/marketplace-refresh", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<MarketplaceRefreshResult>;
+}
+
 export async function installCatalogTemplate(
   itemId: string
 ): Promise<{ template: Template; catalogItem: Pick<CatalogItem, "id" | "externalId" | "sourceId"> }> {
@@ -2630,15 +3015,6 @@ export async function installSkill(data: SkillInstallInput): Promise<{ skill: Sk
   }) as Promise<{ skill: Skill; source: SkillSource }>;
 }
 
-export async function previewSkillSource(
-  data: SkillSourcePreviewInput
-): Promise<{ preview: RemoteSkillPreview }> {
-  return fetchJson("/api/v1/skills/install/preview", {
-    method: "POST",
-    body: JSON.stringify(data),
-  }) as Promise<{ preview: RemoteSkillPreview }>;
-}
-
 export async function updateSkill(id: string, data: SkillUpdateInput): Promise<{ skill: Skill }> {
   return fetchJson(`/api/v1/skills/${id}`, {
     method: "PUT",
@@ -2655,6 +3031,27 @@ export async function toggleSkill(id: string, enabled: boolean): Promise<{ skill
     method: "POST",
     body: JSON.stringify({ enabled }),
   }) as Promise<{ skill: Skill }>;
+}
+
+export async function previewGitHubSkillSource(
+  data: GitHubSkillSourcePreviewInput
+): Promise<GitHubSkillSourcePreview> {
+  return fetchJson("/api/v1/skills/install/github/preview", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }) as Promise<GitHubSkillSourcePreview>;
+}
+
+export async function checkSkillUpdate(id: string): Promise<SkillUpdateCheckResult> {
+  return fetchJson(`/api/v1/skills/${encodeURIComponent(id)}/check-update`, {
+    method: "POST",
+  }) as Promise<SkillUpdateCheckResult>;
+}
+
+export async function checkAllSkillUpdates(): Promise<SkillUpdateCheckSummary> {
+  return fetchJson("/api/v1/skills/check-updates", {
+    method: "POST",
+  }) as Promise<SkillUpdateCheckSummary>;
 }
 
 export async function listProjectSkills(projectId: string): Promise<{ skills: ProjectSkill[] }> {
@@ -2725,6 +3122,8 @@ export interface DirectoryPickerResult {
 export async function selectNativeDirectory(): Promise<DirectoryPickerResult> {
   return fetchJson("/api/v1/system/select-directory", {
     method: "POST",
+    // The host dialog allows 120 seconds; leave time for its error response.
+    timeoutMs: 130_000,
   }) as Promise<DirectoryPickerResult>;
 }
 
@@ -2772,7 +3171,9 @@ export interface GitTemplateImportInput {
 export interface GitTemplateImportResult {
   templateId: string;
   name: string;
-  adapter: "claude" | "opencode" | "codex" | "kimi" | null;
+  // `pi` was missing from this union even though the gateway can return it, so
+  // consumers had to cast. Kept in sync with the other adapter unions.
+  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | null;
   fileCount: number;
   skippedFiles: string[];
 }
@@ -2840,6 +3241,7 @@ export async function createModelProvider(data: {
   productType?: ProviderProductType;
   supportedAdapters?: ProviderSupportedAdapter[];
   allowPlaintextHttp?: boolean;
+  allowPrivateNetworks?: boolean;
 }): Promise<{ provider: ProviderProfile }> {
   return fetchJson("/api/v1/model-providers", {
     method: "POST",
@@ -2858,6 +3260,7 @@ export async function updateModelProvider(providerId: string, data: {
   apiFormat?: ProviderApiFormat;
   supportedAdapters?: ProviderSupportedAdapter[];
   allowPlaintextHttp?: boolean;
+  allowPrivateNetworks?: boolean;
 }): Promise<{ provider: ProviderProfile }> {
   return fetchJson(`/api/v1/model-providers/${providerId}`, {
     method: "PATCH",
@@ -2892,6 +3295,23 @@ export async function rotateProviderCredential(
   }) as Promise<{ credential: ProviderCredentialSummary }>;
 }
 
+/**
+ * Reveals the stored provider secret for copying into other tools. The
+ * Gateway verifies the caller's account password on top of the session and
+ * answers 401 (like change-password) for a wrong password, so the path is
+ * exempt from the stale-session redirect below.
+ */
+export async function revealProviderCredential(
+  providerId: string,
+  credentialId: string,
+  password: string
+): Promise<{ secret: string }> {
+  return fetchJson(`/api/v1/model-providers/${providerId}/credentials/${credentialId}/reveal`, {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  }) as Promise<{ secret: string }>;
+}
+
 export async function deleteProviderCredential(providerId: string, credentialId: string): Promise<{ disposition: "deleted" | "revoked" }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/credentials/${credentialId}`, {
     method: "DELETE",
@@ -2900,7 +3320,7 @@ export async function deleteProviderCredential(providerId: string, credentialId:
 
 export async function createProviderModel(
   providerId: string,
-  data: { name: string; modelId: string; capabilities?: string[]; contextWindow?: number | null; isDefault?: boolean }
+  data: { name: string; modelId: string; capabilities?: string[]; contextWindow?: number | null; isDefault?: boolean; supportEfforts?: string[]; defaultEffort?: string | null }
 ): Promise<{ model: ModelProfile }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/models`, {
     method: "POST",
@@ -2911,7 +3331,7 @@ export async function createProviderModel(
 export async function updateProviderModel(
   providerId: string,
   modelId: string,
-  data: { name?: string; modelId?: string; capabilities?: string[]; contextWindow?: number | null; isDefault?: boolean }
+  data: { name?: string; modelId?: string; capabilities?: string[]; contextWindow?: number | null; isDefault?: boolean; supportEfforts?: string[]; defaultEffort?: string | null }
 ): Promise<{ model: ModelProfile }> {
   return fetchJson(`/api/v1/model-providers/${providerId}/models/${modelId}`, {
     method: "PATCH",
@@ -2977,6 +3397,20 @@ export async function getProviderBalance(providerId: string): Promise<ProviderBa
   return fetchJson(
     `/api/v1/model-providers/${providerId}/balance`
   ) as Promise<ProviderBalanceResult>;
+}
+
+export async function getCliAccounts(): Promise<{ accounts: CliAccountOverview[] }> {
+  return fetchJson("/api/v1/cli-accounts") as Promise<{ accounts: CliAccountOverview[] }>;
+}
+
+export async function getCliAccount(adapter: CliAccountAdapter): Promise<{ overview: CliAccountOverview }> {
+  return fetchJson(`/api/v1/cli-accounts/${adapter}`) as Promise<{ overview: CliAccountOverview }>;
+}
+
+export async function refreshCliAccountQuota(adapter: CliAccountAdapter): Promise<{ overview: CliAccountOverview }> {
+  return fetchJson(`/api/v1/cli-accounts/${adapter}/quota/refresh`, {
+    method: "POST",
+  }) as Promise<{ overview: CliAccountOverview }>;
 }
 
 export async function listApiKeys(): Promise<{ apiKeys: ApiKeySummary[] }> {
@@ -3109,6 +3543,8 @@ export interface TemplateSyncWriteOutcome {
   skippedFiles: string[];
   failedFiles: string[];
   conflicts: ConfigConflict[];
+  /** Directory holding per-file backups taken before writing. */
+  backupPath?: string;
 }
 
 export interface TemplateSyncProjectResult {
@@ -3167,4 +3603,48 @@ export async function applyTemplateSync(
       ...(options.credentialMode ? { credentialMode: options.credentialMode } : {})
     })
   }) as Promise<TemplateSyncApplyResult>;
+}
+
+// ---- Runtime settings (DB-backed overrides on top of .env defaults) ----
+
+export type RuntimeSettingKey =
+  | "registration"
+  | "mcp_enabled"
+  | "session_prefix"
+  | "pm_auto_dispatch";
+
+export interface RuntimeSettingView {
+  key: RuntimeSettingKey;
+  value: unknown;
+  source: "env" | "settings";
+  /** false → the change needs a Gateway restart to take effect. */
+  hot: boolean;
+}
+
+export interface RuntimeSettingsState {
+  settings: RuntimeSettingView[];
+  /** true when FORGEBADGER_RUNTIME_SETTINGS_READONLY forbids writes. */
+  readonly: boolean;
+}
+
+export function runtimeSettingsValue<T>(state: RuntimeSettingsState, key: RuntimeSettingKey): T | undefined {
+  const value = state.settings.find((view) => view.key === key)?.value;
+  return value === undefined || value === null ? undefined : (value as T);
+}
+
+export function runtimeSettingsMeta(state: RuntimeSettingsState, key: RuntimeSettingKey): RuntimeSettingView | undefined {
+  return state.settings.find((view) => view.key === key);
+}
+
+export async function getRuntimeSettings(): Promise<RuntimeSettingsState> {
+  return fetchJson<RuntimeSettingsState>("/api/v1/runtime-settings");
+}
+
+export async function updateRuntimeSettings(
+  patch: Partial<Record<RuntimeSettingKey, unknown>>
+): Promise<RuntimeSettingsState> {
+  return fetchJson<RuntimeSettingsState>("/api/v1/runtime-settings", {
+    method: "PUT",
+    body: JSON.stringify(patch)
+  });
 }

@@ -30,11 +30,11 @@ load the same values:
 
 ```bash
 FORGEBADGER_HOST=127.0.0.1
-FORGEBADGER_PORT=48731
+FORGEBADGER_PORT=18332
 FORGEBADGER_WEB_HOST=127.0.0.1
-FORGEBADGER_WEB_PORT=48732
-FORGEBADGER_GATEWAY_URL=http://127.0.0.1:48731
-NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
+FORGEBADGER_WEB_PORT=18333
+FORGEBADGER_GATEWAY_URL=http://127.0.0.1:18332
+NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:18332
 FORGEBADGER_DB_PATH=/tmp/forgebadger-smoke.db
 FORGEBADGER_MASTER_KEY=<64-hex-characters>
 FORGEBADGER_JWT_SECRET=<32+-character-secret>
@@ -52,7 +52,7 @@ already present in the shell. For disposable smoke state, a command prefix such
 as `FORGEBADGER_DB_PATH=/tmp/forgebadger-smoke.db pnpm --dir packages/gateway dev`
 therefore takes precedence over the same key in `.env`.
 
-Open `http://127.0.0.1:48732`.
+Open `http://127.0.0.1:18333`.
 
 Windows terminal acceptance requires native node-pty/ConPTY + Session Server
 and, when WSL is claimed, a separate POSIX PTY run in WSL. The external gate

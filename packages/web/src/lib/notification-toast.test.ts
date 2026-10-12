@@ -19,7 +19,7 @@ describe("notification toast", () => {
 
   describe("toastToneFor", () => {
     it("maps permission prompts to warning", () => {
-      expect(toastToneFor("permission_prompt", { type: "claude_notification" })).toBe("warning");
+      expect(toastToneFor("permission_prompt", { type: "session_notification" })).toBe("warning");
     });
 
     it("maps completed and errored sessions to success and error", () => {

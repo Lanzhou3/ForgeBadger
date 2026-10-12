@@ -31,6 +31,7 @@ vi.mock("@/hooks/use-language", () => ({
     language: "en",
     t: (key: Parameters<typeof getTranslation>[1]) => getTranslation("en", key),
   }),
+  useUiLocale: () => "en-US",
 }));
 vi.mock("next/link", () => ({
   default: ({ children, ...props }: { children: ReactNode }) => (

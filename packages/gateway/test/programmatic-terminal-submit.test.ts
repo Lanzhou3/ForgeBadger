@@ -7,6 +7,7 @@ import {
   composerContainsNeedle,
   currentProgrammaticComposer,
   isProgrammaticComposerReady,
+  isProgrammaticNativeApprovalRequired,
   isProgrammaticTaskConsumed,
   programmaticDeliveryNeedle
 } from "../src/services/programmatic-terminal-submit.js";
@@ -28,6 +29,104 @@ const STAGED_PANES = {
 } as const;
 
 describe("programmatic terminal submit classifiers", () => {
+  for (const adapter of ['codex', 'claude', 'opencode', 'kimi', 'pi'] as const) {
+    it(`requires an empty recognized ${adapter} composer after folded or clipped staging`, () => {
+      const needle = programmaticDeliveryNeedle('review changes and verify every boundary condition');
+      const staged = STAGED_PANES[adapter].replace('修复登录流程', '[Pasted 400 characters]');
+      assert.equal(composerContainsStagedTask(adapter, staged, 'task', needle, READY_PANES[adapter]), true);
+      for (const current of [staged + '\nfooter refreshed', staged.replace('400', '401'), '', 'Disconnected', 'Trust this directory?']) {
+        assert.equal(isProgrammaticTaskConsumed(adapter, staged, current, needle), false, current);
+      }
+      assert.equal(isProgrammaticTaskConsumed(adapter, staged, READY_PANES[adapter], needle), true);
+    });
+  }
+  it('confirms folded PI input only after the composer clears into its live busy footer', () => {
+    const staged = '  /app/workspace/project\n  0.0%/262k (auto)\n  [paste #2 +20 lines]';
+    const busy = '  ── ⠦ Working ───────────────────────────────\n  \n  ──────────────────────────────────────────\n  /app/workspace/project\n  5.5%/262k (auto)';
+    const needle = programmaticDeliveryNeedle('Review changes and verify boundaries');
+    assert.equal(isProgrammaticTaskConsumed('pi', staged, busy, needle), true);
+    assert.equal(isProgrammaticTaskConsumed('pi', staged, busy + '\n[paste #2 +20 lines]', needle), false);
+  });
+  it('ignores historical Codex busy hints above the current folded composer', () => {
+    const staged = '› [Pasted 400 characters]\n\nmodel · cwd';
+    const current = 'Old turn: esc to interrupt\n' + staged;
+    const needle = programmaticDeliveryNeedle('Review changes and verify boundaries');
+    assert.match(currentProgrammaticComposer('codex', current), /Pasted 400 characters/);
+    assert.equal(isProgrammaticTaskConsumed('codex', staged, current, needle), false);
+    assert.equal(isProgrammaticTaskConsumed('codex', staged, 'Historical esc to interrupt\nDisconnected', needle), false);
+    assert.equal(isProgrammaticTaskConsumed('codex', staged, staged + '\nWorking · esc to interrupt', needle), true);
+  });
+  it('confirms folded Codex input from a standalone busy footer with a known spinner', () => {
+    const staged = '› [Pasted 400 characters]\n\nmodel · cwd';
+    const needle = programmaticDeliveryNeedle('Review changes and verify boundaries');
+    // Codex's upstream status-indicator snapshot renders a leading bullet;
+    // braille spinner frames must also survive terminal-control stripping.
+    for (const spinner of ['', '• ', ...Array.from('⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏', frame => `${frame} `)]) {
+      for (const status of ['Working', 'Thinking']) {
+        const busy = `  ${spinner}${status} (3s • esc to interrupt)\n\n  model · cwd`;
+        assert.equal(isProgrammaticTaskConsumed('codex', staged, busy, needle), true, busy);
+        assert.equal(isProgrammaticComposerReady('codex', busy), false, busy);
+      }
+    }
+    const colored = '\u001b[2m  ⠋ Working (3s • esc to interrupt)\u001b[0m';
+    assert.equal(isProgrammaticTaskConsumed('codex', staged, colored, needle), true);
+  });
+  it('does not confirm folded Codex input from stale or unrecognized spinner lines', () => {
+    const staged = '› [Pasted 400 characters]\n\nmodel · cwd';
+    const needle = programmaticDeliveryNeedle('Review changes and verify boundaries');
+    const busy = '  ⠋ Working (3s • esc to interrupt)';
+    for (const current of [
+      `${busy}\n${staged}`,
+      `${busy}\nold output\nmore output\nDisconnected\nunknown screen`,
+      'Log: ⠋ Working (3s • esc to interrupt)',
+      '✓ Working (3s • esc to interrupt)',
+      '⠋ Working (3s)',
+      '⠋ Waiting (3s • esc to interrupt)'
+    ]) {
+      assert.equal(isProgrammaticTaskConsumed('codex', staged, current, needle), false, current);
+    }
+    assert.match(currentProgrammaticComposer('codex', `${busy}\n${staged}`), /Pasted 400 characters/);
+  });
+  it('recognizes Claude folded paste only in the current composer with matching newline count', () => {
+    const message = Array.from({ length: 35 }, (_, i) => `review line ${i}`).join('\n');
+    const needle = programmaticDeliveryNeedle(message);
+    const pane = '──────\n❯ [Pasted text #1 +34 lines]\n──────\n  auto mode on';
+    assert.equal(composerContainsStagedTask('claude', pane, message, needle), true);
+    for (const wrong of [pane.replace('+34', '+33'), pane.replace('#1', '#0'),
+      pane.replace('lines]', 'lines] extra input'), `[Pasted text #1 +34 lines]\n${READY_PANES.claude}`]) {
+      assert.equal(composerContainsStagedTask('claude', wrong, message, needle), false);
+    }
+    assert.equal(isProgrammaticComposerReady('claude', pane), false);
+    assert.equal(isProgrammaticComposerReady('claude', '──────\n❯\nexisting unsent draft\n──────'), false);
+    assert.equal(isProgrammaticComposerReady('claude', '──────\n❯\n[Pasted text #1 +34 lines]\n──────'), false);
+  });
+
+  it('does not confirm folded Claude input from unrelated screen changes or disappearance into an unknown screen', () => {
+    const needle = programmaticDeliveryNeedle('review changes');
+    const staged = '──────\n❯ [Pasted text #1 +34 lines]\n──────\n  auto mode on';
+    for (const current of [staged, staged.replace('auto mode on', '99% context left'),
+      staged.replace('+34', '+33'), '──────\n❯ [Pasted text #1 +34 li', '', 'Disconnected', 'Trust this directory?']) {
+      assert.equal(isProgrammaticTaskConsumed('claude', staged, current, needle), false);
+    }
+    assert.equal(isProgrammaticTaskConsumed('claude', staged, READY_PANES.claude, needle), true);
+  });
+  it('distinguishes native Codex trust decisions from ordinary startup waiting', () => {
+    assert.equal(isProgrammaticNativeApprovalRequired('codex', 'Do you trust the contents of this directory?\n› 1. Yes, continue'), true);
+    assert.equal(isProgrammaticNativeApprovalRequired('codex', 'Hooks need review\n2. Trust all and continue'), true);
+    assert.equal(isProgrammaticNativeApprovalRequired('codex', READY_PANES.codex), false);
+  });
+  it("does not treat the Codex startup composer as ready before model loading finishes", () => {
+    const startup = '│ model:     loading   /model to change │\n› Ask Codex to do anything\n? for shortcuts';
+    assert.equal(isProgrammaticComposerReady('codex', startup), false);
+    assert.equal(isProgrammaticComposerReady('codex', startup.replace('loading', 'gpt-5.6')), true);
+  });
+  it('recognizes a multiline task beyond four lines without treating a queue hint as delivery', () => {
+    const message = 'Task: Implement addition\nProject: isolated acceptance\nRuntime CLI: codex\n\nContext:\nImplement add.cjs and run node tests.\nAcceptance:\nAll three original tests pass.';
+    const pane = `› ${message}\n  tab to queue message · 100% context left`;
+    const needle = programmaticDeliveryNeedle(message);
+    assert.equal(composerContainsStagedTask('codex', pane, message, needle), true);
+    assert.equal(isProgrammaticTaskConsumed('codex', `› ${message}`, pane, needle), false);
+  });
   it("accepts Unicode, tabs, and newlines in programmatic task text", () => {
     assert.doesNotThrow(() => assertSafeProgrammaticMessage("修复登录流程\n\t保留缩进"));
   });
@@ -156,7 +255,7 @@ describe("programmatic terminal submit classifiers", () => {
       true,
       "the same text in scrollback is allowed once the current composer cleared"
     );
-    const busyPane = `${STAGED_PANES.codex}\n  tab to queue message · 100% context left`;
+    const busyPane = `${STAGED_PANES.codex}\n  Working · esc to interrupt · 100% context left`;
     assert.equal(
       currentProgrammaticComposer("codex", busyPane),
       "",
@@ -164,6 +263,40 @@ describe("programmatic terminal submit classifiers", () => {
     );
     assert.equal(composerContainsNeedle("codex", busyPane, needle), false);
     assert.equal(isProgrammaticTaskConsumed("codex", STAGED_PANES.codex, busyPane, needle), true);
+  });
+
+  it("recognizes PI's folded multi-line paste marker as staged input", () => {
+    // pi 0.87.1 folds a multi-line bracketed paste into `[paste #N +M lines]`
+    // inside the editor box (live capture 2026-09-23: a Copilot task packet
+    // staged as `[paste #1 +20 lines]`); the raw task text never renders, so
+    // the needle alone cannot prove staging.
+    const message = [
+      "Task: 修复登录流程",
+      "Project: ForgeBadger",
+      "Runtime CLI: pi",
+      "",
+      ...Array.from({ length: 16 }, (_, index) => `context line ${index}`)
+    ].join("\n");
+    const needle = programmaticDeliveryNeedle(message);
+    const border = "  " + "─".repeat(90);
+    const pane = [
+      " pi v0.87.1",
+      border,
+      "  [paste #1 +20 lines]",
+      border,
+      "  D:\\Project\\opensource\\ForgeBadger (dev)",
+      "  0.0%/131k (auto)                    GLM-5.2 • medium"
+    ].join("\n");
+    assert.equal(composerContainsNeedle("pi", pane, needle), false, "folded paste hides the raw text");
+    assert.equal(composerContainsStagedTask("pi", pane, message, needle), true);
+
+    // Layout A (pi ≤ 0.86.0): the marker renders below the status line.
+    const layoutA = "  /app/workspace/project\n  0.0%/262k (auto)\n  [paste #2 +20 lines]";
+    assert.equal(composerContainsStagedTask("pi", layoutA, message, needle), true);
+
+    // The marker only counts inside the current composer, not in scrollback.
+    const scrollback = `[paste #1 +20 lines]\n${READY_PANES.pi}`;
+    assert.equal(composerContainsStagedTask("pi", scrollback, message, needle), false);
   });
 
   it("recognizes Codex's current-composer placeholder for a large Unicode paste", () => {
@@ -177,5 +310,56 @@ describe("programmatic terminal submit classifiers", () => {
       false,
       "Codex counts Unicode scalar values, not UTF-16 code units"
     );
+  });
+
+  it("accepts a Claude folded marker without a line count (newer builds)", () => {
+    const message = ["Task: fix", "detail one", "detail two"].join("\n");
+    const needle = programmaticDeliveryNeedle(message);
+    const pane = "──────\n❯ [Pasted text #2]\n──────\n  auto mode on";
+    assert.equal(composerContainsStagedTask("claude", pane, message, needle), true);
+    // A count-carrying marker still must match exactly.
+    assert.equal(
+      composerContainsStagedTask("claude", "──────\n❯ [Pasted text #2 +4 lines]\n──────", message, needle),
+      false
+    );
+  });
+
+  it("falls back to the ready-pane proof when the CLI renders the paste beyond the needle", () => {
+    // Kimi has no fold-marker parser; suppose its box clips the staged text
+    // so the full needle never appears literally.
+    const message = "修复登录流程并验证全部边界条件与回归用例";
+    const needle = programmaticDeliveryNeedle(message);
+    const readyPane = "│ >                                                                        │\nauto  K3 thinking: high  context: 0%";
+    const clipped = "│ > 修复登录流程并验证                                     │\nauto  K3 thinking: high  context: 0%";
+    assert.equal(composerContainsNeedle("kimi", clipped, needle), false, "needle clipped by box width");
+    assert.equal(composerContainsStagedTask("kimi", clipped, message, needle, readyPane), true);
+
+    // Without the ready-pane proof the clipped text is not accepted.
+    assert.equal(composerContainsStagedTask("kimi", clipped, message, needle), false);
+    // An empty composer after staging is never accepted (echo truly absent).
+    assert.equal(composerContainsStagedTask("kimi", readyPane, message, needle, readyPane), false);
+    // A ready pane that was NOT composer-ready disables the fallback: a
+    // non-empty composer could predate the staging write.
+    const busy = "│ > someone else's draft                   │\ncontext: 0%";
+    assert.equal(composerContainsStagedTask("kimi", clipped, message, needle, busy), false);
+  });
+
+  it("ready-pane fallback covers opencode and codex placeholder drift", () => {
+    const message = "Task: add tests\nCover edge cases";
+    const needle = programmaticDeliveryNeedle(message);
+    const readyOpenCode = "┃ Ask anything... \"Fix a TODO in the codebase\"\n┃ Build · model\nctrl+p commands";
+    // opencode re-renders the folded input with its own wording.
+    const folded = "┃ [1 file pasted]\n┃ Build · model\nctrl+p commands";
+    assert.equal(composerContainsStagedTask("opencode", folded, message, needle, readyOpenCode), true);
+
+    const readyCodex = "› Ask Codex to do anything\n\n  gpt-5.6-sol · ~/Project/ForgeBadger";
+    // Codex placeholder wording drift with a changed count format.
+    const drifted = "› [Pasted 42 chars]\n\nmodel · cwd";
+    assert.equal(composerContainsStagedTask("codex", drifted, message, needle), false, "count must match when parsed");
+    assert.equal(composerContainsStagedTask("codex", drifted, message, needle, readyCodex), true);
+    // An UNCHANGED ready composer (placeholder intact, paste echo not yet
+    // rendered) must not be accepted: a Codex-ready composer is non-empty by
+    // definition, so the comparison is against the ready composer, not "".
+    assert.equal(composerContainsStagedTask("codex", readyCodex, message, needle, readyCodex), false);
   });
 });

@@ -436,7 +436,7 @@ function AffectedView({ projectId, enabled, onOpenSource, onBack }: AffectedView
         </Button>
         <Button
           size="sm"
-          className="bg-brand text-brand-foreground hover:bg-brand/90"
+          variant="brand"
           disabled={!enabled || gitQuery.isPending || changedFiles.length === 0 || analyzeMutation.isPending}
           onClick={() => analyzeMutation.mutate()}
         >

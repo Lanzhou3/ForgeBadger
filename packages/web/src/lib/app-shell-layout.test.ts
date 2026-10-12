@@ -14,6 +14,12 @@ describe("app shell layout classes", () => {
     expect(appShellMainClassName(false)).toContain("overflow-auto");
   });
 
+  it("reserves mobile top space for the fixed hamburger on non-terminal routes only", () => {
+    expect(appShellMainClassName(false)).toContain("pt-16");
+    expect(appShellMainClassName(false)).toContain("md:pt-0");
+    expect(appShellMainClassName(true)).not.toContain("pt-16");
+  });
+
   it("keeps terminal routes locked to their internal terminal layout", () => {
     expect(appShellMainClassName(true)).toContain("h-full");
     expect(appShellMainClassName(true)).toContain("overflow-hidden");

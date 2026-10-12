@@ -87,6 +87,12 @@ interface ProjectManagerPanelProps {
   enabled: boolean;
   selectedWorkItemId?: string | null;
   authority: TaskAuthority;
+  /**
+   * Rendered under a tab/breadcrumb that already names this panel (e.g. the
+   * project page's "Dev Tasks" tab): the internal heading becomes sr-only so
+   * the title is not duplicated visually while heading semantics stay.
+   */
+  embedded?: boolean;
 }
 
 export function ProjectManagerPanel(props: ProjectManagerPanelProps) {
@@ -97,6 +103,7 @@ function ProjectManagerPanelContent({
   projectId,
   enabled,
   selectedWorkItemId: requestedWorkItemId = null,
+  embedded = false,
 }: ProjectManagerPanelProps) {
   const { t } = useLanguage();
   const {canEdit, canManage, legacySessions, actorId} = useTaskAuthority();
@@ -733,7 +740,7 @@ function ProjectManagerPanelContent({
     <div className="space-y-5" data-testid="project-manager-panel">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <h2 className="text-sm font-semibold">{t("projects.devTasks")}</h2>
+          <h2 className={embedded ? "sr-only" : "text-sm font-semibold"}>{t("projects.devTasks")}</h2>
           <p className="text-xs text-muted-foreground">{t("projects.devTasksDescription")}</p>
         </div>
         <Button size="sm" variant="outline" onClick={refresh} disabled={isRefreshing || !canLoad}>

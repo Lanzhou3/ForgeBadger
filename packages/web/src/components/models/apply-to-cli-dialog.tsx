@@ -66,11 +66,11 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
   const activeCredentials = useMemo(() => credentials.filter((credential) => credential.status === "active"), [credentials]);
   const defaultModel = activeModels.find((model) => model.isDefault) ?? activeModels[0];
 
-  const [adapter, setAdapter] = useState<ProviderSupportedAdapter>(targets[0] ?? "claude");
+  const [adapter, setAdapter] = useState<ProviderSupportedAdapter | "">(targets[0] ?? "");
   // Prefer a native Anthropic endpoint, including legacy Anthropic baseUrl.
   // Only providers without one need protocol translation through the Gateway.
   const needsRoute = adapter === "claude" && !provider.anthropicBaseUrl && provider.apiFormat !== "anthropic";
-  const routeSupported = needsRoute && (provider.apiFormat === "openai" || provider.apiFormat === "openai-compatible");
+  const routeSupported = needsRoute && (provider.apiFormat === "openai-responses" || provider.apiFormat === "openai-compatible");
   const routeUnsupported = needsRoute && !routeSupported;
   const routeQuery = useQuery({
     queryKey: ["claude-route"],
@@ -110,10 +110,10 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
     const preset = initialAdapter && targets.includes(initialAdapter as ProviderSupportedAdapter)
       ? (initialAdapter as ProviderSupportedAdapter)
       : undefined;
-    const fallback = preset ?? chooseDefaultAdapter(detectedAdapters, targets) ?? targets[0] ?? "claude";
+    const fallback = preset ?? chooseDefaultAdapter(detectedAdapters, targets) ?? targets[0] ?? "";
     const detected = new Map(detectedAdapters.map((adapter) => [adapter.id, adapter]));
     setAdapter((current) =>
-      !preset && targets.includes(current) && (detected.get(current) ? isAdapterSelectable(detected.get(current)!, targets) : true)
+      current !== "" && !preset && targets.includes(current) && (detected.get(current) ? isAdapterSelectable(detected.get(current)!, targets) : true)
         ? current
         : fallback
     );
@@ -157,7 +157,10 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
 
   const previewQuery = useQuery({
     queryKey: ["cli-config-apply-preview", adapter, debouncedPreviewInput],
-    queryFn: () => previewCliConfigApply(adapter, debouncedPreviewInput),
+    queryFn: () => {
+      if (adapter === "") throw new Error("No CLI selected");
+      return previewCliConfigApply(adapter, debouncedPreviewInput);
+    },
     // Gate on the debounce having caught up: expanding the summary must not
     // fire a request with the stale (pre-selection) input, and selection
     // changes pause the query until the 400ms debounce settles.
@@ -168,6 +171,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
 
   const applyMutation = useMutation({
     mutationFn: async () => {
+      if (!adapter) throw new Error("No CLI selected");
       // One-tap path: enable the route first, then apply through it.
       if (needsRoute && !routeEnabled) {
         await setClaudeRoute(true);
@@ -198,8 +202,13 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
 
   const preview = previewQuery.data;
   const previewFiles = preview?.files ?? [];
-  // Machine-readable route marker; the localized banner above carries the UX.
-  const warnings = (preview?.warnings ?? []).filter((warning) => warning !== "OPENAI_PROTOCOL_REQUIRES_ROUTE");
+  // Machine-readable markers; the localized banners carry the UX and these
+  // codes are filtered out of the generic warning list.
+  const previewWarnings = preview?.warnings ?? [];
+  const codexWireApiBlocked = previewWarnings.includes("CODEX_WIRE_API_UNSUPPORTED");
+  const warnings = previewWarnings.filter(
+    (warning) => warning !== "OPENAI_PROTOCOL_REQUIRES_ROUTE" && warning !== "CODEX_WIRE_API_UNSUPPORTED"
+  );
   // PI apply writes every active model of the provider into models.json; the
   // single selection only pins the startup default (settings.json), so the
   // label must not read as "the only model that will be applied".
@@ -373,6 +382,11 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
                 <p className="text-destructive">{previewQuery.error instanceof Error ? previewQuery.error.message : t("models.applyPreviewFailed")}</p>
               ) : preview ? (
                 <>
+                  {codexWireApiBlocked && (
+                    <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                      {t("models.codexWireApiBlocked")}
+                    </p>
+                  )}
                   {previewFiles.map((file) => (
                     <div key={file.targetPath} className="space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -403,8 +417,10 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
           <Button
             type="button"
             disabled={
+              !adapter ||
               applyMutation.isPending ||
               routeUnsupported ||
+              codexWireApiBlocked ||
               (needsRoute && routeQuery.isLoading)
             }
             onClick={() => applyMutation.mutate()}
@@ -425,9 +441,18 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
 }
 
 // Defensive masking: the preview should already be redacted server-side, but
-// never echo token-looking values back to the UI if they slip through.
-function maskSecrets(text: string): string {
+// never echo token-looking values back to the UI if they slip through. Each
+// pattern keeps a short recognizable prefix so the shape stays identifiable.
+// Exported for unit tests; not part of the component's public API surface.
+export function maskSecrets(text: string): string {
   return text
     .replace(/\b(sk-[A-Za-z0-9_-]{2})[A-Za-z0-9_-]+/g, "$1…")
-    .replace(/((?:api[-_]?key|auth[-_]?token|token|secret)["'\s]*[:=]["'\s]*)([^\s,"']{4})[^\s,"']*/giu, "$1$2…");
+    .replace(/((?:api[-_]?key|auth[-_]?token|token|secret)["'\s]*[:=]["'\s]*)([^\s,"']{4})[^\s,"']*/giu, "$1$2…")
+    .replace(/(Bearer\s+)([A-Za-z0-9._-]{6})[A-Za-z0-9._-]+/giu, "$1$2…")
+    .replace(/\b((?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{4})[A-Za-z0-9_]+/g, "$1…")
+    .replace(/\b(github_pat_[A-Za-z0-9_]{4})[A-Za-z0-9_]+/g, "$1…")
+    .replace(/\b(xox[baprs]-[A-Za-z0-9-]{4})[A-Za-z0-9-]+/giu, "$1…")
+    .replace(/\b((?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{4})[A-Z0-9]+/g, "$1…")
+    .replace(/\b(AIza[0-9A-Za-z_-]{4})[0-9A-Za-z_-]+/g, "$1…")
+    .replace(/\b(eyJ[A-Za-z0-9_-]{4})[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "$1…");
 }

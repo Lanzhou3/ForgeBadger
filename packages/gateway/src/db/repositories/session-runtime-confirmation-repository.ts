@@ -7,9 +7,9 @@ const receiptSchema=generationSchema.extend({stopped:z.literal(true)});
 export type RuntimeLaunchGeneration=z.infer<typeof generationSchema>;
 export type ConfirmedStopReceipt=z.infer<typeof receiptSchema>;
 export interface SessionRuntimeConfirmation extends RuntimeLaunchGeneration {
- userId:string;sessionId:string;status:'pending'|'stopped';receipt:ConfirmedStopReceipt|null;updatedAt:number;
+ userId:string;sessionId:string;status:'pending'|'stopped'|'revoked';receipt:ConfirmedStopReceipt|null;updatedAt:number;
 }
-interface Row {user_id:string;session_id:string;runtime_name:string;launch_nonce:string;daemon_pid:number;daemon_started_at:string;status:'pending'|'stopped';receipt_json:string|null;updated_at:number}
+interface Row {user_id:string;session_id:string;runtime_name:string;launch_nonce:string;daemon_pid:number;daemon_started_at:string;status:'pending'|'stopped'|'revoked';receipt_json:string|null;updated_at:number}
 
 /** A missing row or registry entry is not a process-exit receipt. */
 export class SessionRuntimeConfirmationRepository {
@@ -40,8 +40,21 @@ export class SessionRuntimeConfirmationRepository {
   const receipt=receiptSchema.parse(input),current=this.get(sessionId);
   if(!current||current.launchNonce!==expectedLaunchNonce||!this.matches(current,receipt))return false;
   return this.db.prepare(`UPDATE session_runtime_confirmations SET status='stopped',receipt_json=?,updated_at=?
-   WHERE user_id=? AND session_id=? AND launch_nonce=? AND runtime_name=? AND daemon_pid=? AND daemon_started_at=?`)
+   WHERE user_id=? AND session_id=? AND launch_nonce=? AND runtime_name=? AND daemon_pid=? AND daemon_started_at=? AND status!='revoked'`)
    .run(JSON.stringify(receipt),Date.now(),this.userId,sessionId,expectedLaunchNonce,receipt.runtimeName,receipt.daemon.pid,receipt.daemon.startedAt).changes===1;
+ }
+ /**
+  * Marks a pending confirmation revoked — the receipt can never be issued
+  * (the daemon instance that would sign it is gone, or an operator forced the
+  * deletion after the leader exited). Pending rows cannot be deleted (the
+  * preserve_pending_runtime_confirmation trigger keeps the stop proof
+  * immutable), so revocation is a status transition; the row later cascades
+  * with the session row. Stopped rows are never touched: the receipt is the
+  * audit trail.
+  */
+ revoke(sessionId:string):boolean {
+  return this.db.prepare("UPDATE session_runtime_confirmations SET status='revoked',updated_at=? WHERE user_id=? AND session_id=? AND status='pending'")
+   .run(Date.now(),this.userId,sessionId).changes===1;
  }
  private matches(a:RuntimeLaunchGeneration,b:RuntimeLaunchGeneration):boolean {
   return a.runtimeName===b.runtimeName&&a.launchNonce===b.launchNonce&&a.daemon.pid===b.daemon.pid&&a.daemon.startedAt===b.daemon.startedAt;

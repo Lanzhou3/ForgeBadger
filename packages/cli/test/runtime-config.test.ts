@@ -20,8 +20,8 @@ describe("loadOrCreateRuntimeConfig", () => {
     assert.equal(config.version, 1);
     assert.equal(config.stateDir, path.resolve(stateDir));
     assert.equal(config.dbPath, path.join(path.resolve(stateDir), "forgebadger.db"));
-    assert.deepEqual(config.gateway, { host: "127.0.0.1", port: 48731 });
-    assert.deepEqual(config.web, { host: "127.0.0.1", port: 48732 });
+    assert.deepEqual(config.gateway, { host: "127.0.0.1", port: 18332 });
+    assert.deepEqual(config.web, { host: "127.0.0.1", port: 18333 });
     assert.match(config.secrets.masterKey, /^[a-f0-9]{64}$/);
     assert.ok(config.secrets.jwtSecret.length >= 32);
 
@@ -90,8 +90,8 @@ describe("loadOrCreateRuntimeConfig", () => {
     // Assert
     assert.deepEqual(overridden.gateway, { host: "0.0.0.0", port: 49931 });
     assert.deepEqual(overridden.web, { host: "0.0.0.0", port: 49932 });
-    assert.deepEqual(reloaded.gateway, { host: "127.0.0.1", port: 48731 });
-    assert.deepEqual(reloaded.web, { host: "127.0.0.1", port: 48732 });
+    assert.deepEqual(reloaded.gateway, { host: "127.0.0.1", port: 18332 });
+    assert.deepEqual(reloaded.web, { host: "127.0.0.1", port: 18333 });
   });
 
   it("applies ForgeBadger environment overrides without persisting them", async () => {
@@ -114,8 +114,8 @@ describe("loadOrCreateRuntimeConfig", () => {
     assert.deepEqual(overridden.gateway, { host: "0.0.0.0", port: 49931 });
     assert.deepEqual(overridden.web, { host: "127.0.0.2", port: 49932 });
     assert.equal(overridden.dbPath, path.join(stateDir, "forgebadger-env", "override.db"));
-    assert.deepEqual(reloaded.gateway, { host: "127.0.0.1", port: 48731 });
-    assert.deepEqual(reloaded.web, { host: "127.0.0.1", port: 48732 });
+    assert.deepEqual(reloaded.gateway, { host: "127.0.0.1", port: 18332 });
+    assert.deepEqual(reloaded.web, { host: "127.0.0.1", port: 18333 });
     assert.equal(reloaded.dbPath, path.join(path.resolve(stateDir), "forgebadger.db"));
   });
 
@@ -170,8 +170,8 @@ describe("loadOrCreateRuntimeConfig", () => {
         version: 1,
         stateDir,
         dbPath: path.join(stateDir, "forgebadger.db"),
-        gateway: { host: "127.0.0.1", port: 48731 },
-        web: { host: "127.0.0.1", port: 48732 },
+        gateway: { host: "127.0.0.1", port: 18332 },
+        web: { host: "127.0.0.1", port: 18333 },
         secrets: { masterKey: "not-hex", jwtSecret: "abcdefghijklmnopqrstuvwxyz123456" }
       }),
       { mode: 0o600 }
@@ -231,8 +231,8 @@ function createStoredConfig(stateDir: string) {
     version: 1,
     stateDir,
     dbPath: path.join(stateDir, "forgebadger.db"),
-    gateway: { host: "127.0.0.1", port: 48731 },
-    web: { host: "127.0.0.1", port: 48732 },
+    gateway: { host: "127.0.0.1", port: 18332 },
+    web: { host: "127.0.0.1", port: 18333 },
     secrets: {
       masterKey: "a".repeat(64),
       jwtSecret: "abcdefghijklmnopqrstuvwxyz123456"

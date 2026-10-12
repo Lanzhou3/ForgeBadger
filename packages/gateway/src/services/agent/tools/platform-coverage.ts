@@ -6,6 +6,7 @@ import { SessionRepository } from '../../../db/repositories/session-repository.j
 import { createSessionCommands } from '../../platform-commands/session-commands.js';
 import { executeAgentAction } from '../../platform-commands/agent-actions.js';
 import { checkAgentScope } from '../../platform-commands/agent-scope.js';
+import { normalizeAdapter } from '../../session-launch-plan.js';
 import type { InMemorySessionManager } from '../../session-manager.js';
 import { redactAgentText } from '../redaction.js';
 import type { AgentTool, AgentToolContext } from '../tool-registry.js';
@@ -40,12 +41,12 @@ export function createPlatformCoverageTools(): AgentTool[] {
       });
       return { events, count: events.length, evidenceSource: 'declared' };
     }),
-    read('pm_get_management', 'Read project management mode, owner, next action and revision. Use revision as expectedRevision for pm_update_management. CLI mode does not enable autonomous dispatch.', projectInput, (input, ctx) => {
+    read('pm_get_management', 'Read project management owner, next action and revision. Use revision as expectedRevision for pm_update_management.', projectInput, (input, ctx) => {
       const { projectId } = projectInput.parse(input);
       requireProject(ctx, projectId);
       return { management: new ProjectManagementRepository(ctx.db, ctx.userId).get(projectId) };
     }),
-    read('get_session_writer', 'Read whether a live session writer is manual or automated. Does not expose writer credentials or change control; CLI autonomy remains manual_only.', sessionInput, (input, ctx) => writerStatus(ctx, sessionInput.parse(input).sessionId)),
+    read('get_session_writer', 'Read whether a live session writer is manual or automated. Does not expose writer credentials or change control.', sessionInput, (input, ctx) => writerStatus(ctx, sessionInput.parse(input).sessionId)),
     { name: 'takeover_session', description: 'Return an existing live session to manual control and fence its programmatic writer. Requires exact interactive owner approval; unavailable for delegated or background runs. Does not dispatch a CLI task.',
       risk: 'operate', requiresApproval: true, inputSchema: takeover.inputSchema,
       async execute(input, ctx) {
@@ -82,7 +83,7 @@ function writerStatus(context: AgentToolContext, sessionId: string) {
       mode = 'automated';
     }
   }
-  return { sessionId, mode, autonomy: 'manual_only' };
+  return { sessionId, mode };
 }
 /** Defensive projection also covers historical metadata predating write sanitizers. */
 function safeProjection(value: unknown): unknown {

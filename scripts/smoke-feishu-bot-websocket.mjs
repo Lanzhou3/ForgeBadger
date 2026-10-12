@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-const DEFAULT_GATEWAY_URL = "http://127.0.0.1:48731";
+const DEFAULT_GATEWAY_URL = "http://127.0.0.1:18332";
 const EVENT_SUBSCRIPTION = "im.message.receive_v1";
 
 export function resolveFeishuBotWebSocketSmokeConfig(env = process.env, argv = process.argv.slice(2)) {

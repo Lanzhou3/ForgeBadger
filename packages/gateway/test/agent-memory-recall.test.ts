@@ -161,3 +161,26 @@ it("isolates exact memory scopes and cannot delete another tenant's search index
     assert.equal(repo.searchMulti([{ scope: "global" }], "unique").length, 1);
   } finally { db.close(); }
 });
+
+it('recalls Chinese words and safely ignores punctuation-only queries', async () => {
+  const db = createTestDb();
+  try {
+    const user = new UserRepository(db).create('chinese-recall@example.test', 'hash');
+    const other = new UserRepository(db).create('other-recall@example.test', 'hash');
+    const memory = new AgentMemoryRepository(db, user.id);
+    const entry = memory.create({ scope: 'global', kind: 'preference', text: '用户偏好中文回答，项目使用 pnpm 管理依赖。' });
+    new AgentMemoryRepository(db, other.id).create({ scope: 'global', kind: 'fact', text: '中文租户秘密' });
+    for (const query of ['中文', '以后请用中文回答']) {
+      assert.deepEqual(memory.searchMulti([{ scope: 'global' }], query).map(row => row.id), [entry.id]);
+    }
+    for (const query of ['"', '" "', '...', '！？']) {
+      assert.deepEqual(memory.search(query, { scope: 'global' }), []);
+      assert.deepEqual(memory.searchMulti([{ scope: 'global' }], query), []);
+    }
+    const log = new CopilotConversationLog(db, user.id);
+    const conversation = log.createConversation();
+    log.appendMessage(conversation.id, { role: 'user', kind: 'text', content: '"' });
+    const context = await buildCompressedContext(log, conversation.id, stubLlm(), undefined, { memory });
+    assert.equal(context.messages.at(-1)?.content, '"');
+  } finally { db.close(); }
+});

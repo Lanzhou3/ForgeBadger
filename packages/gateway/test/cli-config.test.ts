@@ -194,7 +194,7 @@ describe("cli-config service", () => {
       assert.equal(raw.providers["anthropic-relay"].api, "anthropic-messages");
       await assert.rejects(
         upsertCliProvider("pi", "bedrock-p", { protocol: "bedrock", baseUrl: "https://x" }),
-        /does not support/u
+        /no file-based API/u
       );
     });
 

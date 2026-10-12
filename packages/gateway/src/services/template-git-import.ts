@@ -17,7 +17,7 @@ export interface GitTemplateImportInput {
 export interface GitTemplateImportResult {
   templateId: string;
   name: string;
-  adapter: GitTemplateAdapterId | null;
+  adapter: GitTemplateAdapterId;
   fileCount: number;
   skippedFiles: string[];
 }
@@ -216,9 +216,13 @@ export async function importTemplateFromGit(
       createInput.description = description;
     }
     const adapter = inferTemplateAdapter(files.map((file) => file.filePath));
-    if (adapter) {
-      createInput.adapter = adapter;
+    if (!adapter) {
+      throw new TemplateGitImportError(
+        "Could not infer the template CLI adapter from well-known config filenames; import a repository containing adapter config (CLAUDE.md, opencode.json, .codex/, .kimi-code/)",
+        400
+      );
     }
+    createInput.adapter = adapter;
 
     const template = repo.create(createInput);
     return {

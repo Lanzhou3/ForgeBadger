@@ -7,6 +7,7 @@ export default defineConfig({
     // output (.next/standalone ships Next's own node_modules test files) is
     // never picked up by the unit test run.
     exclude: ["node_modules", "e2e", ".next"],
+    setupFiles: ["./vitest.setup.ts"],
   },
   esbuild: {
     jsx: "automatic",

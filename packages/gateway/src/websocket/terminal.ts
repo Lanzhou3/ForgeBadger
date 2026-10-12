@@ -67,10 +67,10 @@ export class TerminalInputBuffer {
   private readonly pendingInput: string[] = [];
   private pendingBytes = 0;
 
-  constructor(private readonly assertWritable: () => void = () => {}) {}
+  constructor(private readonly assertWritable: (data: string) => void = () => {}) {}
 
   writeOrStore(pty: TerminalWritable | undefined, data: string): void {
-    this.assertWritable();
+    this.assertWritable(data);
     if (pty) {
       pty.write(data);
       return;
@@ -87,7 +87,7 @@ export class TerminalInputBuffer {
     const pending = this.pendingInput.splice(0);
     this.pendingBytes = 0;
     for (const data of pending) {
-      this.assertWritable();
+      this.assertWritable(data);
       pty.write(data);
     }
     this.pendingInput.length = 0;
@@ -327,7 +327,7 @@ async function handleTerminalSocket(
 ): Promise<void> {
   let pty: SessionServerPty | undefined;
   let ptyExited = false;
-  const inputBuffer = new TerminalInputBuffer(() => sessionManager.assertManualInputAllowed(userId, sessionId));
+  const inputBuffer = new TerminalInputBuffer(data => sessionManager.assertTerminalInputAllowed(userId, sessionId, data));
   const resizeBuffer = new TerminalResizeBuffer();
   let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
   let authorizationLease: TerminalRuntimeAuthorizationLease | undefined;
@@ -463,11 +463,16 @@ async function handleTerminalSocket(
     return;
   }
 
-  // Replay the rendered snapshot before going live. Output produced during
-  // the attach window is buffered inside SessionServerPty and emitted right
-  // after the onData listener registers below.
+  // Replay the rendered snapshot before going live: history chunks are
+  // followed by an explicit terminal_history_end marker (enqueued right after
+  // the snapshot, so the ACK gate delivers it after every history chunk and
+  // before any live output), which the client uses to swap in the replayed
+  // screen in one frame. Output produced during the attach window is buffered
+  // inside SessionServerPty and emitted right after the onData listener
+  // registers below.
   if (snapshot && ws.readyState === WebSocket.OPEN) {
     outputFlow.enqueue("terminal_history", snapshot);
+    outputFlow.enqueue("terminal_history_end", "");
   }
 
   const activePty = pty;

@@ -15,10 +15,10 @@ describe("parseCliArgs", () => {
   });
 
   it("parses start ports and host", () => {
-    assert.deepEqual(parseCliArgs(["start", "--gateway-port", "48731", "--web-port", "48732", "--host", "127.0.0.1"]), {
+    assert.deepEqual(parseCliArgs(["start", "--gateway-port", "18332", "--web-port", "18333", "--host", "127.0.0.1"]), {
       command: "start",
-      gatewayPort: 48731,
-      webPort: 48732,
+      gatewayPort: 18332,
+      webPort: 18333,
       host: "127.0.0.1",
       openBrowser: false
     });
@@ -106,6 +106,34 @@ describe("parseCliArgs", () => {
     assert.deepEqual(parseCliArgs(["-h"]), {
       command: "help"
     });
+  });
+
+  it("parses uninstall command", () => {
+    assert.deepEqual(parseCliArgs(["uninstall"]), {
+      command: "uninstall",
+      yes: false,
+      force: false,
+      backup: undefined
+    });
+    assert.deepEqual(parseCliArgs(["uninstall", "--yes", "--force", "--backup", "/tmp/backup"]), {
+      command: "uninstall",
+      yes: true,
+      force: true,
+      backup: "/tmp/backup"
+    });
+  });
+
+  it("rejects invalid uninstall arguments", () => {
+    assert.throws(() => parseCliArgs(["uninstall", "--backup"]), /Missing value for --backup/);
+    assert.throws(() => parseCliArgs(["uninstall", "--backup", "--yes"]), /Missing value for --backup/);
+    assert.throws(() => parseCliArgs(["uninstall", "--backup", "/a", "--backup", "/b"]), /duplicate uninstall option/);
+    assert.throws(() => parseCliArgs(["uninstall", "--wipe"]), /Unexpected argument: --wipe/);
+  });
+
+  it("parses version aliases", () => {
+    assert.deepEqual(parseCliArgs(["version"]), { command: "version" });
+    assert.deepEqual(parseCliArgs(["--version"]), { command: "version" });
+    assert.deepEqual(parseCliArgs(["-v"]), { command: "version" });
   });
 
   it("preserves init arguments for the existing init flow", () => {

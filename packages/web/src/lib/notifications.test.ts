@@ -30,7 +30,7 @@ describe("notifications", () => {
   it("creates a Claude Code permission notification from a hook event", () => {
     const notification = createNotificationFromEvent(
       {
-        type: "claude_notification",
+        type: "session_notification",
         payload: {
           session_id: "session-2",
           notification_id: "notification-2",
@@ -46,7 +46,7 @@ describe("notifications", () => {
 
     expect(notification).toMatchObject({
       id: "notification-2",
-      type: "claude_notification",
+      type: "session_notification",
       titleKey: "notifications.claudePermissionRequest",
       message: "Bash: Claude needs your permission to use Bash",
       createdAt: "2026-04-30T12:00:59.000Z",
@@ -58,7 +58,7 @@ describe("notifications", () => {
   it("uses the OpenCode title for an OpenCode permission notification", () => {
     const notification = createNotificationFromEvent(
       {
-        type: "claude_notification",
+        type: "session_notification",
         payload: {
           session_id: "session-3",
           notification_id: "notification-3",
@@ -79,7 +79,7 @@ describe("notifications", () => {
 
   it("falls back to the Claude title when adapter is claude or missing", () => {
     const withClaude = createNotificationFromEvent({
-      type: "claude_notification",
+      type: "session_notification",
       payload: {
         session_id: "session-4",
         notification_type: "permission_prompt",
@@ -88,7 +88,7 @@ describe("notifications", () => {
       },
     });
     const withMissingAdapter = createNotificationFromEvent({
-      type: "claude_notification",
+      type: "session_notification",
       payload: {
         session_id: "session-5",
         notification_type: "permission_prompt",
@@ -109,7 +109,7 @@ describe("notifications", () => {
     for (const notificationType of ["status", "notification"]) {
       expect(
         createNotificationFromEvent({
-          type: "claude_notification",
+          type: "session_notification",
           payload: {
             session_id: "session-6",
             notification_type: notificationType,
@@ -123,7 +123,7 @@ describe("notifications", () => {
 
   it("creates a permission denied notification with a per-adapter title", () => {
     const kimiDenied = createNotificationFromEvent({
-      type: "claude_notification",
+      type: "session_notification",
       payload: {
         session_id: "session-9",
         notification_type: "permission_denied",
@@ -132,7 +132,7 @@ describe("notifications", () => {
       },
     });
     const defaultDenied = createNotificationFromEvent({
-      type: "claude_notification",
+      type: "session_notification",
       payload: {
         session_id: "session-10",
         notification_type: "permission_denied",
@@ -141,7 +141,7 @@ describe("notifications", () => {
     });
 
     expect(kimiDenied).toMatchObject({
-      type: "claude_notification",
+      type: "session_notification",
       category: "session_event",
       titleKey: "notifications.kimiPermissionDenied",
       notificationType: "permission_denied",
@@ -154,7 +154,7 @@ describe("notifications", () => {
 
   it("creates task failed and session ended notifications", () => {
     const failed = createNotificationFromEvent({
-      type: "claude_notification",
+      type: "session_notification",
       payload: {
         session_id: "session-11",
         notification_type: "task_failed",
@@ -163,7 +163,7 @@ describe("notifications", () => {
       },
     });
     const ended = createNotificationFromEvent({
-      type: "claude_notification",
+      type: "session_notification",
       payload: {
         session_id: "session-12",
         notification_type: "session_ended",
@@ -251,7 +251,7 @@ describe("notifications", () => {
   it("creates a task completion notification", () => {
     // Arrange / Act
     const notification = createNotificationFromEvent({
-      type: "claude_notification",
+      type: "session_notification",
       payload: {
         session_id: "session-8",
         notification_type: "task_completed",
@@ -270,7 +270,7 @@ describe("notifications", () => {
 
   it("keeps project, session, adapter, and lifecycle type context", () => {
     const notification = createNotificationFromEvent({
-      type: "claude_notification",
+      type: "session_notification",
       payload: {
         session_id: "session-7",
         project_id: "project-7",

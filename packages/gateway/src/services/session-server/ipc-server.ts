@@ -89,6 +89,9 @@ export class IpcServer {
   private readonly slowClients = new Set<string>();
   /** Every live connection (management + I/O), so stop() can close them all. */
   private readonly connections = new Set<Socket>();
+  /** The management connection (hello carries role "management") — the only
+   *  socket that receives session_notification relays. */
+  private managementSocket: Socket | undefined;
 
   constructor(options: IpcServerOptions) {
     this.ipcPath = options.ipcPath;
@@ -119,6 +122,20 @@ export class IpcServer {
         data
       };
       this.sendToClient(sessionId, clientId, msg);
+    };
+
+    // Terminal-native notifications go to the management connection only —
+    // attached I/O clients are never informed, and a missing management
+    // socket simply means the notification is dropped (old daemons / tests).
+    this.sessionServer.onSessionNotification = (sessionId, notification) => {
+      const socket = this.managementSocket;
+      if (!socket?.writable) return;
+      const msg: IoStreamResponse = {
+        type: "session_notification",
+        sessionId,
+        notification
+      };
+      this.writeSocket(socket, msg);
     };
 
     // Set up session exit relay — targeted: only clients attached to the
@@ -261,6 +278,7 @@ export class IpcServer {
     const cleanup = () => {
       clearTimeout(helloTimer);
       this.connections.delete(socket);
+      if (this.managementSocket === socket) this.managementSocket = undefined;
       // Remove every clientId entry that still points at this socket —
       // attach_client maps clientId → socket, and both must be reaped. The
       // detach also releases any backpressure pause the client was holding.
@@ -343,6 +361,7 @@ export class IpcServer {
       return false;
     }
     state.authenticated = true;
+    if (msg.role === "management") this.managementSocket = socket;
     clearTimeout(helloTimer);
     this.writeSocket(socket, {
       type: "hello_ok",
@@ -649,6 +668,8 @@ export async function startSessionServer(options: {
   token: string;
   /** Stolen-socket self-check interval in ms (POSIX). 0 disables; default 30s. */
   socketSelfCheckIntervalMs?: number;
+  /** Exited-session retirement retry interval in ms. 0 disables; default 5s. On Windows exited handles are dropped immediately, so the reaper is a no-op there. */
+  exitReaperIntervalMs?: number;
   /** How the host process exits (test hook); defaults to process.exit. */
   onExit?: (code: number) => void;
 }): Promise<{ ipcServer: IpcServer; sessionServer: SessionServer; stop: () => Promise<void> }> {
@@ -668,10 +689,12 @@ export async function startSessionServer(options: {
 
   let stopped = false;
   let stopSelfCheck: () => void = () => {};
+  let stopExitReaper: () => void = () => {};
   const shutdown = async (exitCode: number) => {
     if (stopped) return;
     stopped = true;
     stopSelfCheck();
+    stopExitReaper();
     await ipcServer.stop();
     await sessionServer.destroy();
     exit(exitCode);
@@ -697,10 +720,16 @@ export async function startSessionServer(options: {
     }
   });
 
+  const exitReaperIntervalMs = options.exitReaperIntervalMs ?? 5_000;
+  if (exitReaperIntervalMs > 0) {
+    stopExitReaper = sessionServer.startExitReaper(exitReaperIntervalMs);
+  }
+
   const stop = async () => {
     if (stopped) return;
     stopped = true;
     stopSelfCheck();
+    stopExitReaper();
     await ipcServer.stop();
     await sessionServer.destroy();
   };

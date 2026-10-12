@@ -25,7 +25,7 @@ export function createCopilotChannelRoutes(deps: { db: Database; masterKey: stri
   router.post('/pairings/:id/cancel', handler(req => { service(req).cancelPairing(req.params.id!); return { cancelled: true }; }));
   router.get('/identities', handler(req => ({ identities: service(req).records.listIdentities() })));
   router.post('/identities/:id/revoke', handler(req => { service(req).revokeIdentity(req.params.id!); return { revoked: true }; }));
-  router.get('/routes', handler(req => ({ routes: service(req).records.listRoutes() })));
+  router.get('/routes', handler(req => ({ routes: service(req).listRouteStatuses() })));
   router.post('/routes', handler(req => ({ route: service(req).createRoute(req.body) }), true));
   router.post('/routes/:id/revoke', handler(req => { service(req).revokeRoute(req.params.id!); return { revoked: true }; }));
   return router;

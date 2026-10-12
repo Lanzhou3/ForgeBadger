@@ -19,9 +19,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useLanguage } from "@/hooks/use-language";
-import { extractProjectTemplate } from "@/lib/api";
+import { extractProjectTemplate, runtimeAdapterIds } from "@/lib/api";
 
-const TEMPLATE_ADAPTERS = ["claude", "opencode", "codex", "kimi"] as const;
+// `pi` was missing here even though the gateway supports extracting from it,
+// so the picker silently hid an existing capability.
+const TEMPLATE_ADAPTERS = runtimeAdapterIds;
 type TemplateAdapter = (typeof TEMPLATE_ADAPTERS)[number];
 
 interface ExtractTemplateDialogProps {

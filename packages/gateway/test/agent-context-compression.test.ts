@@ -6,7 +6,8 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 
-import { buildCompressedContext, MAX_CONTEXT_CHARS } from "../src/services/agent/context.js";
+import { buildCompressedContext, MAX_CONTEXT_TOKENS } from "../src/services/agent/context.js";
+import { estimateJsonTokens } from "../src/services/agent/token-estimate.js";
 import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import type { AgentLlmClient, AgentLlmMessage } from "../src/services/agent/orchestrator-types.js";
@@ -58,7 +59,7 @@ describe("copilot context compression", () => {
     const user = new UserRepository(db).create("ctx@example.com", "hash");
     const log = new CopilotConversationLog(db, user.id);
     const conversation = log.createConversation();
-    appendText(log, conversation.id, 60, 2000); // ~120k chars > MAX_CONTEXT_CHARS
+    appendText(log, conversation.id, 60, 2000); // ~120k chars ≈ 30k tokens > MAX_CONTEXT_TOKENS
 
     const summarizeCalls: AgentLlmMessage[][] = [];
     const llm = {
@@ -124,11 +125,13 @@ describe("copilot context compression", () => {
 
     const result = await buildCompressedContext(log, conversation.id, llm);
     assert.equal(result.compressed, true);
-    assert.ok(JSON.stringify(result.messages).length <= MAX_CONTEXT_CHARS);
+    assert.ok(estimateJsonTokens({ messages: result.messages, tools: [] }) <= MAX_CONTEXT_TOKENS);
+    assert.equal(log.getConversation(conversation.id)?.summary_covered_sequence ?? 0, 0);
+    db.close();
   });
 
   it("exposes a context budget constant for the harness", () => {
-    assert.ok(MAX_CONTEXT_CHARS > 0);
+    assert.ok(MAX_CONTEXT_TOKENS > 0);
   });
 });
 
@@ -164,7 +167,9 @@ it("does not commit a summary after source history changes or ownership is lost"
         if (changeHistory) log.appendMessage(conversation.id, { role: "user", kind: "text", content: "changed" });
         return "stale";
       } } as unknown as AgentLlmClient;
-      await buildCompressedContext(log, conversation.id, llm, undefined, { canCommit: () => changeHistory });
+      const build = () => buildCompressedContext(log, conversation.id, llm, undefined, { canCommit: () => changeHistory });
+      if (changeHistory) await build();
+      else await assert.rejects(build(), /COPILOT_LEASE_LOST/);
       assert.equal(log.getConversation(conversation.id)?.summary, null);
     } finally { db.close(); }
   }
@@ -176,7 +181,7 @@ it("keeps a whole oversized latest turn and labels incomplete legacy calls as hi
     const user = new UserRepository(db).create("turn@example.com", "hash");
     const log = new CopilotConversationLog(db, user.id);
     const conversation = log.createConversation();
-    log.appendMessage(conversation.id, { role: "user", kind: "text", content: "x".repeat(MAX_CONTEXT_CHARS + 1) });
+    log.appendMessage(conversation.id, { role: "user", kind: "text", content: "x".repeat(MAX_CONTEXT_TOKENS * 4) });
     log.appendMessage(conversation.id, { role: "assistant", kind: "tool_call", toolCallId: "missing", toolName: "read", toolInputJson: "{}", content: "" });
     const llm = { async summarize() { assert.fail("must not cut a single turn"); } } as unknown as AgentLlmClient;
     await assert.rejects(buildCompressedContext(log, conversation.id, llm), /COPILOT_CONTEXT_TOO_LARGE/);
@@ -215,12 +220,12 @@ it("bounds one oversized tool turn and includes immutable request overhead", asy
     for (const id of ["a","b","c"]) log.appendMessage(c.id,{role:"tool",kind:"tool_result",content:'\\"'.repeat(48000),toolCallId:id});
     const tools=[{description:"x".repeat(20000)}];
     const prefixMessages: AgentLlmMessage[]=[{role:"user",content:"immutable skill/project"}];
-    const result=await buildCompressedContext(log,c.id,{} as AgentLlmClient,undefined,{tools,prefixMessages,reservedChars:5000});
-    assert.ok(JSON.stringify({messages:result.messages,tools}).length+5000 <= MAX_CONTEXT_CHARS);
+    const result=await buildCompressedContext(log,c.id,{} as AgentLlmClient,undefined,{tools,prefixMessages,reservedTokens:5000});
+    assert.ok(estimateJsonTokens({ messages: result.messages, tools })+5000 <= MAX_CONTEXT_TOKENS);
     assert.equal(result.messages[1]?.content,"Keep the latest goal intact");
     assert.equal(result.messages.filter(m=>m.role==='tool').length,3);
     for(const m of result.messages.filter(m=>m.role==='tool')) assert.match(m.content,/read_tool_result/);
-    await assert.rejects(buildCompressedContext(log,c.id,{} as AgentLlmClient,undefined,{reservedChars:MAX_CONTEXT_CHARS}),/COPILOT_CONTEXT_TOO_LARGE/);
+    await assert.rejects(buildCompressedContext(log,c.id,{} as AgentLlmClient,undefined,{reservedTokens:MAX_CONTEXT_TOKENS}),/COPILOT_CONTEXT_TOO_LARGE/);
   } finally {db.close();}
 });
 
@@ -235,13 +240,37 @@ it('bounds summarizer input and oversized output without cutting tool argument J
     log.appendMessage(c.id,{role:'user',kind:'text',content:'newest goal'});
     let called=false;
     const llm={async summarize({messages}:{messages:AgentLlmMessage[]}) {
-      called=true;assert.ok(JSON.stringify({messages,tools:[]}).length+4096<=MAX_CONTEXT_CHARS);
+      called=true;assert.ok(estimateJsonTokens({messages,tools:[]})+1024<=MAX_CONTEXT_TOKENS);
       for (const message of messages) for(const call of message.toolCalls??[]) assert.deepEqual(JSON.parse(call.arguments),{value:'escape "\\'});
-      return 'S'.repeat(MAX_CONTEXT_CHARS*2);
+      return 'S'.repeat(MAX_CONTEXT_TOKENS*2);
     }} as unknown as AgentLlmClient;
     const result=await buildCompressedContext(log,c.id,llm);
-    assert.equal(called,true);assert.ok(JSON.stringify({messages:result.messages,tools:[]}).length<=MAX_CONTEXT_CHARS);
+    assert.equal(called,true);assert.ok(estimateJsonTokens({messages:result.messages,tools:[]})<=MAX_CONTEXT_TOKENS);
     assert.equal(result.messages.at(-1)?.content,'newest goal');
     assert.ok((log.getConversation(c.id)?.summary?.length??0)<=4096);
   }finally{db.close();}
+});
+
+it('summarizes every uncovered turn before advancing coverage across a large backlog', async () => {
+  const db = createTestDb();
+  try {
+    const user = new UserRepository(db).create('backlog@example.test', 'hash');
+    const log = new CopilotConversationLog(db, user.id);
+    const c = log.createConversation();
+    for (let index = 0; index < 640; index++) {
+      log.appendMessage(c.id, { role: 'user', kind: 'text', content: `requirement-${index}: ${'x'.repeat(1800)}` });
+      log.appendMessage(c.id, { role: 'assistant', kind: 'text', content: 'Observed.' });
+    }
+    const seen = new Set<number>();
+    const llm = { async summarize({ messages }: { messages: AgentLlmMessage[] }) {
+      for (const message of messages) for (const match of message.content.matchAll(/requirement-(\d+):/g)) seen.add(Number(match[1]));
+      return 'Goals and evidence retained.';
+    } } as unknown as AgentLlmClient;
+    await buildCompressedContext(log, c.id, llm);
+    const covered = log.getConversation(c.id)!.summary_covered_sequence;
+    for (const row of log.listMessages(c.id).filter(row => row.sequence <= covered && row.role === 'user')) {
+      assert.ok(seen.has(Number(/requirement-(\d+)/.exec(row.content)![1])), `unseen covered message ${row.sequence}`);
+    }
+    assert.ok(covered > 0);
+  } finally { db.close(); }
 });

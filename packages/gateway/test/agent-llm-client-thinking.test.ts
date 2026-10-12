@@ -18,13 +18,13 @@ function createTestDb(): Database.Database {
   return db;
 }
 
-function setupClient(db: Database.Database, apiFormat: ProviderApiFormat, response: unknown) {
+function setupClient(db: Database.Database, apiFormat: ProviderApiFormat, response: unknown, baseUrl = "https://stub.example") {
   const user = new UserRepository(db).create("thinking@example.com", "hash");
   const repo = new ModelProviderRepository(db, user.id, "abcdef0123456789abcdef0123456789");
   const provider = repo.createProviderProfile({
     name: "Stub",
     providerKey: "stub",
-    baseUrl: "https://stub.example",
+    baseUrl,
     authType: "api_key",
     apiFormat,
     supportedAdapters: ["opencode"]
@@ -78,7 +78,7 @@ describe("copilot llm thinking", () => {
 
   it("surfaces OpenAI reasoning_content as a thinking_delta separate from the answer", async () => {
     const db = createTestDb();
-    const { client } = setupClient(db, "openai", {
+    const { client } = setupClient(db, "openai-compatible", {
       choices: [
         {
           message: {
@@ -125,11 +125,11 @@ describe("copilot llm thinking", () => {
   });
 });
 
-for (const format of ["anthropic", "openai"] as const) {
+for (const format of ["anthropic", "openai-responses", "openai-compatible"] as const) {
   it(`preserves correlated tool batches in ${format} requests`, async () => {
     const db = createTestDb();
     try {
-      const { client, calls } = setupClient(db, format, format === "openai" ? { choices: [{ message: { content: "okay" } }] } : { content: [{ type: "text", text: "okay" }] });
+      const { client, calls } = setupClient(db, format, format !== "anthropic" ? { choices: [{ message: { content: "okay" } }] } : { content: [{ type: "text", text: "okay" }] });
       await client.stream({ messages: [
         { role: "user", content: "inspect" },
         { role: "assistant", content: "checking", toolCalls: [
@@ -142,7 +142,7 @@ for (const format of ["anthropic", "openai"] as const) {
       const body = calls[0]!.body;
       assert.equal("max_steps" in body, false, "Agent step budgets are not provider request fields");
       const messages = body.messages as Array<Record<string, unknown>>;
-      if (format === "openai") {
+      if (format !== "anthropic") {
         assert.equal(messages[0]?.role, "system");
         assert.match(String(messages[0]?.content), /ForgeBadger/);
         assert.equal(messages[3]?.tool_call_id, "a");
@@ -166,7 +166,7 @@ it("removes abort listeners after completion and avoids sending pre-cancelled re
   const { getEventListeners } = await import("node:events");
   const db = createTestDb();
   try {
-    const { client, calls } = setupClient(db, "openai", { choices: [{ message: { content: "okay" } }] });
+    const { client, calls } = setupClient(db, "openai-compatible", { choices: [{ message: { content: "okay" } }] });
     const controller = new AbortController();
     await client.stream({ messages: [{ role: "user", content: "hi" }], tools: [], signal: controller.signal, onEvent() {} });
     assert.equal(getEventListeners(controller.signal, "abort").length, 0);
@@ -174,4 +174,170 @@ it("removes abort listeners after completion and avoids sending pre-cancelled re
     await assert.rejects(client.stream({ messages: [], tools: [], signal: controller.signal, onEvent() {} }));
     assert.equal(calls.length, 1);
   } finally { db.close(); }
+});
+
+describe("copilot llm preferences", () => {
+  const openaiResponse = { choices: [{ message: { content: "okay" } }] };
+  const anthropicResponse = { content: [{ type: "text", text: "okay" }], stop_reason: "end_turn" };
+
+  async function setupPreferenceClient(db: Database.Database, apiFormat: ProviderApiFormat, response: unknown, fetchImplOverride?: typeof fetch) {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const user = new UserRepository(db).create("preference@example.com", "hash");
+    const repo = new ModelProviderRepository(db, user.id, "abcdef0123456789abcdef0123456789");
+    const provider = repo.createProviderProfile({
+      name: "Stub",
+      providerKey: "stub",
+      baseUrl: "https://stub.example",
+      authType: "api_key",
+      apiFormat,
+      supportedAdapters: ["opencode"],
+    });
+    const defaultProfile = repo.createModelProfile({
+      providerProfileId: provider.id,
+      name: "Stub model",
+      modelId: "stub-model",
+      capabilities: ["chat"],
+      isDefault: true,
+    });
+    const preferredProfile = repo.createModelProfile({
+      providerProfileId: provider.id,
+      name: "Preferred model",
+      modelId: "preferred-model",
+      capabilities: ["chat"],
+      isDefault: false,
+    });
+    repo.createCredential({ providerProfileId: provider.id, label: "key", plaintextSecret: "secret" });
+    const { CopilotPreferencesRepository } = await import("../src/db/repositories/copilot-preferences-repository.js");
+    const preferences = new CopilotPreferencesRepository(db, user.id);
+    const client = createAgentLlmClient({
+      modelProviderRepository: repo,
+      preferences,
+      resolveHost: async () => [{ address: "8.8.8.8", family: 4 }],
+      fetchImpl: fetchImplOverride ?? ((async (url: string, init?: RequestInit) => {
+        calls.push({ url: String(url), body: JSON.parse((init?.body as string | undefined) ?? "{}") });
+        return { ok: true, status: 200, json: async () => response } as Response;
+      }) as typeof fetch),
+    });
+    return { client, calls, preferences, defaultProfile, preferredProfile };
+  }
+
+  it("uses the default model until a thinking preference is stored, then sends it", async () => {
+    const db = createTestDb();
+    try {
+      const { client, calls, preferences } = await setupPreferenceClient(db, "openai-compatible", openaiResponse);
+      await client.stream({ messages: [{ role: "user", content: "hello" }], tools: [], onEvent: () => {} });
+      assert.equal(calls[0]!.body.model, "stub-model");
+      assert.ok(!("reasoning_effort" in calls[0]!.body), "no thinking params before any preference is stored");
+      preferences.set({ thinkingEffort: "medium" });
+      await client.stream({ messages: [{ role: "user", content: "hello again" }], tools: [], onEvent: () => {} });
+      assert.equal(calls[1]!.body.model, "stub-model");
+      assert.equal(calls[1]!.body.reasoning_effort, "medium");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("summarize prefers the user model but omits thinking params", async () => {
+    const db = createTestDb();
+    try {
+      const { client, calls, preferences, preferredProfile } = await setupPreferenceClient(db, "openai-compatible", openaiResponse);
+      preferences.set({ modelId: preferredProfile.id, thinkingEffort: "high" });
+      const text = await client.summarize({ messages: [{ role: "user", content: "summarize me" }] });
+      assert.equal(text, "okay");
+      assert.equal(calls[0]!.body.model, "preferred-model");
+      assert.ok(!("reasoning_effort" in calls[0]!.body), "summarize must not forward thinking params");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("maps anthropic thinking effort to a budget and raises max_tokens", async () => {
+    const db = createTestDb();
+    try {
+      const { client, calls, preferences } = await setupPreferenceClient(db, "anthropic", anthropicResponse);
+      preferences.set({ thinkingEffort: "low" });
+      await client.stream({ messages: [{ role: "user", content: "think" }], tools: [], onEvent: () => {} });
+      assert.deepEqual(calls[0]!.body.thinking, { type: "enabled", budget_tokens: 2048 });
+      assert.equal(calls[0]!.body.max_tokens, 10240);
+      preferences.set({ thinkingEffort: "high" });
+      await client.stream({ messages: [{ role: "user", content: "think harder" }], tools: [], onEvent: () => {} });
+      assert.deepEqual(calls[1]!.body.thinking, { type: "enabled", budget_tokens: 8192 });
+      assert.equal(calls[1]!.body.max_tokens, 16384);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("prefers the user model over the default when no modelId is requested", async () => {
+    const db = createTestDb();
+    try {
+      const { client, calls, preferences, preferredProfile } = await setupPreferenceClient(db, "openai-compatible", openaiResponse);
+      preferences.set({ modelId: preferredProfile.id });
+      await client.stream({ messages: [{ role: "user", content: "hello" }], tools: [], onEvent: () => {} });
+      assert.equal(calls[0]!.body.model, "preferred-model");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("falls back to the default model when the preferred profile is inactive", async () => {
+    const db = createTestDb();
+    try {
+      const { client, calls, preferences, preferredProfile, defaultProfile } = await setupPreferenceClient(db, "openai-compatible", openaiResponse);
+      preferences.set({ modelId: preferredProfile.id });
+      db.prepare("UPDATE model_profiles SET status = 'inactive' WHERE id = ?").run(preferredProfile.id);
+      await client.stream({ messages: [{ role: "user", content: "hello" }], tools: [], onEvent: () => {} });
+      assert.equal(calls[0]!.body.model, defaultProfile.modelId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps an explicit request modelId in front of the stored preference", async () => {
+    const db = createTestDb();
+    try {
+      const { client, calls, preferences, preferredProfile, defaultProfile } = await setupPreferenceClient(db, "openai-compatible", openaiResponse);
+      preferences.set({ modelId: preferredProfile.id });
+      await client.stream({ messages: [{ role: "user", content: "hello" }], modelId: defaultProfile.id, tools: [], onEvent: () => {} });
+      assert.equal(calls[0]!.body.model, defaultProfile.modelId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("retries once with thinking disabled when the provider 400s on thinking params", async () => {
+    const db = createTestDb();
+    try {
+      const { client, calls, preferences } = await setupPreferenceClient(db, "openai-compatible", openaiResponse, ((url: string, init?: RequestInit) => {
+        const body = JSON.parse((init?.body as string | undefined) ?? "{}");
+        calls.push({ url: String(url), body });
+        // First attempt carries reasoning_effort and the stub model rejects it;
+        // the degraded retry (no thinking params) succeeds.
+        if (body.reasoning_effort !== undefined) {
+          return Promise.resolve(new Response(JSON.stringify({ error: "reasoning_effort is not supported" }), { status: 400 }));
+        }
+        return Promise.resolve(new Response(JSON.stringify(openaiResponse), { status: 200 }));
+      }) as typeof fetch);
+      preferences.set({ thinkingEffort: "high" });
+      const result = await client.stream({ messages: [{ role: "user", content: "think" }], tools: [], onEvent: () => {} });
+      assert.equal(result.message, "okay");
+      assert.equal(calls.length, 2);
+      assert.equal(calls[0]!.body.reasoning_effort, "high");
+      assert.ok(!("reasoning_effort" in calls[1]!.body), "retry must not forward thinking params");
+    } finally {
+      db.close();
+    }
+  });
+});
+
+it("requests separated reasoning only on official MiniMax endpoints and explicit streamed usage",async()=>{
+ for(const url of ['https://api.minimax.cn/v1','https://api.minimaxi.com/v1','https://stub.example']){
+  const db=createTestDb();try {
+   const {client,calls}=setupClient(db,'openai-compatible',{choices:[{message:{content:'answer',reasoning_content:'private'},finish_reason:'stop'}]},url);
+   const result=await client.stream({messages:[{role:'user',content:'hello'}],tools:[],maxOutputTokens:1024,onEvent:()=>{}});
+   assert.equal(calls[0]!.body.reasoning_split,url.includes('stub')?undefined:true);
+   assert.deepEqual(calls[0]!.body.stream_options,{include_usage:true});
+   assert.equal(calls[0]!.body.max_completion_tokens,1024);assert.equal(result.message,'answer');
+  }finally{db.close();}
+ }
 });

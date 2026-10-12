@@ -1,4 +1,5 @@
 import { PlatformNoEffectError } from "./errors.js";
+import { stopSessionInput, resolveSessionStopTarget, assertSessionStopTargetLive, sessionExecutionScope } from "../session-stop-target.js";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { SessionRepository, type Session } from "../../db/repositories/session-repository.js";
@@ -9,29 +10,32 @@ import type { ForgeBadgerEventBus } from "../event-bus.js";
 import { recordActivity } from "../activity-events.js";
 import { recordSessionSnapshot } from "../session-snapshots.js";
 import { getAdapterLaunchStatus } from "../adapter-discovery.js";
-import { createLaunchPlan, normalizeAdapter, prepareAdapterLaunchExtras } from "../session-launch-plan.js";
+import { createLaunchPlan, createTerminalLaunchPlan, checkTerminalShell, resolveAvailableTerminalShell, normalizeSessionKind, prepareAdapterLaunchExtras } from "../session-launch-plan.js";
 import { canonical } from "./actions.js";
 import type { CommandContext, PlatformCommand } from "./types.js";
 const inputSchema = z.object({ sessionId: z.string().min(1).max(128) }).strict();
-function resolve(ctx: CommandContext, input: unknown) {
-    const { sessionId } = inputSchema.parse(input);
+function resolve(ctx: CommandContext, input: unknown, action: string) {
+    const parsed = (action === "stop" ? stopSessionInput : inputSchema).parse(input);
+    const { sessionId } = parsed;
     const session = new SessionRepository(ctx.db, ctx.userId).getById(sessionId);
     if (!session || !new ProjectRepository(ctx.db, ctx.userId).getById(session.projectId))
         throw new Error("Session not found");
-    return { projectIds: [session.projectId], revision: createHash("sha256").update(canonical(session)).digest("hex") };
+    const stopTarget = action === "stop" ? resolveSessionStopTarget(ctx, stopSessionInput.parse(input)) : undefined;
+    return { projectIds: [session.projectId], rootPaths: [session.workingDir], revision: createHash("sha256").update(canonical(session)).digest("hex"), ...(stopTarget ? { stopTarget } : {}) };
 }
 export function createSessionCommands(): PlatformCommand[] {
     return ["start", "stop", "takeover"].map(action => ({
-        id: `session.${action}`, capability: `session.${action}`, effect: "external", delegatable: action !== "takeover", inputSchema, resolve,
+        id: `session.${action}`, capability: `session.${action}`, effect: "external", inputSchema: action === "stop" ? stopSessionInput : inputSchema,
+        resolve: (ctx, input) => resolve(ctx, input, action),
         prepare(ctx, input) {
-            return preflight(ctx, inputSchema.parse(input).sessionId, action);
+            return preflight(ctx, (action === "stop" ? stopSessionInput : inputSchema).parse(input).sessionId, action, input);
         },
         execute(ctx, input) {
-            const { sessionId } = inputSchema.parse(input);
+            const { sessionId } = (action === "stop" ? stopSessionInput : inputSchema).parse(input);
             if (action === "start")
                 return start(ctx, sessionId);
             if (action === "stop")
-                return stop(ctx, sessionId);
+                return stop(ctx, stopSessionInput.parse(input));
             if (!ctx.sessionManager)
                 throw new Error("Session runtime unavailable");
             ctx.sessionManager.takeoverSession(ctx.userId, sessionId);
@@ -39,7 +43,8 @@ export function createSessionCommands(): PlatformCommand[] {
         }
     }));
 }
-async function preflight(ctx: CommandContext, sessionId: string, action: string) {
+async function preflight(ctx: CommandContext, sessionId: string, action: string, input: unknown) {
+    if (action === "stop") await assertSessionStopTargetLive(ctx, stopSessionInput.parse(input));
     const manager = ctx.sessionManager;
     if (!manager)
         throw new PlatformNoEffectError("Session runtime unavailable");
@@ -54,12 +59,22 @@ async function preflight(ctx: CommandContext, sessionId: string, action: string)
         const claimsRunning = live?.status === 'running' || session.status === 'running';
         if (claimsRunning && await manager.hasLiveTerminal(sessionId, session.runtimeSessionName ?? undefined))
             throw new PlatformNoEffectError("Session already running");
-        const adapter = normalizeAdapter(session.aiTool);
-        if (!adapter)
+        const kind = normalizeSessionKind(session.aiTool);
+        if (!kind)
             throw new PlatformNoEffectError("Unsupported session adapter", 400);
-        const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
-        if (!status.launchEnabled)
-            throw new PlatformNoEffectError(`${status.label} is not available for launch`);
+        if (kind === "terminal") {
+            let shell;
+            try { shell = await resolveAvailableTerminalShell(undefined, undefined, ctx.adapterCommandRunner); }
+            catch (error) { throw new PlatformNoEffectError(error instanceof Error ? error.message : "No supported shell is installed"); }
+            const shellStatus = await checkTerminalShell(shell, undefined, undefined, ctx.adapterCommandRunner);
+            if (!shellStatus.available)
+                throw new PlatformNoEffectError(`${shell} is not available for launch`);
+        } else {
+            const adapter = kind;
+            const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
+            if (!status.launchEnabled)
+                throw new PlatformNoEffectError(`${status.label} is not available for launch`);
+        }
     }
     else if (action === 'stop' && !live && !session.runtimeSessionName)
         throw new PlatformNoEffectError("Session is not running");
@@ -95,39 +110,63 @@ async function start(ctx: CommandContext, sessionId: string) {
             ) {
                 throw new SessionConflictError("Session already running");
             }
-            const adapter = normalizeAdapter(dbSession.aiTool);
-            if (!adapter) {
+            const kind = normalizeSessionKind(dbSession.aiTool);
+            if (!kind) {
                 const err = new Error("Unsupported session adapter");
                 (err as Error & {
                     httpStatus?: number;
                 }).httpStatus = 400;
                 throw err;
             }
-            const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner, sessionManager.terminalBackendHealth());
-            if (!launchStatus.launchEnabled) {
-                const err = new Error(`${launchStatus.label} is not available for launch`);
-                (err as Error & {
-                    httpStatus?: number;
-                }).httpStatus = 409;
-                (err as Error & {
-                    details?: unknown;
-                }).details = {
-                    adapter: launchStatus.id,
-                    command: launchStatus.command,
-                    status: launchStatus.status,
-                    error: launchStatus.error
-                };
-                throw err;
+            let launchPlan;
+            if (kind === "terminal") {
+                const shell = await resolveAvailableTerminalShell(undefined, undefined, adapterCommandRunner);
+                const shellStatus = await checkTerminalShell(shell, undefined, undefined, adapterCommandRunner);
+                if (!shellStatus.available) {
+                    const err = new Error(`${shell} is not available for launch`);
+                    (err as Error & {
+                        httpStatus?: number;
+                    }).httpStatus = 409;
+                    (err as Error & {
+                        details?: unknown;
+                    }).details = { shell, command: shellStatus.command, error: shellStatus.error };
+                    throw err;
+                }
+                authorize();
+                effectsStarted = true;
+                launchPlan = createTerminalLaunchPlan({
+                    projectRoot: dbSession.workingDir,
+                    sessionId: dbSession.id,
+                    shell
+                });
+            } else {
+                const adapter = kind;
+                const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner, sessionManager.terminalBackendHealth());
+                if (!launchStatus.launchEnabled) {
+                    const err = new Error(`${launchStatus.label} is not available for launch`);
+                    (err as Error & {
+                        httpStatus?: number;
+                    }).httpStatus = 409;
+                    (err as Error & {
+                        details?: unknown;
+                    }).details = {
+                        adapter: launchStatus.id,
+                        command: launchStatus.command,
+                        status: launchStatus.status,
+                        error: launchStatus.error
+                    };
+                    throw err;
+                }
+                authorize();
+                effectsStarted = true;
+                const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, dbSession.workingDir);
+                launchPlan = createLaunchPlan({
+                    adapter,
+                    projectRoot: dbSession.workingDir,
+                    sessionId: dbSession.id,
+                    ...(pluginDirs.length > 0 ? { pluginDirs } : {})
+                });
             }
-            authorize();
-            effectsStarted = true;
-            const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, dbSession.workingDir);
-            const launchPlan = createLaunchPlan({
-                adapter,
-                projectRoot: dbSession.workingDir,
-                sessionId: dbSession.id,
-                ...(pluginDirs.length > 0 ? { pluginDirs } : {})
-            });
             const attachToken = randomUUID();
             authorize();
             sessionRepo.update(dbSession.id, { attachToken });
@@ -166,7 +205,12 @@ async function start(ctx: CommandContext, sessionId: string) {
         throw error;
     }
 }
-async function stop(ctx: CommandContext, sessionId: string) {
+/** Shared runtime launch path: session.start and pm.task.execute both spawn the CLI through here. */
+export async function startSessionRuntime(ctx: CommandContext, sessionId: string) {
+    return start(ctx, sessionId);
+}
+async function stop(ctx: CommandContext, input: z.infer<typeof stopSessionInput>) {
+    const { sessionId } = input;
     const { db, userId, eventBus, adapterCommandRunner } = ctx;
     const sessionManager = ctx.sessionManager;
     if (!sessionManager)
@@ -175,6 +219,8 @@ async function stop(ctx: CommandContext, sessionId: string) {
     const dbSession = sessionRepo.getById(sessionId);
     if (!dbSession)
         throw new Error("Session not found");
+    await assertSessionStopTargetLive(ctx, input);
+    ctx.authorize?.();
     let effectsStarted = false;
     if (sessionManager.getSession(sessionId)) {
         effectsStarted = true;
@@ -188,6 +234,9 @@ async function stop(ctx: CommandContext, sessionId: string) {
     };
     try {
         return await sessionManager.runExclusive(sessionId, async () => {
+            // Revalidate after any wait for an in-flight submission/lifecycle operation.
+            await assertSessionStopTargetLive(ctx, input);
+            const executionScope = sessionExecutionScope(dbSession, sessionManager);
             const live = sessionManager.getSession(sessionId);
             // Runtime session name (DB column `runtime_session_name`, historical naming).
             const runtimeSession = live?.runtimeSessionName ?? dbSession.runtimeSessionName ?? undefined;
@@ -205,7 +254,8 @@ async function stop(ctx: CommandContext, sessionId: string) {
                 lastActive: new Date()
             });
             recordSessionActivity(db, eventBus, userId, updatedSession ?? dbSession, "session_stopped", "success", `Session ${dbSession.name} stopped`);
-            return safeSession(updatedSession ?? dbSession);
+            return { ...safeSession(updatedSession ?? dbSession), terminalStopped: true, stopScope: "terminal_process_group",
+                externalExecutionStopped: null, ...(executionScope === "external_runtime_unverified" ? { warning: "CODEX_EXTERNAL_RUNTIME_UNVERIFIED: Only the terminal was stopped; a shared Codex daemon may still run the task and hold its thread lock." } : {}) };
         });
     }
     catch (error) {
@@ -215,14 +265,14 @@ async function stop(ctx: CommandContext, sessionId: string) {
             throw error;
         if (error instanceof SessionConflictError)
             throw error;
+        if (error instanceof PlatformNoEffectError) throw new Error(error.message);
         sessionRepo.update(sessionId, { status: "error", errorMessage: error instanceof Error ? error.message : String(error) });
         recordSessionActivity(db, eventBus, userId, dbSession, "session_error", "error", error instanceof Error ? error.message : "Session operation failed");
         eventBus?.emitEvent({ type: "session_status_changed", userId, sessionId, oldStatus: dbSession.status, newStatus: "error" });
         throw error;
     }
 }
-function recordSessionActivity(db: Database, eventBus: ForgeBadgerEventBus | undefined, userId: string, session: Session, type: string, status: "info" | "success" | "warning" | "error", message: string, metadata?: unknown): void {
-    recordActivity({
+function recordSessionActivity(db: Database, eventBus: ForgeBadgerEventBus | undefined, userId: string, session: Session, type: string, status: "info" | "success" | "warning" | "error", message: string, metadata?: unknown): void {    recordActivity({
         db,
         eventBus,
         userId,

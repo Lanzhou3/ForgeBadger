@@ -204,7 +204,7 @@ async function assertSelectedRuntimeStopped(env: NodeJS.ProcessEnv): Promise<voi
       await assertPortAvailable(current.web.host, current.web.port);
     }
   } else if (env.FORGEBADGER_PORT) {
-    await assertPortAvailable(env.FORGEBADGER_HOST ?? "127.0.0.1", environmentPort(env.FORGEBADGER_PORT, 48731));
+    await assertPortAvailable(env.FORGEBADGER_HOST ?? "127.0.0.1", environmentPort(env.FORGEBADGER_PORT, 18332));
   }
 }
 

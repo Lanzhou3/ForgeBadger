@@ -5,14 +5,14 @@ import type { ProjectSkill } from "../db/repositories/project-skill-repository.j
 import type { AdapterId } from "./adapter-discovery.js";
 
 export interface BuildProjectConfigFilesInput {
-  adapter?: AdapterId | undefined;
+  adapter: AdapterId;
   templateFiles: TemplateFileInput[];
   skills?: ProjectSkill[];
 }
 
 
 export function buildProjectConfigFiles(input: BuildProjectConfigFilesInput): TemplateFileInput[] {
-  const adapter = input.adapter ?? "claude";
+  const adapter = input.adapter;
   const files = [
     ...adaptTemplateFiles(input.templateFiles, adapter),
     ...(input.skills ?? [])
@@ -28,7 +28,8 @@ function adaptTemplateFiles(
   adapter: AdapterId
 ): TemplateFileInput[] {
   if (adapter === "claude") {
-    return files.map((file) => {
+    const hasClaudeMemory = files.some(file => file.relativePath === 'CLAUDE.md' || file.relativePath === '.claude/CLAUDE.md');
+    const adapted = files.map((file) => {
       if (file.relativePath === ".claude/CLAUDE.md") {
         return {
           ...file,
@@ -37,6 +38,13 @@ function adaptTemplateFiles(
       }
       return file;
     });
+    // Native AGENTS support can be shadowed by ancestor memory or disabled
+    // plugins. Import shared memory explicitly without breaking its file path.
+    const sharedMemory = files.find(file => file.relativePath === 'AGENTS.md');
+    if (!hasClaudeMemory && sharedMemory) adapted.push({
+      id: `claude-memory:${sharedMemory.id}`, relativePath: 'CLAUDE.md', content: '@AGENTS.md\n', renderVariables: false,
+    });
+    return adapted;
   }
   const root = adapterConfigRoot(adapter);
   return files.flatMap((file) => {
@@ -96,17 +104,25 @@ function skillConfigPath(name: string, adapter: AdapterId): string {
   return `${adapterConfigRoot(adapter)}/skills/${slug}/SKILL.md`;
 }
 
-export function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" | ".kimi-code" | ".pi" {
+export function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" | ".kimi-code" | ".pi" | ".mcode" {
   if (adapter === "opencode") return ".opencode";
   if (adapter === "codex") return ".codex";
   if (adapter === "kimi") return ".kimi-code";
   if (adapter === "pi") return ".pi";
+  // MiniMax Code has no project-level config.yaml; .mcode/ holds project
+  // commands and agents. ForgeBadger writes neither, so this root is only
+  // used by the skill path helper, which stays consistent with .claude/.
+  if (adapter === "mcode") return ".mcode";
   return ".claude";
 }
 
 function adaptInstructionContent(content: string, adapter: AdapterId): string {
   const adapterLabel =
-    adapter === "opencode" ? "OpenCode" : adapter === "kimi" ? "Kimi Code" : "Codex";
+    adapter === "opencode" ? "OpenCode"
+      : adapter === "kimi" ? "Kimi Code"
+      : adapter === "pi" ? "PI"
+      : adapter === "mcode" ? "MiniMax Code"
+      : "Codex";
   return content
     .replaceAll("CLAUDE.md", "AGENTS.md")
     .replaceAll("Claude Code", adapterLabel)

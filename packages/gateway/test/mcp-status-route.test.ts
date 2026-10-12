@@ -40,7 +40,7 @@ describe("mcp status route", () => {
     app.use(express.json());
     app.use("/api/v1/mcp", createMcpStatusRoutes({
       mcpEnabled: false,
-      endpoint: "http://127.0.0.1:48731/mcp"
+      endpoint: "http://127.0.0.1:18332/mcp"
     }));
   });
 
@@ -54,7 +54,7 @@ describe("mcp status route", () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.code, 0);
     assert.equal(res.body.data.enabled, false);
-    assert.equal(res.body.data.endpoint, "http://127.0.0.1:48731/mcp");
+    assert.equal(res.body.data.endpoint, "http://127.0.0.1:18332/mcp");
   });
 
   it("reports enabled=true when the feature flag is set", async () => {
@@ -64,7 +64,7 @@ describe("mcp status route", () => {
     enabledApp.locals.db = db;
     enabledApp.use("/api/v1/mcp", createMcpStatusRoutes({
       mcpEnabled: true,
-      endpoint: "http://127.0.0.1:48731/mcp"
+      endpoint: "http://127.0.0.1:18332/mcp"
     }));
     const res = await makeRequest(enabledApp, "GET", "/api/v1/mcp", undefined, bearer(user.id, user.email));
     assert.equal(res.status, 200);

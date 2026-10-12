@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 import { CommandPalette } from "@/components/command-palette";
 import { CopilotRobotHost } from "@/components/copilot/copilot-robot-host";
+import { SessionBookmark } from "@/components/session-bookmark";
 import {
   globalShortcutContextFromEvent,
   isCommandPaletteShortcut,
@@ -68,6 +69,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
       />
       <CopilotRobotHost />
+      <SessionBookmark />
     </div>
   );
 }

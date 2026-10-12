@@ -7,7 +7,7 @@ describe("provider capability matrix", () => {
   it("exposes per-adapter api formats and model selection modes", () => {
     const codex = getProviderCapabilities().find((entry) => entry.adapter === "codex");
     assert.deepEqual(codex?.authModes, ["native_cli_login", "managed_credential"]);
-    assert.deepEqual(codex?.apiFormats, ["openai", "openai-compatible"]);
+    assert.deepEqual(codex?.apiFormats, ["openai-responses", "openai-compatible"]);
     assert.equal(codex?.projectionScope, "user-global");
     const kimi = getProviderCapabilities().find((entry) => entry.adapter === "kimi");
     assert.equal(kimi?.modelSelection, "native-config");

@@ -33,9 +33,26 @@ describe("multi-adapter launch plans", () => {
     });
 
     assert.equal(plan.command, "codex");
-    assert.deepEqual(plan.args, ["-m", "gpt-5.1-codex", "-c", 'model_provider="openai"']);
+    assert.deepEqual(plan.args, ["--no-daemon", "-c", 'tui.notifications=["approval-requested"]', "-c", 'tui.notification_method="osc9"', "-c", 'tui.notification_condition="always"', "-m", "gpt-5.1-codex", "-c", 'model_provider="openai"']);
     assert.equal(plan.cwd, "/workspace/app");
     assert.deepEqual(plan.secretEnvNames, []);
+  });
+
+  it("keeps Codex notification identity local to each terminal session", () => {
+    const plans = ["session-a", "session-b"].map((sessionId) => createAdapterLaunchPlan({
+      adapter: "codex",
+      projectRoot: "/workspace/app",
+      credentialMode: "host_environment",
+      env: { FORGEBADGER_SESSION_ID: sessionId }
+    }));
+
+    for (const plan of plans) {
+      assert.deepEqual(plan.args, ["--no-daemon", "-c", 'tui.notifications=["approval-requested"]', "-c", 'tui.notification_method="osc9"', "-c", 'tui.notification_condition="always"']);
+      assert.equal(plan.args.includes("--dangerously-bypass-hook-trust"), false);
+      assert.equal("shell" in plan, false);
+    }
+    assert.equal(plans[0].env.FORGEBADGER_SESSION_ID, "session-a");
+    assert.equal(plans[1].env.FORGEBADGER_SESSION_ID, "session-b");
   });
 
   it("creates a Kimi Code launch plan without model override args", () => {

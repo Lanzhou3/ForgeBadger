@@ -195,11 +195,11 @@ function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-function renderPanel() {
+function renderPanel(options: { embedded?: boolean } = {}) {
   return render(
     <LanguageProvider>
       <QueryClientProvider client={createQueryClient()}>
-        <ProjectManagerPanel projectId="project-1" enabled authority={{canEdit:true,canManage:true,legacySessions:true}} />
+        <ProjectManagerPanel projectId="project-1" enabled authority={{canEdit:true,canManage:true,legacySessions:true}} embedded={options.embedded} />
       </QueryClientProvider>
     </LanguageProvider>
   );
@@ -424,5 +424,19 @@ it("uses the single PM editor for assignments and preserves the captured revisio
   client.setQueriesData({queryKey:["project-manager","project-1","work-items"]},{workItems: workItems.map(item => ({...item,revision:9}))});
   fireEvent.click(within(dialog).getByRole("button",{name:"保存工作项"}));
   await waitFor(()=>expect(updateProjectManagerWorkItemMock).toHaveBeenCalledWith("project-1","item-1",expect.objectContaining({expectedRevision:3,title:"One edited task",assigneeId:"dev",reviewerId:"review"})));
+});
+
+it("keeps the Dev Tasks heading visible standalone but screen-reader-only when embedded under the tab", async () => {
+  const { unmount } = renderPanel();
+  const heading = await screen.findByRole("heading", { level: 2, name: "开发任务" });
+  expect(heading.className).toContain("text-sm");
+  expect(heading.className).not.toContain("sr-only");
+  unmount();
+
+  renderPanel({ embedded: true });
+  const embeddedHeading = await screen.findByRole("heading", { level: 2, name: "开发任务" });
+  expect(embeddedHeading.className).toContain("sr-only");
+  // The description stays visible so the embedded panel keeps its guidance.
+  expect(screen.getByText("从目标到交付：按阶段推进工作项，以证据闭环验收。")).toBeTruthy();
 });
 });

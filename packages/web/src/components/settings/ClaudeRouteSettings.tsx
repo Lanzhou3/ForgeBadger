@@ -5,15 +5,10 @@ import { Route } from "lucide-react";
 import { toast } from "@/lib/toast";
 
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { useLanguage } from "@/hooks/use-language";
+import { SettingsCardHeader } from "@/components/settings/ui";
 import { getClaudeRoute, setClaudeRoute } from "@/lib/api";
 
 export function ClaudeRouteSettings() {
@@ -44,23 +39,19 @@ export function ClaudeRouteSettings() {
 
   return (
     <Card className="forgebadger-animate-in">
-      <CardHeader className="flex flex-wrap items-center gap-3 space-y-0">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
-          <Route className="size-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <CardTitle className="text-sm font-semibold">{t("settings.claudeRoute")}</CardTitle>
-          <CardDescription className="mt-1 text-xs">
-            {t("settings.claudeRouteDescription")}
-          </CardDescription>
-        </div>
-        <Switch
-          checked={enabled}
-          disabled={routeLoading || routeError || toggleMutation.isPending}
-          onCheckedChange={(next) => toggleMutation.mutate(next)}
-          aria-label={t("settings.claudeRoute")}
-        />
-      </CardHeader>
+      <SettingsCardHeader
+        icon={<Route className="size-4" />}
+        title={t("settings.claudeRoute")}
+        description={t("settings.claudeRouteDescription")}
+        action={
+          <Switch
+            checked={enabled}
+            disabled={routeLoading || routeError || toggleMutation.isPending}
+            onCheckedChange={(next) => toggleMutation.mutate(next)}
+            aria-label={t("settings.claudeRoute")}
+          />
+        }
+      />
       <CardContent className="space-y-3">
         {routeError ? (
           <p className="text-xs text-destructive">{t("settings.claudeRouteLoadFailed")}</p>

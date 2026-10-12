@@ -7,6 +7,8 @@ import { Play, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useLanguage } from "@/hooks/use-language";
 import {
   applyTemplateSync,
   getTemplateUsage,
@@ -15,22 +17,24 @@ import {
   type TemplateUsageProject,
 } from "@/lib/api";
 
-const statusLabel: Record<TemplateUsageProject["configStatus"], string> = {
-  compliant: "In sync",
-  stale: "Stale",
-  missing: "Missing config"
-};
-
 const statusBadgeClass: Record<TemplateUsageProject["configStatus"], string> = {
   compliant: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
   stale: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
   missing: "border-destructive/40 bg-destructive/10 text-destructive"
 };
 
+const outcomeLabelKey = {
+  applied: "templates.syncOutcomeApplied",
+  rolled_back: "templates.syncOutcomeRolledBack",
+  rollback_failed: "templates.syncOutcomeRollbackFailed",
+} as const;
+
 export function TemplateSyncPanel({ templateId }: { templateId: string }) {
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [preview, setPreview] = useState<TemplateSyncPreview | null>(null);
   const [overwriteProjectIds, setOverwriteProjectIds] = useState<Set<string>>(new Set());
+  const [applyConfirmOpen, setApplyConfirmOpen] = useState(false);
 
   const { data: usage, isLoading } = useQuery({
     queryKey: ["template-usage", templateId],
@@ -47,7 +51,7 @@ export function TemplateSyncPanel({ templateId }: { templateId: string }) {
 
   const applyMutation = useMutation({
     mutationFn: () => {
-      if (!preview) throw new Error("Preview first");
+      if (!preview) throw new Error(t("templates.syncPreviewFailed"));
       const decisions: Record<string, Record<string, "skip" | "overwrite">> = {};
       for (const entry of preview.projects) {
         if (!overwriteProjectIds.has(entry.projectId) || entry.summary.requiresDecision.length === 0) {
@@ -63,6 +67,9 @@ export function TemplateSyncPanel({ templateId }: { templateId: string }) {
       });
     },
     onSuccess: () => {
+      // Reset the preview and checkboxes so a repeat click has to preview again.
+      setPreview(null);
+      setOverwriteProjectIds(new Set());
       queryClient.invalidateQueries({ queryKey: ["template-usage", templateId] });
     }
   });
@@ -90,38 +97,49 @@ export function TemplateSyncPanel({ templateId }: { templateId: string }) {
     });
   }
 
+  const statusLabel: Record<TemplateUsageProject["configStatus"], string> = {
+    compliant: t("templates.syncStatusCompliant"),
+    stale: t("templates.syncStatusStale"),
+    missing: t("templates.syncStatusMissing")
+  };
+
   return (
     <Card className="border-dashed">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <RefreshCw className="size-4" />
-          Sync to projects
+          {t("templates.syncTitle")}
           {usage && usage.usageCount === 0 && (
             <Badge variant="outline" className="text-xs font-normal">
-              seed only
+              {t("templates.syncSeedOnly")}
             </Badge>
           )}
         </CardTitle>
         <CardDescription>
           {isLoading || !usage
-            ? "Loading usage…"
-            : `${usage.usageCount} project${usage.usageCount === 1 ? "" : "s"} use this template`}
+            ? t("templates.syncLoadingUsage")
+            : t("templates.syncUsageCount").replace("{count}", String(usage.usageCount))}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {usage && (
           <div className="flex flex-wrap gap-2 text-xs">
-            <Badge variant="secondary">{statusCounts.compliant} in sync</Badge>
-            <Badge variant="secondary">{statusCounts.stale} stale</Badge>
-            <Badge variant="secondary">{statusCounts.missing} missing config</Badge>
+            <Badge variant="secondary">
+              {t("templates.syncCountCompliant").replace("{count}", String(statusCounts.compliant))}
+            </Badge>
+            <Badge variant="secondary">
+              {t("templates.syncCountStale").replace("{count}", String(statusCounts.stale))}
+            </Badge>
+            <Badge variant="secondary">
+              {t("templates.syncCountMissing").replace("{count}", String(statusCounts.missing))}
+            </Badge>
           </div>
         )}
 
         <div className="space-y-2">
           {!usage || usage.projects.length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">
-              No projects are tracking this template. It currently serves as a one-time
-              project initialization seed — bind a project to it to enable batch sync.
+              {t("templates.syncEmpty")}
             </p>
           ) : (
             usage.projects.map((project) => (
@@ -143,7 +161,7 @@ export function TemplateSyncPanel({ templateId }: { templateId: string }) {
 
         {preview && (
           <div className="space-y-2 rounded-md border bg-background p-3">
-            <div className="text-sm font-medium">Preview</div>
+            <div className="text-sm font-medium">{t("templates.syncPreview")}</div>
             {preview.projects.map((entry) => {
               const needsDecision = entry.summary.requiresDecision.length > 0;
               return (
@@ -157,14 +175,14 @@ export function TemplateSyncPanel({ templateId }: { templateId: string }) {
                           checked={overwriteProjectIds.has(entry.projectId)}
                           onChange={() => toggleOverwrite(entry.projectId)}
                         />
-                        overwrite modified files
+                        {t("templates.syncOverwriteModified")}
                       </label>
                     )}
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {entry.summary.missingFiles.length} files to create
+                    {t("templates.syncFilesToCreate").replace("{count}", String(entry.summary.missingFiles.length))}
                     {entry.summary.requiresDecision.length > 0 && (
-                      <> · {entry.summary.requiresDecision.length} files need a decision</>
+                      <> · {t("templates.syncFilesNeedDecision").replace("{count}", String(entry.summary.requiresDecision.length))}</>
                     )}
                     {entry.summary.modifiedFiles.length > 0 && (
                       <span className="ml-2 font-mono">
@@ -175,17 +193,18 @@ export function TemplateSyncPanel({ templateId }: { templateId: string }) {
                 </div>
               );
             })}
+            <p className="text-xs text-muted-foreground">{t("templates.syncOverwriteHint")}</p>
           </div>
         )}
 
         {previewMutation.isError && (
           <p className="text-sm text-destructive">
-            {previewMutation.error instanceof Error ? previewMutation.error.message : "Preview failed"}
+            {previewMutation.error instanceof Error ? previewMutation.error.message : t("templates.syncPreviewFailed")}
           </p>
         )}
         {applyMutation.isError && (
           <p className="text-sm text-destructive">
-            {applyMutation.error instanceof Error ? applyMutation.error.message : "Sync failed"}
+            {applyMutation.error instanceof Error ? applyMutation.error.message : t("templates.syncApplyFailed")}
           </p>
         )}
 
@@ -197,30 +216,47 @@ export function TemplateSyncPanel({ templateId }: { templateId: string }) {
             disabled={!usage || usage.projects.length === 0 || previewMutation.isPending}
             onClick={() => previewMutation.mutate()}
           >
-            {previewMutation.isPending ? "Previewing…" : "Preview changes"}
+            {previewMutation.isPending ? t("templates.syncPreviewing") : t("templates.syncPreviewAction")}
           </Button>
           <Button
             type="button"
             size="sm"
             disabled={!preview || preview.projects.length === 0 || applyMutation.isPending}
-            onClick={() => applyMutation.mutate()}
+            onClick={() => setApplyConfirmOpen(true)}
           >
             <Play className="size-4" />
-            {applyMutation.isPending ? "Syncing…" : `Apply to ${preview?.projects.length ?? 0} projects`}
+            {applyMutation.isPending
+              ? t("templates.syncApplying")
+              : t("templates.syncApply").replace("{count}", String(preview?.projects.length ?? 0))}
           </Button>
         </div>
 
         {applyMutation.data && (
           <div className="space-y-1.5 text-xs">
             {applyMutation.data.projects.map((entry) => (
-              <div key={entry.projectId} className="flex items-center justify-between gap-2">
+              <div key={entry.projectId} className="flex flex-wrap items-center justify-between gap-2">
                 <span className="truncate">{entry.projectName}</span>
                 {entry.error ? (
                   <span className="shrink-0 text-destructive">{entry.error}</span>
                 ) : (
-                  <span className="shrink-0 text-muted-foreground">
-                    {entry.result?.outcome} · {entry.result?.writtenFiles.length} written ·{" "}
-                    {entry.result?.skippedFiles.length} skipped
+                  <span className="flex min-w-0 shrink-0 items-center gap-2 text-muted-foreground">
+                    <span>
+                      {entry.result
+                        ? t(outcomeLabelKey[entry.result.outcome])
+                        : ""}{" "}
+                      ·{" "}
+                      {t("templates.syncResultLine")
+                        .replace("{written}", String(entry.result?.writtenFiles.length ?? 0))
+                        .replace("{skipped}", String(entry.result?.skippedFiles.length ?? 0))}
+                    </span>
+                    {entry.result?.backupPath ? (
+                      <span
+                        className="max-w-48 truncate font-mono"
+                        title={entry.result.backupPath}
+                      >
+                        {t("templates.syncBackup")}: {entry.result.backupPath}
+                      </span>
+                    ) : null}
                   </span>
                 )}
               </div>
@@ -228,6 +264,19 @@ export function TemplateSyncPanel({ templateId }: { templateId: string }) {
           </div>
         )}
       </CardContent>
+
+      <ConfirmDialog
+        open={applyConfirmOpen}
+        title={t("templates.syncApplyConfirmTitle")}
+        description={t("templates.syncApplyConfirmDescription").replace("{count}", String(preview?.projects.length ?? 0))}
+        confirmLabel={t("templates.syncApplyConfirm")}
+        pending={applyMutation.isPending}
+        onOpenChange={setApplyConfirmOpen}
+        onConfirm={() => {
+          setApplyConfirmOpen(false);
+          applyMutation.mutate();
+        }}
+      />
     </Card>
   );
 }

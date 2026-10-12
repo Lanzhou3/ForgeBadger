@@ -1,19 +1,24 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from "node:url";
 import { createPlatformTools } from '../src/services/agent/tools/index.js';
 import { TOOL_COMMANDS } from '../src/services/platform-commands/tool-commands.js';
 
 describe('Copilot active tool boundaries', () => {
-  it('exposes task preparation and does not advertise retired dispatch or CLI skill tools', () => {
+  it('exposes task preparation and programmatic dispatch, and does not advertise retired CLI skill tools', () => {
     const tools = createPlatformTools();
     const names = tools.map(tool => tool.name);
     assert.ok(names.includes('pm_prepare_task_packet'));
+    assert.ok(names.includes('pm_execute_task_packet'));
+    assert.ok(names.includes('dispatch_task_to_session'));
     assert.ok(names.includes('list_playbooks'));
     assert.ok(names.includes('load_playbook'));
-    for (const retired of ['pm_start_task_packet', 'dispatch_task_to_session', 'list_skills', 'load_skill']) {
+    for (const retired of ['pm_start_task_packet', 'list_skills', 'load_skill']) {
       assert.equal(names.includes(retired), false, retired);
     }
     assert.equal(TOOL_COMMANDS.pm_prepare_task_packet, 'pm.task.prepare');
+    assert.equal(TOOL_COMMANDS.pm_execute_task_packet, 'pm.task.execute');
+    assert.equal(TOOL_COMMANDS.dispatch_task_to_session, 'session.dispatch');
     assert.match(tools.find(tool => tool.name === 'pm_prepare_task_packet')!.description, /does not start the CLI/i);
   });
 });
@@ -34,7 +39,7 @@ import { visibleToolSchemas } from '../src/services/agent/tool-availability.js';
 
 function fixture() {
   const db = new Database(':memory:');
-  migrate(drizzle(db), {migrationsFolder:new URL('../src/db/migrations/', import.meta.url).pathname});
+  migrate(drizzle(db), {migrationsFolder: fileURLToPath(new URL('../src/db/migrations/', import.meta.url))});
   const user = new UserRepository(db).create('tool-boundary@test.dev', 'hash');
   const ledger = new CopilotRunLedger(db, user.id);
   const registry = createAgentToolRegistry(createPlatformTools());
@@ -69,12 +74,12 @@ for (const approvedBeforeUpgrade of [false,true]) it(`fails closed for an old ta
     const step = ledger.addStep(runId,{kind:'tool',toolCallId:'legacy',toolName:'pm_start_task_packet',inputJson:JSON.stringify(input),effect:'write'});
     ledger.append(runId,{role:'assistant',kind:'tool_call',content:'pm_start_task_packet',toolName:'pm_start_task_packet',toolInputJson:JSON.stringify(input),toolCallId:'legacy'},step.id);
     const actions = new PlatformActions({db,userId:user.id},createPlatformCommands());
-    const intent = actions.preview({commandId:'pm.task.prepare',input,authority:'owner_action',idempotencyKey:step.id});
+    const intent = actions.preview({commandId:'pm.task.prepare',input,idempotencyKey:step.id});
+    if (!approvedBeforeUpgrade) actions.intents.transition(intent.id,'approved','pending');
     ledger.waitApproval(claim,step);
     const pending = ledger.log.listPendingActions(runId)[0]!;
     if (approvedBeforeUpgrade) {
       ledger.decide(runId,pending.id,true);
-      actions.decide(intent.id,intent.digest,true);
       await orchestrator.executeRun(user.id,runId);
       assert.match(ledger.log.listMessages(conversation.id).find(m=>m.kind==='tool_result')?.content??'',/Unknown tool/);
     } else {

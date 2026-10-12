@@ -4,7 +4,7 @@ import { assertResolvedPublicHttpsEndpoint } from '../network-policy.js';
 
 const LIMIT = 1024 * 1024;
 /** No redirects or ambient proxy/auth; actual TLS socket uses only validated DNS addresses. */
-export async function publicFetch(input: string | URL | Request, init: RequestInit = {}, beforeSend?: () => void, options: { allowQuery?: boolean } = {}): Promise<Response> {
+export async function publicFetch(input: string | URL | Request, init: RequestInit = {}, beforeSend?: () => void, options: { allowQuery?: boolean; maxResponseBytes?: number } = {}): Promise<Response> {
   const url = new URL(input instanceof Request ? input.url : input.toString());
   let addresses: Awaited<ReturnType<typeof resolveAll>> = [];
   await assertResolvedPublicHttpsEndpoint(url.href, async hostname => {
@@ -40,7 +40,7 @@ export async function publicFetch(input: string | URL | Request, init: RequestIn
         start(controller) {
           res.on('data', (chunk: Buffer) => {
             size += chunk.length;
-            if (size > LIMIT) { res.destroy(new Error('Remote response too large')); return; }
+            if (size > (options.maxResponseBytes ?? LIMIT)) { res.destroy(new Error('Remote response too large')); return; }
             controller.enqueue(new Uint8Array(chunk));
           });
           res.once('end', () => { clearTimeout(timer); controller.close(); });

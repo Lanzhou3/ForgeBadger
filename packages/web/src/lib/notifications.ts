@@ -6,7 +6,7 @@ export type NotificationEventType =
   | "session_created"
   | "session_status_changed"
   | "session_deleted"
-  | "claude_notification"
+  | "session_notification"
   | "app_action_notification";
 
 export interface GatewayEvent {
@@ -49,6 +49,7 @@ const NOTIFIED_CLI_NOTIFICATION_TYPES = new Set([
   "task_interrupted",
   "task_failed",
   "session_ended",
+  "attention",
 ]);
 
 export function createNotificationFromEvent(
@@ -58,7 +59,7 @@ export function createNotificationFromEvent(
   if (event.type === "app_action_notification") {
     return createAppActionNotification(event, now);
   }
-  if (event.type !== "claude_notification") {
+  if (event.type !== "session_notification") {
     return null;
   }
   const notificationType = getString(event.payload, "notification_type");
@@ -228,6 +229,7 @@ function cliNotificationTitleKey(
   if (notificationType === "task_completed") return "notifications.taskCompleted";
   if (notificationType === "task_failed") return "notifications.taskFailed";
   if (notificationType === "session_ended") return "notifications.sessionEnded";
+  if (notificationType === "attention") return "notifications.needsAttention";
   return "notifications.taskInterrupted";
 }
 

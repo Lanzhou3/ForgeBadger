@@ -38,10 +38,10 @@ export function DeleteConfirmDialog({
         : t("models.deleteProviderTitle");
   const description =
     target?.kind === "model"
-      ? t("models.deleteModelWarning")
+      ? `${t("models.deleteModelWarning")} ${target.name}`
       : target?.kind === "credential"
-        ? t("models.deleteCredentialConfirm")
-        : t("models.deleteProviderWarning");
+        ? `${t("models.deleteCredentialConfirm")} ${target.name}`
+        : `${t("models.deleteProviderWarning")} ${target?.name ?? ""}`;
   return (
     <Dialog
       open={target !== null}

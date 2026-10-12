@@ -17,6 +17,7 @@ import {
   type AdapterDiscovery,
   type RuntimeAdapterId,
 } from "@/lib/api";
+import { useOrderedAdapters } from "@/lib/adapter-order";
 
 export const ADAPTER_DISCOVERY_QUERY_KEY = ["adapter-discovery"] as const;
 
@@ -101,7 +102,8 @@ export function AdapterSelect({
     staleTime: 30_000,
   });
   const adapters = data?.adapters ?? [];
-  const visibleAdapters = adapters.filter((adapter) => showMissing || adapter.available);
+  const orderedAdapters = useOrderedAdapters(adapters);
+  const visibleAdapters = orderedAdapters.filter((adapter) => showMissing || adapter.available);
 
   return (
     <Select

@@ -1,3 +1,4 @@
+import type { ProviderReplay } from "./llm-replay.js";
 /**
  * The LLM client seam the orchestrator depends on. Defined as an interface so
  * the orchestrator is decoupled from any concrete provider client; the
@@ -6,6 +7,7 @@
 export interface AgentLlmMessage {
   role: "user" | "assistant" | "tool";
   content: string;
+  providerReplay?: ProviderReplay;
   toolCallId?: string;
   toolCalls?: Array<{ id: string; name: string; arguments: string }>;
 }
@@ -30,6 +32,9 @@ export interface AgentToolCall {
 }
 
 export interface AgentLlmClient {
+  modelInfo?(modelId?: string): { modelProfileId: string; modelId: string; apiFormat: string };
+  /** Estimated-token projection budget for this model (see token-estimate). */
+  contextBudget?(modelId?: string): number;
   stream(request: {
     messages: AgentLlmMessage[];
     tools: AgentLlmToolSchema[];
@@ -37,13 +42,13 @@ export interface AgentLlmClient {
     system?: string;
     signal?: AbortSignal;
     onEvent: (event: AgentLlmStreamEvent) => void;
-  }): Promise<{ message: string }>;
+  }): Promise<import("./llm-response.js").LlmResult>;
   /** Fold a message list into a concise summary (context compression). */
-  summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal }): Promise<string>;
+  summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal; onUsage?: (usage: import("./llm-response.js").LlmUsage | undefined) => void }): Promise<string>;
   /** Generate a short conversation title from the first user/assistant exchange. */
-  generateTitle(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<string>;
+  generateTitle(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal; onUsage?: (usage: import("./llm-response.js").LlmUsage | undefined) => void }): Promise<string>;
   /** Propose durable memory entries from a completed turn (memory curation). */
-  proposeMemory(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<Array<{
+  proposeMemory(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal; onUsage?: (usage: import("./llm-response.js").LlmUsage | undefined) => void }): Promise<Array<{
     kind: "fact" | "preference" | "decision" | "project_note";
     scope: "global" | "project" | "session";
     text: string;

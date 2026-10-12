@@ -12,6 +12,7 @@ import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, Eye, FileCode2, FileT
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,7 +54,9 @@ import {
   type SessionActivity,
 } from "@/lib/api";
 import { findSessionTaskPacket, sessionTaskPacketProjectManagerHref } from "@/components/sessions/session-task-packet";
-import { useLanguage } from "@/hooks/use-language";
+import { formatSessionRelativeTime } from "@/components/sessions/session-board-utils";
+import { activityTypeLabel, projectStatusLabel, useProjectCopy } from "@/components/projects/project-copy";
+import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import { normalizeSessionStatus } from "@/lib/session-status";
 import { highlightCode, supportsSyntaxHighlighting } from "@/lib/syntax-highlight";
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
@@ -91,7 +94,16 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const projectCopy = useProjectCopy();
+  // Client-only clock for relative session times (same SSR-avoidance pattern
+  // as the sessions board).
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const id = params.id as string;
   const [activeTab, setActiveTab] = useState<ProjectDetailTab>(() =>
     readProjectDetailTab(searchParams.get("tab") === "collaboration-settings" ? "project-manager" : searchParams.get("tab")) ?? "project-manager"
@@ -101,6 +113,7 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
   const [configDraft, setConfigDraft] = useState("");
   const [pendingConfigAction, setPendingConfigAction] = useState<"preview" | null>(null);
   const [extractDialogOpen, setExtractDialogOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const configSyncRef = useRef<ConfigSyncPanelHandle>(null);
 
   const { data: projectData, isLoading: projectLoading } = useQuery({
@@ -315,7 +328,7 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
             </Button>
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <h1 className="truncate text-lg font-semibold tracking-tight">{project.name}</h1>
-              {project.status && <Badge variant="outline" className="shrink-0">{project.status}</Badge>}
+              {project.status && <Badge variant="outline" className="shrink-0">{projectStatusLabel(projectCopy, project.status)}</Badge>}
               <span
                 className="hidden min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground sm:inline"
                 title={project.path ?? project.rootPath}
@@ -340,7 +353,7 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
               />
               <Button
                 size="sm"
-                className="bg-brand text-brand-foreground hover:bg-brand/90"
+                variant="brand"
                 onClick={() => createSessionMutation.mutate()}
                 disabled={cannotCreateSession || createSessionMutation.isPending}
               >
@@ -368,11 +381,7 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                   <DropdownMenuItem
                     variant="destructive"
                     disabled={deleteMutation.isPending}
-                    onSelect={() => {
-                      if (window.confirm(t("projects.deleteConfirm"))) {
-                        deleteMutation.mutate();
-                      }
-                    }}
+                    onSelect={() => setConfirmDelete(true)}
                   >
                     <Trash2 className="size-4" />
                     {deleteMutation.isPending ? t("projects.deleting") : t("projects.deleteRecord")}
@@ -443,6 +452,17 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
             </p>
           )}
 
+          <ConfirmDialog
+            open={confirmDelete}
+            destructive
+            pending={deleteMutation.isPending}
+            title={t("projects.deleteConfirmTitle")}
+            description={t("projects.deleteConfirmNamed").replace("{name}", project.name)}
+            confirmLabel={t("common.delete")}
+            onOpenChange={setConfirmDelete}
+            onConfirm={() => deleteMutation.mutate()}
+          />
+
           <Tabs value={activeTab} onValueChange={handleTabChange}>
             <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:thin]">
             <TabsList className="min-w-max">
@@ -487,7 +507,7 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                       <div className="text-sm font-medium">{t("projects.noSessions")}</div>
                       <Button
                         size="sm"
-                        className="bg-brand text-brand-foreground hover:bg-brand/90"
+                        variant="brand"
                         onClick={() => createSessionMutation.mutate()}
                         disabled={cannotCreateSession || createSessionMutation.isPending}
                       >
@@ -500,6 +520,7 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                   <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
                     {projectSessions.map((session, index) => {
                       const linkedTaskPacket = findSessionTaskPacket(taskPacketsData?.taskPackets ?? [], session.id);
+                      const relativeTime = now === null ? null : formatSessionRelativeTime(session, now, language);
                       return (
                       <Link
                         key={session.id}
@@ -511,6 +532,10 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium">
                             {session.name || session.runtimeSessionName || session.id}
+                          </div>
+                          {/* The relative time tells same-named sessions apart. */}
+                          <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                            {relativeTime ?? t("sessions.noActivity")}
                           </div>
                         </div>
                         {linkedTaskPacket && <LinkedWorkItemChip packet={linkedTaskPacket} />}
@@ -547,6 +572,7 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                 authority={taskAuthority}
                 enabled={activeTab === "project-manager"}
                 selectedWorkItemId={projectManagerWorkItemId}
+                embedded
               />
             </TabsContent>
 
@@ -690,7 +716,9 @@ function SessionStatusDot({ status }: { status: string }) {
           ? "animate-pulse bg-emerald-400"
           : normalized === "error"
             ? "bg-red-400"
-            : "bg-muted-foreground/40"
+            : normalized === "lost"
+              ? "bg-amber-400"
+              : "bg-muted-foreground/40"
       )}
     />
   );
@@ -707,14 +735,18 @@ function SessionStatusText({ status }: { status: string }) {
           ? "text-emerald-400"
           : normalized === "error"
             ? "text-red-400"
-            : "text-muted-foreground"
+            : normalized === "lost"
+              ? "text-amber-400"
+              : "text-muted-foreground"
       )}
     >
       {normalized === "running"
         ? t("sessions.running")
         : normalized === "error"
           ? t("sessions.error")
-          : t("sessions.stopped")}
+          : normalized === "lost"
+            ? t("sessions.lost")
+            : t("sessions.stopped")}
     </span>
   );
 }
@@ -840,7 +872,7 @@ function ProjectConfigPanel({
               )}
               <Button
                 size="sm"
-                className="bg-brand text-brand-foreground hover:bg-brand/90"
+                variant="brand"
                 onClick={onSave}
                 disabled={!selectedFile || isSaving}
               >
@@ -956,12 +988,12 @@ function SyntaxHighlightedEditor({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-input bg-[#05070a] shadow-inner shadow-black/30">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-800 bg-slate-950/80 px-3 py-2">
-        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-slate-400">
+    <div className="overflow-hidden rounded-lg border border-input bg-muted shadow-inner shadow-black/30">
+      <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/60 px-3 py-2">
+        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           {readOnly ? "Readonly config" : "Live syntax editor"}
         </span>
-        <Badge variant="outline" className="border-slate-700 bg-slate-900/80 text-[10px] text-slate-300">
+        <Badge variant="outline" className="border-border bg-background text-[10px] text-muted-foreground">
           {hasHighlighting ? fileType : "plain"}
         </Badge>
       </div>
@@ -969,7 +1001,7 @@ function SyntaxHighlightedEditor({
         <div
           ref={gutterRef}
           aria-hidden="true"
-          className="overflow-hidden border-r border-slate-800 bg-slate-950/70 px-2 py-4 text-right font-mono text-[11px] leading-6 text-slate-600 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="overflow-hidden border-r border-border bg-muted/40 px-2 py-4 text-right font-mono text-[11px] leading-6 text-muted-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {lineNumbers.map((lineNumber) => (
             <div key={lineNumber}>{lineNumber}</div>
@@ -981,7 +1013,7 @@ function SyntaxHighlightedEditor({
             aria-hidden={!readOnly}
             onScroll={readOnly ? syncGutterScroll : undefined}
             className={cn(
-              "inset-0 whitespace-pre p-4 font-mono text-[13px] leading-6 text-slate-200",
+              "inset-0 whitespace-pre p-4 font-mono text-[13px] leading-6 text-foreground/90",
               readOnly
                 ? "h-full max-h-[420px] overflow-auto"
                 : "pointer-events-none absolute overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -1043,6 +1075,8 @@ function GlobalConfigPreview({ file }: { file: AiConfigFile }) {
 
 function ProjectActivityList({ activities }: { activities: SessionActivity[] }) {
   const { t } = useLanguage();
+  const locale = useUiLocale();
+  const activityCopy = useProjectCopy();
 
   return (
     <Card className="forgebadger-animate-in overflow-hidden">
@@ -1078,10 +1112,10 @@ function ProjectActivityList({ activities }: { activities: SessionActivity[] }) 
                     variant={activity.status === "error" ? "destructive" : "outline"}
                     className="w-fit"
                   >
-                    {activity.type}
+                    {activityTypeLabel(activityCopy, activity.type)}
                   </Badge>
                   <span className="text-xs text-muted-foreground">
-                    {formatProjectActivityTime(activity.createdAt)}
+                    {formatProjectActivityTime(activity.createdAt, locale)}
                   </span>
                 </div>
                 <p className="break-words text-sm text-foreground">{activity.message}</p>
@@ -1113,10 +1147,10 @@ function normalizeSearchParam(value: string | null): string | null {
   return trimmed ? trimmed : null;
 }
 
-function formatProjectActivityTime(value: string): string {
+function formatProjectActivityTime(value: string, locale: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleString();
+  return date.toLocaleString(locale);
 }

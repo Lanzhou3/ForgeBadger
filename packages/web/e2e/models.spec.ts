@@ -107,6 +107,7 @@ test("Models provider can be applied to a CLI config after a redacted preview", 
   // The preview payload intentionally carries a plaintext-looking key; the UI must mask it.
   await expect(dialog.getByText(/sk-live-secret/)).toHaveCount(0);
   await dialog.getByRole("button", { name: "Apply config" }).click();
+  await expect(dialog).toHaveCount(0);
 
   expect(requests.applyPreview).toEqual({
     providerProfileId: "provider-profile-1",
@@ -118,7 +119,6 @@ test("Models provider can be applied to a CLI config after a redacted preview", 
     modelProfileId: "model-1",
     credentialId: "credential-1",
   });
-  await expect(dialog).toHaveCount(0);
 });
 
 test("Models diagnostics tab runs the provider endpoint speed test", async ({ page }) => {
@@ -249,7 +249,7 @@ async function mockModelsApis(
           routing: {
             enabled: false,
             hasToken: false,
-            gatewayUrl: "http://127.0.0.1:48731",
+            gatewayUrl: "http://127.0.0.1:18332",
             assignment: null,
           },
         }),
@@ -410,6 +410,9 @@ function modelProfile() {
     name: "Provider 01 Model",
     modelId: "provider-01-model",
     capabilities: ["chat", "code"],
+    contextWindow: 262144,
+    supportEfforts: ["low", "high"],
+    defaultEffort: null,
     status: "active",
     isDefault: true,
   };

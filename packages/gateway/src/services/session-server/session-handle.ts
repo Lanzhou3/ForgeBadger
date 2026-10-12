@@ -16,6 +16,10 @@ import type { IPty } from "node-pty";
 import { assertSafeProgrammaticMessage } from "../programmatic-terminal-submit.js";
 import { TerminalScreen } from "./terminal-screen.js";
 import type { PaneSnapshot } from "./ipc-protocol.js";
+import {
+  TerminalNotificationScanner,
+  type TerminalNotification
+} from "./terminal-notification-scanner.js";
 
 export interface SessionHandleOptions {
   sessionId: string;
@@ -28,6 +32,9 @@ export interface SessionHandleOptions {
   scrollback?: number | undefined;
   /** Write-queue watermark tuning (test hook; defaults in terminal-screen). */
   screenFlowControl?: { highWaterBytes: number; lowWaterBytes: number } | undefined;
+  /** Fired for each terminal-native notification (OSC 9/99/777, bell) the
+   *  scanner detects in this session's PTY output stream. */
+  onNotification?: ((notification: TerminalNotification) => void) | undefined;
 }
 
 /** Bracketed-paste framing for programmatic input: the bytes reach the pty
@@ -47,10 +54,14 @@ export class SessionHandle {
   readonly ownerSessionId: string | undefined;
   readonly pty: IPty;
   readonly screen: TerminalScreen;
+  private readonly onNotification:
+    | ((notification: TerminalNotification) => void)
+    | undefined;
 
   /** Attached clients; the value is a buffer while an attach is in flight. */
   private readonly clients = new Map<string, string[] | null>();
   private readonly pauseSources = new Set<string>();
+  private readonly scanner = new TerminalNotificationScanner();
   private _status: "running" | "exited" | "error" = "running";
   private _exitCode: number | undefined;
   private _pauseActivations = 0;
@@ -61,6 +72,7 @@ export class SessionHandle {
     this.attachToken = options.attachToken;
     this.ownerSessionId = options.ownerSessionId;
     this.pty = options.pty;
+    this.onNotification = options.onNotification;
     this.screen = new TerminalScreen({
       cols: options.pty.cols,
       rows: options.pty.rows,
@@ -126,8 +138,12 @@ export class SessionHandle {
     return [...this.clients.keys()];
   }
 
-  /** Live output fan-out: buffers while a client attach is in flight. */
+  /** Live output fan-out: buffers while a client attach is in flight. The
+   *  scanner observes the same stream first — it never mutates the data. */
   fanOut(data: string, emit: (clientId: string, data: string) => void): void {
+    for (const notification of this.scanner.push(data)) {
+      this.onNotification?.(notification);
+    }
     for (const [clientId, buffer] of this.clients) {
       if (buffer) {
         buffer.push(data);

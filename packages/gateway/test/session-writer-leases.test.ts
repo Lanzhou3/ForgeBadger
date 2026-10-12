@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionWriterLeases } from "../src/services/session-writer-leases.js";
-import { assertAdapterAutonomy, getAdapterAutonomy } from "../src/services/adapter-autonomy.js";
 import { TerminalInputBuffer } from "../src/websocket/terminal.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 
@@ -71,9 +70,30 @@ test("buffer rechecks writer authorization at flush and drops blocked bytes", ()
   assert.deepEqual(writes, []);
 });
 
-test("every production adapter requires manual execution", () => {
-  for (const adapter of ["claude", "opencode", "codex", "kimi"] as const) {
-    assert.equal(getAdapterAutonomy(adapter).mode, "manual_only");
-    assert.throws(() => assertAdapterAutonomy(adapter), /ADAPTER_AUTONOMY_UNVERIFIED/);
-  }
+test('terminal wheel input preserves the writer fence, tenant checks and dispatch evidence', async () => {
+  const manager = new InMemorySessionManager({
+    async createSession() {}, async killSession() {}, async listSessions() { return []; },
+    async hasSession() { return true; }, async capturePane() { return ''; },
+  });
+  await manager.createSession({ userId: 'u', sessionId: 's', launchPlan: {
+    command: 'pi', args: [], cwd: '/tmp', env: {}, secretEnvNames: [], credentialMode: 'host_environment',
+  } });
+  const lease = manager.acquireWriterLease({ userId: 'u', sessionId: 's', workspace: '/tmp' });
+  const writes: string[] = [];
+  let interventions = 0;
+  manager.noteManualInput = () => { interventions++; };
+  const buffer = new TerminalInputBuffer(data => manager.assertTerminalInputAllowed('u', 's', data));
+  const wheel = '\x1b[<65;10;10M';
+  buffer.writeOrStore(undefined, wheel);
+  buffer.flush({ write: value => writes.push(value) });
+  for (const data of ['x', '\r', '\x1b[A', '\x1b[<0;10;10M', '\x1b[<35;10;10M', wheel + 'x', wheel + '\r', '\x1b[<65;10;10M\n', '\x1b[<65;10M'])
+    assert.throws(() => buffer.writeOrStore({ write: value => writes.push(value) }, data), /WRITER_BUSY/, JSON.stringify(data));
+  assert.deepEqual(writes, [wheel]);
+  assert.equal(interventions, 0);
+  assert.throws(() => manager.assertTerminalInputAllowed('other', 's', wheel), /SESSION_NOT_FOUND/);
+  manager.assertWriterLeaseCurrent(lease);
+  manager.releaseWriterLease(lease);
+  buffer.writeOrStore({ write: value => writes.push(value) }, 'x');
+  assert.equal(interventions, 1);
+  assert.deepEqual(writes, [wheel, 'x']);
 });

@@ -46,7 +46,10 @@ export function createSecurityPolicy(context?: SecurityPolicyContext) {
 
   function evaluate(input: SecurityPolicyInput): SecurityDecision {
     // Global denylist first: traversal or known-dangerous patterns in any input.
-    const dangerous = detectDangerousInput(executableInput(input.toolName, input.input));
+    const script = input.toolName === 'terminal_run' && input.input && typeof input.input === 'object'
+      && 'command' in input.input && typeof input.input.command === 'string' ? input.input.command.trim() : undefined;
+    const dangerous = detectDangerousInput(executableInput(input.toolName, input.input))
+      ?? (script && containsDangerousShellCommand(script, 0, 'script') ? 'input contains potentially destructive shell pattern' : undefined);
     if (dangerous) {
       return { action: "deny", reason: dangerous, riskClass: "high" };
     }
@@ -73,6 +76,20 @@ export function createSecurityPolicy(context?: SecurityPolicyContext) {
       };
     }
 
+    // These commands only mutate scoped planning records or operate an
+    // explicitly enabled CLI adapter. Resource/tenant/grant and runtime
+    // authorization are still enforced by PlatformActions at execution.
+    if (ROUTINE_PLATFORM_TOOLS.has(input.toolName)) {
+      return { action: "auto_approve", reason: "routine scoped platform operation", riskClass: "low" };
+    }
+    if (SUPERVISED_CLI_TOOLS.has(input.toolName)) {
+      return { action: "auto_approve", reason: "operator-enabled supervised CLI operation", riskClass: "medium" };
+    }
+    if (input.toolName === 'write_memory' && input.input && typeof input.input === 'object'
+        && 'scope' in input.input && ['project', 'session'].includes(String(input.input.scope))) {
+      return { action: 'auto_approve', reason: 'scoped task memory', riskClass: 'low' };
+    }
+
     return {
       action: base as SecurityDecisionAction,
       reason: base === "auto_approve" ? "tool does not require approval" : "operate tool default approval gate",
@@ -83,16 +100,31 @@ export function createSecurityPolicy(context?: SecurityPolicyContext) {
   return { evaluate };
 }
 
+const ROUTINE_PLATFORM_TOOLS = new Set([
+  "pm_create_work_item", "pm_update_work_item", "pm_prepare_task_packet",
+  "pm_close_task", "update_project", "pm_update_management"
+]);
+const SUPERVISED_CLI_TOOLS = new Set([
+  "start_session", "pm_execute_task_packet", "dispatch_task_to_session"
+]);
+
 // Only these exact fields on known platform tools contain inert prose. Keep
 // keys, unknown/nested fields and every path/command subject to normal checks.
 const DESCRIPTIVE_FIELDS: Record<string, readonly string[]> = {
   write_memory: ['text'],
+  stop_session: ['expectedTitle'],
   create_project: ['description'],
   update_project: ['description'],
   pm_create_work_item: ['title', 'description', 'acceptanceCriteria'],
   pm_update_work_item: ['title', 'description'],
-  pm_update_management: ['nextAction']
+  pm_update_management: ['nextAction'],
+  pm_set_goal: ['summary', 'constraints', 'acceptanceCriteria'],
+  pm_update_task_plan: ['title', 'description', 'acceptanceCriteria'],
+  pm_manage_stage: ['name', 'description'],
+  pm_review_task: ['note']
 };
+
+const DESCRIPTIVE_LIST_FIELDS = new Set(['acceptanceCriteria', 'constraints']);
 
 function executableInput(toolName: string, input: unknown): unknown {
   if(toolName==='submit_development_task') {
@@ -105,7 +137,7 @@ function executableInput(toolName: string, input: unknown): unknown {
   return Object.fromEntries(Object.entries(input).map(([key, value]) => {
     if (!fields.includes(key)) return [key, value];
     if (typeof value === 'string') return [key, ''];
-    if (key === 'acceptanceCriteria' && Array.isArray(value) && value.every(v => typeof v === 'string')) return [key, []];
+    if (DESCRIPTIVE_LIST_FIELDS.has(key) && Array.isArray(value) && value.every(v => typeof v === 'string')) return [key, []];
     return [key, value];
   }));
 }

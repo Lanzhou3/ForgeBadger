@@ -673,6 +673,272 @@
       "when": 1789886800009,
       "tag": "0096_pending_runtime_delete_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "6",
+      "when": 1789886800010,
+      "tag": "0097_telegram_channel_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "6",
+      "when": 1789886800011,
+      "tag": "0098_skill_remote_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "6",
+      "when": 1789886800012,
+      "tag": "0099_runtime_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "6",
+      "when": 1790086099921,
+      "tag": "0100_runtime_confirmation_revocation",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "6",
+      "when": 1790086099922,
+      "tag": "0101_provider_private_networks",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1790145697165,
+      "tag": "0102_copilot_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "6",
+      "when": 1790214505399,
+      "tag": "0103_model_thinking_efforts",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "6",
+      "when": 1790217612172,
+      "tag": "0104_copilot_project_autonomy",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "6",
+      "when": 1790217612173,
+      "tag": "0105_remove_copilot_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "6",
+      "when": 1790217612174,
+      "tag": "0106_mcp_cli_dispatch_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "6",
+      "when": 1790217612175,
+      "tag": "0107_cli_skill_revisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "6",
+      "when": 1790217612176,
+      "tag": "0108_copilot_run_governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "6",
+      "when": 1790217612177,
+      "tag": "0109_copilot_research_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "6",
+      "when": 1790217612178,
+      "tag": "0110_copilot_tool_artifacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "6",
+      "when": 1790217612179,
+      "tag": "0111_copilot_model_metering",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "6",
+      "when": 1790217612180,
+      "tag": "0112_copilot_repair_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "6",
+      "when": 1790217612181,
+      "tag": "0113_copilot_memory_search_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "6",
+      "when": 1790434497758,
+      "tag": "0114_channel_reliability",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "6",
+      "when": 1790440767000,
+      "tag": "0115_feishu_typing_reactions",
+      "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "6",
+      "when": 1790442196976,
+      "tag": "0116_channel_control_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "6",
+      "when": 1790471886753,
+      "tag": "0117_channel_session_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "6",
+      "when": 1790473866016,
+      "tag": "0118_mcp_project_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "6",
+      "when": 1790473866017,
+      "tag": "0119_feishu_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "6",
+      "when": 1790473866018,
+      "tag": "0120_feishu_notification_targets",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "6",
+      "when": 1790473866019,
+      "tag": "0121_session_notification_prompts",
+      "breakpoints": true
+    },
+    {
+      "idx": 121.0,
+      "version": "7",
+      "when": 1790473867019,
+      "tag": "0122_mcode_adapter",
+      "breakpoints": true
+    },
+    {
+      "idx": 122.0,
+      "version": "7",
+      "when": 1790473868019,
+      "tag": "0123_mcode_supported_adapters_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 123.0,
+      "version": "7",
+      "when": 1790667599356,
+      "tag": "0124_user_adapter_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1791092848037,
+      "tag": "0125_copilot_approval_clock",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1791092848038,
+      "tag": "0126_development_execution_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1791092848039,
+      "tag": "0127_cli_observation_summaries",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1791092848040,
+      "tag": "0128_feishu_builtin_summaries",
+      "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1791092848041,
+      "tag": "0129_session_notification_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1791092848042,
+      "tag": "0130_template_adapter_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1791092848043,
+      "tag": "0131_single_project_autonomy",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1791511237807,
+      "tag": "0132_api_format_protocol_values",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1791600000000,
+      "tag": "0133_copilot_run_trace",
+      "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1791690000000,
+      "tag": "0134_drop_copilot_project_autonomy",
+      "breakpoints": true
     }
   ]
 }

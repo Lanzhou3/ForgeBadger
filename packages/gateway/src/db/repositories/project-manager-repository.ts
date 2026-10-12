@@ -314,6 +314,24 @@ export class ProjectManagerRepository {
     return row ? toGoal(row) : undefined;
   }
 
+  /** Full planning identity, independent of display pagination. */
+  planningState(projectId: string): unknown {
+    return {
+      goal: this.getGoal(projectId) ?? null, stages: this.listStages(projectId),
+      links: this.listWorkItemLinks(projectId),
+      items: this.db.prepare(`SELECT w.*,c.revision,c.semantic_revision,c.assignee_id,c.reviewer_id
+        FROM project_manager_work_items w LEFT JOIN collaboration_tasks c
+          ON c.user_id=w.user_id AND c.project_id=w.project_id AND c.work_item_id=w.id
+        WHERE w.user_id=? AND w.project_id=? ORDER BY w.id`).all(this.userId, projectId)
+    };
+  }
+
+  listPlanningItems(projectId: string, offset: number, limit: number): ProjectManagerWorkItem[] {
+    return (this.db.prepare(`SELECT * FROM project_manager_work_items
+      WHERE user_id=? AND project_id=? ORDER BY id LIMIT ? OFFSET ?`)
+      .all(this.userId, projectId, Math.max(1, Math.min(50, limit)), Math.max(0, Math.floor(offset))) as WorkItemRow[]).map(toWorkItem);
+  }
+
   upsertGoal(projectId: string, input: UpsertProjectManagerGoalInput): ProjectManagerGoal {
     const summary = normalizeRequiredText(input.summary, "goal summary", 1_000);
     const constraints = normalizeTextList(input.constraints ?? []);
@@ -450,6 +468,24 @@ export class ProjectManagerRepository {
       ORDER BY updated_at DESC, title ASC
       LIMIT ?
     `).all(this.userId, limit) as WorkItemRow[]).map(toWorkItem);
+  }
+
+  /** Exact tenant-scoped lookup; task dispatch must not depend on board pagination. */
+  getWorkItemByTaskPacketSession(projectId: string, sessionId: string): ProjectManagerWorkItem | undefined {
+    const rows = this.db.prepare(`
+      SELECT * FROM project_manager_work_items
+      WHERE user_id = ? AND project_id = ?
+        AND json_extract(details_json, '$.taskPacket.sessionId') = ?
+      LIMIT 2
+    `).all(this.userId, projectId, sessionId) as WorkItemRow[];
+    // Ambiguous links cannot authorize an automatic transition.
+    return rows.length === 1 ? toWorkItem(rows[0]!) : undefined;
+  }
+
+  hasTaskPacketSession(projectId: string, sessionId: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM project_manager_work_items
+      WHERE user_id=? AND project_id=? AND json_extract(details_json,'$.taskPacket.sessionId')=? LIMIT 1`)
+      .get(this.userId, projectId, sessionId);
   }
 
   getWorkItem(projectId: string, workItemId: string): ProjectManagerWorkItem | undefined {

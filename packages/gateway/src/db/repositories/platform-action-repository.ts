@@ -5,9 +5,7 @@ export interface ActionIntent {
     id: string;
     user_id: string;
     actor_user_id: string;
-    grant_id: string | null;
-    grant_revision: number | null;
-    authority: 'owner_action' | 'delegated_grant';
+    authority: 'owner_action' ;
     command_id: string;
     input_json: string;
     digest: string;
@@ -30,6 +28,25 @@ export interface ActionReceipt {
     result: unknown;
     createdAt: number;
 }
+export interface DispatchHistory {
+  intentId: string;
+  status: ActionIntent['status'];
+  receiptOutcome: ActionReceipt['outcome'] | null;
+}
+export interface CopilotActionOriginRecord {
+    run_id: string;
+    conversation_id: string;
+    source: string;
+    run_input_json: string;
+    run_status: string;
+    step_id: string;
+    step_status: string;
+    tool_name: string;
+    tool_call_id: string | null;
+    input_json: string;
+    input_digest: string;
+}
+
 export class PlatformActionRepository {
     constructor(private db: Database, private userId: string) {
     }
@@ -39,12 +56,39 @@ export class PlatformActionRepository {
     byKey(key: string) {
         return this.db.prepare('SELECT * FROM platform_action_intents WHERE user_id=? AND idempotency_key=?').get(this.userId, key) as ActionIntent | undefined;
     }
+    copilotOrigin(runId: string, stepId: string): CopilotActionOriginRecord | undefined {
+        return this.db.prepare(`SELECT r.id AS run_id,r.conversation_id,r.source,r.input_json AS run_input_json,
+            r.status AS run_status,s.id AS step_id,s.status AS step_status,s.tool_name,s.tool_call_id,s.input_json,s.input_digest
+            FROM copilot_run_steps s JOIN copilot_runs r ON r.user_id=s.user_id AND r.id=s.run_id
+            JOIN copilot_conversations c ON c.user_id=r.user_id AND c.id=r.conversation_id AND c.status!='deleted'
+            WHERE s.user_id=? AND s.id=? AND r.id=? AND s.kind='tool'`)
+            .get(this.userId, stepId, runId) as CopilotActionOriginRecord | undefined;
+    }
+    pendingApproval(actionId: string, runId: string, stepId: string) {
+        return this.db.prepare(`SELECT tool,tool_call_id,input_json,input_digest FROM copilot_pending_actions
+            WHERE user_id=? AND id=? AND run_id=? AND step_id=? AND status='pending'`)
+            .get(this.userId, actionId, runId, stepId) as {
+                tool: string; tool_call_id: string | null; input_json: string; input_digest: string;
+            } | undefined;
+    }
+    /** Caller must consume the pending decision in the same immediate transaction. */
+    refreshCopilotApproval(intent: ActionIntent, actionId: string, expiresAt: number): boolean {
+        return this.db.prepare(`UPDATE platform_action_intents SET expires_at=?
+            WHERE user_id=? AND id=? AND status='approved' AND expires_at=? AND origin_kind='copilot'
+            AND origin_run_id=? AND origin_step_id=? AND idempotency_key=? AND digest=?
+            AND execution_owner IS NULL AND execution_lease_expires_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM platform_action_receipts r WHERE r.user_id=platform_action_intents.user_id AND r.intent_id=platform_action_intents.id)
+            AND EXISTS (SELECT 1 FROM copilot_pending_actions a WHERE a.user_id=platform_action_intents.user_id
+                AND a.id=? AND a.run_id=platform_action_intents.origin_run_id AND a.step_id=platform_action_intents.origin_step_id AND a.status='pending')`)
+            .run(expiresAt, this.userId, intent.id, intent.expires_at, intent.origin_run_id, intent.origin_step_id,
+                intent.idempotency_key, intent.digest, actionId).changes === 1;
+    }
     create(input: Omit<ActionIntent, 'id' | 'user_id' | 'created_at' | 'execution_owner' | 'execution_lease_expires_at' | 'channel_conversation_id' | 'origin_kind' | 'origin_run_id' | 'origin_step_id'>, originSource?:ActionOrigin) {
         return this.db.transaction(() => {
         const id = randomUUID();
         this.db.prepare(`INSERT INTO platform_action_intents
- (id,user_id,actor_user_id,grant_id,grant_revision,authority,command_id,input_json,digest,resources_json,policy_version,expires_at,idempotency_key,status,created_at)
- VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, this.userId, input.actor_user_id, input.grant_id, input.grant_revision, input.authority, input.command_id, input.input_json, input.digest, input.resources_json, input.policy_version, input.expires_at, input.idempotency_key, input.status, Date.now());
+ (id,user_id,actor_user_id,authority,command_id,input_json,digest,resources_json,policy_version,expires_at,idempotency_key,status,created_at)
+ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, this.userId, input.actor_user_id, input.authority, input.command_id, input.input_json, input.digest, input.resources_json, input.policy_version, input.expires_at, input.idempotency_key, input.status, Date.now());
         let step:{id:string;run_id:string}|undefined;
         if(originSource?.kind==='copilot') {
             if(originSource.stepId!==input.idempotency_key)throw new Error('Copilot action origin key mismatch');
@@ -90,6 +134,22 @@ export class PlatformActionRepository {
             return this.receipt(id)!;
         }).immediate();
     }
+/** Missing task details do not erase historical dispatch uncertainty. Return references, never prompt/results. */
+    findDispatchHistory(projectId: string, workItemId: string, sessionId?: string): DispatchHistory | null {
+  return this.db.prepare(`
+    SELECT i.id AS intentId, i.status, r.outcome AS receiptOutcome
+    FROM platform_action_intents i
+    LEFT JOIN platform_action_receipts r ON r.user_id = i.user_id AND r.intent_id = i.id
+    WHERE i.user_id = ? AND json_valid(i.input_json) AND (
+      (i.command_id = 'pm.task.execute' AND json_extract(i.input_json, '$.projectId') = ?
+        AND json_extract(i.input_json, '$.workItemId') = ?)
+      OR (i.command_id = 'session.dispatch' AND json_extract(i.input_json, '$.sessionId') = ?))
+    ORDER BY CASE WHEN i.status = 'indeterminate' OR r.outcome = 'unknown' THEN 0
+      WHEN i.status = 'executing' THEN 1 ELSE 2 END, i.created_at DESC, i.id DESC
+    LIMIT 1
+  `).get(this.userId, projectId, workItemId, sessionId ?? null) as DispatchHistory | undefined ?? null;
+}
+
     rejectRun(runId: string) {
         this.db.prepare("UPDATE platform_action_intents SET status='rejected' WHERE user_id=? AND status IN ('pending','approved') AND idempotency_key IN (SELECT id FROM copilot_run_steps WHERE user_id=? AND run_id=?)").run(this.userId,this.userId,runId);
     }
@@ -102,10 +162,5 @@ export class PlatformActionRepository {
     assertOriginActive(key: string) {
         const row=this.db.prepare("SELECT r.status FROM copilot_run_steps s JOIN copilot_runs r ON r.user_id=s.user_id AND r.id=s.run_id WHERE s.user_id=? AND s.id=?").get(this.userId,key) as {status:string}|undefined;
         if(row&&!['pending','running','awaiting_approval'].includes(row.status))throw new Error('Originating Copilot run is no longer active');
-    }
-    activeForGrant(id: string) {
-        return (this.db.prepare("SELECT COUNT(*) n FROM platform_action_intents WHERE user_id=? AND grant_id=? AND status IN ('executing','indeterminate')").get(this.userId, id) as {
-            n: number;
-        }).n;
     }
 }

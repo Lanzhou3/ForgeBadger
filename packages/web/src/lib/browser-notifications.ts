@@ -35,7 +35,7 @@ export function shouldTriggerBrowserNotification(
     return false;
   }
   if (
-    event.type === "claude_notification" &&
+    event.type === "session_notification" &&
     [
       "permission_prompt",
       "permission_denied",
@@ -43,6 +43,7 @@ export function shouldTriggerBrowserNotification(
       "task_interrupted",
       "task_failed",
       "session_ended",
+      "attention",
     ].includes(String(event.payload?.notification_type ?? ""))
   ) {
     return true;

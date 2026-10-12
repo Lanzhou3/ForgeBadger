@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   checkCommand,
@@ -60,6 +63,25 @@ describe("runCommand", () => {
     assert.equal(result.stderr, "Command timed out after 25ms");
   });
 
+  it("kills updater descendants on timeout", { skip: process.platform === "win32" }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), "forgebadger-update-tree-"));
+    const marker = join(directory, "orphaned-child");
+    const childScript = `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(marker)}, "alive"), 350);`;
+    const parentScript = `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(childScript)}], {stdio:"ignore"}); setInterval(() => {}, 1000);`;
+    try {
+      const result = await runCommand(process.execPath, ["-e", parentScript], {
+        timeoutMs: 150,
+        killGraceMs: 100,
+        killProcessTree: true
+      });
+      assert.equal(result.exitCode, 124);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      assert.equal(existsSync(marker), false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("bounds stdout and stderr to the configured maximum output bytes", async () => {
     const stdoutText = "o".repeat(128);
     const stderrText = "e".repeat(128);
@@ -82,7 +104,7 @@ describe("Session Server runtime dependencies", () => {
       seen.push(command);
       return { exitCode: 127, stdout: "", stderr: "not found" };
     });
-    assert.deepEqual(seen, ["claude", "opencode", "codex", "kimi", "pi"]);
+    assert.deepEqual(seen, ["claude", "opencode", "codex", "kimi", "pi", "mcode"]);
     assert.ok(result.every((item) => !item.required && !item.available));
   });
   it("reports daemon availability independently of optional adapter binaries", async () => {

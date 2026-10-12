@@ -7,7 +7,7 @@ const t = (key: string) => key;
 describe("getCliBrand", () => {
   it("returns the brand for each supported CLI", () => {
     expect(getCliBrand("claude")).toMatchObject({ label: "Claude Code", color: "#d97757" });
-    expect(getCliBrand("codex")).toMatchObject({ label: "Codex", color: "#e4e4e7" });
+    expect(getCliBrand("codex")).toMatchObject({ label: "Codex", color: "#ad9df8" });
     expect(getCliBrand("kimi")).toMatchObject({ label: "Kimi Code", color: "#1783ff" });
     expect(getCliBrand("opencode")).toMatchObject({ label: "OpenCode", color: "#b7b1b1" });
     expect(getCliBrand("pi")).toMatchObject({ label: "PI", color: "#4d9abf" });

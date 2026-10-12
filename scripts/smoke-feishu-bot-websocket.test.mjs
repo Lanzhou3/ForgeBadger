@@ -12,12 +12,12 @@ describe("Feishu bot WebSocket smoke helper", () => {
   it("uses only ForgeBadger smoke variables", () => {
     const result = resolveFeishuBotWebSocketSmokeConfig({
       FORGEBADGER_TOKEN: "current-token",
-      FORGEBADGER_GATEWAY_URL: "http://current.example:48731"
+      FORGEBADGER_GATEWAY_URL: "http://current.example:18332"
     });
 
     assert.equal(result.ok, true);
     assert.equal(result.config.token, "current-token");
-    assert.equal(result.config.gatewayUrl, "http://current.example:48731");
+    assert.equal(result.config.gatewayUrl, "http://current.example:18332");
   });
 
   it("builds SDK-style im.message.receive_v1 fixture events", () => {
@@ -40,7 +40,7 @@ describe("Feishu bot WebSocket smoke helper", () => {
   it("posts receive, reconnect, and terminal-rejection checks without leaking auth", async () => {
     const calls = [];
     const report = await runFeishuBotWebSocketSmoke({
-      gatewayUrl: "http://127.0.0.1:48731",
+      gatewayUrl: "http://127.0.0.1:18332",
       token: "Bearer should-not-leak",
       chatId: "oc_sensitive_chat",
       feishuUserId: "ou_sensitive_user",
@@ -109,7 +109,7 @@ describe("Feishu bot WebSocket smoke helper", () => {
 
   it("redacts unsafe response content from smoke reports", () => {
     const report = buildFeishuBotWebSocketSmokeReport({
-      gatewayUrl: "http://127.0.0.1:48731",
+      gatewayUrl: "http://127.0.0.1:18332",
       checks: [
         {
           name: "receive_route",

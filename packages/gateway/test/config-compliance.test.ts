@@ -172,7 +172,10 @@ describe("project config compliance", () => {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
+        // Claude template files pass through unfiltered, which is the path
+        // this traversal report exercises.
         name: "Unsafe Template",
+        adapter: "claude",
         files: [{ filePath: "../escape.md", content: "escape" }]
       })
     });

@@ -3,6 +3,7 @@ import { it } from 'node:test';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -21,7 +22,7 @@ for (const [adapter, directory] of [
     const root = mkdtempSync(path.join(tmpdir(), 'fb-playbook-render-'));
     const db = new Database(':memory:');
     try {
-      migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations/', import.meta.url).pathname });
+      migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations/', import.meta.url)) });
       const user = new UserRepository(db).create(`render-${adapter}@test.dev`, 'hash');
       const template = new TemplateRepository(db, user.id).create({
         name: 'bounded template', adapter, files: [{ filePath: 'AGENTS.md', content: '# Project', fileType: 'markdown' }]
@@ -55,7 +56,7 @@ import {SkillRepository} from '../src/db/repositories/skill-repository.js';
 it('blocks selected stale snapshots after an invalid source package refresh',async()=>{
  const root=mkdtempSync(path.join(tmpdir(),'fb-stale-package-'));const db=new Database(':memory:');
  try {
-  migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations/',import.meta.url).pathname});
+  migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations/', import.meta.url))});
   const user=new UserRepository(db).create('stale-package@test.dev','hash');
   const source=path.join(root,'source/review');mkdirSync(source,{recursive:true});
   writeFileSync(path.join(source,'SKILL.md'),'# Review');writeFileSync(path.join(source,'check.py'),'print("old")');

@@ -9,12 +9,16 @@ export interface CommandResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  processTreeCleanupUncertain?: boolean;
 }
 
 export interface CommandRunnerOptions {
   timeoutMs?: number;
   maxOutputBytes?: number;
   killGraceMs?: number;
+  env?: NodeJS.ProcessEnv;
+  cwd?: string;
+  killProcessTree?: boolean;
 }
 
 export type CommandRunner = (
@@ -84,6 +88,17 @@ const ADAPTER_DEPENDENCY_CHECKS: DependencyCheck[] = [
     args: ["--version"],
     required: false,
     timeoutMs: 5_000
+  },
+  {
+    // MiniMax Code is a bundled Node CLI behind a two-level Windows
+    // launcher (mcode.cmd -> releases/<version>/.mcode-launcher.cmd ->
+    // node cli.js), so the probe pays two extra batch hops. resolveWindowsShimCommand
+    // unwraps that indirection; the timeout keeps a cold first run from being
+    // reported as missing.
+    command: "mcode",
+    args: ["--version"],
+    required: false,
+    timeoutMs: 10_000
   }
 ];
 
@@ -141,10 +156,14 @@ export async function checkCommand(
 export async function checkAdapterCommand(
   command: string,
   args: string[],
-  runner: CommandRunner = runCommand
+  runner: CommandRunner = runCommand,
+  options?: CommandRunnerOptions
 ): Promise<DependencyStatus> {
   const timeoutMs = ADAPTER_DEPENDENCY_CHECKS.find((check) => check.command === command)?.timeoutMs;
-  return checkCommand(command, args, runner, timeoutMs === undefined ? undefined : { timeoutMs });
+  return checkCommand(command, args, runner, {
+    ...options,
+    ...(timeoutMs === undefined ? {} : { timeoutMs })
+  });
 }
 
 export async function checkForgeBadgerDependencies(
@@ -203,13 +222,17 @@ export function runCommand(
     // it directly; this avoids cmd.exe re-tokenizing args and is fast enough to
     // stay inside the timeout even when several adapters are probed in
     // parallel. When resolution fails, fall back to running through cmd.exe.
-    const resolved = resolveWindowsShimCommand(command, process.env);
-    const needsShell = resolved === undefined && isWindowsShimCommand(command);
+    const resolved = resolveWindowsShimCommand(command, options.env ?? process.env);
+    const needsShell = resolved === undefined && isWindowsShimCommand(command, options.env ?? process.env);
+    const killProcessTree = options.killProcessTree === true;
     const child = spawn(
       resolved?.command ?? command,
       [...(resolved?.args ?? []), ...args],
       {
         stdio: ["ignore", "pipe", "pipe"],
+        ...(options.env ? { env: options.env } : {}),
+        ...(options.cwd ? { cwd: options.cwd } : {}),
+        ...(killProcessTree && process.platform !== "win32" ? { detached: true } : {}),
         ...(needsShell ? { shell: true } : {})
       }
     );
@@ -229,9 +252,31 @@ export function runCommand(
         stdout: boundedOutputToString(stdout),
         stderr: `Command timed out after ${timeoutMs}ms`
       };
-      child.kill("SIGTERM");
+      if (killProcessTree && process.platform === "win32" && child.pid) {
+        const cleanupUncertain: CommandResult = {
+          exitCode: 124,
+          stdout: timeoutResult.stdout,
+          stderr: "Command timed out; process tree cleanup could not be verified",
+          processTreeCleanupUncertain: true
+        };
+        const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true
+        });
+        killer.on("error", () => child.kill("SIGKILL"));
+        killer.on("close", (code) => {
+          if (code === 0) finish(timeoutResult!);
+          else child.kill("SIGKILL");
+        });
+        killGraceTimeout = setTimeout(() => {
+          child.kill("SIGKILL");
+          finish(cleanupUncertain);
+        }, killGraceMs);
+        return;
+      }
+      terminate("SIGTERM");
       killGraceTimeout = setTimeout(() => {
-        child.kill("SIGKILL");
+        terminate("SIGKILL");
         finish(timeoutResult!);
       }, killGraceMs);
     }, timeoutMs);
@@ -251,12 +296,28 @@ export function runCommand(
       });
     });
     child.on("close", (exitCode) => {
+      if (timeoutResult && killProcessTree) return;
       finish(timeoutResult ?? {
         exitCode: exitCode ?? 1,
         stdout: boundedOutputToString(stdout),
         stderr: boundedOutputToString(stderr)
       });
     });
+
+    function terminate(signal: NodeJS.Signals): void {
+      if (killProcessTree && process.platform !== "win32" && child.pid) {
+        try {
+          process.kill(-child.pid, signal);
+          return;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH" && timeoutResult) {
+            timeoutResult.processTreeCleanupUncertain = true;
+            timeoutResult.stderr = "Command timed out; process tree cleanup could not be verified";
+          }
+        }
+      }
+      child.kill(signal);
+    }
 
     function finish(result: CommandResult): void {
       if (settled) {

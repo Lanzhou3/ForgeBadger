@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
+import { GatewayApiError } from "@/lib/api";
+import type { RobotCorner } from "@/lib/pixel-robot";
 import {
   ROBOT_CONVERSATION_STORAGE_KEY,
   RobotChatPanel,
@@ -16,19 +19,31 @@ const {
   listMessagesMock,
   renameConversationMock,
   sendMessageMock,
+  editMessageMock,
   cancelRunMock,
-  decidePendingActionMock,
   getRunMock,
   listRunsMock,
+  getCopilotPreferencesMock,
+  updateCopilotPreferencesMock,
+  listProjectsMock,
+  listModelProvidersMock,
+  queueFollowupMock,
+  toastErrorMock,
 } = vi.hoisted(() => ({
   createConversationMock: vi.fn(),
   listMessagesMock: vi.fn(),
   renameConversationMock: vi.fn(),
   sendMessageMock: vi.fn(),
+  editMessageMock: vi.fn(),
   cancelRunMock: vi.fn(),
-  decidePendingActionMock: vi.fn(),
   getRunMock: vi.fn(),
   listRunsMock: vi.fn(),
+  getCopilotPreferencesMock: vi.fn(),
+  updateCopilotPreferencesMock: vi.fn(),
+  listProjectsMock: vi.fn(),
+  listModelProvidersMock: vi.fn(),
+  queueFollowupMock: vi.fn().mockResolvedValue({ followup: { id: 'q1', status: 'queued', runId: null } }),
+  toastErrorMock: vi.fn(),
 }));
 
 vi.mock("@/lib/copilot-api", async (importOriginal) => {
@@ -39,12 +54,30 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     listMessages: listMessagesMock,
     renameConversation: renameConversationMock,
     sendMessage: sendMessageMock,
+    editMessage: editMessageMock,
     cancelRun: cancelRunMock,
-    decidePendingAction: decidePendingActionMock,
     getRun: getRunMock,
     listConversationRuns: listRunsMock,
+    getCopilotPreferences: getCopilotPreferencesMock,
+    updateCopilotPreferences: updateCopilotPreferencesMock,
+    listFollowups: vi.fn().mockResolvedValue({ followups: [] }),
+    queueFollowup: queueFollowupMock,
+    cancelFollowup: vi.fn().mockResolvedValue({ cancelled: true }),
   };
 });
+
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    listProjects: listProjectsMock,
+    listModelProviders: listModelProvidersMock,
+  };
+});
+
+vi.mock("@/lib/toast", () => ({
+  toast: { success: vi.fn(), info: vi.fn(), error: toastErrorMock },
+}));
 
 vi.stubGlobal(
   "ResizeObserver",
@@ -87,12 +120,45 @@ const newConversation = {
   updated_at: 1779373600000,
 };
 
-function renderPanel(overrides: { onClose?: () => void; onExpandFull?: (id: string | null) => void } = {}) {
+const baseModels = {
+  providers: [],
+  credentials: [],
+  models: [
+    {
+      id: "model-1",
+      providerProfileId: "provider-1",
+      providerKey: "openai",
+      providerName: "OpenAI",
+      baseUrl: null,
+      name: "gpt-5",
+      modelId: "gpt-5",
+      capabilities: [],
+      status: "active",
+      isDefault: true,
+    },
+  ],
+};
+
+// In-memory stand-in for the server-side preference store, mirroring the
+// console test: PUTs merge into it and the GET returns the merged value.
+let preferencesState: { modelId: string | null; thinkingEffort: string };
+
+function createQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+function renderPanel(overrides: { onClose?: () => void; onExpandFull?: (id: string | null) => void; corner?: RobotCorner } = {}) {
   const onClose = overrides.onClose ?? vi.fn();
   const onExpandFull = overrides.onExpandFull ?? vi.fn();
   render(
     <LanguageProvider>
-      <RobotChatPanel onClose={onClose} onExpandFull={onExpandFull} />
+      <QueryClientProvider client={createQueryClient()}>
+        <RobotChatPanel
+          onClose={onClose}
+          onExpandFull={onExpandFull}
+          corner={overrides.corner ?? "bottom-right"}
+        />
+      </QueryClientProvider>
     </LanguageProvider>
   );
   return { onClose, onExpandFull };
@@ -118,7 +184,29 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+// jsdom implements neither Pointer Capture nor scrollIntoView; Radix Select
+// calls both while opening/rendering its content.
+function stubRadixSelectEnvironment() {
+  Element.prototype.hasPointerCapture = vi.fn(() => false);
+  Element.prototype.releasePointerCapture = vi.fn();
+  Element.prototype.scrollIntoView = vi.fn();
+}
+
+async function pickOption(name: string, option: string) {
+  const trigger = screen.getByRole("combobox", { name });
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  const item = await screen.findByRole("option", { name: option });
+  fireEvent.click(item);
+}
+
 describe("RobotChatPanel", () => {
+  it("focuses the quick-chat input and lets keyboard users close with Escape", () => {
+    const { onClose } = renderPanel();
+    const input = screen.getByRole("textbox");
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -128,8 +216,16 @@ describe("RobotChatPanel", () => {
     listMessagesMock.mockResolvedValue({ messages: [] });
     renameConversationMock.mockResolvedValue({ conversation: newConversation });
     sendMessageMock.mockResolvedValue({ runId: "run-1" });
+    editMessageMock.mockResolvedValue({ runId: "run-2" });
     cancelRunMock.mockResolvedValue({ cancelled: true, runId: "run-1" });
-    decidePendingActionMock.mockResolvedValue({ resumed: true, runId: "run-1" });
+    listProjectsMock.mockResolvedValue({ projects: [] });
+    listModelProvidersMock.mockResolvedValue(baseModels);
+    preferencesState = { modelId: null, thinkingEffort: "medium" };
+    getCopilotPreferencesMock.mockImplementation(async () => preferencesState);
+    updateCopilotPreferencesMock.mockImplementation(async (patch: Record<string, unknown>) => {
+      preferencesState = { ...preferencesState, ...patch };
+      return preferencesState;
+    });
     getRunMock.mockResolvedValue({
       run: {
         id: "run-1",
@@ -142,23 +238,102 @@ describe("RobotChatPanel", () => {
       },
       pendingActions: [],
     });
+    stubRadixSelectEnvironment();
   });
 
-  it("renders the header actions, the empty state, and the floating panel shape", () => {
+  it("retries an uncertain send using the same request identity without duplicating the local message", async () => {
+    sendMessageMock.mockRejectedValueOnce(new Error("response lost"));
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "派发任务" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "重试" })).toBeTruthy());
+    // Console-aligned failure surface: a toast plus the inline retry action.
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("发送失败，请检查 Gateway 服务。"));
+    const options = sendMessageMock.mock.calls[0]![3];
+    expect(options).toEqual({ clientRequestId: expect.any(String) });
+    sendMessageMock.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(2));
+    expect(sendMessageMock.mock.calls[1]).toEqual(["conv-new", "派发任务", undefined, options]);
+    expect(screen.getAllByText("派发任务")).toHaveLength(1);
+  });
+
+  it("preserves the restored conversation when loading fails temporarily", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    listMessagesMock.mockRejectedValueOnce(new Error("offline"));
+    const { onExpandFull } = renderPanel();
+    await waitFor(() => expect(screen.getByText("加载失败，请检查 Gateway 服务。")).toBeTruthy());
+    expect(window.localStorage.getItem(ROBOT_CONVERSATION_STORAGE_KEY)).toBe("conv-stored");
+    fireEvent.click(screen.getByRole("button", { name: "展开全屏" }));
+    expect(onExpandFull).toHaveBeenCalledWith("conv-stored");
+  });
+
+  it("keeps an accepted run when the subsequent message refresh fails", async () => {
+    listMessagesMock.mockRejectedValue(new Error("offline"));
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "派发任务" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    // Console-aligned: a refresh failure surfaces as a toast, not a send error.
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("加载失败，请检查 Gateway 服务。"));
+    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+    expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers cancellation for a restored awaiting approval run", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    const run = { id: "run-legacy", conversationId: "conv-stored", status: "awaiting_approval", revision: 2 };
+    listRunsMock.mockResolvedValue({ runs: [run], activeRun: run });
+    getRunMock.mockResolvedValue({ run, pendingActions: [] });
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "停止" }));
+    await waitFor(() => expect(cancelRunMock).toHaveBeenCalledWith("run-legacy"));
+  });
+
+  it("renders the header actions, the shared empty state, and the console capability chrome", () => {
     renderPanel();
 
     expect(screen.getByRole("button", { name: "展开全屏" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "新建对话" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "关闭" })).toBeTruthy();
     expect(screen.getByText("你好，我是 Copilot")).toBeTruthy();
+    // Parity chrome: model / thinking pickers (shared preferences store),
+    // project context, and the run-options entry all live in the panel too.
+    expect(screen.getByTestId("copilot-status-bar")).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "当前模型" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "思考强度" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "项目上下文" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "执行选项" })).toBeTruthy();
+    // The empty state shares the console's suggestion set.
+    expect(screen.getByRole("button", { name: "项目整体进展如何？" })).toBeTruthy();
     // Mobile (<768px): near-fullscreen bottom sheet; desktop: 380x520 card
-    // anchored bottom-right above the robot.
+    // anchored to the robot's corner (bottom-right by default) beside it.
     const panel = screen.getByTestId("robot-chat-panel");
     expect(panel.className).toContain("inset-x-2");
     expect(panel.className).toContain("bottom-2");
     expect(panel.className).toContain("md:w-[380px]");
     expect(panel.className).toContain("md:h-[520px]");
     expect(panel.className).toContain("md:bottom-32");
+    expect(panel.className).toContain("md:right-4");
+  });
+
+  it.each([
+    { corner: "top-left", vertical: "md:top-32", horizontal: "md:left-4", released: "md:bottom-auto" },
+    { corner: "top-right", vertical: "md:top-32", horizontal: "md:right-4", released: "md:bottom-auto" },
+    { corner: "bottom-left", vertical: "md:bottom-32", horizontal: "md:left-4", released: "md:top-auto" },
+  ] as const)("anchors beside the robot pinned to the $corner corner", ({ corner, vertical, horizontal, released }) => {
+    renderPanel({ corner });
+
+    const panel = screen.getByTestId("robot-chat-panel");
+    expect(panel.className).toContain(vertical);
+    expect(panel.className).toContain(horizontal);
+    // The opposite edge releases the mobile sheet so the card hugs its
+    // corner instead of stretching edge to edge.
+    expect(panel.className).toContain(released);
+    // Mobile keeps the near-fullscreen sheet regardless of the robot corner.
+    expect(panel.className).toContain("inset-x-2");
+    expect(panel.className).toContain("top-14");
+    expect(panel.className).toContain("bottom-2");
   });
 
   it("renders a floating composer instead of a docked bottom bar", () => {
@@ -192,13 +367,43 @@ describe("RobotChatPanel", () => {
     // Optimistic user bubble appears immediately.
     expect(screen.getByText("帮我看看进度")).toBeTruthy();
     await waitFor(() => expect(createConversationMock).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "帮我看看进度", undefined));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "帮我看看进度", undefined, { clientRequestId: expect.any(String) }));
     expect(window.localStorage.getItem(ROBOT_CONVERSATION_STORAGE_KEY)).toBe("conv-new");
     // The new conversation gets an auto title from the first message.
     await waitFor(() => expect(renameConversationMock).toHaveBeenCalledWith("conv-new", "帮我看看进度"));
   });
 
-  it("shows the thinking pulse immediately on send, before the POST answers", async () => {
+  it("drops a duplicate submit while lazy conversation creation is in flight", async () => {
+    const blockedCreate = deferred<{ conversation: typeof newConversation }>();
+    const blockedSend = deferred<{ runId: string }>();
+    createConversationMock.mockReturnValue(blockedCreate.promise);
+    sendMessageMock.mockReturnValue(blockedSend.promise);
+    renderPanel();
+
+    const input = screen.getByPlaceholderText("输入消息……");
+    fireEvent.change(input, { target: { value: "双击发送" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    // Second Enter lands while createConversation is still in flight and the
+    // controller's sending guard is not armed yet — it must be dropped.
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await act(async () => {
+      blockedCreate.resolve({ conversation: newConversation });
+    });
+
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+    expect(createConversationMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "双击发送", undefined, { clientRequestId: expect.any(String) });
+    // A single optimistic bubble, not two. (The send POST stays in flight so
+    // the post-send refresh cannot replace the transcript before we assert.)
+    expect(screen.getAllByText("双击发送")).toHaveLength(1);
+
+    await act(async () => {
+      blockedSend.resolve({ runId: "run-1" });
+    });
+  });
+
+  it("shows the thinking pulse while the lazy conversation is created and the send is in flight", async () => {
     const blockedCreate = deferred<{ conversation: typeof newConversation }>();
     const blockedSend = deferred<{ runId: string }>();
     createConversationMock.mockReturnValue(blockedCreate.promise);
@@ -208,16 +413,16 @@ describe("RobotChatPanel", () => {
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "hi" } });
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
 
-    // Neither createConversation nor sendMessage has resolved, yet the panel
-    // must already show the pulsing thinking indicator — no dead air while
-    // the Gateway starts the model turn.
-    expect(screen.getByText("Copilot 正在思考…")).toBeTruthy();
+    // The lazy create round-trip has not resolved yet, so the controller has
+    // not started the turn; no dead-air claim before the send exists.
+    await waitFor(() => expect(createConversationMock).toHaveBeenCalled());
 
     await act(async () => {
       blockedCreate.resolve({ conversation: newConversation });
     });
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
-    // Still thinking while the send POST is in flight.
+    // Thinking while the send POST is in flight — no dead air while the
+    // Gateway starts the model turn.
     expect(screen.getByText("Copilot 正在思考…")).toBeTruthy();
 
     await act(async () => {
@@ -232,7 +437,7 @@ describe("RobotChatPanel", () => {
     await waitFor(() => expect(screen.queryByText("Copilot 正在思考…")).toBeNull());
   });
 
-  it("clears the thinking pulse and shows the send error when the POST fails", async () => {
+  it("clears the thinking pulse and offers a retry when the POST fails", async () => {
     const blockedSend = deferred<{ runId: string }>();
     sendMessageMock.mockReturnValue(blockedSend.promise);
     renderPanel();
@@ -247,7 +452,8 @@ describe("RobotChatPanel", () => {
     });
 
     await waitFor(() => expect(screen.queryByText("Copilot 正在思考…")).toBeNull());
-    expect(screen.getByText("发送失败，请检查 Gateway 服务。")).toBeTruthy();
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("发送失败，请检查 Gateway 服务。"));
+    expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
   });
 
   it("renders streaming text deltas for the active run", async () => {
@@ -265,32 +471,6 @@ describe("RobotChatPanel", () => {
     getRunMock.mockResolvedValue({ run: { id: "run-1", conversationId: "conv-new", status: "completed", revision: 3 }, pendingActions: [] });
     dispatchRunUpdated({ run_id: "run-1", status: "completed" });
     await waitFor(() => expect(screen.queryByText("正在生成回复")).toBeNull());
-  });
-
-  it("approves a pending action from the approval card", async () => {
-    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
-    listMessagesMock.mockResolvedValue({ messages: [storedMessage] });
-    renderPanel();
-
-    await waitFor(() => expect(screen.getByText("上次的问题")).toBeTruthy());
-
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "跑一下构建" } });
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
-    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-stored", "跑一下构建", undefined));
-
-    getRunMock.mockResolvedValue({ run: { id: "run-1", conversationId: "conv-stored", status: "awaiting_approval", revision: 2 }, pendingActions: [{ id: "act-1", runId: "run-1", tool: "run_terminal", status: "pending", inputJson: "{}", inputDigest: "digest" }] });
-    dispatchRunUpdated({
-      run_id: "run-1",
-      status: "awaiting_approval",
-      pending_action_id: "act-1",
-      tool_name: "run_terminal",
-    });
-
-    await waitFor(() => expect(screen.getByText("需要批准")).toBeTruthy());
-    expect(screen.getByText("run_terminal")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "批准" }));
-
-    await waitFor(() => expect(decidePendingActionMock).toHaveBeenCalledWith("run-1", "act-1", true));
   });
 
   it("resets to a fresh draft on new chat without creating a server conversation", async () => {
@@ -322,7 +502,7 @@ describe("RobotChatPanel", () => {
 
   it("drops a stale persisted conversation id when the server no longer has it", async () => {
     window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-gone");
-    listMessagesMock.mockRejectedValue(new Error("not found"));
+    listMessagesMock.mockRejectedValue(new GatewayApiError("not found", 404));
 
     renderPanel();
 
@@ -389,17 +569,17 @@ describe("RobotChatPanel", () => {
     await waitFor(() => expect(screen.getByText("答案")).toBeTruthy());
   });
 
-  it("sends a suggestion chip from the empty state", async () => {
+  it("sends a suggestion chip from the shared empty state", async () => {
     renderPanel();
 
-    fireEvent.click(screen.getByRole("button", { name: "我的项目状态如何？" }));
+    fireEvent.click(screen.getByRole("button", { name: "项目整体进展如何？" }));
 
     await waitFor(() => expect(createConversationMock).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "我的项目状态如何？", undefined)
+      expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "项目整体进展如何？", undefined, { clientRequestId: expect.any(String) })
     );
     // The empty state is replaced by the conversation.
-    expect(screen.queryByRole("button", { name: "列出进行中的会话" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "现在有哪些会话在运行？" })).toBeNull();
   });
 
   it("follows the stream at the bottom and pauses when the user scrolls up", async () => {
@@ -429,4 +609,82 @@ describe("RobotChatPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "回到底部" }));
     await waitFor(() => expect(scrollToSpy.mock.calls.length).toBeGreaterThan(callsBefore));
   });
+
+  it("passes the picked project context through to the send", async () => {
+    listProjectsMock.mockResolvedValue({ projects: [{ id: "project-1", name: "示例项目" }] });
+    renderPanel();
+
+    await pickOption("项目上下文", "示例项目");
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "检查这个项目" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+
+    await waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "检查这个项目", undefined, {
+        projectId: "project-1",
+        clientRequestId: expect.any(String),
+      })
+    );
+  });
+
+  it("edits a persisted user message and reruns it through the shared controller", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    listMessagesMock.mockResolvedValue({ messages: [storedMessage] });
+    renderPanel();
+
+    await waitFor(() => expect(screen.getByText("上次的问题")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /编辑消息/ }));
+    fireEvent.click(screen.getByRole("button", { name: "保存并重新运行" }));
+
+    await waitFor(() =>
+      expect(editMessageMock).toHaveBeenCalledWith("conv-stored", "msg-stored-1", "上次的问题", {
+        clientRequestId: expect.any(String),
+      })
+    );
+  });
+
+  it("queues a message typed while a run is in flight instead of dropping it", async () => {
+    renderPanel();
+
+    // No conversation yet: nothing to queue behind.
+    expect(screen.queryByTestId("copilot-followup-chips")).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "hi" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
+
+    // The run owns the conversation; the composer switches to queue mode and
+    // the placeholder tells the user their next message will wait.
+    await waitFor(() => expect(screen.getByPlaceholderText("执行中，发送将加入队列…")).toBeTruthy());
+  });
+  it("preserves a newer draft when an earlier enqueue response arrives", async () => {
+    const response = deferred<{ followup: { id: string; status: string; runId: null } }>();
+    queueFollowupMock.mockReturnValueOnce(response.promise);
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "start" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    const input = await screen.findByPlaceholderText("执行中，发送将加入队列…");
+    fireEvent.change(input, { target: { value: "queued A" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(queueFollowupMock).toHaveBeenCalled());
+    fireEvent.change(input, { target: { value: "new draft B" } });
+    await act(async () => { response.resolve({ followup: { id: 'q1', status: 'queued', runId: null } }); });
+    expect((input as HTMLTextAreaElement).value).toBe("new draft B");
+  });
+
+  it("keeps a retyped identical draft after an earlier queue request completes", async () => {
+    const response = deferred<{ followup: { id: string; status: string; runId: null } }>();
+    queueFollowupMock.mockReturnValueOnce(response.promise);
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "start" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    const input = await screen.findByPlaceholderText("执行中，发送将加入队列…");
+    fireEvent.change(input, { target: { value: "queued A" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(queueFollowupMock).toHaveBeenCalled());
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.change(input, { target: { value: "queued A" } });
+    await act(async () => { response.resolve({ followup: { id: 'q1', status: 'queued', runId: null } }); });
+    expect((input as HTMLTextAreaElement).value).toBe("queued A");
+  });
+
 });

@@ -68,17 +68,17 @@ describe("forgebadger init CLI prototype", () => {
       dryRun: true
     });
 
-    assert.equal(
-      parseForgeBadgerCliArgs(["--", "init", "--path", "/tmp/demo"]).projectPath,
-      "/tmp/demo"
+    assert.throws(
+      () => parseForgeBadgerCliArgs(["--", "init", "--path", "/tmp/demo"]),
+      /--template-id/
     );
   });
 
-  it("parses --list-templates without requiring --path", () => {
+  it("parses --list-templates without requiring --path or --template-id", () => {
     assert.deepEqual(parseForgeBadgerCliArgs(["init", "--list-templates"]), {
       command: "init",
       projectPath: null,
-      templateId: "builtin-claude-code",
+      templateId: "",
       credentialMode: "host_environment",
       listTemplates: true,
       dryRun: false
@@ -87,6 +87,13 @@ describe("forgebadger init CLI prototype", () => {
 
   it("rejects init without --path when not listing templates", () => {
     assert.throws(() => parseForgeBadgerCliArgs(["init"]), /--path/);
+  });
+
+  it("rejects init without --template-id: no CLI is the implicit default", () => {
+    assert.throws(
+      () => parseForgeBadgerCliArgs(["init", "--path", "/tmp/demo"]),
+      /Missing required --template-id/
+    );
   });
 
   it("creates a dry-run render plan from the built-in template", async () => {
@@ -126,18 +133,18 @@ describe("forgebadger init CLI prototype", () => {
         templateId: "builtin-claude-code",
         credentialMode: "host_environment",
         dryRun: true,
-        env: { ...env, OLD_PRODUCT_GATEWAY_URL: "http://old.example:48731" }
+        env: { ...env, OLD_PRODUCT_GATEWAY_URL: "http://old.example:18332" }
       });
       const currentPlan = await createInitRenderPlan({
         projectPath,
         templateId: "builtin-claude-code",
         credentialMode: "host_environment",
         dryRun: true,
-        env: { ...env, FORGEBADGER_GATEWAY_URL: "http://current.example:48731" }
+        env: { ...env, FORGEBADGER_GATEWAY_URL: "http://current.example:18332" }
       });
 
-      assert.match(JSON.stringify(defaultPlan.files), /http:\/\/127\.0\.0\.1:48731/);
-      assert.match(JSON.stringify(currentPlan.files), /http:\/\/current\.example:48731/);
+      assert.match(JSON.stringify(defaultPlan.files), /http:\/\/127\.0\.0\.1:18332/);
+      assert.match(JSON.stringify(currentPlan.files), /http:\/\/current\.example:18332/);
     } finally {
       await rm(projectPath, { recursive: true, force: true });
       await rm(stateDir, { recursive: true, force: true });

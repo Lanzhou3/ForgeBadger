@@ -22,7 +22,9 @@ export interface DevelopmentTaskRow {
   project_root:string; workspace_path:string|null; evidence_json:string|null;
   artifact_digest:string|null; error:string|null; owner:string|null; lease_expires_at:number|null;
   cancel_requested:number; revision:number; created_at:number; updated_at:number;
+  execution_identity_json:string|null; reconciliation_json:string|null;
 }
+export interface DevelopmentReconciliation {version:1;outcome:'unknown';basis:'supervisor_stopped'|'host_reboot';identityDigest:string;observedAt:number}
 export interface DevelopmentEvidence {
   sourceDigest:string; outputDigest:string; recipeDigest:string;
   files:Array<{path:string;beforeSha256:string|null;afterSha256:string|null}>;
@@ -32,5 +34,5 @@ export interface DevelopmentEvidence {
 export function taskSummary(row:DevelopmentTaskRow) {
   return {id:row.id,projectId:row.project_id,goal:row.goal,status:row.status,revision:row.revision,
     recipeDigest:row.recipe_digest,sourceDigest:row.source_digest,outputDigest:row.output_digest,
-    artifactDigest:row.artifact_digest,error:row.error,createdAt:row.created_at,updatedAt:row.updated_at};
+    artifactDigest:row.artifact_digest,error:row.error,reconciliation:row.reconciliation_json?JSON.parse(row.reconciliation_json) as DevelopmentReconciliation:null,createdAt:row.created_at,updatedAt:row.updated_at};
 }

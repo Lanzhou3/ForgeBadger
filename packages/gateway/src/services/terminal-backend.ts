@@ -1,4 +1,5 @@
 import type {ConfirmedStopReceipt,RuntimeGeneration,DaemonIdentity} from './session-server/confirmed-stop.js';
+import type {SessionInfo} from './session-server/ipc-protocol.js';
 /**
  * Terminal backend client contract.
  *
@@ -36,6 +37,8 @@ export interface TerminalBackendClient {
   killSession(name: string): Promise<void>;
   capturePane(name: string): Promise<string>;
   listSessions(): Promise<string[]>;
+  /** Full runtime rows (id + status) for the force-delete liveness gate. */
+  listSessionInfos?(): Promise<SessionInfo[]>;
   hasSession(name: string): Promise<boolean>;
   showEnvironment?(name: string): Promise<Record<string, string>>;
   resizeWindow?(name: string, cols: number, rows: number): Promise<void>;

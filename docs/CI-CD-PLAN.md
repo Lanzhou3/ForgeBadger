@@ -37,6 +37,11 @@ Acceptance:
 - CLI, Gateway `node:test`, and Web Vitest suites pass.
 - Real Session Server/node-pty integration tests pass. This job runs on
   Linux/Ubuntu and does not exercise native Windows Session Server/ConPTY.
+- A separate `Windows CLI Shim Contracts` job runs the real Windows npm-shim
+  fixtures and Session Server platform contracts on `windows-latest` / Node 22.
+  Windows filesystem fixtures are skipped on POSIX; the POSIX no-op contract
+  still runs there. This job does not clear physical Windows/ConPTY or WSL
+  lifecycle acceptance gates.
 - Provider/cli-config-apply SSOT, Codex native-auth
   boundary, and session adapter-decoupling gates pass.
 - `git diff --check` reports no whitespace errors.
@@ -135,10 +140,10 @@ E2E requires a real Gateway plus Web console on the configured ports:
 
 ```bash
 export FORGEBADGER_HOST=127.0.0.1
-export FORGEBADGER_PORT=48731
-export FORGEBADGER_WEB_PORT=48732
-export FORGEBADGER_GATEWAY_URL=http://127.0.0.1:48731
-export NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
+export FORGEBADGER_PORT=18332
+export FORGEBADGER_WEB_PORT=18333
+export FORGEBADGER_GATEWAY_URL=http://127.0.0.1:18332
+export NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:18332
 export FORGEBADGER_DB_PATH=/tmp/forgebadger-ci.db
 export FORGEBADGER_MASTER_KEY=<64-hex-characters>
 export FORGEBADGER_JWT_SECRET=<32+-character-secret>
@@ -164,6 +169,10 @@ Known skip:
 ### Phase 1 Terminal Gate Boundary
 
 CI requires `e2e/mvp1-smoke.spec.ts` as the stable control-plane happy path.
+Playwright starts Next through `packages/web/e2e/start-web-server.mjs`, which
+loads the root environment and invokes the Next CLI directly through Node.
+This keeps hostname/port overrides and lets Playwright terminate the server
+process group without an intermediate pnpm native process blocking cleanup.
 `e2e/gate-d-smoke.spec.ts` remains release/manual evidence unless the host
 supplies Gateway/Web loopback listeners, Session Server/node-pty, and the real CLI prerequisites
 needed for terminal behavior.
@@ -260,11 +269,16 @@ construction, but secret values and unsanitized user input are not acceptable.
 
 Gate 1 - Candidate readiness:
 
-- Release branch is rebased or merged onto `master`.
+- Stable release candidates are rebased or merged onto `master`. A maintainer-selected
+  beta can use a clean, frozen `dev` commit with an explicit prerelease version/tag.
 - `docs/RELEASE-PLAN.md`, `docs/SMOKE-TEST.md`, and this plan are current.
 - Migration impact is understood and database backup instructions are present.
 
 Gate 2 - Automated verification:
+
+Stable candidates require the checks below. Beta exceptions must follow the
+bounded failure record and non-waivable package/security gates in
+`docs/RELEASE-PLAN.md` section 6; a failed check is never reported as passed.
 
 - Static and unit checks pass.
 - Gateway build passes.

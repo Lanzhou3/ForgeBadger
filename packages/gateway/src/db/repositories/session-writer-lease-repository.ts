@@ -27,6 +27,12 @@ export class SessionWriterLeaseRepository {
     if(!row)throw new Error('SESSION_WRITER_FENCE_STALE');
   }
 
+  /** Extend a still-held lease by one TTL; no-op on the (already gone) row. */
+  renew(lease: WriterLease, now: number, ttlMs: number): void {
+    this.db.prepare('UPDATE session_writer_leases SET expires_at=? WHERE user_id=? AND workspace=? AND session_id=? AND token=? AND fence=? AND expires_at>?')
+      .run(now+ttlMs,this.userId,lease.workspace,lease.sessionId,lease.token,lease.fence,now);
+  }
+
   release(lease: WriterLease): void {
     this.db.prepare('UPDATE session_writer_leases SET token=NULL,expires_at=0 WHERE user_id=? AND workspace=? AND session_id=? AND token=? AND fence=?')
       .run(this.userId,lease.workspace,lease.sessionId,lease.token,lease.fence);
@@ -36,10 +42,15 @@ export class SessionWriterLeaseRepository {
     if(this.db.prepare('SELECT 1 FROM session_writer_leases WHERE workspace=? AND expires_at>?').get(workspace,now))throw new Error('SESSION_WRITER_BUSY');
   }
 
-  takeover(workspace: string, sessionId: string, now: number): void {
+  /**
+   * Human-owner takeover, workspace-scoped: the owner can revoke a
+   * programmatic lease from any of their sessions in the workspace (leases
+   * are only held by programmatic flows, so the owner always wins).
+   */
+  takeover(workspace: string, now: number): void {
     this.db.transaction(()=>{
-      const updated=this.db.prepare('UPDATE session_writer_leases SET token=NULL,expires_at=0,fence=fence+1 WHERE user_id=? AND session_id=? AND workspace=?')
-        .run(this.userId,sessionId,workspace);
+      const updated=this.db.prepare('UPDATE session_writer_leases SET token=NULL,expires_at=0,fence=fence+1 WHERE user_id=? AND workspace=?')
+        .run(this.userId,workspace);
       if(!updated.changes)this.assertAvailable(workspace,now);
     }).immediate();
   }

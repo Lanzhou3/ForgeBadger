@@ -10,16 +10,34 @@ const strictEnvBoolean = z
   .default(false)
   .transform((value) => value === true || value === "true");
 
+// Shared with the runtime-settings service so the settings page validates
+// against exactly the same shapes the process env accepts.
+export const registrationModeSchema = z.enum(["open", "off", "invite"]);
+export const sessionPrefixSchema = z
+  .string()
+  .regex(/^[a-zA-Z0-9_-]+$/)
+  .max(32);
+const runtimeSettingsBoolean = z
+  .union([z.boolean(), z.enum(["true", "false"])])
+  .default(false)
+  .transform((value) => value === true || value === "true");
+
 const envSchema = z.object({
-  FORGEBADGER_PORT: z.coerce.number().int().positive().default(3000),
+  FORGEBADGER_PORT: z.coerce.number().int().positive().default(18332),
   FORGEBADGER_HOST: z.string().default("127.0.0.1"),
   FORGEBADGER_STATE_DIR: z.string(),
   FORGEBADGER_DB_PATH: z.string(),
   FORGEBADGER_JWT_SECRET: z.string().min(32),
-  FORGEBADGER_SESSION_PREFIX: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("fb-"),
-  FORGEBADGER_REGISTRATION: z.enum(["open", "off", "invite"]).default("open"),
+  FORGEBADGER_SESSION_PREFIX: sessionPrefixSchema.default("fb-"),
+  FORGEBADGER_REGISTRATION: registrationModeSchema.default("open"),
   FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: strictEnvBoolean,
   FORGEBADGER_MCP_ENABLED: strictEnvBoolean,
+  /**
+   * Operator escape hatch: when true the runtime-settings API rejects writes
+   * and the console renders the settings page read-only (.env stays the only
+   * source of truth).
+   */
+  FORGEBADGER_RUNTIME_SETTINGS_READONLY: runtimeSettingsBoolean,
   FORGEBADGER_MASTER_KEY: z.string().refine((value) => isValidMasterKey(value), {
     message: "FORGEBADGER_MASTER_KEY must be 32 bytes or 64 hex characters"
   }),

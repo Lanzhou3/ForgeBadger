@@ -11,8 +11,10 @@ import {
 import {
   confirmProgrammaticTaskConsumed,
   DEFAULT_PROGRAMMATIC_CONSUMPTION,
-  PROGRAMMATIC_SUBMIT_INDETERMINATE
+  PROGRAMMATIC_SUBMIT_INDETERMINATE,
+  ProgrammaticSubmitNoEffectError
 } from "../programmatic-terminal-submit.js";
+import { PlatformNoEffectError } from "../platform-commands/errors.js";
 import type { InMemorySessionManager } from "../session-manager.js";
 import { AgentMemoryRepository, type AgentMemoryScope } from "./memory.js";
 import type { AgentMemoryEntry } from "./types.js";
@@ -22,11 +24,11 @@ export const COPILOT_DELIVERY_UNCONFIRMED = "COPILOT_DELIVERY_UNCONFIRMED";
 export function listSessionSummaries(
   db: Database,
   userId: string,
-  input: { projectId?: string; limit?: number; allowedProjectIds?: string[] }
+  input: { projectId?: string; limit?: number; allowedProjectIds?: string[]; isSessionAllowed?: (sessionId: string) => boolean }
 ) {
   const repository = new SessionRepository(db, userId);
   const rows = input.projectId ? repository.listByProject(input.projectId) : repository.list();
-  return rows.filter(row=>!input.allowedProjectIds||input.allowedProjectIds.includes(row.projectId)).slice(0, input.limit ?? 50).map((session) => ({
+  return rows.filter(row=>(!input.allowedProjectIds||input.allowedProjectIds.includes(row.projectId)) && (!input.isSessionAllowed || input.isSessionAllowed(row.id))).slice(0, input.limit ?? 50).map((session) => ({
     id: session.id,
     name: session.name,
     aiTool: session.aiTool,
@@ -56,12 +58,14 @@ export async function dispatchSessionInput(
   sessionManager: Pick<InMemorySessionManager, "submitProgrammaticTask" | "captureHistory">,
   sessionId: string,
   adapter: AdapterId,
-  message: string
+  message: string,
+  options: { authorize?: (() => void) | undefined; beforeStage?: (() => void) | undefined } = {}
 ): Promise<{ dispatched: true; sessionId: string; delivery: "consumed" }> {
   let staged;
   try {
-    staged = await sessionManager.submitProgrammaticTask(sessionId, { adapter, message });
+    staged = await sessionManager.submitProgrammaticTask(sessionId, { adapter, message, ...options });
   } catch (error) {
+    if (error instanceof ProgrammaticSubmitNoEffectError) throw new PlatformNoEffectError(error.message);
     if (error instanceof Error && error.message === PROGRAMMATIC_SUBMIT_INDETERMINATE) {
       throw new Error(COPILOT_DELIVERY_UNCONFIRMED);
     }

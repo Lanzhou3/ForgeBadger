@@ -5,6 +5,7 @@ export interface CopilotSkillFile { path: string; content: string; }
 export interface CopilotSkillSource { kind: 'builtin' | 'paste' | 'upload' | 'url' | 'legacy'; url?: string | undefined; label?: string | undefined; }
 export interface CopilotSkillSnapshot {
   name: string; description: string; version: string; content: string;
+  reviewedBuiltinVersion?: string;
   files: CopilotSkillFile[]; source: CopilotSkillSource; requiredTools: string[]; incompatibilityReasons: string[];
 }
 export type RevisionAction = 'import' | 'update' | 'rollback' | 'legacy' | 'builtin-update';

@@ -2,14 +2,15 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApplyToCliDialog } from "./apply-to-cli-dialog";
+import { ApplyToCliDialog, maskSecrets } from "./apply-to-cli-dialog";
 import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { applyCliConfigToAdapter, getClaudeRoute, previewCliConfigApply, setClaudeRoute, type ModelProfile, type ProviderProfile } from "@/lib/api";
 
-vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) => key }) }));
+vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) => key }), useUiLocale: () => "en-US" }));
 vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 vi.mock("@/lib/api", () => ({
   discoverAdapters: vi.fn(async () => ({ adapters: [] })),
+  getAdapterOrder: vi.fn(async () => ({ order: [] })),
   getClaudeRoute: vi.fn(async () => ({ enabled: false })),
   setClaudeRoute: vi.fn(async () => ({ enabled: true })),
   previewCliConfigApply: vi.fn(async () => ({ files: [], warnings: [] })),
@@ -18,14 +19,14 @@ vi.mock("@/lib/api", () => ({
 
 const provider: ProviderProfile = {
   id: "provider-1", providerKey: "custom", name: "Custom", baseUrl: "https://example.com/v1",
-  apiFormat: "openai", authType: "api_key", supportedAdapters: ["claude"], status: "active",
+  apiFormat: "openai-compatible", authType: "api_key", supportedAdapters: ["claude"], status: "active",
 };
 
 function makeModel(overrides: Partial<ModelProfile> = {}): ModelProfile {
   return {
     id: "model-1", providerProfileId: "provider-1", providerKey: "custom", providerName: "Custom",
     baseUrl: "https://example.com/v1", name: "First Model", modelId: "m-1",
-    capabilities: [], contextWindow: null, status: "active", isDefault: true, ...overrides
+    capabilities: [], contextWindow: null, supportEfforts: [], defaultEffort: null, status: "active", isDefault: true, ...overrides
   };
 }
 
@@ -45,7 +46,7 @@ afterEach(cleanup);
 
 describe("Claude endpoint routing", () => {
   it.each([
-    { apiFormat: "openai" as const, anthropicBaseUrl: "https://example.com/anthropic", openaiBaseUrl: "https://example.com/v1" },
+    { apiFormat: "openai-responses" as const, anthropicBaseUrl: "https://example.com/anthropic", openaiBaseUrl: "https://example.com/v1" },
     { apiFormat: "openai-compatible" as const, anthropicBaseUrl: "https://example.com/anthropic" },
     { apiFormat: "anthropic" as const },
   ])("applies native Anthropic configuration directly: %j", async (overrides) => {
@@ -61,7 +62,7 @@ describe("Claude endpoint routing", () => {
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["claude-route"] }));
   });
 
-  it.each(["openai", "openai-compatible"] as const)("enables routing for %s without Anthropic", async (apiFormat) => {
+  it.each(["openai-responses", "openai-compatible"] as const)("enables routing for %s without Anthropic", async (apiFormat) => {
     setup({ apiFormat });
     await waitFor(() => expect(getClaudeRoute).toHaveBeenCalled());
     const button = screen.getByRole("button", { name: "models.claudeRouteEnableAndApply" });
@@ -103,5 +104,68 @@ describe("PI apply model selection semantics", () => {
     fireEvent.change(select, { target: { value: "model-2" } });
     fireEvent.click(screen.getByRole("button", { name: "models.applyConfig" }));
     await waitFor(() => expect(applyCliConfigToAdapter).toHaveBeenCalledWith("pi", expect.objectContaining({ modelProfileId: "model-2" })));
+  });
+});
+
+describe("Codex wire API blocker", () => {
+  it("renders the localized blocker banner and filters the raw marker code", async () => {
+    vi.mocked(previewCliConfigApply).mockResolvedValueOnce({
+      files: [],
+      warnings: [
+        "CODEX_WIRE_API_UNSUPPORTED",
+        "Codex (installed: codex-cli 0.157.1) no longer supports wire_api = \"chat\"."
+      ]
+    } as never);
+    setup({ supportedAdapters: ["codex"] }, [makeModel()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "models.applyChangeSummary" }));
+    await waitFor(() => expect(screen.getByText("models.codexWireApiBlocked")).toBeTruthy());
+    // The machine-readable marker never renders verbatim; the human message does.
+    expect(screen.queryByText("CODEX_WIRE_API_UNSUPPORTED")).toBeNull();
+    expect(
+      screen.getByText((content) => content.includes("no longer supports wire_api"))
+    ).toBeTruthy();
+    // The apply action is hard-blocked while the marker is present.
+    const applyButton = screen.getByRole("button", { name: "models.applyConfig" }) as HTMLButtonElement;
+    expect(applyButton.disabled).toBe(true);
+  });
+
+  it("does not render the blocker banner for other warning sets", async () => {
+    vi.mocked(previewCliConfigApply).mockResolvedValueOnce({
+      files: [],
+      warnings: ["Applying this change may normalize TOML comments and formatting in the config file."]
+    } as never);
+    setup({ supportedAdapters: ["codex"] }, [makeModel()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "models.applyChangeSummary" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText((content) => content.includes("normalize TOML"))
+      ).toBeTruthy()
+    );
+    expect(screen.queryByText("models.codexWireApiBlocked")).toBeNull();
+  });
+});
+
+describe("maskSecrets", () => {
+  it("masks existing and extended token shapes while leaving normal text alone", () => {
+    expect(maskSecrets("key: sk-abc1234567890")).toBe("key: sk-ab…");
+    expect(maskSecrets("Authorization: Bearer abcdef1234567890")).toBe("Authorization: Bearer abcdef…");
+    expect(maskSecrets("token ghp_abcd1234567890")).toBe("token ghp_abcd…");
+    expect(maskSecrets("pat github_pat_abcd1234567890")).toBe("pat github_pat_abcd…");
+    expect(maskSecrets("slack xoxb-1234-5678-9012")).toBe("slack xoxb-1234…");
+    expect(maskSecrets("aws AKIAIOSFODNN7EXAMPLE")).toBe("aws AKIAIOSF…");
+    expect(maskSecrets("google AIzaSyD4iE7xn0xABC123DEF")).toBe("google AIzaSyD4…");
+    expect(maskSecrets("jwt eyJhbGciOiJIUzI1NiJ9.payload.signature")).toBe("jwt eyJhbGc…");
+
+    // Non-secret text passes through untouched.
+    expect(maskSecrets("model: claude-sonnet-4-5")).toBe("model: claude-sonnet-4-5");
+    expect(maskSecrets("baseUrl: https://api.example.com/v1")).toBe("baseUrl: https://api.example.com/v1");
+  });
+
+  it("keeps a recognizable prefix so the shape stays identifiable", () => {
+    const masked = maskSecrets("api_key=sk-live2eQ7wTy9");
+    expect(masked.startsWith("api_key=sk-li…".slice(0, 10))).toBe(true);
+    expect(masked).not.toContain("2eQ7wTy9");
   });
 });

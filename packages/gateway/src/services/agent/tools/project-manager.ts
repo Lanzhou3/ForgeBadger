@@ -1,3 +1,6 @@
+import { adapterIds } from "../../../lib/adapter-ids.js";
+import { assertChannelToolScope } from '../../channels/channel-run-scope.js';
+import { getTaskProgress, taskCloseInput, taskProgressInput } from '../../project-manager/task-progress.js';
 import { executeAgentAction } from "../../platform-commands/agent-actions.js";
 /** Project Manager reads and governed task preparation. Preparation never launches a CLI. */
 import { z } from "zod";
@@ -30,7 +33,7 @@ const getPacketInput = z.object({
 }).strict();
 
 const startPacketInput = getPacketInput.extend({
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional()
+  aiTool: z.enum(adapterIds).optional()
 }).strict();
 
 /** Load project + work item, or a recoverable not-found marker. */
@@ -50,6 +53,33 @@ function loadWorkItem(
 export function createProjectManagerTools(): AgentTool[] {
   return [
     {
+      name: "pm_get_task_progress",
+      description: "Read a task's current dispatch attempt, durable CLI notification evidence, session status and next action. A CLI completion is only a review candidate. Optional bounded wait never changes task state.",
+      risk: "read", requiresApproval: false, inputSchema: taskProgressInput,
+      async execute(input, context) {
+        const parsed = taskProgressInput.parse(input);
+        const deadline = Date.now() + (parsed.waitMs ?? 0);
+        const ctx = { db: context.db as Database, userId: context.userId as string };
+        const assertActive = () => {
+          if (typeof context.checkExecutionAuthority === 'function' && !context.checkExecutionAuthority()) throw new Error('Copilot execution authority expired');
+        };
+        assertActive();
+        let result = getTaskProgress(ctx, parsed.projectId, parsed.workItemId);
+        while (Date.now() < deadline && result.found && result.taskPacket.workItemStatus === 'in_progress' && result.notifications.length === 0) {
+          await new Promise(resolve => setTimeout(resolve, Math.min(250, deadline - Date.now())));
+          assertActive();
+          result = getTaskProgress(ctx, parsed.projectId, parsed.workItemId);
+        }
+        return result;
+      }
+    },
+    {
+      name: "pm_close_task",
+      description: "Save a task closeout report using the current attempt ID and a server-provided completion notification ID. Validates the exact task, dispatch receipt and prompt. Advances at most to ready_for_review; never claims independent verification or done.",
+      risk: "operate", requiresApproval: true, inputSchema: taskCloseInput,
+      async execute(input, context) { return executeAgentAction("pm_close_task", taskCloseInput.parse(input), context); }
+    },
+    {
       name: "pm_list_task_packets",
       description:
         "List the Project Manager task packets for a project — the development queue with per-item prompt, acceptance criteria, verification expectations, linked session, and queue status (planned/running/waiting_for_review/blocked/completed/cancelled).",
@@ -67,6 +97,10 @@ export function createProjectManagerTools(): AgentTool[] {
         const sessionsByWorkItem = resolveTaskPacketSessions(db, userId, projectId, items);
         const packets: ProjectManagerTaskPacket[] = [];
         for (const workItem of items) {
+          if (context.channelScope) {
+            try { assertChannelToolScope(context, 'pm_get_task_packet', { projectId, workItemId: workItem.id }); }
+            catch { continue; }
+          }
           const session = sessionsByWorkItem.get(workItem.id) ?? null;
           packets.push(buildTaskPacket({ project, workItem, session }));
         }
@@ -99,6 +133,17 @@ export function createProjectManagerTools(): AgentTool[] {
       inputSchema: startPacketInput,
       async execute(input, context) {
         return executeAgentAction("pm_prepare_task_packet", startPacketInput.parse(input), context);
+      }
+    },
+    {
+      name: "pm_execute_task_packet",
+      description:
+        "Prepare (if needed), start the linked CLI session, and programmatically deliver the task packet prompt to it, then mark the work item in progress.",
+      risk: "operate",
+      requiresApproval: true,
+      inputSchema: startPacketInput,
+      async execute(input, context) {
+        return executeAgentAction("pm_execute_task_packet", startPacketInput.parse(input), context);
       }
     }
   ];

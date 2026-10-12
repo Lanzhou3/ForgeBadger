@@ -238,11 +238,13 @@ it("requires password confirmation and explicit reset acknowledgement, clears pa
   fireEvent.change(screen.getByLabelText("确认新密码"), {
     target: { value: "new-password" },
   });
-  const submit = screen.getAllByRole("button", {
-    name: "重置账号密码",
-  })[1] as HTMLButtonElement;
+  const submit = (
+    await screen.findAllByRole("button", {
+      name: "重置账号密码",
+    })
+  )[0] as HTMLButtonElement;
   expect(submit.disabled).toBe(true);
-  fireEvent.click(screen.getByRole("checkbox", { name: "确认" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: /我确认要为此成员/ }));
   fireEvent.click(submit);
   await waitFor(() =>
     expect(accountsApi.reset).toHaveBeenCalledWith("m1", "new-password"),

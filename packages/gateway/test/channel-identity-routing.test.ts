@@ -21,8 +21,6 @@ import { randomBytes } from 'node:crypto';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { FeishuChannelRepository } from '../src/db/repositories/feishu-channel-repository.js';
 import { FeishuIntegrationRepository } from '../src/db/repositories/feishu-integration-repository.js';
-import { CopilotGrantRepository } from '../src/db/repositories/copilot-grant-repository.js';
-import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { ChannelIdentityService, type TrustedChannelPeer } from '../src/services/channels/channel-identity-service.js';
 
 function fixture(path = ':memory:', folder = migrationsFolder) {
@@ -34,9 +32,12 @@ function fixture(path = ':memory:', folder = migrationsFolder) {
   const account = accounts.upsertAccount({ appId: 'fixture', appSecret: randomBytes(24).toString('hex'), enabled: true });
   const config = new FeishuIntegrationRepository(db, user.id);
   config.upsertConfig({ enabled: true, emergencyDisabled: false });
-  const project = new ProjectRepository(db, user.id).create({ name: 'p', path: '/private/tmp/channel-project', aiTool: 'claude' });
-  const grants = new CopilotGrantRepository(db, user.id);
-  const grant = grants.create({ name: 'limited', scope: { projectIds: [project.id], capabilities: ['project.update'], allowedRoots: [] }, expiresAt: Date.now() + 600_000, maxActions: 5, maxConcurrency: 1 });
+  // Upgrade-rehearsal fixtures predate the current projects schema, so seed the
+  // project with a raw SQL column subset that works on both shapes.
+  const now = Date.now();
+  db.prepare('INSERT INTO projects(id,user_id,name,path,ai_tool,status,is_imported,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run('fixture-project', user.id, 'p', '/private/tmp/channel-project', 'claude', 'active', 0, now, now);
+  const project: { id: string } = { id: 'fixture-project' };
   const service = new ChannelIdentityService(db, user.id, key);
   const peer: TrustedChannelPeer = { channel: 'feishu', accountId: account.id, accountRevision: account.configRevision, externalUserId: 'ou-owner', chatId: 'oc-private', chatType: 'p2p' };
   const pair = () => {
@@ -44,7 +45,7 @@ function fixture(path = ':memory:', folder = migrationsFolder) {
     const claimed = service.claimPairing(issued.token, peer);
     return service.confirmPairing(claimed.id, { revision: claimed.revision, externalUserId: peer.externalUserId, chatId: peer.chatId });
   };
-  return { db, user, other, key, accounts, account, config, project, grants, grant, service, peer, pair };
+  return { db, user, other, key, accounts, account, config, project, service, peer, pair };
 }
 
 it('requires claim and exact owner confirmation; hashes tokens and rejects replay', () => {
@@ -65,20 +66,19 @@ it('requires claim and exact owner confirmation; hashes tokens and rejects repla
   } finally { f.db.close(); }
 });
 
-it('creates a fresh grant-bound route and rolls back duplicate route history', () => {
+it('creates a fresh project-bound route and rolls back duplicate route history', () => {
   const f = fixture();
   try {
     const identity = f.pair();
-    const route = f.service.createRoute({ identityId: identity.id, grantId: f.grant.id });
-    assert.equal(f.grants.binding(route.conversationId), f.grant.id);
-    assert.throws(() => f.service.createRoute({ identityId: identity.id, grantId: f.grant.id }));
+    const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
+    assert.equal(f.service.records.route(route.id)?.projectId, f.project.id);
+    assert.throws(() => f.service.createRoute({ identityId: identity.id, projectId: f.project.id }));
     assert.equal(f.db.prepare('SELECT count(*) AS n FROM copilot_conversations').get().n, 1);
     const admitted = f.service.admit(route.id, f.peer, { capability: 'project.update', projectIds: [f.project.id] });
     assert.equal(admitted.actorUserId, f.user.id);
-    assert.throws(() => f.service.admit(route.id, f.peer, { capability: 'project.delete', projectIds: [f.project.id] }));
     assert.throws(() => f.service.admit(route.id, f.peer, { capability: 'project.update', projectIds: ['foreign'] }));
     f.service.revokeRoute(route.id);
-    const replacement = f.service.createRoute({ identityId: identity.id, grantId: f.grant.id });
+    const replacement = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
     assert.notEqual(replacement.conversationId, route.conversationId);
     assert.throws(() => f.service.admit(route.id, f.peer));
   } finally { f.db.close(); }
@@ -106,7 +106,7 @@ for (const change of ['expire', 'rotate', 'emergency', 'allowlist', 'cancel'] as
       const issued = f.service.createPairing({ channel: 'feishu', accountId: f.account.id });
       const claimed = f.service.claimPairing(issued.token, f.peer);
       if (change === 'expire') f.db.prepare('UPDATE channel_pairings SET expires_at=0 WHERE id=?').run(claimed.id);
-      if (change === 'rotate') f.accounts.upsertAccount({ appId: f.account.appId, enabled: true });
+      if (change === 'rotate') f.accounts.upsertAccount({ appId: f.account.appId, appSecret: 'rotated-test-secret', enabled: true });
       if (change === 'emergency') f.config.upsertConfig({ emergencyDisabled: true });
       if (change === 'allowlist') f.config.upsertConfig({ allowedChatIds: ['other-chat'] });
       if (change === 'cancel') f.service.cancelPairing(claimed.id);
@@ -116,19 +116,17 @@ for (const change of ['expire', 'rotate', 'emergency', 'allowlist', 'cancel'] as
   });
 }
 
-for (const change of ['grant', 'identity', 'route', 'account', 'config', 'actor', 'history', 'grantRevision', 'peer'] as const) {
+for (const change of ['identity', 'route', 'account', 'config', 'actor', 'history', 'peer'] as const) {
   it(`rejects stale admission after ${change} changes`, () => {
     const f = fixture();
     try {
-      const identity = f.pair(); const route = f.service.createRoute({ identityId: identity.id, grantId: f.grant.id });
-      if (change === 'grant') f.grants.revoke(f.grant.id);
+      const identity = f.pair(); const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
       if (change === 'identity') f.service.revokeIdentity(identity.id);
       if (change === 'route') f.service.revokeRoute(route.id);
       if (change === 'account') f.accounts.upsertAccount({ appId: f.account.appId, enabled: false });
       if (change === 'config') f.config.upsertConfig({ enabled: false });
       if (change === 'actor') f.db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(f.user.id);
       if (change === 'history') f.db.prepare("UPDATE copilot_conversations SET status='deleted' WHERE id=?").run(route.conversationId);
-      if (change === 'grantRevision') f.db.prepare('UPDATE copilot_grants SET revision=revision+1 WHERE id=?').run(f.grant.id);
       assert.throws(() => f.service.admit(route.id, change === 'peer' ? { ...f.peer, externalUserId: 'imposter' } : f.peer));
     } finally { f.db.close(); }
   });
@@ -137,9 +135,9 @@ for (const change of ['grant', 'identity', 'route', 'account', 'config', 'actor'
 it('permits explicit new pairing after account rotation and enforces composite tenant FKs', () => {
   const f = fixture();
   try {
-    const first = f.pair(); const old = f.service.createRoute({ identityId: first.id, grantId: f.grant.id });
-    f.peer.accountRevision = f.accounts.upsertAccount({ appId: f.account.appId, enabled: true }).configRevision;
-    const next = f.pair(); const route = f.service.createRoute({ identityId: next.id, grantId: f.grant.id });
+    const first = f.pair(); const old = f.service.createRoute({ identityId: first.id, projectId: f.project.id });
+    f.peer.accountRevision = f.accounts.upsertAccount({ appId: f.account.appId, appSecret: 'rotated-test-secret', enabled: true }).configRevision;
+    const next = f.pair(); const route = f.service.createRoute({ identityId: next.id, projectId: f.project.id });
     assert.notEqual(route.conversationId, old.conversationId);
     assert.throws(() => f.service.admit(old.id, f.peer));
     assert.ok(f.service.admit(route.id, f.peer));
@@ -176,7 +174,8 @@ it('serves authenticated owner management through the mounted Gateway, without a
     assert.equal((await fetch(base + '/identities')).status, 401);
     assert.equal((await request('/deliveries')).status, 200);
     assert.deepEqual((await (await request('/deliveries', undefined, f.other.id)).json()).data.deliveries, []);
-    assert.equal((await request('/pairings', { channel: 'telegram', accountId: f.account.id })).status, 400);
+    // Telegram is a valid channel platform now; the feishu account id is unknown to it, so authority rejects it.
+    assert.equal((await request('/pairings', { channel: 'telegram', accountId: f.account.id })).status, 403);
     const issuedResponse = await request('/pairings', { channel: 'feishu', accountId: f.account.id });
     assert.equal(issuedResponse.status, 201);
     assert.equal(issuedResponse.headers.get('cache-control'), 'no-store');
@@ -190,9 +189,12 @@ it('serves authenticated owner management through the mounted Gateway, without a
     const confirmed = await request(`/pairings/${claimed.id}/confirm`, confirmation);
     assert.equal(confirmed.status, 200);
     const identity = (await confirmed.json()).data.identity;
-    const created = await request('/routes', { identityId: identity.id, grantId: f.grant.id });
+    const created = await request('/routes', { identityId: identity.id, projectId: f.project.id });
     assert.equal(created.status, 201);
     const route = (await created.json()).data.route;
+    const routeListing = await request('/routes');
+    assert.equal(routeListing.headers.get('cache-control'), 'no-store');
+    assert.equal((await routeListing.json()).data.routes.find((item: { id: string }) => item.id === route.id)?.authorityValid, true);
     assert.deepEqual((await (await request('/routes', undefined, f.other.id)).json()).data.routes, []);
     assert.equal((await request(`/identities/${identity.id}/revoke`, {}, f.other.id)).status, 403);
     assert.ok(f.service.admit(route.id, f.peer));
@@ -204,7 +206,7 @@ it('serves authenticated owner management through the mounted Gateway, without a
     new NativeChannelDelivery(f.db,f.user.id,f.key,async()=>{throw new Error('must not send');}).project();
     const metadataResponse=await request('/deliveries');assert.equal(metadataResponse.headers.get('cache-control'),'no-store');
     const metadata=(await metadataResponse.json()).data.deliveries;assert.equal(metadata.length,1);
-    assert.deepEqual(Object.keys(metadata[0]).sort(),['createdAt','id','inboxId','phase','receiptRecorded','status']);
+    assert.deepEqual(Object.keys(metadata[0]).sort(),['accountId','channel','createdAt','id','inboxId','phase','receiptRecorded','status']);
     assert.equal(JSON.stringify(metadata).includes('private prompt'),false);
     assert.deepEqual((await (await request('/deliveries',undefined,f.other.id)).json()).data.deliveries,[]);
     assert.equal((await request(`/identities/${identity.id}/revoke`, {})).status, 200);
@@ -241,7 +243,12 @@ it('upgrades populated main schema, preserves route revocation and restores a pr
     (source.prepare(`PRAGMA table_info(${quote(table)})`).all() as Array<{ name: string }>).map((column) => column.name);
   const originalNames = names.map((name) => tableColumns(f.db, name));
   const selectRows = (source: Sqlite.Database, columns: string[][]) =>
-    names.map((name, index) => source.prepare(`SELECT ${(columns[index] as string[]).map(quote).join(',')} FROM ${quote(name)}`).all());
+    names.map((name, index) => {
+      const cols = columns[index] as string[];
+      // 0105 drops copilot_grants/copilot_conversation_grants entirely; a table with no
+      // surviving columns contributes no rows to the comparison.
+      return cols.length === 0 ? [] : source.prepare(`SELECT ${cols.map(quote).join(',')} FROM ${quote(name)}`).all();
+    });
   const before = selectRows(f.db, originalNames);
   let db: Sqlite.Database = f.db;
   try {
@@ -273,7 +280,7 @@ it('upgrades populated main schema, preserves route revocation and restores a pr
     } finally { restored.close(); }
     assert.equal(db.prepare('SELECT count(*) AS n FROM channel_identities').get().n, 0);
     assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
-    const identity = f.pair(); const route = f.service.createRoute({ identityId: identity.id, grantId: f.grant.id });
+    const identity = f.pair(); const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
     db.close(); db = new Sqlite(path);
     let service = new ChannelIdentityService(db, f.user.id, f.key);
     assert.ok(service.admit(route.id, f.peer));
@@ -303,12 +310,13 @@ for (const claimed of [false, true]) {
   });
 }
 
-it('rejects a foreign grant without leaving a conversation or route', () => {
+it('rejects a foreign project without leaving a conversation or route', () => {
   const f = fixture();
   try {
     const identity = f.pair();
-    const foreignGrant = new CopilotGrantRepository(f.db, f.other.id).create({ name: 'other', scope: { projectIds: [], capabilities: [], allowedRoots: [] }, expiresAt: Date.now() + 10000, maxActions: 1, maxConcurrency: 1 });
-    assert.throws(() => f.service.createRoute({ identityId: identity.id, grantId: foreignGrant.id }));
+    f.db.prepare('INSERT INTO projects(id,user_id,name,path,ai_tool,status,is_imported,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run('foreign-project', f.other.id, 'foreign', '/private/tmp/foreign-channel-project', 'claude', 'active', 0, Date.now(), Date.now());
+    assert.throws(() => f.service.createRoute({ identityId: identity.id, projectId: 'foreign-project' }));
     assert.equal(f.service.records.listRoutes().length, 0);
     assert.equal(f.db.prepare('SELECT count(*) AS n FROM copilot_conversations').get().n, 0);
   } finally { f.db.close(); }
@@ -319,9 +327,9 @@ it('native admission cannot bypass a revoked channel route through a Web convers
   const f = fixture();
   try {
     const identity = f.pair();
-    const route = f.service.createRoute({ identityId: identity.id, grantId: f.grant.id });
+    const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
     f.service.revokeRoute(route.id);
-    assert.throws(() => new CopilotRunLedger(f.db, f.user.id).admit({ userId: f.user.id, conversationId: route.conversationId, userText: 'bypass route', grantId: f.grant.id }, 2));
+    assert.throws(() => new CopilotRunLedger(f.db, f.user.id).admit({ userId: f.user.id, conversationId: route.conversationId, userText: 'bypass route' }, 2));
   } finally { f.db.close(); }
 });
 
@@ -335,7 +343,7 @@ import { z } from 'zod';
 
 function inboxFixture(path?:string) {
   const f=fixture(path); const identity=f.pair();
-  const route=f.service.createRoute({identityId:identity.id,grantId:f.grant.id});
+  const route=f.service.createRoute({identityId:identity.id,projectId:f.project.id});
   return {...f,identity,route,inbox:new NativeChannelInbox(f.db,f.user.id,f.key)};
 }
 const incoming=(suffix:string,text='Check project progress')=>({eventId:`event-${suffix}`,messageId:`message-${suffix}`,text});
@@ -420,11 +428,12 @@ for(const removeOrigin of [false,true]) {
     try {
       const admittedMessage=f.inbox.receive(f.peer,incoming('1'));const adopted=f.inbox.adoptNext();assert.equal(adopted.status,'adopted');if(adopted.status!=='adopted')return;
       const ledger=new CopilotRunLedger(f.db,f.user.id);
-      const step=ledger.addStep(adopted.runId,{kind:'tool',toolName:'test',toolCallId:'test-call',inputJson:'{}',effect:'write'});
+      const input={projectId:f.project.id};
+      const step=ledger.addStep(adopted.runId,{kind:'tool',toolName:'update_project',toolCallId:'test-call',inputJson:JSON.stringify(input),effect:'write'});
       let effects=0;
-      const command:PlatformCommand={id:'test',capability:'project.update',effect:'database',delegatable:true,inputSchema:z.object({}),resolve:()=>({projectIds:[f.project.id],revision:'1'}),execute:()=>{effects++;return {};}};
-      const actions=new PlatformActions({db:f.db,userId:f.user.id},new Map([['test',command]]));
-      const intent=actions.preview({commandId:'test',input:{},idempotencyKey:step.id,authority:'delegated_grant',grantId:f.grant.id});
+      const command:PlatformCommand={id:'project.metadata.update',capability:'project.update',effect:'database',inputSchema:z.object({projectId:z.string()}),resolve:()=>({projectIds:[f.project.id],revision:'1'}),execute:()=>{effects++;return {};}};
+      const actions=new PlatformActions({db:f.db,userId:f.user.id,actionOrigin:{kind:'copilot',runId:adopted.runId,stepId:step.id}},new Map([[command.id,command]]));
+      const intent=actions.preview({commandId:command.id,input,idempotencyKey:step.id});
       assert.equal(intent.channel_conversation_id,f.route.conversationId);
       if(removeOrigin)f.db.prepare('DELETE FROM copilot_run_steps WHERE user_id=? AND id=?').run(f.user.id,step.id);
       else f.service.revokeRoute(f.route.id);
@@ -476,7 +485,7 @@ it('does not let a busy route starve a separate route',()=>{
     const peer={...f.peer,externalUserId:'second-peer',chatId:'second-private-chat'};
     const issued=f.service.createPairing({channel:'feishu',accountId:f.account.id});const claimed=f.service.claimPairing(issued.token,peer);
     const identity=f.service.confirmPairing(claimed.id,{revision:claimed.revision,externalUserId:peer.externalUserId,chatId:peer.chatId});
-    f.service.createRoute({identityId:identity.id,grantId:f.grant.id});
+    f.service.createRoute({identityId:identity.id,projectId:f.project.id});
     const item=f.inbox.receive(peer,incoming('unblocked'));
     const adopted=f.inbox.adoptNext();assert.equal(adopted.status,'adopted');if(adopted.status==='adopted')assert.equal(adopted.messageId,item.id);
   }finally{f.db.close();}
@@ -502,22 +511,50 @@ it('blocks approval resumption after channel revocation before changing its pend
     const step=ledger.addStep(adopted.runId,{kind:'tool',toolName:'test',toolCallId:'approve-call',inputJson:'{}',effect:'write'});
     ledger.waitApproval(claim,step);const action=ledger.log.listPendingActions(adopted.runId)[0]!;
     f.service.revokeRoute(f.route.id);
-    const runtime=createCopilotOrchestrator({db:f.db,masterKey:f.key,eventBus:new ForgeBadgerEventBus(),toolRegistry:createAgentToolRegistry([]),llm:llmFixture});
+    const runtime=createCopilotOrchestrator({db:f.db,masterKey:f.key,eventBus:new ForgeBadgerEventBus(),toolRegistry:createAgentToolRegistry([{name:'test',description:'test',risk:'write',requiresApproval:true,inputSchema:z.object({}),execute:async()=>[]}]),llm:llmFixture});
     await assert.rejects(runtime.resumeAfterApproval({userId:f.user.id,runId:adopted.runId,actionId:action.id,approved:true}));
     assert.equal(ledger.log.getPendingAction(action.id)?.status,'pending');
   }finally{f.db.close();}
+});
+
+it('deleting a route parent blocks child approval resumption but permits rejection and cancellation', async () => {
+  const f = inboxFixture();
+  try {
+    f.config.upsertConfig({ allowedChatIds: [f.peer.chatId, 'group'] });
+    const group = { ...f.peer, chatId: 'group', chatType: 'group' as const, mentionedBot: true as const };
+    f.inbox.receive(group, incoming('child'));
+    const adopted = f.inbox.adoptNext();
+    if (adopted.status !== 'adopted') return assert.fail('admission required');
+    const ledger = new CopilotRunLedger(f.db, f.user.id);
+    const claim = ledger.claim(adopted.runId, 'owner', 30000)!;
+    const step = ledger.addStep(adopted.runId, { kind: 'tool', toolName: 'test', toolCallId: 'approve-child', inputJson: '{}', effect: 'write' });
+    ledger.waitApproval(claim, step);
+    const action = ledger.log.listPendingActions(adopted.runId)[0]!;
+    let effects = 0;
+    const runtime = createCopilotOrchestrator({ db: f.db, masterKey: f.key, eventBus: new ForgeBadgerEventBus(),
+      toolRegistry: createAgentToolRegistry([{ name: 'test', description: 'test', risk: 'write', requiresApproval: true,
+        inputSchema: z.object({}), execute: async () => { effects++; return []; } }]), llm: llmFixture });
+    assert.equal(ledger.log.deleteConversation(f.route.conversationId), true);
+    await assert.rejects(runtime.resumeAfterApproval({ userId: f.user.id, runId: adopted.runId, actionId: action.id, approved: true }), /CHANNEL_AUTHORITY_REJECTED/);
+    assert.equal(ledger.log.getPendingAction(action.id)?.status, 'pending');
+    assert.equal(effects, 0);
+    assert.equal(ledger.decide(adopted.runId, action.id, false), true);
+    assert.equal(ledger.log.getPendingAction(action.id)?.status, 'rejected');
+    assert.equal(ledger.cancel(adopted.runId), true);
+  } finally { f.db.close(); }
 });
 
 it('rechecks authority at an external command fence after an await',async()=>{
   const f=inboxFixture();
   try {
     f.inbox.receive(f.peer,incoming('1'));const adopted=f.inbox.adoptNext();if(adopted.status!=='adopted')return assert.fail('admission required');
-    const step=new CopilotRunLedger(f.db,f.user.id).addStep(adopted.runId,{kind:'tool',toolName:'external',toolCallId:'external',inputJson:'{}',effect:'write'});
+    const input={projectId:f.project.id};
+    const step=new CopilotRunLedger(f.db,f.user.id).addStep(adopted.runId,{kind:'tool',toolName:'update_project',toolCallId:'external',inputJson:JSON.stringify(input),effect:'write'});
     let release!:()=>void;let started!:()=>void;const waiting=new Promise<void>(resolve=>{release=resolve;});const began=new Promise<void>(resolve=>{started=resolve;});let effects=0;
-    const command:PlatformCommand={id:'test',capability:'project.update',effect:'external',delegatable:true,inputSchema:z.object({}),resolve:()=>({projectIds:[f.project.id],revision:'1'}),
+    const command:PlatformCommand={id:'project.metadata.update',capability:'project.update',effect:'external',inputSchema:z.object({projectId:z.string()}),resolve:()=>({projectIds:[f.project.id],revision:'1'}),
       execute:async context=>{started();await waiting;context.authorize?.();effects++;return {};}};
-    const actions=new PlatformActions({db:f.db,userId:f.user.id},new Map([['test',command]]));
-    const intent=actions.preview({commandId:'test',input:{},idempotencyKey:step.id,authority:'delegated_grant',grantId:f.grant.id});
+    const actions=new PlatformActions({db:f.db,userId:f.user.id,actionOrigin:{kind:'copilot',runId:adopted.runId,stepId:step.id}},new Map([[command.id,command]]));
+    const intent=actions.preview({commandId:command.id,input,idempotencyKey:step.id});
     const executing=actions.execute(intent.id);const rejected=assert.rejects(executing);await began;
     f.service.revokeRoute(f.route.id);release();await rejected;assert.equal(effects,0);
   }finally{f.db.close();}
@@ -528,18 +565,18 @@ it('backfills channel ownership and action provenance on identity-schema upgrade
   const journalFile=join(prior,'meta/_journal.json');const journal=JSON.parse(readFileSync(journalFile,'utf8'));journal.entries=entriesBefore(journal.entries,'0079_native_channel_messages');writeFileSync(journalFile,JSON.stringify(journal));
   const f=fixture(':memory:',prior);
   try {
-    const conversationId='historical-channel-conversation';const identityId='historical-channel-identity';const routeId='historical-channel-route';
+    const conversationId='historical-channel-conversation';const identityId='historical-channel-identity';const routeId='historical-channel-route';const legacyGrantId='historical-grant';
+    f.db.prepare("INSERT INTO copilot_grants(id,user_id,actor_user_id,name,status,revision,scope_json,expires_at,max_actions,max_concurrency,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(legacyGrantId,f.user.id,f.user.id,'historical','active',1,'[]',Date.now()+600000,5,1,Date.now());
     f.db.prepare("INSERT INTO copilot_conversations(id,user_id,title,status,created_at,updated_at) VALUES (?,?,'channel','active',?,?)").run(conversationId,f.user.id,Date.now(),Date.now());
-    f.grants.bind(conversationId,f.grant.id);
+    f.db.prepare('INSERT INTO copilot_conversation_grants(conversation_id,user_id,grant_id,created_at) VALUES (?,?,?,?)').run(conversationId,f.user.id,legacyGrantId,Date.now());
     f.db.prepare('INSERT INTO channel_identities(id,user_id,channel,account_id,account_revision,external_user_id,chat_id,created_at) VALUES (?,?,\'feishu\',?,?,?,?,?)').run(identityId,f.user.id,f.account.id,f.account.configRevision,f.peer.externalUserId,f.peer.chatId,Date.now());
-    f.db.prepare('INSERT INTO channel_routes(id,user_id,identity_id,grant_id,grant_revision,conversation_id,created_at) VALUES (?,?,?,?,?,?,?)').run(routeId,f.user.id,identityId,f.grant.id,1,conversationId,Date.now());
+    f.db.prepare('INSERT INTO channel_routes(id,user_id,identity_id,grant_id,grant_revision,conversation_id,created_at) VALUES (?,?,?,?,?,?,?)').run(routeId,f.user.id,identityId,legacyGrantId,1,conversationId,Date.now());
     const log=new CopilotRunLedger(f.db,f.user.id).log;const run=log.createRun(conversationId, {});
     f.db.prepare("INSERT INTO copilot_run_steps(id,user_id,run_id,ordinal,kind,status,effect) VALUES ('old-step',?,?,1,'tool','pending','write')").run(f.user.id,run.id);
-    f.db.prepare("INSERT INTO platform_action_intents(id,user_id,actor_user_id,grant_id,grant_revision,authority,command_id,input_json,digest,resources_json,policy_version,expires_at,idempotency_key,status,created_at) VALUES ('old-intent',?,?,?,1,'delegated_grant','test','{}','digest','{}',1,?,'old-step','approved',?)").run(f.user.id,f.user.id,f.grant.id,Date.now()+60000,Date.now());
+    f.db.prepare("INSERT INTO platform_action_intents(id,user_id,actor_user_id,grant_id,grant_revision,authority,command_id,input_json,digest,resources_json,policy_version,expires_at,idempotency_key,status,created_at) VALUES ('old-intent',?,?,?,1,'delegated_grant','test','{}','digest','{}',1,?,'old-step','approved',?)").run(f.user.id,f.user.id,legacyGrantId,Date.now()+60000,Date.now());
     migrate(drizzle(f.db),{migrationsFolder});
     assert.equal(f.db.prepare('SELECT channel_owned FROM copilot_conversations WHERE id=?').get(conversationId).channel_owned,1);
     assert.equal(f.db.prepare("SELECT channel_conversation_id FROM platform_action_intents WHERE id='old-intent'").get().channel_conversation_id,conversationId);
-    f.db.prepare('DELETE FROM channel_routes WHERE id=?').run(routeId);
     assert.throws(()=>new CopilotRunLedger(f.db,f.user.id).validateScope({userId:f.user.id,conversationId,userText:'missing route'}));
     assert.deepEqual(f.db.prepare('PRAGMA foreign_key_check').all(),[]);
   }finally{f.db.close();rmSync(directory,{recursive:true,force:true});}
@@ -618,15 +655,19 @@ it('default Gateway composition receives, adopts, executes and delivers without 
   const f=inboxFixture();let handlers:FeishuSdkEventHandlers|undefined;let sends=0;let closed=0;
   const legacy=f.accounts.enqueueOutbox({accountId:f.account.id,idempotencyKey:'historical',chatId:f.peer.chatId,payload:'historical payload'});
   const models=new ModelProviderRepository(f.db,f.user.id,f.key);
-  const provider=models.createProviderProfile({name:'fixture',providerKey:'fixture',baseUrl:'https://8.8.8.8',apiFormat:'openai',authType:'api_key',supportedAdapters:['opencode']});
+  const provider=models.createProviderProfile({name:'fixture',providerKey:'fixture',baseUrl:'https://8.8.8.8',apiFormat:'openai-compatible',authType:'api_key',supportedAdapters:['opencode']});
   models.createCredential({providerProfileId:provider.id,label:'fixture',plaintextSecret:'fixture-key'});
   models.createModelProfile({providerProfileId:provider.id,name:'fixture',modelId:'fixture',capabilities:['chat'],isDefault:true});
   const app=createGatewayApp({db:f.db,masterKey:f.key,jwtSecret:randomBytes(32).toString('hex'),sessionServerIpcPath:'/private/tmp/forgebadger-channel-test.sock',
     sessionManager:new InMemorySessionManager({async listSessions(){return[];},async createSession(){},async killSession(){},async capturePane(){return '';}} as never),
     apiKeyStore:new InMemoryApiKeyStore({masterKey:f.key}),llmFetch:async()=>Response.json({choices:[{message:{content:'Native end-to-end fixture result'}}]}),
     nativeFeishuIO:{sdkFactory:{createWebSocketClient:(_config,callbacks,incomingHandlers)=>{handlers=incomingHandlers;return {start:async()=>{callbacks.onReady?.();},close:()=>{closed++;},getConnectionStatus:()=>({state:'connected',reconnectAttempts:0})};}},
-      validate:async()=>{},fetch:async url=>{
+      validate:async()=>{},fetch:async (url,init)=>{
         if(String(url).includes('/auth/'))return Response.json({code:0,tenant_access_token:'fixture-token'});
+        if(String(url).includes('/reactions')) {
+          if(init?.method==='GET')return Response.json({code:0,data:{items:[],has_more:false,page_token:''}});
+          return Response.json({code:0,data:{reaction_id:'composed-typing'}});
+        }
         sends++;return Response.json({code:0,data:{message_id:'om-composed'}});
       }}
   });
@@ -689,29 +730,44 @@ it('does not let a late receipt overwrite an expired claim',async()=>{
     assert.equal(f.db.prepare('SELECT status FROM channel_deliveries').get().status,'unknown');
   }finally{release?.();f.db.close();}
 });
-it('bounds encoded reply size and skips already projected history',async()=>{
+it('bounds Feishu durable reply size and skips already projected history',async()=>{
   const f=inboxFixture();
   try {
     const run=completedInput(f);
     new CopilotRunLedger(f.db,f.user.id).append(run.runId,{role:'assistant',kind:'text',content:'汉字"\\\n'.repeat(20_000)});
     let sent='';const worker=new NativeChannelDelivery(f.db,f.user.id,f.key,async input=>{sent=input.text;return {status:'delivered',messageId:'om'};});
-    await worker.runOnce(new AbortController().signal);assert.ok(Buffer.byteLength(JSON.stringify({text:sent}))<=12_000);assert.ok(sent.includes('截断'));
+    await worker.runOnce(new AbortController().signal);
+    assert.ok(Buffer.byteLength(sent,'utf8')<=66_000);assert.ok(Buffer.byteLength(sent,'utf8')>12_000);
+    assert.ok(sent.endsWith('内容过长，请在 Web Copilot 查看完整结果。'));
     for(let n=0;n<25;n++) {completedInput(f,`history-${n}`);await worker.runOnce(new AbortController().signal);}
     completedInput(f,'latest');await worker.runOnce(new AbortController().signal);
     assert.equal(f.db.prepare("SELECT count(*) n FROM channel_deliveries WHERE status='delivered'").get().n,27);
     assert.equal(new ChannelDeliveryRepository(f.db,f.other.id).claim(),undefined);
   }finally{f.db.close();}
 });
-it('upgrades populated native inbox to an empty native delivery ledger with tenant FK protection',()=>{
+it('upgrades populated native inbox through the grant removal, clears the route FK chain and keeps the delivery ledger tenant-scoped',()=>{
   const directory=mkdtempSync(join(tmpdir(),'fb-delivery-upgrade-'));const prior=join(directory,'prior');cpSync(migrationsFolder,prior,{recursive:true});
   const journalFile=join(prior,'meta/_journal.json');const journal=JSON.parse(readFileSync(journalFile,'utf8'));journal.entries=entriesBefore(journal.entries,'0080_native_channel_deliveries');writeFileSync(journalFile,JSON.stringify(journal));
   const f=fixture(':memory:',prior);
   try {
-    const identity=f.pair();f.service.createRoute({identityId:identity.id,grantId:f.grant.id});
-    const inbox=new NativeChannelInbox(f.db,f.user.id,f.key);const message=inbox.receive(f.peer,incoming('upgrade'));
-    const before=f.db.prepare('SELECT * FROM channel_messages').all();migrate(drizzle(f.db),{migrationsFolder});
-    assert.deepEqual(f.db.prepare('SELECT * FROM channel_messages').all(),before);
+    const identity=f.pair();
+    // Pre-0105 routes bound a grant column the new service layer no longer writes; replay the historical rows with raw SQL.
+    f.db.prepare("INSERT INTO copilot_grants(id,user_id,actor_user_id,name,status,revision,scope_json,expires_at,max_actions,max_concurrency,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run('historical-grant',f.user.id,f.user.id,'historical','active',1,'[]',Date.now()+600000,5,1,Date.now());
+    f.db.prepare("INSERT INTO copilot_conversations(id,user_id,title,status,created_at,updated_at) VALUES (?,?,'Channel Copilot','active',?,?)").run('historical-channel-conversation',f.user.id,Date.now(),Date.now());
+    f.db.prepare('INSERT INTO channel_routes(id,user_id,identity_id,grant_id,grant_revision,conversation_id,created_at) VALUES (?,?,?,?,?,?,?)').run('historical-channel-route',f.user.id,identity.id,'historical-grant',1,'historical-channel-conversation',Date.now());
+    f.db.prepare("INSERT INTO channel_messages(id,user_id,route_id,account_id,event_id,message_id,payload_encrypted,payload_digest,created_at) VALUES (?,?,?,?,?,?,?,?,?)").run('historical-channel-message',f.user.id,'historical-channel-route',f.account.id,'upgrade-event','upgrade-message','fixture','fixture',Date.now());
+    f.db.prepare('INSERT INTO channel_message_events(user_id,account_id,event_id,inbox_id) VALUES (?,?,?,?)').run(f.user.id,f.account.id,'upgrade-event','historical-channel-message');
+    f.db.prepare("INSERT INTO platform_action_intents(id,user_id,actor_user_id,grant_id,grant_revision,authority,command_id,input_json,digest,resources_json,policy_version,expires_at,idempotency_key,status,created_at) VALUES ('upgrade-intent',?,?,?,1,'delegated_grant','test','{}','digest','{}',1,?,'upgrade-step','approved',?)").run(f.user.id,f.user.id,'historical-grant',Date.now()+60000,Date.now());
+    migrate(drizzle(f.db),{migrationsFolder});
+    assert.equal(f.db.prepare('SELECT count(*) n FROM channel_routes').get().n,0);
+    assert.equal(f.db.prepare('SELECT count(*) n FROM channel_messages').get().n,0);
+    assert.equal(f.db.prepare('SELECT count(*) n FROM channel_message_events').get().n,0);
     assert.equal(f.db.prepare('SELECT count(*) n FROM channel_deliveries').get().n,0);
+    assert.equal(f.db.prepare("SELECT count(*) n FROM sqlite_master WHERE type='table' AND name IN ('copilot_grants','copilot_conversation_grants')").get().n,0);
+    assert.equal(f.db.prepare("SELECT count(*) n FROM platform_action_intents WHERE id='upgrade-intent'").get().n,1);
+    assert.equal(f.db.prepare("SELECT count(*) n FROM pragma_table_info('platform_action_intents') WHERE name IN ('grant_id','grant_revision')").get().n,0);
+    f.service.createRoute({identityId:identity.id,projectId:f.project.id});
+    const message=new NativeChannelInbox(f.db,f.user.id,f.key).receive(f.peer,incoming('post-upgrade'));
     assert.throws(()=>new ChannelDeliveryRepository(f.db,f.other.id).enqueue(message.id,'terminal','encrypted'));
     assert.deepEqual(f.db.prepare('PRAGMA foreign_key_check').all(),[]);
   }finally{f.db.close();rmSync(directory,{recursive:true,force:true});}
@@ -765,24 +821,10 @@ function entriesBefore<T extends {tag:string}>(entries:T[],tag:string):T[] {
   return entries.slice(0,index);
 }
 
-it('admits a perpetual grant and rejects the same route immediately after revocation',()=>{
+it('admits an active route bound to a project of the owner',()=>{
  const f=fixture();
  try {
-  const permanent=f.grants.create({name:'ongoing',scope:{projectIds:[f.project.id],capabilities:['project.metadata.update'],allowedRoots:[]},expiresAt:null,maxActions:null,maxConcurrency:1});
-  const identity=f.pair();const route=f.service.createRoute({identityId:identity.id,grantId:permanent.id});
+  const identity=f.pair();const route=f.service.createRoute({identityId:identity.id,projectId:f.project.id});
   assert.ok(f.service.admit(route.id,f.peer));
-  f.grants.revoke(permanent.id);assert.throws(()=>f.service.admit(route.id,f.peer));
  }finally{f.db.close();}
-});
-it('persists perpetual bounds across reopen without permitting another tenant to consume them',()=>{
- const directory=mkdtempSync(join(tmpdir(),'fb-permanent-grant-'));const file=join(directory,'db.sqlite');const f=fixture(file);
- try {
-  const grant=f.grants.create({name:'persistent',scope:{projectIds:[f.project.id],capabilities:[],allowedRoots:[]},expiresAt:null,maxActions:null,maxConcurrency:1});
-  f.db.close();const reopened=new Sqlite(file);
-  try {
-   const own=new CopilotGrantRepository(reopened,f.user.id);assert.equal(own.get(grant.id)?.expiresAt,null);assert.equal(own.get(grant.id)?.maxActions,null);
-   assert.equal(new CopilotGrantRepository(reopened,f.other.id).consume(grant.id,grant.revision),false);
-   assert.equal(own.consume(grant.id,grant.revision),true);own.revoke(grant.id);assert.equal(own.consume(grant.id,grant.revision),false);
-  }finally{reopened.close();}
- }finally{if(f.db.open)f.db.close();rmSync(directory,{recursive:true,force:true});}
 });

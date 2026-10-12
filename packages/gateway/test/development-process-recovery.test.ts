@@ -12,9 +12,11 @@ import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { DevelopmentTaskRepository } from '../src/db/repositories/development-task-repository.js';
 import { hashText } from '../src/services/development/workspace.js';
+import { reconcileDevelopmentTask } from '../src/services/development/reconciliation.js';
+import { sandboxCapability } from '../src/services/development/sandbox.js';
 import type { DevelopmentTaskRow, DevelopmentEvidence } from '../src/services/development/contracts.js';
 
-const unsupported = process.platform !== 'darwin';
+const unavailable = !sandboxCapability().available;
 const originalSource = 'module.exports=(a,b)=>a-b;';
 const passingCheck = "require('node:test').test('sum',()=>require('node:assert/strict').equal(require('./sum.cjs')(2,3),5));";
 const worker = fileURLToPath(new URL('./fixtures/development-process-worker.ts', import.meta.url));
@@ -33,7 +35,7 @@ function fixture(t: TestContext, check = passingCheck) {
   const project = new ProjectRepository(db, user.id).create({ name: 'process-fixture', path: projectRoot, aiTool: 'codex' });
   const plan = { projectId: project.id, goal: 'Fix approved sum', sourceFiles: ['sum.cjs', 'sum.test.cjs'], changes: [{ path: 'sum.cjs', beforeSha256: hashText(originalSource), content: 'module.exports=(a,b)=>a+b;' }], checks: [{ path: 'sum.test.cjs', sha256: hashText(check) }] };
   const config = path.join(dir, 'fixture.json');
-  fs.writeFileSync(config, JSON.stringify({ database, userId: user.id, plan }));
+  fs.writeFileSync(config, JSON.stringify({ database, userId: user.id, projectRoot, plan }));
   db.close();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return { dir, database, config, projectRoot, userId: user.id, projectId: project.id };
@@ -94,7 +96,7 @@ function scratchPid(dir: string): number | undefined {
   return undefined;
 }
 
-it('a queued task crosses real process exits and executes its approved check exactly once', { skip: unsupported }, async t => {
+it('a queued task crosses real process exits and executes its approved check exactly once', { skip: unavailable }, async t => {
   const f = fixture(t);
   const admitted = await run(t, f.config, 'submit');
   const queued = observe(f.database, f.userId, admitted.taskId!);
@@ -117,7 +119,7 @@ it('a queued task crosses real process exits and executes its approved check exa
   assert.deepEqual(restarted.events, []);
 });
 
-it('SIGKILL of a running Gateway kills its sandbox; expired lease recovery retains the host slot without replay', { skip: unsupported }, async t => {
+it('SIGKILL of a running Gateway kills its sandbox; expired lease recovery retains the host slot until trusted reconciliation without replay', { skip: unavailable }, async t => {
   const check = "require('node:fs').writeFileSync(process.env.TMPDIR+'/child.pid',String(process.pid));require('node:test').test('wait',async()=>{await new Promise(r=>setTimeout(r,50000))});";
   const f = fixture(t, check);
   const admitted = await run(t, f.config, 'submit');
@@ -166,6 +168,17 @@ it('SIGKILL of a running Gateway kills its sandbox; expired lease recovery retai
   assert.deepEqual(restarted.events, []);
   assert.equal(alive(childPid), false);
   assert.equal(fs.readFileSync(path.join(f.projectRoot, 'sum.cjs'), 'utf8'), originalSource);
+  const reconcileDb=new Database(f.database);
+  try {
+    const current=new DevelopmentTaskRepository(reconcileDb,f.userId).get(admitted.taskId!)!;
+    const identity=JSON.parse(current.execution_identity_json!);assert.equal(identity.phase,'ready');assert.ok(fs.existsSync(identity.evidencePath));
+    const released=reconcileDevelopmentTask(reconcileDb,f.userId,{taskId:current.id,projectId:f.projectId,expectedRevision:current.revision});
+    assert.equal(released.status,'failed');assert.equal(JSON.parse(released.reconciliation_json!).outcome,'unknown');
+    assert.equal(new DevelopmentTaskRepository(reconcileDb,f.userId).get(queued.taskId!)!.status,'queued');
+    const claim=new DevelopmentTaskRepository(reconcileDb,f.userId).claim('next-after-reconcile');assert.equal(claim?.id,queued.taskId);
+    new DevelopmentTaskRepository(reconcileDb,f.userId).finish(claim!.id,claim!.owner!,'cancelled');
+    assert.equal(new DevelopmentTaskRepository(reconcileDb,f.userId).get(current.id)!.status,'failed','unknown original execution is never replayed');
+  } finally {reconcileDb.close();}
 });
 
 it('failed outbox delivery retries across process restart with the same event identities', async t => {

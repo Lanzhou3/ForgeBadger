@@ -617,7 +617,7 @@ describe("security hardening", () => {
     // The hook URL is the shared session-hooks endpoint (no session id or
     // token baked in); the live session identity + attach token travel in the
     // headers, expanded from the worker's environment at request time.
-    assert.match(permissionHook.url, /\/api\/v1\/session-hooks\/claude-notification/);
+    assert.match(permissionHook.url, /\/api\/v1\/session-hooks\/cli-notification/);
     assert.doesNotMatch(permissionHook.url, /session-token-value|attach-token-value/);
     assert.equal(permissionHook.headers["x-forgebadger-session-id"], "$FORGEBADGER_SESSION_ID");
     assert.equal(permissionHook.headers["x-forgebadger-session-token"], "$FORGEBADGER_ATTACH_TOKEN");

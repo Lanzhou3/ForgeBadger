@@ -125,6 +125,11 @@ export class FeishuChannelRepository {
   upsertAccount(input: { appId: string; appSecret?: string; enabled: boolean }): FeishuAccountSummary {
     const existing = this.getAccountRow();
     if (!existing && !input.appSecret) throw new Error("FEISHU_APP_SECRET_REQUIRED");
+    const sameSecret = existing && (!input.appSecret || input.appSecret === decryptSecret(
+      JSON.parse(existing.app_secret_encrypted) as EncryptedSecret, { key: this.masterKey }));
+    if (existing && sameSecret && existing.enabled === Number(input.enabled) && existing.app_id === input.appId.trim()) {
+      return this.getAccount(existing.id) as FeishuAccountSummary;
+    }
     const encrypted = input.appSecret
       ? JSON.stringify(encryptSecret(input.appSecret, { key: this.masterKey }))
       : existing!.app_secret_encrypted;

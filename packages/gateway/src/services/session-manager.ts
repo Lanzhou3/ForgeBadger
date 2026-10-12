@@ -3,22 +3,29 @@ import {SessionRuntimeConfirmationRepository} from '../db/repositories/session-r
 import type {RuntimeGeneration} from './session-server/confirmed-stop.js';
 import { assertVerificationProcessStopped } from './collaboration/legacy-verification-recovery.js';
 import { randomUUID } from "node:crypto";
+import { TaskDispatchEvidenceRepository } from '../db/repositories/task-dispatch-evidence-repository.js';
 import { basename } from "node:path";
+import { redactSensitiveContent } from "../lib/redaction.js";
+import { isTerminalWheelInput } from '../lib/terminal-wheel-input.js';
 
 import type { LaunchPlan } from "../adapters/claude.js";
 import { isAdapterId, type AdapterId } from "./adapter-discovery.js";
 import type { TerminalBackendClient } from "./terminal-backend.js";
+import type { SessionInfo } from "./session-server/ipc-protocol.js";
 import type { ForgeBadgerEventBus } from "./event-bus.js";
 import { SessionOutputRing } from "./session-output-buffer.js";
-import { SessionWriterLeases } from "./session-writer-leases.js";
+import { SessionWriterLeases, type WriterLease } from "./session-writer-leases.js";
 import type { Database } from "../db/types.js";
 import {
   assertSafeProgrammaticMessage,
   composerContainsStagedTask,
   isProgrammaticComposerReady,
+  isProgrammaticNativeApprovalRequired,
+  PROGRAMMATIC_SUBMIT_NATIVE_APPROVAL_REQUIRED,
   PROGRAMMATIC_SUBMIT_ADAPTER_MISMATCH,
   PROGRAMMATIC_SUBMIT_INDETERMINATE,
   PROGRAMMATIC_SUBMIT_NOT_READY,
+  ProgrammaticSubmitNoEffectError,
   PROGRAMMATIC_SUBMIT_STAGING_FAILED,
   programmaticDeliveryNeedle
 } from "./programmatic-terminal-submit.js";
@@ -98,6 +105,13 @@ export interface SessionManagerOptions {
   sessionPrefix?: string;
   runtimeInputAuthorizer?: (session: Readonly<GateASession>) => void;
   programmaticSubmitSettleMs?: Partial<Record<AdapterId, number>>;
+  programmaticReadyTimeoutMs?: number;
+  /** How long the post-staging pane poll keeps looking for the staged input
+   *  before declaring the delivery indeterminate (default 2500 ms). The pty
+   *  echo of a bracketed paste — especially under Windows ConPTY — can lag
+   *  the write by well over the settle window, and a single snapshot then
+   *  misclassifies the staged paste as "not delivered" (Enter never sent). */
+  programmaticStagedVerifyTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
   /**
    * One-shot probe consumed once per status-correction scan: returns true
@@ -111,6 +125,8 @@ export interface SessionManagerOptions {
 export interface ProgrammaticTaskInput {
   adapter: AdapterId;
   message: string;
+  authorize?: (() => void) | undefined;
+  beforeStage?: (() => void) | undefined;
 }
 
 export interface ProgrammaticTaskStageReceipt {
@@ -124,7 +140,8 @@ const DEFAULT_PROGRAMMATIC_SETTLE_MS: Readonly<Record<AdapterId, number>> = Obje
   opencode: 150,
   codex: 350,
   kimi: 150,
-  pi: 150
+  pi: 150,
+  mcode: 150
 });
 
 /**
@@ -145,15 +162,28 @@ class EmptyRecoveryStore implements SessionRecoveryStore {
   async removeSession(_id: string, _userId: string): Promise<void> {}
 }
 
+/** Handle for a workspace writer lease as seen by programmatic writers. */
+export interface WriterLeaseHandle {
+  userId: string;
+  sessionId: string;
+  workspace: string;
+  token: string;
+  fence: number;
+  expiresAt: number;
+}
+
 export class InMemorySessionManager {
+  private readonly stoppingSessions = new Set<string>();
   private readonly db: Database | undefined;
   private readonly writerLeases: SessionWriterLeases;
   private readonly writerGenerations = new Map<string, number>();
   private readonly sessions = new Map<string, GateASession>();
   private readonly sessionOutputs = new Map<string, SessionOutputRing>();
-  private readonly sessionPrefix: string;
+  private sessionPrefix: string;
   private readonly runtimeInputAuthorizer: ((session: Readonly<GateASession>) => void) | undefined;
   private readonly programmaticSubmitSettleMs: Readonly<Record<AdapterId, number>>;
+  private readonly programmaticReadyTimeoutMs: number;
+  private readonly programmaticStagedVerifyTimeoutMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly detectBackendRestart: (() => boolean) | undefined;
   private readonly sessionLocks = new Map<string, Promise<unknown>>();
@@ -173,8 +203,19 @@ export class InMemorySessionManager {
       ...DEFAULT_PROGRAMMATIC_SETTLE_MS,
       ...options.programmaticSubmitSettleMs
     };
+    this.programmaticReadyTimeoutMs = Math.min(15_000, Math.max(0, options.programmaticReadyTimeoutMs ?? 10_000));
+    this.programmaticStagedVerifyTimeoutMs = Math.min(15_000, Math.max(0, options.programmaticStagedVerifyTimeoutMs ?? 2_500));
     this.sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     this.detectBackendRestart = options.detectBackendRestart;
+  }
+
+  /**
+   * Update the runtime session name prefix (runtime settings page).
+   * Affects newly created sessions only; existing sessions keep the name
+   * they were started with.
+   */
+  setSessionPrefix(prefix: string): void {
+    this.sessionPrefix = normalizeSessionPrefix(prefix);
   }
 
   /**
@@ -235,22 +276,22 @@ export class InMemorySessionManager {
        assertManagedSessionAccess(this.db,input.userId,input.sessionId,input.launchPlan.cwd);
       }
       if(this.db&&authority){generation={runtimeName:runtimeSessionName,launchNonce:randomUUID(),daemon:authority};new SessionRuntimeConfirmationRepository(this.db,input.userId).begin(input.sessionId,generation);}
+      const env: Record<string, string> = {
+        ...input.launchPlan.env,
+        FORGEBADGER_SESSION_ID: session.id,
+        FORGEBADGER_USER_ID: input.userId,
+        FORGEBADGER_ATTACH_TOKEN: session.attachToken
+      };
+      // Codex disables colors even for NO_COLOR="". Omit the variable entirely;
+      // the Session Server also excludes the host value via buildSanitizedEnv.
+      delete env.NO_COLOR;
       await this.backend.createSession({
         name: runtimeSessionName,
         ...(generation?{launchNonce:generation.launchNonce,expectedDaemon:generation.daemon}:{}),
         cwd: input.launchPlan.cwd,
         command: input.launchPlan.command,
         args: input.launchPlan.args,
-        env: {
-          ...input.launchPlan.env,
-          FORGEBADGER_SESSION_ID: session.id,
-          FORGEBADGER_USER_ID: input.userId,
-          FORGEBADGER_ATTACH_TOKEN: session.attachToken,
-          // The Web terminal renders ANSI colors, so a NO_COLOR=1 leaked from
-          // the host shell must be overridden to empty — CLI TUIs (e.g.
-          // Claude Code) then render in color instead of monochrome.
-          NO_COLOR: ""
-        }
+        env
       });
       try { if(this.db) assertManagedSessionAccess(this.db,input.userId,input.sessionId,input.launchPlan.cwd); }
       catch(error) { if(generation)await this.confirmSessionExecutionStopped(input.userId,input.sessionId,true);else await this.backend.killSession(runtimeSessionName);throw error; }
@@ -370,8 +411,19 @@ export class InMemorySessionManager {
     return { available: true };
   }
 
-  async stopSession(id: string, runtimeSessionName?: string, userId?: string): Promise<GateASession> {
+  async stopSession(id: string, runtimeSessionName?: string, userId?: string, writerLease?: WriterLeaseHandle): Promise<GateASession> {
     const session = this.sessions.get(id);
+    if (writerLease) {
+      this.assertWriterLeaseCurrent(writerLease);
+      if (writerLease.sessionId !== id || writerLease.userId !== userId
+        || session && session.runtimeSessionName !== runtimeSessionName) throw new Error('SESSION_WRITER_FENCE_STALE');
+    }
+    if (writerLease && this.db && userId) {
+      const record = new SessionRuntimeConfirmationRepository(this.db, userId).get(id);
+      if (record && record.runtimeName !== runtimeSessionName) throw new Error('SESSION_WRITER_FENCE_STALE');
+    }
+    if (writerLease) this.stoppingSessions.add(id);
+    try {
     const owner=userId??session?.userId;
     if(this.db&&owner&&new SessionRuntimeConfirmationRepository(this.db,owner).get(id)){
       if(!await this.confirmSessionExecutionStopped(owner,id,true))throw new Error('SESSION_RUNTIME_STOP_UNCONFIRMED');
@@ -401,11 +453,76 @@ export class InMemorySessionManager {
       return stopped;
     }
 
-    await this.backend.killSession(runtimeSessionName as string);
+    // A runtime the daemon no longer hosts (e.g. the daemon restarted and the
+    // pending confirmation was revoked when the session was marked lost) has
+    // nothing left to kill — skip instead of failing the delete with the
+    // daemon's "Session not found".
+    if (await this.backend.hasSession(runtimeSessionName as string)) {
+      if (writerLease) this.assertWriterLeaseCurrent(writerLease);
+      await this.backend.killSession(runtimeSessionName as string);
+    }
     if (userId) {
       await this.recoveryStore.removeSession(id, userId);
     }
     return fallbackStoppedSession(id, runtimeSessionName as string, userId);
+    } finally { if (writerLease) this.stoppingSessions.delete(id); }
+  }
+
+  /**
+   * Operator-forced stop for a session whose leader process has exited but
+   * whose confirmed-stop receipt cannot be obtained (a descendant still holds
+   * the process group, or the daemon that would sign the receipt is gone).
+   * Fails closed on purpose: a transiently unreachable backend or a runtime
+   * that may still be alive rejects the force — never turn a probe failure
+   * into a bypass.
+   */
+  async forceStopSession(id: string, runtimeSessionName: string | undefined, userId: string): Promise<GateASession> {
+    const session = this.sessions.get(id);
+    const runtimeName = session?.runtimeSessionName ?? runtimeSessionName ?? '';
+    if (!this.backend.listSessionInfos) {
+      throw new Error('SESSION_FORCE_DELETE_NOT_ALLOWED');
+    }
+    let infos: SessionInfo[];
+    try {
+      infos = await this.backend.listSessionInfos();
+    } catch (error) {
+      console.error(`[session-manager] force stop gate probe failed for ${id}`, error);
+      throw new Error('SESSION_FORCE_DELETE_NOT_ALLOWED');
+    }
+    const info = infos.find((entry) => entry.sessionId === runtimeName);
+    if (info?.status === 'running') {
+      throw new Error('SESSION_FORCE_DELETE_NOT_ALLOWED');
+    }
+    this.revokePendingRuntimeConfirmation(userId, id);
+    if (info) {
+      // The leader exited but descendants linger; the daemon refuses to
+      // signal a group whose leader was reaped, so this kill may fail — the
+      // orphaned processes are left to the operator.
+      try {
+        await this.backend.killSession(runtimeName);
+      } catch (error) {
+        console.error(`[session-manager] force stop kill failed for ${id}`, error);
+      }
+    }
+    if (session) {
+      this.invalidateWriter(session);
+      const stopped = this.updateSession(id, { status: 'exited' });
+      this.sessions.delete(id);
+      await this.recoveryStore.removeSession(id, session.userId);
+      return stopped;
+    }
+    await this.recoveryStore.removeSession(id, userId);
+    return fallbackStoppedSession(id, runtimeName, userId);
+  }
+
+  /** Revokes a pending runtime confirmation; never blocks the caller. */
+  private revokePendingRuntimeConfirmation(userId: string, sessionId: string): void {
+    if (!this.db) return;
+    try {
+      new SessionRuntimeConfirmationRepository(this.db, userId).revoke(sessionId);
+    } catch (error) {
+      console.error(`[session-manager] runtime confirmation revoke failed for ${sessionId}`, error);
+    }
   }
 
   /**
@@ -429,6 +546,9 @@ export class InMemorySessionManager {
     if(!this.db)return false;
     const repository=new SessionRuntimeConfirmationRepository(this.db,userId),record=repository.get(sessionId);
     if(!record)return false;
+    // Revoked records were released by the lost-session reconciliation or an
+    // operator force delete after the runtime was verified gone/leader-dead.
+    if(record.status==='revoked')return true;
     if(record.status==='stopped'&&record.receipt)return true;
     const receipt=stop?await this.backend.confirmedStop?.(record):await this.backend.confirmedStopStatus?.(record);
     if(!receipt)return false;
@@ -496,6 +616,10 @@ export class InMemorySessionManager {
         } catch (error) {
           console.error(`[session-manager] lost DB sync failed for ${id}`, error);
         }
+        // The daemon instance that would sign the stop receipt is gone, so a
+        // pending confirmation can never be confirmed; revoke it or the
+        // session stays undeletable forever.
+        this.revokePendingRuntimeConfirmation(current.userId, id);
         this.sessions.delete(id);
         return lost;
       }
@@ -558,6 +682,55 @@ export class InMemorySessionManager {
     return this.backend.capturePane(session.runtimeSessionName);
   }
 
+  /** Acquire a workspace writer lease (Copilot shell execution path). */
+  acquireWriterLease(scope: { userId: string; sessionId: string; workspace: string }): WriterLeaseHandle {
+    return this.writerLeases.acquire(scope) as unknown as WriterLeaseHandle;
+  }
+
+  /** Release a previously acquired workspace writer lease. */
+  releaseWriterLease(lease: WriterLeaseHandle): void {
+    this.writerLeases.release(lease as unknown as WriterLease);
+  }
+
+  /**
+   * Extend a still-held writer lease by one TTL. Returns the renewed handle;
+   * keep using the returned handle for assert/release afterwards.
+   */
+  renewWriterLease(lease: WriterLeaseHandle): WriterLeaseHandle {
+    return this.writerLeases.renew(lease as unknown as WriterLease) as unknown as WriterLeaseHandle;
+  }
+
+  /**
+   * Check that a workspace writer lease is still held. Throws
+   * SESSION_WRITER_FENCE_STALE when the owner took over (or the lease
+   * expired), which programmatic writers must treat as "the human wins".
+   */
+  assertWriterLeaseCurrent(lease: WriterLeaseHandle): void {
+    this.writerLeases.assertCurrent(lease as unknown as WriterLease);
+  }
+
+  /** Stage programmatic (bracketed-paste) input for a session. */
+  async stageProgrammaticInput(id: string, data: string): Promise<void> {
+    const session = this.requireSession(id);
+    if (!this.backend.stageProgrammaticInput) throw new Error("terminal backend programmatic input is not supported");
+    await this.backend.stageProgrammaticInput(session.runtimeSessionName, data);
+  }
+
+  /** Stage one shell line without bracketed paste (bash 3/readline compatibility). */
+  async stageShellCommand(id: string, data: string): Promise<void> {
+    if (/[\r\n\x00-\x1f\x7f]/.test(data)) throw new Error("SHELL_INPUT_MUST_BE_SINGLE_LINE");
+    const session = this.requireSession(id);
+    if (!this.backend.sendInput) throw new Error("terminal backend shell input is not supported");
+    await this.backend.sendInput(session.runtimeSessionName, data);
+  }
+
+  /** Press Enter on a session (submit staged input). */
+  async pressEnter(id: string): Promise<void> {
+    const session = this.requireSession(id);
+    if (!this.backend.pressEnter) throw new Error("terminal backend press-enter is not supported");
+    await this.backend.pressEnter(session.runtimeSessionName);
+  }
+
   async resizeSession(id: string, cols: number, rows: number): Promise<void> {
     const session = this.requireSession(id);
     await this.backend.resizeWindow?.(session.runtimeSessionName, cols, rows);
@@ -570,6 +743,7 @@ export class InMemorySessionManager {
       throw new Error("terminal backend input is not supported");
     }
     this.assertRuntimeInputAuthorized(session);
+    this.noteManualInput(session.userId, id);
     await this.backend.sendInput(session.runtimeSessionName, data);
   }
 
@@ -579,8 +753,17 @@ export class InMemorySessionManager {
   ): Promise<ProgrammaticTaskStageReceipt> {
     assertSafeProgrammaticMessage(input.message);
     const generation = this.writerGenerations.get(id) ?? 0;
+    let effectsStarted = false;
     return this.runExclusive(id, async () => {
-      const session = this.requireSession(id);
+      const session = this.sessions.get(id);
+      if (!session) {
+        // The in-memory session is gone — most commonly because the Session
+        // Server daemon restarted and the correction scan marked it `lost`, or
+        // the session was never started in this process. Surface a semantic
+        // error so Copilot can distinguish "session is gone, restart it" from
+        // a generic runtime fault.
+        throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
+      }
       if ((this.writerGenerations.get(id) ?? 0) !== generation) throw new Error("SESSION_WRITER_FENCE_STALE");
       const launchAdapter = adapterFromLaunchCommand(session.launchPlan.command);
       if (launchAdapter !== input.adapter) {
@@ -595,9 +778,33 @@ export class InMemorySessionManager {
 
       const lease = this.writerLeases.acquire({ userId: session.userId, sessionId: id, workspace: session.launchPlan.cwd });
       try {
-        const before = await this.backend.inspectPane(session.runtimeSessionName);
-        if (before.dead || !isProgrammaticComposerReady(input.adapter, before.content)) {
-          throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
+        const deadline = Date.now() + this.programmaticReadyTimeoutMs;
+        const maxPolls = Math.ceil(this.programmaticReadyTimeoutMs / 250);
+        // The last snapshot that proved an empty composer. Kept for the
+        // staged-input verification: under the writer lease no other writer
+        // can exist, so any non-empty composer after staging is our paste.
+        let readyPane = "";
+        for (let poll = 0; ; poll++) {
+          input.authorize?.();
+          this.assertRuntimeInputAuthorized(session);
+          this.writerLeases.assertCurrent(lease);
+          const before = await this.backend.inspectPane(session.runtimeSessionName);
+          if (before.dead) throw new Error(PROGRAMMATIC_SUBMIT_NOT_READY);
+          if (isProgrammaticNativeApprovalRequired(input.adapter, before.content))
+            throw new Error(PROGRAMMATIC_SUBMIT_NATIVE_APPROVAL_REQUIRED);
+          if (isProgrammaticComposerReady(input.adapter, before.content)) {
+            readyPane = before.content;
+            break;
+          }
+          if (poll >= maxPolls || Date.now() >= deadline) {
+            // The composer never reached a recognized ready state. The ready
+            // classifiers match adapter-specific UI text that can drift across
+            // CLI versions; surface the adapter and a short pane tail so the
+            // failure is diagnosable instead of a bare NOT_READY.
+            const tail = before.content.slice(-200).replace(/\s+/g, " ").trim();
+            throw new Error(`${PROGRAMMATIC_SUBMIT_NOT_READY}: ${input.adapter} composer did not become ready; pane tail: ${tail}`);
+          }
+          await this.sleep(250);
         }
 
         const needle = programmaticDeliveryNeedle(input.message);
@@ -609,47 +816,119 @@ export class InMemorySessionManager {
         // the first terminal write, so pre-write rejection remains retry-safe.
         this.assertRuntimeInputAuthorized(session);
         this.writerLeases.assertCurrent(lease);
+        input.authorize?.();
+        input.beforeStage?.();
+        input.authorize?.();
         // Once staging starts, the backend may already have received some or
         // all bytes. Any later failure is therefore indeterminate and must
         // never be exposed as a safe-to-retry pre-write rejection.
         try {
+          effectsStarted = true;
           await this.backend.stageProgrammaticInput(session.runtimeSessionName, input.message);
           await this.sleep(this.programmaticSubmitSettleMs[input.adapter]);
 
-          const staged = await this.backend.inspectPane(session.runtimeSessionName);
-          if (
-            staged.dead
-            || !composerContainsStagedTask(input.adapter, staged.content, input.message, needle)
-          ) {
-            throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
+          // The staged paste's echo can lag the pty write by well over the
+          // settle window — Windows ConPTY output latency under load routinely
+          // exceeds it, and inspectPane's whenIdle() only proves the screen
+          // parsed the bytes it has already received, not that the pty has
+          // delivered the echo. Poll for the staged content instead of
+          // sampling once: a single stale snapshot misclassified the paste as
+          // undelivered, so Enter was never pressed and the instruction was
+          // left sitting in the CLI's input box.
+          let staged: Awaited<ReturnType<NonNullable<typeof this.backend.inspectPane>>> | undefined;
+          let stagedTail = "";
+          const stagedDeadline = Date.now() + this.programmaticStagedVerifyTimeoutMs;
+          for (;;) {
+            const snapshot = await this.backend.inspectPane(session.runtimeSessionName);
+            stagedTail = redactSensitiveContent(snapshot.content.slice(-200).replace(/\s+/g, " ").trim());
+            if (!snapshot.dead
+              && composerContainsStagedTask(input.adapter, snapshot.content, input.message, needle, readyPane)) {
+              staged = snapshot;
+              break;
+            }
+            if (Date.now() >= stagedDeadline) {
+              throw new Error(
+                `${PROGRAMMATIC_SUBMIT_INDETERMINATE}: staged input did not appear in the ${input.adapter} composer within ${this.programmaticStagedVerifyTimeoutMs} ms; pane tail: ${stagedTail}`
+              );
+            }
+            await this.sleep(200);
           }
 
           this.assertRuntimeInputAuthorized(session);
           this.writerLeases.assertCurrent(lease);
+          input.authorize?.();
+          // The bracketed-paste end marker (\x1b[201~) and the Enter key (\r)
+          // are two separate pty.write calls on the daemon side. node-pty's
+          // write is async (queued onto the stdin pipe), and inspectPane's
+          // whenIdle() only proves the *screen* has rendered the staged input —
+          // it does not prove the pty's write buffer has fully flushed the
+          // paste-end marker. If Enter arrives in the same pipe flush as the
+          // trailing paste bytes, some CLI editors (notably Codex's Rust TUI)
+          // may swallow the \r as part of the paste payload instead of
+          // treating it as a submit keystroke. A short settle here lets the
+          // paste-end marker drain through the pty before Enter is written.
+          await this.sleep(this.programmaticSubmitSettleMs[input.adapter]);
           await this.backend.pressEnter(session.runtimeSessionName);
           return { adapter: input.adapter, needle, stagedPane: staged.content };
-        } catch {
-          throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE);
+        } catch (error) {
+          // Keep the surfaced contract exact (consumers match the bare code)
+          // while chaining the detailed cause for diagnostics.
+          throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE, { cause: error });
         }
       } finally {
         this.writerLeases.release(lease);
       }
+    }).catch((error: unknown) => {
+      if (effectsStarted) throw new Error(PROGRAMMATIC_SUBMIT_INDETERMINATE, { cause: error });
+      throw new ProgrammaticSubmitNoEffectError(error);
     });
   }
 
+  async captureScreen(userId: string, id: string): Promise<{ output: string; live: boolean }> {
+    const session = this.requireOwnedSession(userId, id);
+    if (this.db) assertManagedSessionAccess(this.db, userId, id, session.launchPlan.cwd);
+    if (this.backend.inspectPane) {
+      const pane = await this.backend.inspectPane(session.runtimeSessionName);
+      return { output: pane.content, live: !pane.dead };
+    }
+    return { output: await this.captureHistory(id), live: await this.hasLiveTerminal(id) };
+  }
+
   assertManualInputAllowed(userId: string, id: string): void {
+    if (this.stoppingSessions.has(id)) throw new Error('SESSION_STOP_IN_PROGRESS');
     const session = this.requireOwnedSession(userId, id);
     if(this.db) assertManagedSessionAccess(this.db,userId,id,session.launchPlan.cwd);
     this.writerLeases.assertManualInputAllowed({ userId, sessionId: id, workspace: session.launchPlan.cwd });
   }
 
+  /** Viewer scroll keeps task evidence and writer ownership intact. */
+  assertTerminalInputAllowed(userId: string, id: string, data: string): void {
+    if (!isTerminalWheelInput(data)) {
+      this.assertManualInputAllowed(userId, id);
+      this.noteManualInput(userId, id);
+      return;
+    }
+    if (this.stoppingSessions.has(id)) throw new Error('SESSION_STOP_IN_PROGRESS');
+    const session = this.requireOwnedSession(userId, id);
+    if (this.db) assertManagedSessionAccess(this.db, userId, id, session.launchPlan.cwd);
+  }
+
   takeoverSession(userId: string, id: string): void {
+    if (this.stoppingSessions.has(id)) throw new Error('SESSION_STOP_IN_PROGRESS');
     const session = this.requireOwnedSession(userId, id);
     this.writerLeases.takeover({ userId, sessionId: id, workspace: session.launchPlan.cwd });
     this.invalidateWriter(session);
+    this.noteManualInput(userId, id);
+  }
+
+  /** Called immediately before actual manual input; hooks after it are no longer task-specific evidence. */
+  noteManualInput(userId: string, id: string): void {
+    this.requireOwnedSession(userId, id);
+    if (this.db) new TaskDispatchEvidenceRepository(this.db, userId).markManualIntervention(id);
   }
 
   cancelProgrammaticInput(userId: string, id: string): void {
+    if (this.stoppingSessions.has(id)) throw new Error('SESSION_STOP_IN_PROGRESS');
     this.invalidateWriter(this.requireOwnedSession(userId, id));
   }
 
@@ -680,6 +959,10 @@ export class InMemorySessionManager {
     for (const stored of indexed) {
       if (!liveNames.has(stored.runtimeSessionName)) {
         await this.recoveryStore.markSessionLost?.(stored.id, stored.userId);
+        // The runtime is verifiably absent from the daemon; a pending
+        // confirmation would block deletion forever if its daemon instance is
+        // gone, so revoke it.
+        this.revokePendingRuntimeConfirmation(stored.userId, stored.id);
       }
     }
 

@@ -83,8 +83,8 @@ it("sends reconciliation expected HEAD and stable request identity", async () =>
 it("refuses credential transport through remote HTTP even if the other endpoint is secure", () => {
   expect(
     secureCredentialTransport(
-      "http://127.0.0.1:48731",
-      "http://localhost:48732",
+      "http://127.0.0.1:18332",
+      "http://localhost:18333",
     ),
   ).toBe(true);
   expect(

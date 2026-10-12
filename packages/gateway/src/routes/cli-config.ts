@@ -32,6 +32,7 @@ import { gatewayLoopbackUrl } from "../services/claude-route/gateway-url.js";
 import { cliConfigTargetPath, hashTargetLocator } from "../services/cli-config-target.js";
 import { acquireModelBindingTargetLock, ModelBindingTargetLockError } from "../services/model-binding-target-lock.js";
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
+import { redactSensitiveContent } from "../lib/redaction.js";
 
 const providerBodySchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
@@ -490,7 +491,8 @@ function emitApplyProviderNotification(
   input: ApplyProviderNotificationInput
 ): void {
   if (!eventBus) return;
-  const target = input.providerName ? `${input.providerName} -> ${input.adapter}` : input.adapter;
+  const providerName = input.providerName ? redactSensitiveContent(input.providerName) : undefined;
+  const target = providerName ? `${providerName} -> ${input.adapter}` : input.adapter;
   eventBus.emitEvent({
     type: "app_action_notification",
     userId: input.userId,
@@ -499,10 +501,10 @@ function emitApplyProviderNotification(
     titleKey: input.status === "success"
       ? "notifications.applyProviderSucceeded"
       : "notifications.applyProviderFailed",
-    message: `${input.detail} (${target})`,
+    message: redactSensitiveContent(`${input.detail} (${target})`),
     adapter: input.adapter,
     providerId: input.providerProfileId,
-    ...(input.providerName ? { providerName: input.providerName } : {})
+    ...(providerName ? { providerName } : {})
   });
 }
 
@@ -536,7 +538,8 @@ function readClaudeRouteState(db: Database, masterKey: string, userId: string): 
 function applyErrorStatus(error: CliConfigApplyError): number {
   if (error.code.endsWith("_NOT_FOUND")) return 404;
   if (error.code === "CLI_CONFIG_APPLY_ROUTE_REQUIRED"
-    || error.code === "CLI_CONFIG_APPLY_ROUTE_DISABLED") return 409;
+    || error.code === "CLI_CONFIG_APPLY_ROUTE_DISABLED"
+    || error.code === "CLI_CONFIG_APPLY_CODEX_WIRE_API_UNSUPPORTED") return 409;
   if (error.code === "CLI_CONFIG_APPLY_FAILED"
     || error.code === "CLI_CONFIG_APPLY_VERIFY_FAILED"
     || error.code === "CLI_CONFIG_ROLLBACK_FAILED") return 500;

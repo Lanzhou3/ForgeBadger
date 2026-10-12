@@ -1,3 +1,4 @@
+import { adapterIds } from "../lib/adapter-ids.js";
 import { Router } from "express";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -6,10 +7,16 @@ import { z } from "zod";
 import { projects, sessions } from "../db/schema.js";
 import type { Database } from "../db/types.js";
 import type { Session } from "../db/repositories/session-repository.js";
+import { SessionRepository } from "../db/repositories/session-repository.js";
+import { nativePromptIdentity, notificationPromptSummary, SessionNotificationPromptRepository } from '../db/repositories/session-notification-prompt-repository.js';
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import { recordActivity } from "../services/activity-events.js";
+import { defaultNotificationDeduper, type NotificationDeduper } from "../services/notification-dedupe.js";
+import { shouldNotifyCliHook } from '../services/cli-notification-policy.js';
+import { redactAgentText } from '../services/agent/redaction.js';
+import { observeCliHook } from '../services/notifications/observe-cli-hook.js';
 
-const claudeHookEventSchema = z.object({
+const cliHookEventSchema = z.object({
   hook_event_name: z.string().optional(),
   notification_type: z.string().optional(),
   message: z.string().optional(),
@@ -17,22 +24,26 @@ const claudeHookEventSchema = z.object({
   body: z.string().optional(),
   title: z.string().optional(),
   tool_name: z.string().optional(),
-  adapter: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional(),
+  adapter: z.enum(adapterIds).optional(),
   reason: z.string().optional(),
-  error: z.string().optional()
+  error: z.string().optional(),
+  prompt: z.string().optional(),
+  agent_id: z.unknown().optional(),
+  session_id: z.unknown().optional(),
+  turn_id: z.unknown().optional()
 }).passthrough();
 
-const wrappedClaudeNotificationSchema = z.object({
+const wrappedCliNotificationSchema = z.object({
   sessionId: z.string().min(1),
-  event: claudeHookEventSchema
+  event: cliHookEventSchema
 });
 
-interface ParsedClaudeHook {
+interface ParsedCliHook {
   sessionId: string;
-  event: z.infer<typeof claudeHookEventSchema>;
+  event: z.infer<typeof cliHookEventSchema>;
 }
 
-export interface ClaudeNotificationHookResult {
+export interface SessionNotificationHookResult {
   status: number;
   body: {
     code: 0 | 1;
@@ -47,76 +58,69 @@ export function createSessionHookRoutes(
 ): Router {
   const router = Router();
 
-  router.post("/claude-notification/:sessionId", (req, res) => {
-    traceClaudeNotificationHook("received", {
-      route: "/claude-notification/:sessionId",
-      sessionIdFromPath: req.params.sessionId,
-      sessionIdHeaderPresent: Boolean(sessionHookHeader(req, "session-id")),
-      sessionTokenPresent: Boolean(sessionHookHeader(req, "session-token")),
-      bodyKeys: getBodyKeys(req.body)
+  const registerCliNotificationRoute = (route: string, paramKey: string | undefined) => {
+    router.post(route, (req, res) => {
+      const sessionIdFromPath = paramKey ? pathSessionId(req, paramKey) : undefined;
+      traceSessionNotificationHook("received", {
+        route,
+        sessionIdFromPath,
+        sessionIdHeaderPresent: Boolean(sessionHookHeader(req, "session-id")),
+        sessionTokenPresent: Boolean(sessionHookHeader(req, "session-token")),
+        bodyKeys: getBodyKeys(req.body)
+      });
+      const result = handleSessionNotificationHook(
+        db,
+        eventBus,
+        req.body ?? {},
+        sessionHookHeader(req, "session-token"),
+        // The x-forgebadger-session-id header reflects the worker's live
+        // environment and is authoritative; the path is a legacy fallback so a
+        // stale session-specific URL cannot outvote the correct session identity.
+        sessionHookHeader(req, "session-id") || sessionIdFromPath
+      );
+      traceSessionNotificationHook("result", {
+        route,
+        status: result.status,
+        code: result.body.code,
+        accepted: result.body.data?.accepted ?? false,
+        message: result.body.message
+      });
+      res.status(result.status).json(result.body);
     });
-    const result = handleClaudeNotificationHook(
-      db,
-      eventBus,
-      req.body ?? {},
-      sessionHookHeader(req, "session-token"),
-      // The x-forgebadger-session-id header reflects the worker's live
-      // environment and is authoritative; the path is a legacy fallback so a
-      // stale session-specific URL cannot outvote the correct session identity.
-      sessionHookHeader(req, "session-id") || req.params.sessionId
-    );
-    traceClaudeNotificationHook("result", {
-      route: "/claude-notification/:sessionId",
-      status: result.status,
-      code: result.body.code,
-      accepted: result.body.data?.accepted ?? false,
-      message: result.body.message
-    });
-    res.status(result.status).json(result.body);
-  });
+  };
 
-  router.post("/claude-notification", (req, res) => {
-    traceClaudeNotificationHook("received", {
-      route: "/claude-notification",
-      sessionIdHeaderPresent: Boolean(sessionHookHeader(req, "session-id")),
-      sessionTokenPresent: Boolean(sessionHookHeader(req, "session-token")),
-      bodyKeys: getBodyKeys(req.body)
-    });
-    const result = handleClaudeNotificationHook(
-      db,
-      eventBus,
-      req.body ?? {},
-      sessionHookHeader(req, "session-token"),
-      sessionHookHeader(req, "session-id")
-    );
-    traceClaudeNotificationHook("result", {
-      route: "/claude-notification",
-      status: result.status,
-      code: result.body.code,
-      accepted: result.body.data?.accepted ?? false,
-      message: result.body.message
-    });
-    res.status(result.status).json(result.body);
-  });
+  registerCliNotificationRoute("/cli-notification/:sessionId", "sessionId");
+  registerCliNotificationRoute("/cli-notification", undefined);
+  // Deprecated aliases for hook URLs written by Gateway versions before the
+  // Claude-specific route name was retired. Hook config is re-ensured at each
+  // session launch, so in-flight sessions keep reporting until they relaunch.
+  registerCliNotificationRoute("/claude-notification/:sessionId", "sessionId");
+  registerCliNotificationRoute("/claude-notification", undefined);
 
   return router;
+}
+
+function pathSessionId(req: { params: unknown }, key: string): string | undefined {
+  const value = (req.params as Record<string, unknown>)[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function sessionHookHeader(req: { header(name: string): string | undefined }, suffix: string): string | undefined {
   return req.header(`x-forgebadger-${suffix}`);
 }
 
-export function handleClaudeNotificationHook(
+export function handleSessionNotificationHook(
   db: Database,
   eventBus: ForgeBadgerEventBus,
   body: unknown,
   sessionToken: string | undefined,
-  sessionIdHeader?: string | undefined
-): ClaudeNotificationHookResult {
+  sessionIdHeader?: string | undefined,
+  deduper: NotificationDeduper = defaultNotificationDeduper
+): SessionNotificationHookResult {
   const dbClient = drizzle(db);
-  const parsed = parseClaudeHookBody(body, sessionIdHeader);
+  const parsed = parseCliHookBody(body, sessionIdHeader);
   if (!parsed) {
-    traceClaudeNotificationHook("reject", {
+    traceSessionNotificationHook("reject", {
       reason: "invalid_input",
       sessionIdHeaderPresent: Boolean(sessionIdHeader?.trim()),
       bodyKeys: getBodyKeys(body)
@@ -125,10 +129,10 @@ export function handleClaudeNotificationHook(
   }
 
   if (!sessionToken) {
-    traceClaudeNotificationHook("reject", {
+    traceSessionNotificationHook("reject", {
       reason: "missing_session_token",
       sessionId: parsed.sessionId,
-      hookEventName: parsed.event.hook_event_name ?? "Notification"
+      hookEventName: redactAgentText(parsed.event.hook_event_name ?? "Notification")
     });
     return { status: 401, body: { code: 1, message: "Missing session token" } };
   }
@@ -142,37 +146,84 @@ export function handleClaudeNotificationHook(
   const session = row?.session;
 
   if (!session || !session.attachToken || session.attachToken !== sessionToken) {
-    traceClaudeNotificationHook("reject", {
+    traceSessionNotificationHook("reject", {
       reason: "invalid_session_token",
       sessionId: parsed.sessionId,
-      hookEventName: parsed.event.hook_event_name ?? "Notification"
+      hookEventName: redactAgentText(parsed.event.hook_event_name ?? "Notification")
     });
     return { status: 401, body: { code: 1, message: "Invalid session token" } };
   }
 
-  const hookEventName = parsed.event.hook_event_name ?? "Notification";
-  const notificationType = normalizeNotificationType(
+  const native = nativePromptIdentity(parsed.event.session_id, parsed.event.turn_id);
+  const isSubagent = parsed.event.agent_id !== undefined && parsed.event.agent_id !== null && parsed.event.agent_id !== '';
+  const adapter = parsed.event.adapter ?? session.aiTool;
+  let cliSummary;
+  try { cliSummary = observeCliHook(db, session, parsed.event, adapter); }
+  catch { /* Optional summary failures must not fail CLI hooks. */ }
+  if (parsed.event.hook_event_name === 'UserPromptSubmit') {
+    // Metadata and work indicator only: no notification, model wake-up,
+    // transcript read or CLI input.
+    // Child-agent prompts must not overwrite the human's latest request.
+    if (!isSubagent && parsed.event.prompt?.trim()) {
+      const lastPrompt = notificationPromptSummary(parsed.event.prompt);
+      db.transaction(() => {
+        new SessionRepository(db, session.userId).update(session.id, { lastPrompt });
+        if (native) new SessionNotificationPromptRepository(db, session.userId).save(session.id, native, parsed.event.prompt!);
+      }).immediate();
+    }
+    if (!isSubagent) eventBus.setSessionWorkState({
+      userId: session.userId, sessionId: session.id, state: 'working',
+      nativeSessionId: native?.sessionId, nativeTurnId: native?.turnId,
+    });
+    return { status: 200, body: { code: 0, data: { accepted: true }, message: '' } };
+  }
+
+  if (!isSubagent && ['TaskStarted', 'TurnStarted', 'Interrupt', 'SessionEnd'].includes(parsed.event.hook_event_name ?? '')) {
+    eventBus.setSessionWorkState({
+      userId: session.userId, sessionId: session.id,
+      state: ['TaskStarted', 'TurnStarted'].includes(parsed.event.hook_event_name ?? '') ? 'working' : 'idle',
+      nativeSessionId: native?.sessionId, nativeTurnId: native?.turnId,
+    });
+  }
+
+  const hookEventName = redactAgentText(parsed.event.hook_event_name ?? "Notification");
+  if (!shouldNotifyCliHook(parsed.event.adapter ?? session.aiTool, parsed.event)) {
+    return { status: 200, body: { code: 0, data: { accepted: true }, message: '' } };
+  }
+  const notificationType = redactAgentText(normalizeNotificationType(
     hookEventName,
     parsed.event.notification_type,
     parsed.event.message
-  );
-  const toolName = parsed.event.tool_name ?? inferPermissionToolName(parsed.event.message);
-  const message = notificationMessage(parsed.event, hookEventName, notificationType, toolName);
+  ));
+  const dedupeKey = native ? JSON.stringify([session.id, native.sessionId, native.turnId ?? '', isSubagent]) : session.id;
+  if (deduper.shouldDrop(dedupeKey, notificationType, "hook", Date.now())) {
+    if (!isSubagent && ['task_completed', 'task_failed'].includes(notificationType)) {
+      eventBus.setSessionWorkState({ userId: session.userId, sessionId: session.id, state: 'idle',
+        nativeSessionId: native?.sessionId, nativeTurnId: native?.turnId });
+    }
+    traceSessionNotificationHook("deduped", { sessionId: session.id, notificationType });
+    return { status: 200, body: { code: 0, data: { accepted: true }, message: "" } };
+  }
+  const originalToolName = parsed.event.tool_name ?? inferPermissionToolName(parsed.event.message);
+  const toolName = originalToolName ? redactAgentText(originalToolName) : undefined;
+  const message = redactAgentText(notificationMessage(parsed.event, hookEventName, notificationType, toolName));
   const activityType = notificationType;
 
-  const adapter = parsed.event.adapter;
   eventBus.emitEvent({
-    type: "claude_notification",
+    type: "session_notification",
     userId: session.userId,
     sessionId: session.id,
     projectId: session.projectId,
-    ...(row?.projectName ? { projectName: row.projectName } : {}),
-    sessionName: session.name,
+    ...(row?.projectName ? { projectName: redactAgentText(row.projectName) } : {}),
+    sessionName: redactAgentText(session.name),
+    ...(native ? { nativeSessionId: native.sessionId, ...(native.turnId ? { nativeTurnId: native.turnId } : {}) } : {}),
+    ...(isSubagent ? { nativeSubagent: true } : {}),
     hookEventName,
     notificationType,
     message,
-    adapter: adapter ?? "claude",
-    ...(parsed.event.title ? { title: parsed.event.title } : {}),
+    adapter,
+    ...(cliSummary ? { cliSummary } : {}),
+    ...(parsed.event.title ? { title: redactAgentText(parsed.event.title) } : {}),
     ...(toolName ? { toolName } : {})
   });
   recordActivity({
@@ -187,19 +238,22 @@ export function handleClaudeNotificationHook(
     metadata: {
       hookEventName,
       notificationType,
-      adapter: adapter ?? "claude",
+      adapter,
       ...(toolName ? { toolName } : {})
     }
   });
+  deduper.record(dedupeKey, notificationType, "hook", Date.now());
+  // Terminal-native echoes have no native identity; keep their coarse bucket.
+  if (dedupeKey !== session.id) deduper.record(session.id, notificationType, 'hook', Date.now());
 
   return { status: 200, body: { code: 0, data: { accepted: true }, message: "" } };
 }
 
-function parseClaudeHookBody(
+function parseCliHookBody(
   body: unknown,
   sessionIdHeader?: string | undefined
-): ParsedClaudeHook | undefined {
-  const wrapped = wrappedClaudeNotificationSchema.safeParse(body);
+): ParsedCliHook | undefined {
+  const wrapped = wrappedCliNotificationSchema.safeParse(body);
   if (wrapped.success) {
     return wrapped.data;
   }
@@ -209,7 +263,7 @@ function parseClaudeHookBody(
     return undefined;
   }
 
-  const raw = claudeHookEventSchema.safeParse(body);
+  const raw = cliHookEventSchema.safeParse(body);
   if (!raw.success) {
     return undefined;
   }
@@ -253,7 +307,7 @@ function normalizeNotificationType(
 }
 
 function notificationMessage(
-  event: z.infer<typeof claudeHookEventSchema>,
+  event: z.infer<typeof cliHookEventSchema>,
   hookEventName: string,
   notificationType: string,
   toolName?: string | undefined
@@ -292,6 +346,7 @@ function adapterLabel(adapter: string): string {
   if (adapter === "codex") return "Codex";
   if (adapter === "kimi") return "Kimi Code";
   if (adapter === "pi") return "PI";
+  if (adapter === "mcode") return "MiniMax Code";
   return "Claude Code";
 }
 
@@ -323,7 +378,7 @@ function getBodyKeys(body: unknown): string[] {
   return Object.keys(body).slice(0, 20);
 }
 
-function traceClaudeNotificationHook(stage: string, details: Record<string, unknown>): void {
+function traceSessionNotificationHook(stage: string, details: Record<string, unknown>): void {
   if (process.env.FORGEBADGER_DEBUG_SESSION_HOOKS?.trim() !== "1") {
     return;
   }
@@ -331,7 +386,7 @@ function traceClaudeNotificationHook(stage: string, details: Record<string, unkn
   process.stderr.write(
     `${JSON.stringify({
       level: "info",
-      action: "session_hooks.claude_notification",
+      action: "session_hooks.session_notification",
       stage,
       timestamp: new Date().toISOString(),
       ...details

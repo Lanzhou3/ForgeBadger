@@ -1,6 +1,6 @@
 import type { Language } from "@/lib/i18n";
 import type { Project, Session } from "@/lib/api";
-import { normalizeSessionStatus } from "@/lib/session-status";
+import { formatRelativeTime, normalizeSessionStatus } from "@/lib/session-status";
 
 export const UNLINKED_COLUMN_KEY = "__unlinked__";
 
@@ -8,6 +8,7 @@ const STATUS_RANK: Record<string, number> = {
   running: 0,
   error: 1,
   stopped: 2,
+  lost: 3,
 };
 
 export interface SessionBoardColumnData {
@@ -96,7 +97,7 @@ export function collectSessionCliTools(sessions: Session[]): string[] {
   return Array.from(tools).sort();
 }
 
-/** Column order: running > error > stopped, then most recent activity first. */
+/** Column order: running > error > stopped > lost, then most recent activity first. */
 export function sortSessionsForColumn(sessions: Session[]): Session[] {
   return [...sessions].sort((a, b) => {
     const rankDelta =
@@ -231,25 +232,7 @@ export function formatSessionRelativeTime(
   if (timestamp === null) {
     return null;
   }
-  const diffSeconds = Math.round((timestamp - now) / 1000);
-  const abs = Math.abs(diffSeconds);
-  const formatter = new Intl.RelativeTimeFormat(language, { numeric: "auto" });
-  if (abs < 60) {
-    return formatter.format(diffSeconds, "second");
-  }
-  if (abs < 3600) {
-    return formatter.format(Math.round(diffSeconds / 60), "minute");
-  }
-  if (abs < 86400) {
-    return formatter.format(Math.round(diffSeconds / 3600), "hour");
-  }
-  if (abs < 2592000) {
-    return formatter.format(Math.round(diffSeconds / 86400), "day");
-  }
-  if (abs < 31536000) {
-    return formatter.format(Math.round(diffSeconds / 2592000), "month");
-  }
-  return formatter.format(Math.round(diffSeconds / 31536000), "year");
+  return formatRelativeTime(timestamp, now, language);
 }
 
 /**

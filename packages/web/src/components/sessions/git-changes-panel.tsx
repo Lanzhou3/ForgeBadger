@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileDiff, GitBranch, GitCommitHorizontal, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileDiff, GitBranch, GitCommitHorizontal, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { GitDiffSheet, type GitDiffTarget } from "@/components/sessions/git-diff-sheet";
 import { useLanguage } from "@/hooks/use-language";
 import { getProjectGitChanges, type GitWorkingTreeEntry } from "@/lib/api";
@@ -15,6 +16,7 @@ interface Props {
 }
 
 const REFRESH_INTERVAL_MS = 15_000;
+const FILES_PER_PAGE = 100;
 
 export function GitChangesPanel({ projectId }: Props) {
   const { t } = useLanguage();
@@ -55,7 +57,9 @@ export function GitChangesPanel({ projectId }: Props) {
 
       {error ? (
         <p className="mt-2 text-xs text-destructive">{t("sessions.gitLoadFailed")}</p>
-      ) : data && !data.isGitRepo ? (
+      ) : !data ? (
+        <p className="mt-2 text-xs text-muted-foreground">{t("common.loading")}</p>
+      ) : !data.isGitRepo ? (
         <p className="mt-2 text-xs text-muted-foreground">{t("sessions.gitNotRepo")}</p>
       ) : (
         <>
@@ -67,18 +71,10 @@ export function GitChangesPanel({ projectId }: Props) {
                 <span className="text-muted-foreground/60">({data.changed.length})</span>
               )}
             </div>
-            {!data || data.changed.length === 0 ? (
+            {data.changed.length === 0 ? (
               <p className="mt-1.5 text-xs text-muted-foreground">{t("sessions.gitNoChanges")}</p>
             ) : (
-              <ul className="mt-1.5 space-y-0.5">
-                {data.changed.map((entry) => (
-                  <GitChangeRow
-                    key={`${entry.status}-${entry.path}`}
-                    entry={entry}
-                    onOpen={(target) => setDiffTarget(target)}
-                  />
-                ))}
-              </ul>
+              <GitWorkingTreeList key={projectId} entries={data.changed} onOpen={setDiffTarget} />
             )}
           </div>
 
@@ -115,6 +111,91 @@ export function GitChangesPanel({ projectId }: Props) {
         onClose={() => setDiffTarget(null)}
       />
     </section>
+  );
+}
+
+interface GitWorkingTreeListProps {
+  entries: GitWorkingTreeEntry[];
+  onOpen: (target: GitDiffTarget) => void;
+}
+
+function GitWorkingTreeList({ entries, onOpen }: GitWorkingTreeListProps) {
+  const { t } = useLanguage();
+  const [filter, setFilter] = useState("");
+  const [page, setPage] = useState(0);
+  const query = filter.trim().toLowerCase();
+  const filtered = useMemo(
+    () => query ? entries.filter((entry) => entry.path.toLowerCase().includes(query)) : entries,
+    [entries, query]
+  );
+  const pageCount = Math.max(1, Math.ceil(filtered.length / FILES_PER_PAGE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const start = currentPage * FILES_PER_PAGE;
+  const visible = filtered.slice(start, start + FILES_PER_PAGE);
+
+  // A refresh can remove the last page. Keep the user on the last available page.
+  useEffect(() => {
+    if (page !== currentPage) setPage(currentPage);
+  }, [page, currentPage]);
+
+  return (
+    <div className="mt-1.5 space-y-2">
+      <Input
+        type="search"
+        className="h-7 px-2 text-xs md:text-xs"
+        value={filter}
+        placeholder={t("sessions.gitFilterFiles")}
+        aria-label={t("sessions.gitFilterFiles")}
+        onChange={(event) => { setFilter(event.target.value); setPage(0); }}
+      />
+      {filtered.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("sessions.gitNoMatchingFiles")}</p>
+      ) : (
+        <>
+          <ul key={`${query}-${currentPage}`} className="max-h-80 space-y-0.5 overflow-y-auto">
+            {visible.map((entry) => (
+              <GitChangeRow key={`${entry.status}-${entry.path}`} entry={entry} onOpen={onOpen} />
+            ))}
+          </ul>
+          {(entries.length > FILES_PER_PAGE || query) && (
+            <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+              <span aria-live="polite">
+                {t("sessions.gitFileRange")
+                  .replace("{start}", String(start + 1))
+                  .replace("{end}", String(start + visible.length))
+                  .replace("{total}", String(filtered.length))}
+              </span>
+              {pageCount > 1 && (
+                <div className="flex shrink-0 gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6"
+                    aria-label={t("sessions.gitPreviousPage")}
+                    title={t("sessions.gitPreviousPage")}
+                    disabled={currentPage === 0}
+                    onClick={() => setPage(currentPage - 1)}
+                  >
+                    <ChevronLeft className="size-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6"
+                    aria-label={t("sessions.gitNextPage")}
+                    title={t("sessions.gitNextPage")}
+                    disabled={currentPage === pageCount - 1}
+                    onClick={() => setPage(currentPage + 1)}
+                  >
+                    <ChevronRight className="size-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 

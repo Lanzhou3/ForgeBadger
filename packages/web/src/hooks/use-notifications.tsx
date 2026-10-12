@@ -39,15 +39,25 @@ interface NotificationContextValue {
   markRead: (id: string) => void;
   markAllRead: () => void;
   clearNotifications: () => void;
+  /** True when the initial fetch failed before any notification arrived. */
+  initialLoadError: boolean;
+  /** Re-runs the initial fetch (retry button on the notifications page). */
+  reloadNotifications: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
+
+// The notifications page renders 50 at a time with a client-side "load more",
+// so the provider retains a bounded history well beyond the page size instead
+// of silently truncating to it.
+const NOTIFICATION_RETENTION_LIMIT = 500;
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [notifications, setNotifications] = useState<StoredNotification[]>([]);
+  const [initialLoadError, setInitialLoadError] = useState(false);
   const invalidationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateNotifications = useCallback(
@@ -62,9 +72,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const reloadNotifications = useCallback(async () => {
     try {
       const data = await listNotifications();
-      setNotifications(trimNotifications(data.notifications));
+      setNotifications(trimNotifications(data.notifications, NOTIFICATION_RETENTION_LIMIT));
+      setInitialLoadError(false);
     } catch {
       // The real-time stream can still populate notifications if the initial fetch fails.
+      setInitialLoadError(true);
     }
   }, []);
 
@@ -89,15 +101,17 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }
 
     let cancelled = false;
+    setInitialLoadError(false);
     listNotifications()
       .then((data) => {
         if (!cancelled) {
-          setNotifications(trimNotifications(data.notifications));
+          setNotifications(trimNotifications(data.notifications, NOTIFICATION_RETENTION_LIMIT));
         }
       })
       .catch(() => {
         if (!cancelled) {
           setNotifications([]);
+          setInitialLoadError(true);
         }
       });
     return () => {
@@ -134,7 +148,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
               cli: t("notifications.cliContext"),
             }).join(" · ");
             const title = [t(notification.titleKey), context].filter(Boolean).join(" · ");
-            updateNotifications((current) => mergeNotifications(current, notification));
+            updateNotifications((current) =>
+              mergeNotifications(current, notification, NOTIFICATION_RETENTION_LIMIT)
+            );
             showBrowserNotification(title, notification, message);
           }
           scheduleEventQueryInvalidation(invalidationTimerRef, queryClient, message);
@@ -183,8 +199,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           void reloadNotifications();
         });
       },
+      initialLoadError,
+      reloadNotifications,
     }),
-    [markRead, notifications, reloadNotifications, updateNotifications]
+    [initialLoadError, markRead, notifications, reloadNotifications, updateNotifications]
   );
 
   return (

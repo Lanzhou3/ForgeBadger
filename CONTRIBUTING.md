@@ -9,8 +9,9 @@ cloud service or generic project-management suite.
 
 - Read `README.md`, `docs/TECH-ARCHITECTURE.md`, `docs/API.md`, and
   `docs/OPEN-SOURCE-READINESS.md`.
-- Use Node.js 20.12 through 24, pnpm 10, tmux, and at least one local AI CLI when
-  testing terminal/session behavior.
+- Use Node.js 20.12 through 24, the root `packageManager` version of pnpm, and
+  at least one local AI CLI when testing terminal/session behavior. Session
+  Server is bundled; no external terminal multiplexer is required.
 - Keep Gateway behavior in `packages/gateway`; do not add Next.js API routes
   for Gateway responsibilities.
 - Keep Web console behavior in `packages/web`; it should talk to Gateway over
@@ -21,7 +22,7 @@ cloud service or generic project-management suite.
 ```bash
 pnpm install
 pnpm --filter @forgebadger/gateway dev
-FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=48732 pnpm --filter @forgebadger/web dev
+FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=18333 pnpm --filter @forgebadger/web dev
 ```
 
 Use a local `.env` and never commit it. Required secrets include
@@ -48,8 +49,8 @@ For changes touching release behavior, also use `docs/RELEASE-PLAN.md` and
 - ForgeBadger is local-first. Do not add hosted telemetry, hosted collaboration,
   billing, cloud workers, or remote autonomous execution without a new accepted
   architecture and security review.
-- tmux is the terminal persistence layer. Do not store terminal scrollback in
-  SQLite.
+- Session Server owns the persistent live terminals. Do not store terminal
+  scrollback in SQLite.
 - Gateway owns filesystem, credentials, terminal processes, and WebSocket
   authorization.
 - Copilot, Feishu, and model output may propose writes only through explicit

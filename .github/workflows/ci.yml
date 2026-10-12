@@ -24,10 +24,10 @@ jobs:
     timeout-minutes: 45
     env:
       FORGEBADGER_HOST: "127.0.0.1"
-      FORGEBADGER_PORT: "48731"
-      FORGEBADGER_WEB_PORT: "48732"
-      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:48731"
-      NEXT_PUBLIC_GATEWAY_URL: "http://127.0.0.1:48731"
+      FORGEBADGER_PORT: "18332"
+      FORGEBADGER_WEB_PORT: "18333"
+      FORGEBADGER_GATEWAY_URL: "http://127.0.0.1:18332"
+      NEXT_PUBLIC_GATEWAY_URL: "http://127.0.0.1:18332"
       FORGEBADGER_DB_PATH: "/tmp/forgebadger-ci.db"
       FORGEBADGER_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
       FORGEBADGER_JWT_SECRET: "ci-jwt-secret-not-for-production-32chars"
@@ -41,7 +41,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10.33.2
+          version: 12.6.0
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -113,7 +113,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10.33.2
+          version: 12.6.0
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -133,6 +133,31 @@ jobs:
 
       - name: Smoke installed npm package
         run: pnpm smoke:npm
+
+  windows-shim:
+    name: Windows CLI Shim Contracts
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.6.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Native Windows npm shim and Session Server contracts
+        run: pnpm --dir packages/gateway test test/windows-npm-shim.test.ts test/session-server.test.ts
 
   environment-gates:
     name: Environment-Gated Release Notes
@@ -157,5 +182,5 @@ jobs:
               echo "- Codex CLI: unavailable; real native-login status and OpenAI provider smoke are skipped in CI."
             fi
             echo "- Physical Windows/WSL smoke: not covered by Ubuntu CI; run docs/TRIAL-CHECKLIST.md on a Windows host before removing the platform caveat."
-            echo "- Manual browser smoke: run docs/SMOKE-TEST.md on 48731/48732 before final release acceptance."
+            echo "- Manual browser smoke: run docs/SMOKE-TEST.md on 18332/18333 before final release acceptance."
           } >> "$GITHUB_STEP_SUMMARY"

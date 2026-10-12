@@ -1,28 +1,12 @@
 import { fetchJson } from "@/lib/api";
 
-export interface CopilotGrant {
-  id: string;
-  name: string;
-  status: string;
-  revision: number;
-  scope: {
-    projectIds: string[];
-    capabilities: string[];
-    allowedRoots: string[];
-  };
-  expiresAt: number | null;
-  maxActions: number | null;
-  maxConcurrency: number;
-  usedActions: number;
-}
 export interface PlatformIntent {
   id: string;
   command_id: string;
   input_json: string;
   resources_json: string;
   digest: string;
-  authority: "owner_action" | "delegated_grant";
-  grant_id: string | null;
+  authority: "owner_action";
   expires_at: number;
   status: string;
 }
@@ -34,7 +18,6 @@ export interface PlatformReceipt {
 }
 export interface ProjectManagement {
   projectId: string;
-  mode: "manual" | "cli";
   ownerLabel: string;
   nextAction: string;
   freshnessHours: number;
@@ -55,7 +38,6 @@ export interface ManagedProject {
     cancelled: number;
   };
   goal: { summary: string; status: string } | null;
-  autonomy: "manual_only";
   evidenceFreshness: {
     status: "unknown" | "stale" | "fresh";
     fresh: number;
@@ -64,45 +46,13 @@ export interface ManagedProject {
     lastObservedAt: number | null;
   };
 }
-export function listGrants() {
-  return fetchJson<{
-    grants: CopilotGrant[];
-    capabilities: { id: string; capability: string; effect: string }[];
-  }>("/api/v1/copilot/grants");
-}
-export function createGrant(input: {
-  name: string;
-  projectIds: string[];
-  capabilities?: string[];
-  allOperations?: boolean;
-  allowedRoots?: string[];
-  expiresAt: number | null;
-  maxActions: number | null;
-  maxConcurrency: number;
-}) {
-  return fetchJson<{ grant: CopilotGrant }>("/api/v1/copilot/grants", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-export function deleteGrant(id: string) {
-  return fetchJson<{ deleted: boolean }>(`/api/v1/copilot/grants/${encodeURIComponent(id)}`, { method: "DELETE" });
-}
-export function revokeGrant(id: string) {
-  return fetchJson<{ grant: CopilotGrant }>(
-    `/api/v1/copilot/grants/${encodeURIComponent(id)}/revoke`,
-    { method: "POST" },
-  );
-}
 export function getPlatformAction(id: string) {
   return fetchJson<{ intent: PlatformIntent; receipt: PlatformReceipt | null }>(
     `/api/v1/platform-actions/${encodeURIComponent(id)}`,
   );
 }
-export function getProjectOverview(grantId?: string) {
-  return fetchJson<{ projects: ManagedProject[]; observedAt: number }>(
-    `/api/v1/project-manager/overview${grantId ? `?grantId=${encodeURIComponent(grantId)}` : ""}`,
-  );
+export function getProjectOverview() {
+  return fetchJson<{ projects: ManagedProject[]; observedAt: number }>("/api/v1/project-manager/overview");
 }
 export function updateProjectManagement(
   id: string,
@@ -119,7 +69,6 @@ export function getSessionWriter(id: string) {
   return fetchJson<{
     sessionId: string;
     mode: "manual" | "automated";
-    autonomy: "manual_only";
   }>(`/api/v1/sessions/${encodeURIComponent(id)}/writer`);
 }
 export function takeoverSession(id: string) {

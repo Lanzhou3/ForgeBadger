@@ -27,7 +27,7 @@ import {
 interface SessionBoardListViewProps {
   columns: SessionBoardColumnData[];
   prompts: Record<string, string>;
-  now: number;
+  now: number | null;
   actionPending: boolean;
   onOpenSession: (session: Session) => void;
   onStartSession: (session: Session) => void;
@@ -104,7 +104,7 @@ export function SessionBoardListView({
 interface SessionListRowProps {
   session: Session;
   lastPrompt?: string;
-  now: number;
+  now: number | null;
   actionPending: boolean;
   language: Language;
   onOpen: (session: Session) => void;
@@ -128,7 +128,7 @@ function SessionListRow({
   const normalized = normalizeSessionStatus(session.status);
   const isRunning = normalized === "running";
   const picked = pickSessionTitle(session, lastPrompt);
-  const relativeTime = formatSessionRelativeTime(session, now, language);
+  const relativeTime = now === null ? null : formatSessionRelativeTime(session, now, language);
 
   return (
     <div
@@ -156,13 +156,15 @@ function SessionListRow({
         {picked.title}
       </span>
       <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-        {relativeTime ?? t("sessions.noActivity")}
+        {now === null ? "" : (relativeTime ?? t("sessions.noActivity"))}
       </span>
       {isRunning ? (
+        // Hidden below md: on narrow screens the button squeezed the title to
+        // zero width, and tapping the row already opens the session.
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 shrink-0 px-2 text-xs"
+          className="hidden h-7 shrink-0 px-2 text-xs md:inline-flex"
           onClick={(event) => {
             event.stopPropagation();
             onOpen(session);

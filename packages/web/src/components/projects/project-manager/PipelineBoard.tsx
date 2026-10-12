@@ -314,7 +314,7 @@ export function ProjectManagerPipelineBoard({
           {stages.length === 0 && (
             <Button
               size="sm"
-              className="bg-brand text-brand-foreground hover:bg-brand/90"
+              variant="brand"
               onClick={() => {
                 setActionError(null);
                 seedMutation.mutate();
@@ -794,7 +794,7 @@ function ProjectManagerStageFormDialog({
             {t("common.cancel")}
           </Button>
           <Button
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            variant="brand"
             onClick={onSave}
             disabled={isSaving}
           >

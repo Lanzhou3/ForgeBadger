@@ -9,6 +9,8 @@ import { runRestore } from "./commands/restore.js";
 import { runDoctor } from "./commands/doctor.js";
 import { runInit } from "./commands/init.js";
 import { runStart, type RunStartOptions } from "./commands/start.js";
+import { runUninstall, type RunUninstallOptions } from "./commands/uninstall.js";
+import { resolveCliVersion } from "./runtime/version.js";
 
 export type CliCommand =
   | {
@@ -21,6 +23,8 @@ export type CliCommand =
   | { command: "doctor" }
   | { command: "backup"; output: string }
   | { command: "restore"; from: string; to: string }
+  | { command: "uninstall"; yes: boolean; force: boolean; backup: string | undefined }
+  | { command: "version" }
   | { command: "config"; args: string[] }
   | { command: "init"; args: string[] }
   | { command: "help" };
@@ -31,6 +35,8 @@ export interface RunCliOptions {
   doctorRunner?: () => Promise<number>;
   initRunner?: (args: string[]) => Promise<number>;
   startRunner?: (command: Extract<CliCommand, { command: "start" }>) => Promise<number>;
+  uninstallRunner?: (command: Extract<CliCommand, { command: "uninstall" }>) => Promise<number>;
+  versionRunner?: () => Promise<number>;
 }
 
 export function parseCliArgs(args: string[]): CliCommand {
@@ -43,6 +49,12 @@ export function parseCliArgs(args: string[]): CliCommand {
   }
   if (command === "doctor") {
     return { command: "doctor" };
+  }
+  if (command === "uninstall") {
+    return parseUninstallArgs(rest);
+  }
+  if (command === "version" || command === "--version" || command === "-v") {
+    return { command: "version" };
   }
   if (command === "config") {
     return { command: "config", args: rest };
@@ -71,6 +83,36 @@ function parseBackupArgs(command: "backup" | "restore", args: string[]): CliComm
   }
   if (allowed.some((flag) => !values.has(flag))) throw new Error(`Required options: ${allowed.join(" ")}`);
   return command === "backup" ? { command, output: values.get("--output")! } : { command, from: values.get("--from")!, to: values.get("--to")! };
+}
+
+function parseUninstallArgs(args: string[]): Extract<CliCommand, { command: "uninstall" }> {
+  const command: Extract<CliCommand, { command: "uninstall" }> = {
+    command: "uninstall",
+    yes: false,
+    force: false,
+    backup: undefined
+  };
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (token === "--yes") {
+      command.yes = true;
+      continue;
+    }
+    if (token === "--force") {
+      command.force = true;
+      continue;
+    }
+    if (token === "--backup") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) throw new Error("Missing value for --backup");
+      if (command.backup !== undefined) throw new Error("Unexpected or duplicate uninstall option");
+      command.backup = value;
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unexpected argument: ${token}`);
+  }
+  return command;
 }
 
 function parseStartArgs(args: string[]): Extract<CliCommand, { command: "start" }> {
@@ -134,14 +176,38 @@ export async function runCli(args = process.argv.slice(2), options: RunCliOption
   if (command.command === "doctor") {
     return (options.doctorRunner ?? runDoctor)();
   }
+  if (command.command === "uninstall") {
+    if (options.uninstallRunner) {
+      return options.uninstallRunner(command);
+    }
+    return runUninstall(toRunUninstallOptions(command));
+  }
+  if (command.command === "version") {
+    if (options.versionRunner) {
+      return options.versionRunner();
+    }
+    process.stdout.write(`forgebadger ${await resolveCliVersion()}\n`);
+    return 0;
+  }
   if (command.command === "init") {
     return (options.initRunner ?? runInit)(command.args);
   }
   if (command.command === "help") {
-    process.stdout.write("Usage: forgebadger [start|doctor|init|config|backup --output <new-dir>|restore --from <backup-dir> --to <new-state-dir>]\n");
+    process.stdout.write("Usage: forgebadger [start|doctor|init|config|uninstall [--yes] [--force] [--backup <dir>]|backup --output <new-dir>|restore --from <backup-dir> --to <new-state-dir>|version]\n");
     return 0;
   }
   throw new Error(`Command not implemented yet: ${command.command}`);
+}
+
+function toRunUninstallOptions(command: Extract<CliCommand, { command: "uninstall" }>): RunUninstallOptions {
+  const options: RunUninstallOptions = {
+    yes: command.yes,
+    force: command.force
+  };
+  if (command.backup !== undefined) {
+    options.backup = command.backup;
+  }
+  return options;
 }
 
 function toRunStartOptions(command: Extract<CliCommand, { command: "start" }>): RunStartOptions {

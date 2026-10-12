@@ -25,7 +25,10 @@ import {
   safeUnlink
 } from "./cli-config-fs.js";
 import { cliConfigTargetPath, globalConfigRoot } from "./cli-config-target.js";
+import { loadYamlConfig, serializeYamlPreservingComments as replayYamlOntoOriginal } from "./cli-config-yaml.js";
+import { probeCodexPlannedConfig, type CodexConfigProbeFn, type CodexConfigProbeOutcome } from "./codex-config-probe.js";
 import { gatewayLoopbackUrl } from "./claude-route/gateway-url.js";
+import { projectedKimiCapabilities } from "./model-capability-projection.js";
 import {
   assertResolvedPublicHttpsEndpoint,
   type OutboundHostResolver
@@ -83,18 +86,24 @@ export interface CliConfigApplyInput {
    */
   routeThroughGateway?: boolean | undefined;
   /**
-   * Codex only: wire protocol the provider uses. Defaults to "chat"
-   * (OpenAI-compatible /chat/completions), which is correct for most
-   * third-party providers. Set to "responses" only when the provider
-   * supports the OpenAI /responses API (native OpenAI, Codex.app, etc.).
+   * Codex only: wire protocol the provider uses. Defaults to the profile's
+   * apiFormat (openai-responses→"responses", everything else→"chat"). Set
+   * explicitly only to override that resolution.
    */
   codexWireApi?: CodexWireApi | undefined;
   resolveHost?: OutboundHostResolver | undefined;
+  /**
+   * Test seam: replaces the Codex config validation probe (which spawns the
+   * installed `codex` binary). Tests that don't exercise the probe inject a
+   * fixed outcome so behavior stays hermetic on machines with any Codex
+   * version installed.
+   */
+  codexConfigProbe?: CodexConfigProbeFn | undefined;
 }
 
 export interface CliConfigApplyFilePreview {
   targetPath: string;
-  fileType: "json" | "toml";
+  fileType: "json" | "toml" | "yaml";
   operation: "create" | "update" | "delete" | "none";
   /** Observed content with credential values masked; null when the file does not exist. */
   current: string | null;
@@ -151,21 +160,22 @@ interface ApplyContext {
   routeToken: string | null;
   /** What the previous apply to this adapter injected as the context window, if known. */
   previousContextWindow: number | null;
-  /** Codex wire API for this provider: "chat" (default) or "responses". */
+  /** Codex wire API resolved from the profile's apiFormat (explicit apply input wins). */
   codexWireApi: CodexWireApi;
 }
 
 /**
  * Codex wire API: "chat" = /chat/completions (OpenAI-compatible), "responses" = /responses.
- * Third-party OpenAI-compatible APIs (Qwen, Moonshot AI, Ollama, etc.) only support
- * chat completions. The official Codex default is "chat" when omitted; ForgeBadger
- * previously hardcoded "responses" which broke every third-party provider.
+ * Third-party chat-completions relays (Qwen, Moonshot AI, Ollama, etc.) only support
+ * chat completions. The value is derived from the profile's apiFormat (explicit
+ * apply input wins); ForgeBadger previously hardcoded "responses" which broke
+ * every third-party provider.
  */
 export type CodexWireApi = "chat" | "responses";
 
 interface ApplyTarget {
   targetPath: string;
-  fileType: "json" | "toml";
+  fileType: "json" | "toml" | "yaml";
   role: "config" | "auth" | "settings";
 }
 
@@ -179,7 +189,8 @@ interface ApplyDocumentPlan {
 export async function previewCliConfigApply(input: CliConfigApplyInput): Promise<CliConfigApplyPreview> {
   const context = await resolveApplyContext(input);
   const warnings: string[] = [];
-  const files = planApplyDocuments(context, null).map((plan) => {
+  const planned = planApplyDocuments(context, null);
+  const files = planned.map((plan) => {
     const observed = readObservedConfig(plan.target.targetPath);
     const current = observed.existed
       ? maskSecrets(plan.target.fileType, serializeDocument(plan.target.fileType, parseDocument(plan.target.fileType, observed.content, plan.target.targetPath)))
@@ -196,6 +207,13 @@ export async function previewCliConfigApply(input: CliConfigApplyInput): Promise
   });
   if (files.some((file) => file.fileType === "toml" && file.operation !== "none")) {
     warnings.push("Applying this change may normalize TOML comments and formatting in the config file.");
+  }
+  const codexProbe = await probeCodexWireApi(context, planned, input);
+  if (codexProbe) {
+    // Machine-readable marker; the web dialog renders a localized banner and
+    // filters this code out of the generic warning list.
+    warnings.push("CODEX_WIRE_API_UNSUPPORTED");
+    warnings.push(codexWireApiUnsupportedMessage(codexProbe));
   }
   if (context.routeMode === "route_required") {
     // Machine-readable marker; the web dialog renders a localized banner and
@@ -248,6 +266,16 @@ export async function applyCliConfigToAdapter(input: CliConfigApplyInput): Promi
       const observed = readObservedConfig(plan.target.targetPath);
       return { ...plan, observed, operation: planOperation(observed, plan.serialized) };
     });
+    const codexProbe = await probeCodexWireApi(context, planned, input);
+    if (codexProbe) {
+      // Writing this config would make the installed Codex hard-fail at
+      // startup (every new session exits before the TUI renders). Refuse
+      // instead of persisting a crash-on-boot config.
+      throw new CliConfigApplyError(
+        "CLI_CONFIG_APPLY_CODEX_WIRE_API_UNSUPPORTED",
+        codexWireApiUnsupportedMessage(codexProbe)
+      );
+    }
     const backupFiles = planned.map(({ target, observed }) => ({
       targetPath: target.targetPath,
       existed: observed.existed,
@@ -446,7 +474,7 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
   // (the forwarder re-checks per request regardless).
   const providerEndpoint = endpointForAdapter(provider, input.adapter);
   try {
-    await assertResolvedPublicHttpsEndpoint(providerEndpoint, input.resolveHost, { allowPlaintextHttp: provider.allowPlaintextHttp });
+    await assertResolvedPublicHttpsEndpoint(providerEndpoint, input.resolveHost, { allowPlaintextHttp: provider.allowPlaintextHttp, allowPrivateNetworks: provider.allowPrivateNetworks });
   } catch (error) {
     throw new CliConfigApplyError(
       "CLI_CONFIG_APPLY_ENDPOINT_UNSAFE",
@@ -499,28 +527,54 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
     routeMode,
     routeToken,
     previousContextWindow,
-    codexWireApi: resolveCodexWireApi(input, provider, model)
+    codexWireApi: resolveCodexWireApi(input, provider)
   };
 }
 
-/** Resolves the Codex wire API: explicit input wins, else "chat" default, with "responses" for known OpenAI-native providers. */
-function resolveCodexWireApi(
-  input: CliConfigApplyInput,
-  provider: ProviderProfile,
-  model: ModelProfile
-): CodexWireApi {
+/** Resolves the Codex wire API: explicit input wins, else the profile's apiFormat decides. */
+function resolveCodexWireApi(input: CliConfigApplyInput, provider: ProviderProfile): CodexWireApi {
   if (input.codexWireApi) return input.codexWireApi;
-  // Only OpenAI's native providers support the /responses API. Everything else
-  // (Qwen, Moonshot AI, Moonshot, Ollama, generic OpenAI-compatible) is chat only.
-  const providerKey = provider.providerKey.toLowerCase();
-  if (providerKey === "openai" || providerKey === "codex" || providerKey === "chatgpt") {
-    return "responses";
+  // Only endpoints explicitly marked openai-responses speak the /responses
+  // API. Everything else (Qwen, Moonshot AI, Ollama, generic chat-completions
+  // relays) is chat only.
+  return provider.apiFormat === "openai-responses" ? "responses" : "chat";
+}
+
+/**
+ * Validates a planned Codex config against the installed Codex binary before
+ * it is written. Only chat-wire plans are at risk (the "responses" value is
+ * accepted by every known Codex version), so responses plans skip the probe.
+ * Returns the unsupported outcome when the installed Codex provably rejects
+ * the plan; null means "write it" (skipped or supported). Probe infrastructure
+ * failures never block the apply.
+ */
+async function probeCodexWireApi(
+  context: ApplyContext,
+  planned: Array<{ target: ApplyTarget; serialized: string | null }>,
+  input: Pick<CliConfigApplyInput, "codexConfigProbe">
+): Promise<CodexConfigProbeOutcome | null> {
+  if (context.adapter !== "codex" || context.codexWireApi !== "chat") return null;
+  const config = planned.find((plan) => plan.target.role === "config");
+  if (!config || config.serialized === null) return null;
+  const probe: CodexConfigProbeFn = input.codexConfigProbe
+    ?? ((toml) => probeCodexPlannedConfig({ plannedConfigToml: toml }));
+  try {
+    const outcome = await probe(config.serialized);
+    return outcome.status === "unsupported" ? outcome : null;
+  } catch {
+    return null;
   }
-  const modelId = model.modelId.toLowerCase();
-  if (modelId.startsWith("gpt-") || modelId.startsWith("o3") || modelId.startsWith("o4-mini") || modelId.startsWith("codex-")) {
-    return "responses";
-  }
-  return "chat";
+}
+
+function codexWireApiUnsupportedMessage(outcome: CodexConfigProbeOutcome): string {
+  const version = outcome.codexVersion ? ` (installed: ${outcome.codexVersion})` : "";
+  const detail = outcome.detail ? ` Codex reported: ${outcome.detail}` : "";
+  return (
+    `Codex${version} no longer supports wire_api = "chat"; writing this config would make ` +
+    `every new Codex session exit immediately. Use a provider endpoint that implements the ` +
+    `OpenAI /responses API, or install a Codex version that still supports chat completions.` +
+    detail
+  );
 }
 
 function planApplyDocuments(context: ApplyContext, plaintextSecret: string | null): ApplyDocumentPlan[] {
@@ -534,7 +588,7 @@ function planApplyDocuments(context: ApplyContext, plaintextSecret: string | nul
     // when the file is missing.
     const serialized = target.role === "auth" && Object.keys(doc).length === 0
       ? null
-      : serializeDocument(target.fileType, doc);
+      : serializeDocument(target.fileType, doc, observed.content);
     return { target, serialized };
   });
 }
@@ -555,6 +609,11 @@ function applyTargets(adapter: AdapterId): ApplyTarget[] {
       { targetPath: main, fileType: "toml", role: "config" },
       { targetPath: path.join(globalConfigRoot("codex"), "auth.json"), fileType: "json", role: "auth" }
     ];
+  }
+  if (adapter === "mcode") {
+    // Single YAML file. The auth tree under the same data directory is owned by
+    // the CLI's own OAuth flow (`mcode login`) and is never written here.
+    return [{ targetPath: main, fileType: "yaml", role: "config" }];
   }
   if (adapter === "pi") {
     // PI reads file-based providers from models.json; the startup model
@@ -683,12 +742,6 @@ function buildApplyDocument(
     return;
   }
   if (context.adapter === "pi") {
-    if (context.provider.apiFormat === "bedrock") {
-      throw new CliConfigApplyError(
-        "CLI_CONFIG_APPLY_ADAPTER_UNSUPPORTED",
-        "PI providers are file-based (models.json) and do not support the Bedrock API format"
-      );
-    }
     if (target.role === "settings") {
       // Managed startup selection only: PI pairs a bare model id with the
       // provider key (settings.md: defaultProvider + defaultModel). Every
@@ -711,18 +764,33 @@ function buildApplyDocument(
     // then falls back to pi's built-in "medium", so thinking is on by default
     // and adjustable via /thinking. A hand-set `reasoning: true` on an
     // existing entry is preserved even when the profile lacks the capability.
+    // Per-model `input` is capability-driven the same way: the profile's
+    // "vision" capability writes `input: ["text", "image"]` — PI gates every
+    // image block (clipboard paste, the read tool, provider encoders) on
+    // model.input.includes("image"), so without the entry the model is
+    // text-only even when the relay accepts vision requests. A hand-set
+    // image input survives even when the profile lacks the capability
+    // (monotonic, like reasoning). When the entry is (re)written the array is
+    // normalized to exactly ["text", "image"]; PI's input vocabulary is just
+    // these two values, so no user-set modality is ever lost.
     // `thinkingLevelMap` is mostly user-managed, except that reasoning
     // models on openai-completions relays gain an additive `xhigh: "xhigh"`
     // entry (PI's TUI hides xhigh/max unless the map explicitly defines
     // them; generic openai-completions relays receive
     // `reasoning_effort: <mapped value>` verbatim). Existing map entries —
-    // and any other per-model user tuning (maxTokens, input, ...) — are
-    // preserved additively.
-    const api = piApiName(context.provider.apiFormat, context.providerKey);
+    // and any other per-model user tuning (maxTokens, ...) — are preserved
+    // additively.
+    const api = piApiName(context.provider.apiFormat);
     const models = context.activeModels.map((activeModel) => {
       const current = record(existingModels.find((entry) => record(entry).id === activeModel.modelId));
       const next: Record<string, unknown> = { ...current, id: activeModel.modelId, name: activeModel.name };
       next.reasoning = activeModel.capabilities.includes("reasoning") || current.reasoning === true;
+      const currentInput = Array.isArray(current.input)
+        ? current.input.filter((value): value is string => typeof value === "string")
+        : [];
+      if (activeModel.capabilities.includes("vision") || currentInput.includes("image")) {
+        next.input = ["text", "image"];
+      }
       if (next.reasoning === true && api === "openai-completions") {
         const currentMap = record(current.thinkingLevelMap);
         if (currentMap.xhigh === undefined) {
@@ -746,6 +814,56 @@ function buildApplyDocument(
     doc.providers = providers;
     return;
   }
+  if (context.adapter === "mcode") {
+    if (!context.baseUrl) {
+      throw new CliConfigApplyError("CLI_CONFIG_APPLY_ENDPOINT_UNSAFE", "MiniMax Code providers require a base URL");
+    }
+    // MiniMax Code keeps third-party endpoints under `custom_provider`;
+    // `provider` is its bundled inference registry and `minimax_api` /
+    // `minimax_oauth` are reserved for the official service. Both are left
+    // untouched. Writing to the wrong key is not an error upstream — the entry
+    // is silently skipped, so the config would look applied while the CLI kept
+    // talking to the previous provider.
+    const all = record(doc.custom_provider);
+    const existing = record(all[context.providerKey]);
+    const options: Record<string, unknown> = { ...record(existing.options) };
+    options.apiKey = secret;
+    options.baseURL = context.baseUrl;
+    options.authMode = "api-key";
+    const models = record(existing.models);
+    for (const activeModel of context.activeModels) {
+      const current = record(models[activeModel.modelId]);
+      // `limit` is only written by the CLI when --context-limit/--output-limit
+      // are passed, and an absent limit silently falls back to 200000/16384.
+      // ForgeBadger knows the real window, so always write it.
+      models[activeModel.modelId] = {
+        ...current,
+        name: activeModel.name,
+        limit: {
+          context: activeModel.contextWindow && activeModel.contextWindow > 0
+            ? activeModel.contextWindow
+            : mcodeDefaultContextWindow,
+          output: mcodeDefaultOutputTokens
+        },
+        reasoning: activeModel.capabilities.includes("reasoning")
+      };
+    }
+    all[context.providerKey] = {
+      ...existing,
+      name: context.provider.name,
+      kind: "custom",
+      enabled: true,
+      api: mcodeApiName(context.provider.apiFormat),
+      options,
+      models
+    };
+    doc.custom_provider = all;
+    // Custom providers are referenced with an explicit `custom_provider:`
+    // prefix; the bare `<provider>/<model>` form only resolves inside the
+    // bundled registry.
+    doc.defaultModel = `custom_provider:${context.providerKey}/${context.model.modelId}`;
+    return;
+  }
   const providers = record(doc.providers);
   const definition: Record<string, unknown> = {
     type: kimiProviderType(context.provider.apiFormat, context.baseUrl),
@@ -753,18 +871,45 @@ function buildApplyDocument(
   };
   if (context.baseUrl) definition.base_url = context.baseUrl;
   providers[context.providerKey] = definition;
-  // Additive semantics (matching the opencode branch): upsert
-  // every active model of the provider as an alias so the /model picker in
-  // Kimi Code can switch between them; default_model pins the selected one.
+  // Merge-style upsert (matching the opencode/PI branches): every active
+  // model of the provider becomes an alias the Kimi Code /model picker can
+  // switch to. Managed keys are provider/model/display_name/max_context_size,
+  // the capability projection, and the per-model thinking effort fields; any
+  // other hand-written key on the alias entry survives the ...current spread.
   const models = record(doc.models);
   for (const activeModel of context.activeModels) {
-    models[`${context.providerKey}/${activeModel.modelId}`] = {
+    const alias = `${context.providerKey}/${activeModel.modelId}`;
+    const current = record(models[alias]);
+    const next: Record<string, unknown> = {
+      ...current,
       provider: context.providerKey,
       model: activeModel.modelId,
-      max_context_size: activeModel.contextWindow && activeModel.contextWindow > 0
-        ? activeModel.contextWindow
-        : kimiDefaultMaxContextSize
+      display_name: activeModel.name
     };
+    // Profile value wins; then the entry's own positive value (Kimi
+    // hard-errors on a custom model without one); then the 256k floor.
+    next.max_context_size = activeModel.contextWindow && activeModel.contextWindow > 0
+      ? activeModel.contextWindow
+      : typeof current.max_context_size === "number" && current.max_context_size > 0
+        ? current.max_context_size
+        : kimiDefaultMaxContextSize;
+    // capabilities = existing ∪ projection: hand-written tags are never
+    // removed, and an empty projection leaves the entry untouched.
+    const projected = projectedKimiCapabilities(activeModel.capabilities);
+    if (projected.length > 0) {
+      const base = Array.isArray(current.capabilities)
+        ? current.capabilities.filter((value): value is string => typeof value === "string")
+        : [];
+      next.capabilities = [...base, ...projected.filter((value) => !base.includes(value))];
+    }
+    // support_efforts / default_effort are managed keys: written when the
+    // profile declares them, removed otherwise so a re-apply never pins a
+    // stale effort.
+    if (activeModel.supportEfforts.length > 0) next.support_efforts = activeModel.supportEfforts;
+    else delete next.support_efforts;
+    if (activeModel.defaultEffort) next.default_effort = activeModel.defaultEffort;
+    else delete next.default_effort;
+    models[alias] = next;
   }
   doc.providers = providers;
   doc.models = models;
@@ -844,7 +989,7 @@ function claudeContextWindowTarget(baseUrl: string | null, model: ModelProfile |
   if (model && model.modelId.toLowerCase().startsWith("claude-")) return null;
   if (model?.contextWindow && model.contextWindow > 0) return model.contextWindow;
   if (isKimiCodingEndpoint(baseUrl)) return Number(kimiCodingContextTokens);
-  if (isMinimaxAnthropicEndpoint(baseUrl)) return minimaxAnthropicContextTokens;
+  if (isMiniMaxAnthropicEndpoint(baseUrl)) return minimaxAnthropicContextTokens;
   return null;
 }
 
@@ -858,7 +1003,7 @@ function isKimiCodingEndpoint(baseUrl: string | null): boolean {
   }
 }
 
-function isMinimaxAnthropicEndpoint(baseUrl: string | null): boolean {
+function isMiniMaxAnthropicEndpoint(baseUrl: string | null): boolean {
   if (!baseUrl) return false;
   try {
     const url = new URL(baseUrl);
@@ -870,9 +1015,13 @@ function isMinimaxAnthropicEndpoint(baseUrl: string | null): boolean {
   }
 }
 
-function parseDocument(fileType: "json" | "toml", content: string, targetPath: string): Record<string, unknown> {
+function parseDocument(fileType: "json" | "toml" | "yaml", content: string, targetPath: string): Record<string, unknown> {
   if (!content.trim()) return {};
   try {
+    if (fileType === "yaml") {
+      // Comment-preserving handle; the plain root is what callers mutate.
+      return loadYamlConfig(content).root;
+    }
     const value = fileType === "json" ? JSON.parse(content) as unknown : parseToml(content);
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid root");
     return value as Record<string, unknown>;
@@ -881,17 +1030,33 @@ function parseDocument(fileType: "json" | "toml", content: string, targetPath: s
   }
 }
 
-function serializeDocument(fileType: "json" | "toml", doc: Record<string, unknown>): string {
+function serializeDocument(
+  fileType: "json" | "toml" | "yaml",
+  doc: Record<string, unknown>,
+  originalContent?: string
+): string {
+  if (fileType === "yaml") {
+    return serializeYamlPreservingComments(originalContent ?? "", doc);
+  }
   return fileType === "json"
     ? `${JSON.stringify(doc, null, 2)}\n`
     : `${stringifyToml(doc as never).trimEnd()}\n`;
 }
 
+/**
+ * MiniMax Code preserves comments and unknown top-level keys in its
+ * config.yaml, so a full re-serialize would drop whatever it deliberately
+ * kept. See cli-config-yaml for the replay strategy.
+ */
+function serializeYamlPreservingComments(originalContent: string, doc: Record<string, unknown>): string {
+  return replayYamlOntoOriginal(originalContent, doc);
+}
+
 /** Masks credential values so previews never surface plaintext secrets. */
-export function maskSecrets(fileType: "json" | "toml", content: string): string {
+export function maskSecrets(fileType: "json" | "toml" | "yaml", content: string): string {
   const doc = parseDocument(fileType, content, "");
   maskSecretsDeep(doc);
-  return serializeDocument(fileType, doc);
+  return serializeDocument(fileType, doc, content);
 }
 
 function maskSecretsDeep(value: Record<string, unknown>): void {
@@ -911,7 +1076,7 @@ function maskSecretsDeep(value: Record<string, unknown>): void {
   }
 }
 
-function diffDocuments(fileType: "json" | "toml", currentContent: string, proposedContent: string): string[] {
+function diffDocuments(fileType: "json" | "toml" | "yaml", currentContent: string, proposedContent: string): string[] {
   const current = flattenDocument(parseDocument(fileType, currentContent, ""));
   const proposed = flattenDocument(parseDocument(fileType, proposedContent, ""));
   const changed = new Set<string>();
@@ -991,6 +1156,23 @@ async function withInProcessLock<T>(key: string, action: () => Promise<T>): Prom
   }
 }
 
+/**
+ * MiniMax Code API format names (verified against @minimax-ai/code 0.4.12:
+ * the provider registry `api` field, and the URL/header construction it drives).
+ * `google` has no counterpart and is rejected by the capability matrix, so it
+ * falls back to the Anthropic Messages shape rather than writing a value the
+ * CLI cannot use.
+ */
+function mcodeApiName(apiFormat: ProviderApiFormat): "anthropic-messages" | "openai-responses" | "openai-completions" {
+  if (apiFormat === "openai-responses") return "openai-responses";
+  if (apiFormat === "openai-compatible") return "openai-completions";
+  return "anthropic-messages";
+}
+
+/** MiniMax Code's own fallback for a custom model with no declared limit. */
+const mcodeDefaultContextWindow = 200_000;
+const mcodeDefaultOutputTokens = 16_384;
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -1004,7 +1186,8 @@ export function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId
     return provider.anthropicBaseUrl
       ?? (provider.apiFormat === "anthropic" ? provider.baseUrl : provider.openaiBaseUrl ?? provider.baseUrl);
   }
-  if ((adapter === "opencode" || adapter === "kimi" || adapter === "pi") && provider.apiFormat === "anthropic") {
+  if ((adapter === "opencode" || adapter === "kimi" || adapter === "pi" || adapter === "mcode")
+    && provider.apiFormat === "anthropic") {
     return provider.anthropicBaseUrl ?? provider.baseUrl;
   }
   return provider.openaiBaseUrl ?? provider.baseUrl;
@@ -1015,6 +1198,11 @@ export function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId
  * Moonshot's OpenAI-compatible protocol (managed service + Kimi Platform
  * keys), "anthropic" speaks the Anthropic Messages protocol, and "openai"
  * covers generic Chat Completions relays.
+ *
+ * Kimi Code's config has a single OpenAI-family provider type ("openai"),
+ * so both openai-responses and openai-compatible providers are declared
+ * there; whether the endpoint actually serves the provider's wire protocol
+ * is the owner's responsibility, the same as for any relay endpoint.
  */
 function kimiProviderType(apiFormat: ProviderProfile["apiFormat"], baseUrl: string | null): string {
   if (apiFormat === "anthropic") return "anthropic";
@@ -1032,26 +1220,31 @@ function isMoonshotEndpoint(baseUrl: string | null): boolean {
   }
 }
 
+/**
+ * OpenCode provider package selection. `@ai-sdk/openai` routes OpenCode to
+ * the OpenAI Responses API (/responses, `input`-shaped bodies) while
+ * `@ai-sdk/openai-compatible` uses Chat Completions (/chat/completions).
+ * Strict third-party gateways reject the Responses API's shorthand history
+ * items (role/content messages, function_call, function_call_output), so
+ * only endpoints explicitly marked openai-responses may take the native
+ * package — everything OpenAI-flavored defaults to chat completions.
+ */
 function openCodePackage(apiFormat: ProviderProfile["apiFormat"]): string {
-  if (apiFormat === "openai") return "@ai-sdk/openai";
+  if (apiFormat === "openai-responses") return "@ai-sdk/openai";
   if (apiFormat === "anthropic") return "@ai-sdk/anthropic";
   if (apiFormat === "google") return "@ai-sdk/google";
-  if (apiFormat === "bedrock") return "@ai-sdk/amazon-bedrock";
   return "@ai-sdk/openai-compatible";
 }
 
 /**
  * PI models.json `api` values for file-based providers (models.md):
- * anthropic→anthropic-messages, google→google-generative-ai, everything
- * OpenAI-flavored→openai-completions except OpenAI-native providers, which
- * get the /responses API. Bedrock has no file-based API (rejected upstream).
+ * anthropic→anthropic-messages, google→google-generative-ai,
+ * openai-responses→the /responses API, chat completions→openai-completions.
  */
-function piApiName(apiFormat: ProviderApiFormat, providerKey: string): string {
+function piApiName(apiFormat: ProviderApiFormat): string {
   if (apiFormat === "anthropic") return "anthropic-messages";
   if (apiFormat === "google") return "google-generative-ai";
-  if (apiFormat === "openai" && ["openai", "codex", "chatgpt"].includes(providerKey)) {
-    return "openai-responses";
-  }
+  if (apiFormat === "openai-responses") return "openai-responses";
   return "openai-completions";
 }
 

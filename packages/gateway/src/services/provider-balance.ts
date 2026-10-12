@@ -28,6 +28,7 @@ export interface FetchProviderBalanceInput {
   fetchImpl?: typeof fetch | undefined;
   resolveHost?: CheckModelEndpointInput["resolveHost"] | undefined;
   allowPlaintextHttp?: boolean | undefined;
+  allowPrivateNetworks?: boolean | undefined;
 }
 
 interface KnownBalanceProvider {
@@ -224,7 +225,8 @@ export async function fetchProviderBalance(input: FetchProviderBalanceInput): Pr
   const endpoint = `${detected.origin}${detected.provider.path}`;
 
   const validationError = await validatePublicHttpsEndpointUrl(endpoint, resolveHost, {
-    allowPlaintextHttp: input.allowPlaintextHttp
+    allowPlaintextHttp: input.allowPlaintextHttp,
+    allowPrivateNetworks: input.allowPrivateNetworks
   });
   if (validationError) throw new Error(validationError);
 

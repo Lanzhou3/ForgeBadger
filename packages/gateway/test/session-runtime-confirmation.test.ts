@@ -35,3 +35,23 @@ test('unknown generations cannot be overwritten and old stop proof cannot confir
  f.repo.begin(f.session.id,next);assert.equal(f.repo.get(f.session.id)?.receipt,null);assert.equal(f.repo.confirm(f.session.id,f.generation.launchNonce,f.receipt),false);assert.equal(f.repo.get(f.session.id)?.status,'pending');
  assert.throws(()=>f.repo.confirm(f.session.id,next.launchNonce,{...next,stopped:false} as never));
 }finally{f.close();}});
+test('revoke transitions only pending rows and releases the deletion guard',()=>{const f=fixture();try{
+ const sessions=new SessionRepository(f.db,f.user.id);
+ assert.equal(f.repo.revoke(f.session.id),false,'no row is a no-op');
+ f.repo.begin(f.session.id,f.generation);
+ assert.throws(()=>sessions.delete(f.session.id),/SESSION_RUNTIME_STOP_UNCONFIRMED/);
+ assert.equal(f.repo.revoke(f.session.id),true);
+ assert.equal(f.repo.get(f.session.id)?.status,'revoked');
+ // A relaunch after revocation starts a fresh pending generation.
+ const relaunch={...f.generation,launchNonce:randomUUID()};
+ f.repo.begin(f.session.id,relaunch);assert.equal(f.repo.get(f.session.id)?.status,'pending');
+ assert.equal(f.repo.revoke(f.session.id),true);
+ sessions.delete(f.session.id);assert.equal(sessions.getById(f.session.id),undefined);
+ assert.equal(f.repo.get(f.session.id),undefined,'revoked row cascades with the session row');
+ // Stopped rows are kept: the receipt is the audit trail, and revoke is a no-op.
+ const second=sessions.create({projectId:f.session.projectId,name:'second',aiTool:'codex',workingDir:f.session.workingDir});
+ const next={...f.generation,runtimeName:'fb-fixture-'+second.id,launchNonce:randomUUID()};
+ f.repo.begin(second.id,next);assert.equal(f.repo.confirm(second.id,next.launchNonce,{...next,stopped:true}),true);
+ assert.equal(f.repo.revoke(second.id),false);assert.equal(f.repo.get(second.id)?.status,'stopped');
+ sessions.delete(second.id);assert.equal(f.repo.get(second.id),undefined,'confirmed stop still cascades with the session row');
+}finally{f.close();}});

@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cloud, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { QueryState } from "@/components/ui/query-state";
 import { AddProviderDialog } from "@/components/models/add-provider-dialog";
 import { ApplyToCliDialog } from "@/components/models/apply-to-cli-dialog";
 import { CliConfigSheet } from "@/components/models/cli-config-sheet";
@@ -13,9 +14,11 @@ import { DeleteConfirmDialog } from "@/components/models/delete-confirm-dialog";
 import { ProviderList } from "@/components/models/provider-list";
 import { ProviderWorkspace } from "@/components/models/provider-workspace";
 import {
+  customProviderPrimaryBaseUrl,
   emptyCredential,
   emptyCustomProvider,
   emptyModel,
+  hydrateCustomProviderForm,
   mergeCapabilities,
   splitCapabilities,
   type CredentialForm,
@@ -65,9 +68,10 @@ export default function ModelsPage() {
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<ProviderProfile | null>(null);
   const [applyDialog, setApplyDialog] = useState<{ open: boolean; adapter?: RuntimeAdapterId }>({ open: false });
-  const [configSheet, setConfigSheet] = useState<{ open: boolean; adapter: RuntimeAdapterId }>({
+  const [configSheet, setConfigSheet] = useState<{ open: boolean; adapter: RuntimeAdapterId | null }>({
     open: false,
-    adapter: "claude",
+    // No default CLI: the sheet opens from an explicit CLI status cell.
+    adapter: null,
   });
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [rotateDialogOpen, setRotateDialogOpen] = useState(false);
@@ -154,6 +158,8 @@ export default function ModelsPage() {
         capabilities: checked,
         customCapabilities: custom,
         contextWindow: selectedModel.contextWindow ? String(selectedModel.contextWindow) : "",
+        supportEfforts: selectedModel.supportEfforts,
+        defaultEffort: selectedModel.defaultEffort ?? "",
       });
     } else {
       setModelForm(emptyModel);
@@ -175,11 +181,12 @@ export default function ModelsPage() {
         providerKey: customProvider.providerKey.trim(),
         authType: customProvider.authType,
         apiFormat: customProvider.apiFormat,
-        baseUrl: anthropicBaseUrl || openaiBaseUrl,
+        baseUrl: customProviderPrimaryBaseUrl(customProvider),
         ...(anthropicBaseUrl ? { anthropicBaseUrl } : {}),
         ...(openaiBaseUrl ? { openaiBaseUrl } : {}),
         supportedAdapters: customProvider.supportedAdapters,
         ...(customProvider.allowPlaintextHttp ? { allowPlaintextHttp: true } : {}),
+        ...(customProvider.allowPrivateNetworks ? { allowPrivateNetworks: true } : {}),
       });
       const secret = setupCredentialForm.plaintextSecret.trim();
       const credential =
@@ -231,11 +238,14 @@ export default function ModelsPage() {
         name: customProvider.name.trim(),
         authType: customProvider.authType,
         apiFormat: customProvider.apiFormat,
-        baseUrl: anthropicBaseUrl || openaiBaseUrl,
+        // The raw baseUrl fallback keeps a provider's bare baseUrl intact even
+        // when neither format field round-trips a value.
+        baseUrl: customProviderPrimaryBaseUrl(customProvider),
         ...(anthropicBaseUrl ? { anthropicBaseUrl } : {}),
         ...(openaiBaseUrl ? { openaiBaseUrl } : {}),
         supportedAdapters: customProvider.supportedAdapters,
         ...(customProvider.allowPlaintextHttp ? { allowPlaintextHttp: true } : {}),
+        ...(customProvider.allowPrivateNetworks ? { allowPrivateNetworks: true } : {}),
       });
     },
     onSuccess: async () => {
@@ -312,6 +322,7 @@ export default function ModelsPage() {
     name: modelForm.name.trim(),
     modelId: modelForm.modelId.trim(),
     capabilities: mergeCapabilities(modelForm.capabilities, modelForm.customCapabilities),
+    supportEfforts: modelForm.supportEfforts,
   });
 
   const modelMutation = useMutation({
@@ -321,6 +332,7 @@ export default function ModelsPage() {
         ...(modelForm.contextWindow.trim()
           ? { contextWindow: Number(modelForm.contextWindow.trim()) }
           : {}),
+        ...(modelForm.defaultEffort ? { defaultEffort: modelForm.defaultEffort } : {}),
       }),
     onSuccess: async (result) => {
       setModelForm(emptyModel);
@@ -340,6 +352,7 @@ export default function ModelsPage() {
         contextWindow: modelForm.contextWindow.trim()
           ? Number(modelForm.contextWindow.trim())
           : null,
+        defaultEffort: modelForm.defaultEffort || null,
       });
     },
     onSuccess: async (result) => {
@@ -466,16 +479,7 @@ export default function ModelsPage() {
 
   function openEditProviderDialog(provider: ProviderProfile) {
     setEditingProvider(provider);
-    setCustomProvider({
-      name: provider.name,
-      providerKey: provider.providerKey,
-      apiFormat: provider.apiFormat,
-      authType: provider.authType,
-      anthropicBaseUrl: provider.anthropicBaseUrl ?? "",
-      openaiBaseUrl: provider.openaiBaseUrl ?? "",
-      supportedAdapters: [...provider.supportedAdapters],
-      allowPlaintextHttp: provider.allowPlaintextHttp ?? false,
-    });
+    setCustomProvider(hydrateCustomProviderForm(provider));
     setSetupCredentialForm(emptyCredential);
     setProviderDialogOpen(true);
   }
@@ -513,7 +517,7 @@ export default function ModelsPage() {
           <Button
             type="button"
             size="sm"
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            variant="brand"
             onClick={openAddProviderDialog}
           >
             <Plus className="size-4" />
@@ -522,6 +526,15 @@ export default function ModelsPage() {
         </div>
       </div>
 
+      {providerQuery.isError ? (
+        <QueryState
+          isLoading={false}
+          isError
+          isEmpty={false}
+          onRetry={() => void providerQuery.refetch()}
+          empty={null}
+        />
+      ) : (
       <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
         <div className="min-w-0 space-y-6">
           <ProviderList
@@ -562,7 +575,7 @@ export default function ModelsPage() {
               isCheckingBalance={balanceQuery.isFetching}
               onSync={() => syncModelsMutation.mutate()}
               onCheckBalance={() => void balanceQuery.refetch()}
-              onDeleteProvider={() => openDeleteDialog({ kind: "provider", providerId: selectedProvider.id })}
+              onDeleteProvider={() => openDeleteDialog({ kind: "provider", providerId: selectedProvider.id, name: selectedProvider.name })}
               onApplyToCli={(adapter) => setApplyDialog({ open: true, adapter })}
               onViewCliConfig={(adapter) => setConfigSheet({ open: true, adapter })}
               modelsTab={{
@@ -578,7 +591,12 @@ export default function ModelsPage() {
                 onNewModel: openNewModelDialog,
                 onEditModel: openEditModelDialog,
                 onSetDefault: (modelId) => setDefaultModelMutation.mutate(modelId),
-                onDeleteModel: (modelId) => openDeleteDialog({ kind: "model", modelId }),
+                onDeleteModel: (modelId) =>
+                  openDeleteDialog({
+                    kind: "model",
+                    modelId,
+                    name: providerModels.find((model) => model.id === modelId)?.name ?? modelId,
+                  }),
                 onSubmitModel: submitModel,
               }}
               credentialTab={{
@@ -595,11 +613,18 @@ export default function ModelsPage() {
                 onSubmitCredential: submitCredential,
                 onOpenRotate: openRotateDialog,
                 onConfirmRotate: () => rotateCredentialMutation.mutate(),
-                onDeleteCredential: (credentialId) => openDeleteDialog({ kind: "credential", credentialId }),
+                onDeleteCredential: (credentialId) =>
+                  openDeleteDialog({
+                    kind: "credential",
+                    credentialId,
+                    name:
+                      providerCredentials.find((credential) => credential.id === credentialId)?.label ??
+                      credentialId,
+                  }),
               }}
               t={t}
             />
-          ) : (
+          ) : providers.length === 0 ? (
             <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-border/70 bg-card/50 px-6 py-12 text-center forgebadger-animate-in">
               <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
                 <Cloud className="size-5" />
@@ -611,22 +636,32 @@ export default function ModelsPage() {
               <Button
                 type="button"
                 size="sm"
-                className="bg-brand text-brand-foreground hover:bg-brand/90"
+                variant="brand"
                 onClick={openAddProviderDialog}
               >
                 <Plus className="size-4" />
                 {t("models.addProvider")}
               </Button>
             </div>
+          ) : (
+            <div className="flex min-h-[280px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border/70 bg-card/50 px-6 py-10 text-center forgebadger-animate-in">
+              <div className="flex size-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                <Cloud className="size-5" />
+              </div>
+              <p className="max-w-sm text-sm text-muted-foreground">{t("models.noProviderSelected")}</p>
+            </div>
           )}
         </div>
       </div>
+      )}
 
-      <CliConfigSheet
-        open={configSheet.open}
-        adapter={configSheet.adapter}
-        onOpenChange={(open) => setConfigSheet((current) => ({ ...current, open }))}
-      />
+      {configSheet.adapter && (
+        <CliConfigSheet
+          open={configSheet.open}
+          adapter={configSheet.adapter}
+          onOpenChange={(open) => setConfigSheet((current) => ({ ...current, open }))}
+        />
+      )}
 
       <AddProviderDialog
         open={providerDialogOpen}

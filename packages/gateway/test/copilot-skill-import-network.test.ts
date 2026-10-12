@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -8,7 +9,7 @@ import { SkillRepository } from '../src/db/repositories/skill-repository.js';
 import { importCopilotSkill } from '../src/services/agent/skills/copilot-skill-import.js';
 import type { publicFetch } from '../src/services/extensions/public-fetch.js';
 const text='---\nname: public-guide\ndescription: Public text\n---\nReview safely.';
-function fixture(){const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations/',import.meta.url).pathname});const user=new UserRepository(db).create('url-skills@test.dev','hash');return{db,user};}
+function fixture(){const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations/', import.meta.url))});const user=new UserRepository(db).create('url-skills@test.dev','hash');return{db,user};}
 it('imports a public raw URL as one bounded immutable SKILL.md resource and retains its source',async()=>{
  const f=fixture();try{
   const fetcher:typeof publicFetch=async(input,init,beforeSend)=>{assert.equal(String(input),'https://example.com/SKILL.md');assert.equal(init?.method,'GET');beforeSend?.();return new Response(text);};

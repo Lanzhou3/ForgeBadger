@@ -13,8 +13,8 @@ const secretKeys = new Set([
 
 export function buildSmokeEnvironment(options = {}) {
   const root = options.root ?? path.join(tmpdir(), "forgebadger-smoke");
-  const gatewayPort = String(options.gatewayPort ?? 48731);
-  const webPort = String(options.webPort ?? 48732);
+  const gatewayPort = String(options.gatewayPort ?? 18332);
+  const webPort = String(options.webPort ?? 18333);
   const masterKey = options.masterKey ?? "0".repeat(64);
   const jwtSecret = options.jwtSecret ?? "forgebadger-smoke-jwt-secret-32-chars";
 

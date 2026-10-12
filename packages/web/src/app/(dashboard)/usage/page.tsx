@@ -4,10 +4,14 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  BookOpen,
   Brain,
   Braces,
-  Database,
+  PenLine,
   RefreshCw,
+  Target,
   type LucideIcon
 } from "lucide-react";
 
@@ -19,9 +23,11 @@ import {
   CardTitle
 } from "@/components/ui/card";
 import { CliBrandChip } from "@/components/cli-brand-chip";
+import { QueryState } from "@/components/ui/query-state";
 import {
   getProjectActivity,
   getTokenUsageSummary,
+  listProjects,
   syncUsageTokens,
   type TokenUsageBucket,
   type TokenDailyPoint
@@ -88,10 +94,13 @@ export default function UsagePage() {
   const [notice, setNotice] = useState("");
   const [noticeType, setNoticeType] = useState<"ok" | "error">("ok");
   const [range, setRange] = useState(LAST_30_DAYS);
+  // Tap-to-inspect fallback for touch devices (hover tooltips don't exist
+  // there); tapping the same bar again dismisses it.
+  const [tappedDay, setTappedDay] = useState<string | null>(null);
   const monthOptions = useMemo(() => monthOptionsList(), []);
   const activeRange = useMemo(() => activityRange(range), [range]);
 
-  const { data: usageData, isLoading } = useQuery({
+  const { data: usageData, isLoading, isError, refetch } = useQuery({
     queryKey: ["usage-token-summary"],
     queryFn: () => getTokenUsageSummary()
   });
@@ -99,6 +108,20 @@ export default function UsagePage() {
     queryKey: ["usage-project-activity", range],
     queryFn: () => getProjectActivity({ from: activeRange.from, to: activeRange.to })
   });
+  const { data: projectsData } = useQuery({
+    queryKey: ["projects"],
+    queryFn: () => listProjects()
+  });
+
+  const projectNameByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const project of projectsData?.projects ?? []) {
+      map.set(project.id, project.name);
+      if (project.path) map.set(project.path, project.name);
+      if (project.rootPath) map.set(project.rootPath, project.name);
+    }
+    return map;
+  }, [projectsData]);
 
   const summary = usageData?.summary;
   const series = activityData?.series ?? [];
@@ -146,22 +169,22 @@ export default function UsagePage() {
           hint: `${t("usage.requests")} ${summary.requestCount}`
         },
         {
-          icon: Database,
+          icon: ArrowDownToLine,
           label: t("usage.totalInput"),
           value: formatTokens(summary.totalInputTokens)
         },
         {
-          icon: Braces,
+          icon: ArrowUpFromLine,
           label: t("usage.totalOutput"),
           value: formatTokens(summary.totalOutputTokens)
         },
         {
-          icon: Database,
+          icon: BookOpen,
           label: t("usage.totalCacheRead"),
           value: formatTokens(summary.totalCacheReadTokens)
         },
         {
-          icon: Database,
+          icon: PenLine,
           label: t("usage.totalCacheWrite"),
           value: formatTokens(summary.totalCacheWriteTokens)
         },
@@ -171,7 +194,7 @@ export default function UsagePage() {
           value: formatTokens(summary.totalReasoningTokens)
         },
         {
-          icon: Database,
+          icon: Target,
           label: t("usage.cacheHitRate"),
           value: summary.cacheHitRate === null ? "—" : `${summary.cacheHitRate}%`,
           hint: t("usage.cacheHitRateHint")
@@ -191,7 +214,10 @@ export default function UsagePage() {
             aria-label={t("usage.activityTitle")}
             className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
             value={range}
-            onChange={(event) => setRange(event.target.value)}
+            onChange={(event) => {
+              setRange(event.target.value);
+              setTappedDay(null);
+            }}
           >
             <option value={LAST_30_DAYS}>{t("usage.last30Days")}</option>
             {monthOptions.map((option) => (
@@ -200,7 +226,7 @@ export default function UsagePage() {
           </select>
           <Button
             size="sm"
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            variant="brand"
             onClick={() => syncMutation.mutate()}
             disabled={syncMutation.isPending}
           >
@@ -229,7 +255,15 @@ export default function UsagePage() {
         </div>
       )}
 
-      {isLoading || !summary ? (
+      {isError ? (
+        <QueryState
+          isLoading={false}
+          isError
+          isEmpty={false}
+          onRetry={() => void refetch()}
+          empty={null}
+        />
+      ) : isLoading || !summary ? (
         <Card className="forgebadger-animate-in">
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("usage.loading")}
@@ -261,6 +295,11 @@ export default function UsagePage() {
                 </div>
               ))}
             </CardContent>
+            {/* The metric strip aggregates all time while the charts below are
+                bound to the selected range; say so explicitly. */}
+            <div className="border-t border-border/70 px-4 py-2 text-[11px] text-muted-foreground">
+              {t("usage.metricsAllTimeNote")}
+            </div>
           </Card>
 
           {summary.requestCount === 0 ? (
@@ -305,56 +344,84 @@ export default function UsagePage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex h-44 items-end gap-1 border-b border-border/70">
-                    {daily.map((row) => {
-                      const outputShare = row.totalTokens > 0
-                        ? Math.min(100, (row.outputTokens / row.totalTokens) * 100)
-                        : 0;
-                      return (
-                        <div
-                          key={row.day}
-                          className="group relative flex h-full flex-1 items-end"
-                        >
-                          <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs shadow-lg group-hover:block">
-                            <div className="font-medium">{row.day}</div>
-                            <div className="mt-1 space-y-0.5 text-muted-foreground">
-                              <div className="flex items-center justify-between gap-4">
-                                <span>{t("usage.total")}</span>
-                                <span className="font-medium tabular-nums text-foreground">
-                                  {formatTokens(row.totalTokens)}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between gap-4">
-                                <span className="inline-flex items-center gap-1.5">
-                                  <span className="size-1.5 rounded-sm bg-brand" />
-                                  {t("usage.output")}
-                                </span>
-                                <span className="tabular-nums">{formatTokens(row.outputTokens)}</span>
-                              </div>
-                              <div className="flex items-center justify-between gap-4">
-                                <span className="inline-flex items-center gap-1.5">
-                                  <span className="size-1.5 rounded-sm bg-brand/50" />
-                                  {t("usage.input")}
-                                </span>
-                                <span className="tabular-nums">{formatTokens(row.inputTokens)}</span>
-                              </div>
-                            </div>
-                          </div>
-                          {row.totalTokens > 0 && (
+                  <div className="flex h-44 gap-3">
+                    {/* Y-axis ticks aligned with the gridlines below: max, half, zero. */}
+                    <div
+                      className="flex w-12 shrink-0 flex-col justify-between py-0 text-right text-[10px] leading-none tabular-nums text-muted-foreground"
+                      aria-hidden="true"
+                    >
+                      <span>{formatTokens(maxDailyTotal)}</span>
+                      <span>{formatTokens(Math.round(maxDailyTotal / 2))}</span>
+                      <span>0</span>
+                    </div>
+                    <div className="relative flex flex-1 items-end gap-1 border-b border-border/70">
+                      <div className="pointer-events-none absolute inset-x-0 top-0 border-t border-border/40" />
+                      <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t border-border/40" />
+                      {daily.map((row) => {
+                        const outputShare = row.totalTokens > 0
+                          ? Math.min(100, (row.outputTokens / row.totalTokens) * 100)
+                          : 0;
+                        const tapped = tappedDay === row.day;
+                        return (
+                          <div
+                            key={row.day}
+                            data-testid={`usage-bar-${row.day}`}
+                            className="group relative flex h-full flex-1 cursor-pointer items-end"
+                            onClick={() =>
+                              setTappedDay((current) => (current === row.day ? null : row.day))
+                            }
+                          >
                             <div
-                              className="flex w-full flex-col justify-end overflow-hidden rounded-t"
-                              style={{ height: `${Math.max(2, (row.totalTokens / maxDailyTotal) * 100)}%` }}
+                              className={cn(
+                                "pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs shadow-lg",
+                                tapped ? "block" : "hidden group-hover:block"
+                              )}
                             >
-                              <div
-                                className="w-full bg-brand transition-colors group-hover:bg-brand/90"
-                                style={{ height: `${outputShare}%` }}
-                              />
-                              <div className="w-full flex-1 bg-brand/50 transition-colors group-hover:bg-brand/60" />
+                              <div className="font-medium">{row.day}</div>
+                              <div className="mt-1 space-y-0.5 text-muted-foreground">
+                                <div className="flex items-center justify-between gap-4">
+                                  <span>{t("usage.total")}</span>
+                                  <span className="font-medium tabular-nums text-foreground">
+                                    {formatTokens(row.totalTokens)}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-4">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span className="size-1.5 rounded-sm bg-brand" />
+                                    {t("usage.output")}
+                                  </span>
+                                  <span className="tabular-nums">{formatTokens(row.outputTokens)}</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-4">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span className="size-1.5 rounded-sm bg-brand/50" />
+                                    {t("usage.input")}
+                                  </span>
+                                  <span className="tabular-nums">{formatTokens(row.inputTokens)}</span>
+                                </div>
+                              </div>
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                            {row.totalTokens > 0 && (
+                              <div
+                                className="flex w-full flex-col justify-end overflow-hidden rounded-t"
+                                style={{ height: `${Math.max(2, (row.totalTokens / maxDailyTotal) * 100)}%` }}
+                              >
+                                <div
+                                  className="w-full bg-brand transition-colors group-hover:bg-brand/90"
+                                  style={{ height: `${outputShare}%` }}
+                                />
+                                {/* Input portion carries a stripe overlay so the
+                                    split stays readable for color-blind users,
+                                    not only via the lighter brand opacity. */}
+                                <div
+                                  className="w-full flex-1 bg-brand/50 [background-image:repeating-linear-gradient(135deg,transparent_0px,transparent_2px,rgba(255,255,255,0.35)_2px,rgba(255,255,255,0.35)_3px)] transition-colors group-hover:bg-brand/60"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                   <div className="mt-2 flex justify-between text-xs text-muted-foreground">
                     <span>{daily[0]?.day}</span>
@@ -372,6 +439,7 @@ export default function UsagePage() {
                 <UsageTable
                   title={t("usage.byProject")}
                   rows={summary.byProject}
+                  resolveLabel={(key) => projectNameByKey.get(key) ?? key}
                 />
                 <UsageTable
                   title={t("usage.byModel")}
@@ -403,12 +471,15 @@ function UsageTable({
   rows,
   brandChip = false,
   showHitRate = false,
+  resolveLabel,
   className
 }: {
   title: string;
   rows: TokenUsageBucket[];
   brandChip?: boolean;
   showHitRate?: boolean;
+  /** Maps a raw group key (e.g. a project id or path) to a display name. */
+  resolveLabel?: (key: string) => string;
   className?: string;
 }) {
   const { t } = useLanguage();
@@ -440,7 +511,7 @@ function UsageTable({
               {brandChip && getCliBrand(row.key).id !== "unknown" ? (
                 <CliBrandChip aiTool={row.key} />
               ) : (
-                row.key
+                resolveLabel?.(row.key) ?? row.key
               )}
             </span>
             <span className="relative w-20 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
@@ -467,6 +538,10 @@ function UsageTable({
 function ActivityHeatmap({ series, days }: { series: TokenDailyPoint[]; days: string[] }) {
   const { t } = useLanguage();
   const [hoverInfo, setHoverInfo] = useState<{ project: string; day: string; total: number } | null>(null);
+  // Tap-to-pin fallback for touch devices: a tapped cell keeps its values
+  // visible in the header without hover; tapping it again releases the pin.
+  const [pinnedInfo, setPinnedInfo] = useState<{ project: string; day: string; total: number } | null>(null);
+  const displayedInfo = pinnedInfo ?? hoverInfo;
 
   const byKey = useMemo(() => {
     const map = new Map<string, TokenDailyPoint>();
@@ -483,6 +558,14 @@ function ActivityHeatmap({ series, days }: { series: TokenDailyPoint[]; days: st
 
   if (projects.length === 0 || days.length === 0) return null;
 
+  const togglePin = (project: string, day: string, total: number) => {
+    setPinnedInfo((current) =>
+      current && current.project === project && current.day === day
+        ? null
+        : { project, day, total }
+    );
+  };
+
   return (
     <Card className="forgebadger-animate-in">
       <CardHeader className="pb-3">
@@ -490,8 +573,8 @@ function ActivityHeatmap({ series, days }: { series: TokenDailyPoint[]; days: st
           <CardTitle className="text-sm font-semibold">{t("usage.activityTitle")}</CardTitle>
           <div className="flex items-center gap-3">
             <span className="text-xs tabular-nums text-muted-foreground">
-              {hoverInfo
-                ? `${hoverInfo.project.split("/").filter(Boolean).pop() ?? hoverInfo.project} · ${hoverInfo.day} · ${formatTokens(hoverInfo.total)}`
+              {displayedInfo
+                ? `${displayedInfo.project.split("/").filter(Boolean).pop() ?? displayedInfo.project} · ${displayedInfo.day} · ${formatTokens(displayedInfo.total)}`
                 : " "}
             </span>
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -505,25 +588,37 @@ function ActivityHeatmap({ series, days }: { series: TokenDailyPoint[]; days: st
         </div>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto" onMouseLeave={() => setHoverInfo(null)}>
+        <div
+          className="overflow-x-auto"
+          onMouseLeave={() => {
+            setHoverInfo(null);
+            setPinnedInfo(null);
+          }}
+        >
           <div className="inline-block space-y-1.5">
             <div className="flex items-center gap-1.5">
-              <div className="w-36 shrink-0" />
-              {days.map((day) => (
-                <div
-                  key={day}
-                  className="w-4 shrink-0 text-center text-[10px] leading-none text-muted-foreground"
-                >
-                  {day.slice(8)}
-                </div>
-              ))}
+              <div className="sticky left-0 z-10 w-36 shrink-0 bg-card" />
+              {days.map((day, dayIndex) => {
+                // Mark month boundaries so a cross-month axis stays readable.
+                const monthStart =
+                  dayIndex === 0 || day.slice(0, 7) !== days[dayIndex - 1]!.slice(0, 7);
+                return (
+                  <div
+                    key={day}
+                    className="flex w-4 shrink-0 flex-col items-center gap-0.5 text-muted-foreground"
+                  >
+                    <span className="text-[9px] leading-none">{monthStart ? day.slice(5, 7) : ""}</span>
+                    <span className="text-center text-[10px] leading-none">{day.slice(8)}</span>
+                  </div>
+                );
+              })}
             </div>
             {projects.map((project) => {
               const projectLabel = project.split("/").filter(Boolean).pop() ?? project;
               return (
                 <div key={project} className="flex items-center gap-1.5">
                   <div
-                    className="w-36 shrink-0 truncate pr-2 text-xs leading-none text-muted-foreground"
+                    className="sticky left-0 z-10 w-36 shrink-0 truncate bg-card pr-2 text-xs leading-none text-muted-foreground"
                     title={project}
                   >
                     {projectLabel}
@@ -535,8 +630,9 @@ function ActivityHeatmap({ series, days }: { series: TokenDailyPoint[]; days: st
                     return (
                       <div
                         key={`${day}|${project}`}
+                        data-testid={`usage-cell-${day}`}
                         className={cn(
-                          "size-4 shrink-0 rounded-[3px] transition-transform hover:scale-110 hover:ring-1 hover:ring-foreground/40",
+                          "size-4 shrink-0 cursor-pointer rounded-[3px] transition-transform hover:scale-110 hover:ring-1 hover:ring-foreground/40",
                           intensity === 0
                             ? "bg-muted"
                             : intensity === 1
@@ -548,6 +644,7 @@ function ActivityHeatmap({ series, days }: { series: TokenDailyPoint[]; days: st
                                   : "bg-brand"
                         )}
                         onMouseEnter={() => setHoverInfo({ project, day, total })}
+                        onClick={() => togglePin(project, day, total)}
                       />
                     );
                   })}
@@ -555,7 +652,7 @@ function ActivityHeatmap({ series, days }: { series: TokenDailyPoint[]; days: st
               );
             })}
             <div className="flex items-center gap-1.5">
-              <div className="w-36 shrink-0" />
+              <div className="sticky left-0 z-10 w-36 shrink-0 bg-card" />
               <div className="flex flex-1 justify-between pt-1 text-[10px] leading-none text-muted-foreground">
                 <span>{days[0]}</span>
                 <span>{days[days.length - 1]}</span>

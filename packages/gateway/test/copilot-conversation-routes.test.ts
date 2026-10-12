@@ -249,7 +249,7 @@ describe("copilot edit-message route", () => {
       // still exercising the production SSRF validation path.
       baseUrl: "https://8.8.8.8",
       authType: "api_key",
-      apiFormat: "openai",
+      apiFormat: "openai-compatible",
       supportedAdapters: ["opencode"]
     });
     repo.createModelProfile({

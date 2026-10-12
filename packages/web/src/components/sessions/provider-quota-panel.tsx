@@ -1,8 +1,15 @@
 "use client";
 
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Gauge, RefreshCw } from "lucide-react";
 
+import {
+  CliQuotaSummary,
+  LOGIN_HINT_KEYS,
+  loginMethodLabel,
+  type Translate,
+} from "@/components/models/cli-quota";
 import { Button } from "@/components/ui/button";
 import {
   formatQuotaAmount,
@@ -10,12 +17,20 @@ import {
   quotaTextToneClass,
   quotaUsagePercent,
 } from "@/components/sessions/provider-quota";
-import { useLanguage } from "@/hooks/use-language";
+import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import {
   checkProviderBalance,
+  CLI_ACCOUNT_ADAPTERS,
+  getCliAccount,
   getAppliedProviderForAdapter,
+  refreshCliAccountQuota,
+  type CliAccountAdapter,
+  type CliLoginStatus,
+  type CliQuotaResult,
   type ProviderBalanceEntry,
+  runtimeAdapterIds,
 } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -23,11 +38,17 @@ interface Props {
 }
 
 const REFRESH_INTERVAL_MS = 60_000;
-const KNOWN_TOOLS = new Set(["claude", "opencode", "codex", "kimi", "pi"]);
+const KNOWN_TOOLS = new Set<string>(runtimeAdapterIds);
 
 export function ProviderQuotaPanel({ aiTool }: Props) {
   const { t } = useLanguage();
+  const locale = useUiLocale();
   const knownTool = KNOWN_TOOLS.has(aiTool);
+  // Only CLIs with a native login/quota surface are probed by the gateway.
+  // Derived from one list so a new adapter does not need a second edit here
+  // (opencode and pi have no account surface, so they stay excluded).
+  const nativeAdapter: CliAccountAdapter | null =
+    CLI_ACCOUNT_ADAPTERS.includes(aiTool as CliAccountAdapter) ? (aiTool as CliAccountAdapter) : null;
 
   const appliedQuery = useQuery({
     queryKey: ["applied-provider", aiTool],
@@ -51,6 +72,56 @@ export function ProviderQuotaPanel({ aiTool }: Props) {
     retry: false,
   });
 
+  const [refreshingNative, setRefreshingNative] = useState(false);
+
+  // The native login overview is queried whenever the CLI exposes one,
+  // independent of the applied provider: when a provider is applied and the
+  // CLI is also natively logged in, the panel shows both sources side by side.
+  const nativeQuery = useQuery({
+    queryKey: ["cli-account", aiTool],
+    queryFn: async () => (await getCliAccount(nativeAdapter as CliAccountAdapter)).overview,
+    enabled: nativeAdapter !== null,
+    refetchInterval: REFRESH_INTERVAL_MS,
+    retry: false,
+  });
+  const nativeLogin = nativeQuery.data?.login ?? null;
+  const nativeQuota = nativeQuery.data?.quota;
+  const nativeQuotaVisible =
+    nativeLogin?.state === "ready" && Boolean(nativeQuota?.supported && nativeQuota.entries.length > 0);
+  const nativeMethod =
+    nativeLogin && nativeLogin.state === "ready" ? loginMethodLabel(nativeLogin.method, t) : undefined;
+
+  const providerBlockVisible = Boolean(applied);
+  // A ready native login coexisting with the applied provider renders the
+  // second, labeled block. Not-logged-in or failed native accounts render no
+  // block at all, so the panel never shows an empty one.
+  const nativeBlockVisible = nativeAdapter !== null && nativeLogin?.state === "ready";
+  const dualMode = providerBlockVisible && nativeBlockVisible;
+  const providerBlockLabel = dualMode && applied ? applied.providerName : null;
+  const nativeBlockLabel = dualMode
+    ? `${t("sessions.providerQuotaNative")}${nativeMethod ? ` · ${nativeMethod}` : ""}`
+    : null;
+  // Native refresh eligibility: a ready login can always be refreshed, and in
+  // the no-provider fallback a not-logged-in CLI can too (refreshing
+  // re-checks the login).
+  const nativeRefreshVisible =
+    nativeAdapter !== null &&
+    nativeLogin !== null &&
+    (nativeLogin.state === "ready" || (!providerBlockVisible && nativeLogin.state === "not_authenticated"));
+
+  // One header refresh button updates every visible source at once: the
+  // applied provider balance and the native login quota.
+  const handleRefreshAll = () => {
+    if (providerId) void balanceQuery.refetch();
+    if (nativeAdapter && nativeRefreshVisible) {
+      setRefreshingNative(true);
+      refreshCliAccountQuota(nativeAdapter)
+        .then(() => nativeQuery.refetch())
+        .catch(() => toast.error(t("models.cliAccountQuotaRefreshFailed")))
+        .finally(() => setRefreshingNative(false));
+    }
+  };
+
   if (!knownTool) return null;
 
   const balance = balanceQuery.data;
@@ -62,58 +133,162 @@ export function ProviderQuotaPanel({ aiTool }: Props) {
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <Gauge className="size-4 shrink-0 text-muted-foreground" />
           <span className="shrink-0">{t("sessions.providerQuota")}</span>
-          {applied && (
+          {applied ? (
             <span
               className="min-w-0 truncate rounded-full bg-muted/50 px-2 py-0.5 text-[10px] text-muted-foreground"
               title={applied.providerName}
             >
               {applied.providerName}
             </span>
-          )}
+          ) : null}
+          {nativeQuotaVisible ? (
+            <span
+              className="min-w-0 truncate rounded-full bg-muted/50 px-2 py-0.5 text-[10px] text-muted-foreground"
+              title={nativeMethod ? `${t("sessions.providerQuotaNative")} · ${nativeMethod}` : t("sessions.providerQuotaNative")}
+            >
+              {t("sessions.providerQuotaNative")}
+              {nativeMethod ? ` · ${nativeMethod}` : ""}
+            </span>
+          ) : null}
         </div>
-        {providerId && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6 shrink-0 text-muted-foreground"
-            disabled={refreshing}
-            onClick={() => void balanceQuery.refetch()}
-            aria-label={t("sessions.providerQuotaRefresh")}
-            title={t("sessions.providerQuotaRefresh")}
-          >
-            <RefreshCw className={cn("size-3", refreshing && "animate-spin")} />
-          </Button>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {providerId || nativeRefreshVisible ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 shrink-0 text-muted-foreground"
+              disabled={refreshing || refreshingNative}
+              onClick={handleRefreshAll}
+              aria-label={t("sessions.providerQuotaRefresh")}
+              title={t("sessions.providerQuotaRefresh")}
+            >
+              <RefreshCw className={cn("size-3", (refreshing || refreshingNative) && "animate-spin")} />
+            </Button>
+          ) : null}
+        </div>
       </div>
 
-      {!applied ? (
+      {applied ? (
+        <QuotaBlock label={providerBlockLabel}>
+          {balanceQuery.error ? (
+            <p className="mt-2 text-xs text-destructive">{t("sessions.providerQuotaLoadFailed")}</p>
+          ) : !balance ? (
+            <p className="mt-2 text-xs text-muted-foreground">…</p>
+          ) : !balance.supported ? (
+            <p className="mt-2 text-xs text-muted-foreground">{t("sessions.providerQuotaUnsupported")}</p>
+          ) : (
+            <>
+              <ul className="mt-3 space-y-2">
+                {balance.balances.map((entry) => (
+                  <ProviderQuotaRow key={entry.label} entry={entry} />
+                ))}
+              </ul>
+              <p className="mt-2 text-right text-[10px] text-muted-foreground/60 tabular-nums">
+                {t("sessions.providerQuotaCheckedAt")}{" "}
+                {new Date(balance.checkedAt).toLocaleTimeString(locale)}
+                {refreshing && " ·…"}
+              </p>
+            </>
+          )}
+        </QuotaBlock>
+      ) : null}
+
+      {nativeAdapter && (dualMode || !applied) ? (
+        <QuotaBlock label={nativeBlockLabel}>
+          <NativeQuotaBody
+            adapter={nativeAdapter}
+            login={nativeLogin}
+            quota={nativeQuota}
+            failed={Boolean(nativeQuery.error)}
+            t={t}
+          />
+        </QuotaBlock>
+      ) : !applied ? (
         <p className="mt-2 text-xs text-muted-foreground">{t("sessions.providerQuotaEmpty")}</p>
-      ) : balanceQuery.error ? (
-        <p className="mt-2 text-xs text-destructive">{t("sessions.providerQuotaLoadFailed")}</p>
-      ) : !balance ? (
-        <p className="mt-2 text-xs text-muted-foreground">…</p>
-      ) : !balance.supported ? (
-        <p className="mt-2 text-xs text-muted-foreground">{t("sessions.providerQuotaUnsupported")}</p>
-      ) : (
-        <>
-          <ul className="mt-3 space-y-2">
-            {balance.balances.map((entry) => (
-              <ProviderQuotaRow key={entry.label} entry={entry} />
-            ))}
-          </ul>
-          <p className="mt-2 text-right text-[10px] text-muted-foreground/60 tabular-nums">
-            {t("sessions.providerQuotaCheckedAt")}{" "}
-            {new Date(balance.checkedAt).toLocaleTimeString()}
-            {refreshing && " ·…"}
-          </p>
-        </>
-      )}
+      ) : null}
     </section>
   );
 }
 
+/**
+ * One quota source in the panel. In dual display (applied provider + ready
+ * native login) each block carries a source label; single-source mode renders
+ * the body bare.
+ */
+function QuotaBlock({ label, children }: { label: string | null; children: ReactNode }) {
+  if (!label) return <>{children}</>;
+  return (
+    <div>
+      <p className="mt-3 text-[10px] font-medium text-muted-foreground/80">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Native login quota body. Never surfaces gateway error text — failures
+ * collapse back to the neutral empty state.
+ */
+function NativeQuotaBody({  adapter,
+  login,
+  quota,
+  failed,
+  t,
+}: {
+  adapter: CliAccountAdapter;
+  login: CliLoginStatus | null;
+  quota: CliQuotaResult | undefined;
+  failed: boolean;
+  t: Translate;
+}) {
+  const locale = useUiLocale();
+  if (!login) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">
+        {failed ? t("sessions.providerQuotaEmpty") : "…"}
+      </p>
+    );
+  }
+  if (login.state === "not_authenticated") {
+    return (
+      <>
+        <p className="mt-2 text-xs text-muted-foreground">{t("sessions.providerQuotaEmpty")}</p>
+        <p
+          className="mt-1 truncate text-[11px] text-muted-foreground/70"
+          title={t(LOGIN_HINT_KEYS[adapter])}
+        >
+          {t(LOGIN_HINT_KEYS[adapter])}
+        </p>
+      </>
+    );
+  }
+  if (login.state === "ready" && quota) {
+    if (quota.supported && quota.entries.length > 0) {
+      return (
+        <>
+          <div className="mt-3">
+            <CliQuotaSummary quota={quota} t={t} />
+          </div>
+          <p className="mt-2 text-right text-[10px] text-muted-foreground/60 tabular-nums">
+            {t("sessions.providerQuotaCheckedAt")} {new Date(quota.fetchedAt).toLocaleTimeString(locale)}
+          </p>
+        </>
+      );
+    }
+    if (!quota.supported && quota.unsupportedReason) {
+      return (
+        <div className="mt-2">
+          <CliQuotaSummary quota={quota} t={t} />
+        </div>
+      );
+    }
+  }
+  return <p className="mt-2 text-xs text-muted-foreground">{t("sessions.providerQuotaEmpty")}</p>;
+}
+
 function ProviderQuotaRow({ entry }: { entry: ProviderBalanceEntry }) {
   const { t } = useLanguage();
+  const locale = useUiLocale();
   const percent = quotaUsagePercent(entry);
   return (
     <li className="rounded-md border border-border/70 bg-muted/10 px-2.5 py-2">
@@ -164,7 +339,7 @@ function ProviderQuotaRow({ entry }: { entry: ProviderBalanceEntry }) {
           )}
           {entry.resetsAt && (
             <span className="shrink-0 tabular-nums">
-              {t("sessions.providerQuotaResetAt")}: {new Date(entry.resetsAt).toLocaleString()}
+              {t("sessions.providerQuotaResetAt")}: {new Date(entry.resetsAt).toLocaleString(locale)}
             </span>
           )}
         </div>

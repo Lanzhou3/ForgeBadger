@@ -51,27 +51,41 @@ describe("InMemorySessionManager", () => {
     assert.deepEqual(calls, ["create:fb-user_123-session_abcdef"]);
   });
 
-  it("clears NO_COLOR so CLI colors render in the Web terminal", async () => {
-    let capturedEnv: Record<string, string> | undefined;
-    const manager = new InMemorySessionManager({
-      ...fakeBackend([]),
-      async createSession(options) {
-        capturedEnv = options.env;
-      }
-    });
+  for (const noColor of [undefined, "", "1"]) {
+    it(`omits NO_COLOR from the terminal environment when its launch value is ${JSON.stringify(noColor)}`, async () => {
+      // Arrange: empty values also disable colors in newer Codex versions.
+      let capturedEnv: Record<string, string> | undefined;
+      const plan = launchPlan();
+      plan.env = Object.freeze({
+        ...plan.env,
+        LANG: "en_US.UTF-8",
+        ...(noColor === undefined ? {} : { NO_COLOR: noColor })
+      });
+      const originalEnv = { ...plan.env };
+      const manager = new InMemorySessionManager({
+        ...fakeBackend([]),
+        async createSession(options) {
+          capturedEnv = options.env;
+        }
+      });
 
-    await manager.createSession({
-      userId: "user_123456",
-      sessionId: "session_abcdef",
-      launchPlan: launchPlan()
-    });
+      // Act.
+      await manager.createSession({
+        userId: "user_123456",
+        sessionId: "session_abcdef",
+        launchPlan: plan
+      });
 
-    // The Web terminal renders ANSI colors, so a host-leaked NO_COLOR=1
-    // (inherited from the backend server global environment) must be overridden
-    // to an empty value — CLI TUI (e.g. Claude Code) then renders in color.
-    assert.equal(capturedEnv?.NO_COLOR, "");
-    assert.equal(capturedEnv?.["FORGEBADGER_ATTACH_TOKEN"]?.length, 36);
-  });
+      // Assert: absence matters, not a falsy value; retain unrelated metadata.
+      assert.ok(capturedEnv);
+      assert.equal(Object.hasOwn(capturedEnv, "NO_COLOR"), false);
+      assert.equal(capturedEnv.LANG, "en_US.UTF-8");
+      assert.equal(capturedEnv.FORGEBADGER_SESSION_ID, "session_abcdef");
+      assert.equal(capturedEnv.FORGEBADGER_USER_ID, "user_123456");
+      assert.equal(capturedEnv.FORGEBADGER_ATTACH_TOKEN?.length, 36);
+      assert.deepEqual(plan.env, originalEnv);
+    });
+  }
 
   it("marks a session exited when stopped", async () => {
     const calls: string[] = [];
@@ -198,7 +212,7 @@ describe("InMemorySessionManager", () => {
 
     assert.equal(receipt.adapter, "codex");
     assert.deepEqual(calls.filter((call) => call === "enter"), ["enter"]);
-    assert.deepEqual(calls.slice(1), ["inspect", "stage:第一行\n第二行", "settle", "inspect", "enter"]);
+    assert.deepEqual(calls.slice(1), ["inspect", "stage:第一行\n第二行", "settle", "inspect", "settle", "enter"]);
   });
 
   it("rechecks runtime authorization after pane inspection and before programmatic input", async () => {
@@ -265,7 +279,7 @@ describe("InMemorySessionManager", () => {
 
     await manager.submitProgrammaticTask(session.id, { adapter: "codex", message });
 
-    assert.deepEqual(calls.slice(1), ["inspect", "stage", "settle", "inspect", "enter"]);
+    assert.deepEqual(calls.slice(1), ["inspect", "stage", "settle", "inspect", "settle", "enter"]);
   });
 
   it("rejects an adapter mismatch before writing to backend", async () => {
@@ -382,7 +396,7 @@ describe("InMemorySessionManager", () => {
       () => manager.submitProgrammaticTask(session.id, { adapter: "codex", message: "hello" }),
       /PROGRAMMATIC_SUBMIT_INDETERMINATE/
     );
-    assert.deepEqual(terminalCalls, ["inspect", "stage:hello", "settle", "inspect", "enter"]);
+    assert.deepEqual(terminalCalls, ["inspect", "stage:hello", "settle", "inspect", "settle", "enter"]);
   });
 
   it("marks launch failures as errors", async () => {

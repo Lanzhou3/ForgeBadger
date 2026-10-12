@@ -1,3 +1,6 @@
+import { createProjectDiffTools } from './project-diff.js';
+import { createResearchTools } from "./research.js";
+import { createSourceSearchTools } from "./source-search.js";
 import { createDevelopmentTools } from './development.js';
 import { createDiscoveryTools } from './discovery.js';
 import { createPlatformCoverageTools } from "./platform-coverage.js";
@@ -13,6 +16,7 @@ import { createPlatformManagementTools } from "./platform-management.js";
 import type { AgentTool } from "../tool-registry.js";
 import { createProjectTools } from "./projects.js";
 import { createSessionTools } from "./sessions.js";
+import { createTerminalTools } from "./terminal.js";
 import { createMemoryTools } from "./memory.js";
 import { createUsageTools } from "./usage.js";
 import { createProjectManagerTools } from "./project-manager.js";
@@ -21,6 +25,9 @@ import { createGraphTools } from "./graph.js";
 
 export function createPlatformTools(): AgentTool[] {
   return [
+    ...createProjectDiffTools(),
+    ...createResearchTools(),
+    ...createSourceSearchTools(),
     ...createDiscoveryTools(),
     ...createDevelopmentTools(),
     ...createPlatformCoverageTools(),
@@ -29,6 +36,7 @@ export function createPlatformTools(): AgentTool[] {
     ...createSkillTools(),
     ...createProjectTools(),
     ...createSessionTools(),
+    ...createTerminalTools(),
     ...createMemoryTools(),
     ...createUsageTools(),
     ...createProjectManagerTools(),

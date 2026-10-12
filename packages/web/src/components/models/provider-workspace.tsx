@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useUiLocale } from "@/hooks/use-language";
 import { MoreHorizontal, Pencil, RefreshCw, ServerCog, ShieldCheck, Trash2, Wallet } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -76,6 +77,7 @@ export function ProviderWorkspace({
   credentialTab,
   t,
 }: ProviderWorkspaceProps) {
+  const locale = useUiLocale();
   const { data: routeState } = useQuery({
     queryKey: ["claude-route"],
     queryFn: getClaudeRoute,
@@ -106,7 +108,7 @@ export function ProviderWorkspace({
               <Button
                 type="button"
                 size="sm"
-                className="bg-brand text-brand-foreground hover:bg-brand/90"
+                variant="brand"
                 onClick={() => onApplyToCli()}
               >
                 <ShieldCheck className="size-4" />
@@ -177,7 +179,7 @@ export function ProviderWorkspace({
             {balance?.supported && (
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 {isCheckingBalance && <RefreshCw className="size-3 animate-spin" />}
-                <span>{formatCheckedAt(balance.checkedAt)}</span>
+                <span>{formatCheckedAt(balance.checkedAt, locale)}</span>
               </div>
             )}
           </div>
@@ -217,6 +219,7 @@ export function ProviderWorkspace({
 }
 
 function BalanceMeter({ entry, t }: { entry: ProviderBalanceEntry; t: Translate }) {
+  const locale = useUiLocale();
   const usedPercent = balanceEntryUsedPercent(entry);
   const unavailable = entry.isAvailable === false;
   const valueText =
@@ -235,7 +238,7 @@ function BalanceMeter({ entry, t }: { entry: ProviderBalanceEntry; t: Translate 
         <span className={unavailable ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}>
           {entry.label}
           {unavailable ? ` · ${t("models.balanceUnavailable")}` : ""}
-          {entry.resetsAt ? ` · ${t("models.balanceResetsAt")}: ${formatCheckedAt(entry.resetsAt)}` : ""}
+          {entry.resetsAt ? ` · ${t("models.balanceResetsAt")}: ${formatCheckedAt(entry.resetsAt, locale)}` : ""}
         </span>
         <span className={`font-medium ${unavailable ? "text-amber-700 dark:text-amber-300" : ""}`}>
           {valueText}

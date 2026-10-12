@@ -1,3 +1,4 @@
+import { adapterIds } from "../lib/adapter-ids.js";
 import { safeResolve } from "../lib/safe-resolve.js";
 import { BUILTIN_COPILOT_SKILLS } from "./agent/skills/copilot-skills.js";
 import { assertNoObsoleteSkillResources } from "./skill-resources.js";
@@ -15,13 +16,16 @@ import type { Database } from "../db/types.js";
 import { adapterConfigRoot, buildProjectConfigFiles } from "./project-config-files.js";
 import { syncLocalSkills } from "./local-skills.js";
 
-const aiToolSchema = z.enum(["claude", "opencode", "codex", "kimi"]);
+const aiToolSchema = z.enum(adapterIds);
 
 // Config rendering derives the adapter from the bound template, never from the
 // project's ai_tool hint, so CLI-agnostic projects render correctly. The
 // template's stored adapter wins; the built-in id mapping is the legacy
-// fallback, with "claude" as the final default.
+// fallback for templates created before the adapter column existed. There is
+// deliberately no default adapter: a template with no resolvable adapter is a
+// hard error instead of a silent Claude rendering.
 const templateAdapterByBuiltinId: Record<string, z.infer<typeof aiToolSchema>> = {
+  "builtin-claude-code": "claude",
   "builtin-opencode": "opencode",
   "builtin-codex": "codex",
   "builtin-kimi": "kimi"
@@ -32,7 +36,13 @@ export function adapterForTemplate(template: { id: string; adapter: string | nul
   if (stored.success) {
     return stored.data;
   }
-  return templateAdapterByBuiltinId[template.id] ?? "claude";
+  const legacy = templateAdapterByBuiltinId[template.id];
+  if (legacy) {
+    return legacy;
+  }
+  throw new Error(
+    `TEMPLATE_ADAPTER_MISSING: template ${template.id} declares no CLI adapter; set one before rendering project config`
+  );
 }
 
 export type ProjectConfigSkillSync = (repo: Pick<SkillRepository, "create" | "getByName" | "update">) => unknown;
@@ -41,7 +51,7 @@ export function getGatewayUrl(): string {
   return (
     process.env.FORGEBADGER_GATEWAY_URL ||
     process.env.NEXT_PUBLIC_GATEWAY_URL ||
-    `http://${process.env.FORGEBADGER_HOST || "127.0.0.1"}:${process.env.FORGEBADGER_PORT || "3000"}`
+    `http://${process.env.FORGEBADGER_HOST || "127.0.0.1"}:${process.env.FORGEBADGER_PORT || "18332"}`
   );
 }
 
@@ -73,7 +83,7 @@ export async function buildProjectConfigRenderPlan(
   templateId: string,
   credentialMode: CredentialMode,
   dryRun: boolean,
-  options: { syncSkills?: ProjectConfigSkillSync } = {}
+  options: { syncSkills?: ProjectConfigSkillSync; readOnlyTemplates?: boolean } = {}
 ) {
   const projectRepo = new ProjectRepository(db, userId);
   const project = projectRepo.getById(projectId);
@@ -82,7 +92,7 @@ export async function buildProjectConfigRenderPlan(
   }
 
   const templateRepo = new TemplateRepository(db, userId);
-  const template = templateRepo.getById(templateId);
+  const template = options.readOnlyTemplates ? templateRepo.getSnapshotById(templateId) : templateRepo.getById(templateId);
   if (!template || !template.files) {
     throw new Error("Template not found");
   }

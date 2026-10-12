@@ -121,7 +121,7 @@ describe("project git-changes routes", () => {
     assert.equal(body.data?.git.commits[0]?.author, "Test");
   });
 
-  it("reports changes even when git status output exceeds the old 1 MiB buffer limit", async () => {
+  it("reports every change even when git status output exceeds the old 1 MiB buffer limit", async () => {
     const token = await register("git-large@test.com");
     const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-git-large-"));
     await git(rootPath, "init", "-b", "main");
@@ -151,6 +151,31 @@ describe("project git-changes routes", () => {
     assert.equal(body.data?.git.isGitRepo, true);
     const modified = body.data?.git.changed.find((entry) => entry.path === "tracked.ts");
     assert.equal(modified?.status.trim(), "M");
+    assert.equal(body.data?.git.changed.length, 5601);
+    assert.equal(new Set(body.data?.git.changed.map((entry) => entry.path)).size, 5601);
+    assert.equal(
+      body.data?.git.changed.find((entry) => entry.path === `${longName}-5599.txt`)?.status,
+      "??"
+    );
+  });
+
+  it("reports a read error instead of a clean working tree when git status fails", async () => {
+    const token = await register("git-status-error@test.com");
+    const rootPath = await mkdtemp(path.join(tmpdir(), "forgebadger-git-error-"));
+    await git(rootPath, "init", "-b", "main");
+    await writeFile(path.join(rootPath, "tracked.ts"), "export const v = 1;\n");
+    await git(rootPath, "add", "tracked.ts");
+    await writeFile(path.join(rootPath, ".git", "index"), "corrupt index");
+    const projectId = await importProject(token, rootPath);
+
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/git-changes`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const body = (await res.json()) as GitChangesResponseBody;
+
+    assert.equal(res.status, 400);
+    assert.equal(body.code, 1);
+    assert.equal(body.data, undefined);
   });
 
   it("reports isGitRepo=false for directories without git", async () => {

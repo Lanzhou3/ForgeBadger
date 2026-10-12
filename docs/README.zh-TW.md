@@ -1,190 +1,221 @@
 <p align="center">
-  <img src="../packages/web/public/brand/forgebadger-banner.png" alt="ForgeBadger" width="720">
+  <img src="../packages/web/public/brand/forgebadger-banner.png" alt="ForgeBadger" width="640">
 </p>
 
-# ForgeBadger
+<h1 align="center">ForgeBadger</h1>
 
-[English](../README.md) | [简体中文](README.zh-CN.md)
+<p align="center"><strong>把你的 AI 程式開發工具，放進一個本機工作台。</strong></p>
 
-ForgeBadger 是一個本地優先的 AI 程式設計 CLI 控制平面。它為開發者提供統一的 Web
-控制台，用來管理 Claude Code、OpenCode、Codex 和 Kimi Code 的專案、持久終端機工作階段、AI
-工具設定、模型、API Key、Agent、Skill、範本、外掛、用量視覺化和工作階段歷史。
+<p align="center">
+  <a href="https://www.npmjs.com/package/forgebadger"><img src="https://img.shields.io/npm/v/forgebadger/beta?label=npm%20beta" alt="npm beta 版本"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-20.12%20%E2%80%93%2024-43853d" alt="Node.js 20.12 至 24"></a>
+  <a href="https://github.com/Lanzhou3/ForgeBadger/blob/dev/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT 授權"></a>
+</p>
 
-ForgeBadger 面向自架開發機器和私有工作區。Gateway 負責檔案系統存取、SQLite
-持久化、終端機多工器工作階段、WebSocket 終端機流量、加密和 CLI 程序生命週期；Web 控制台是
-純 Next.js SPA，透過 HTTP 和 WebSocket 與 Gateway 通訊。
+[English](../README.md) · [简体中文](README.zh-CN.md)
 
-## 專案狀態
+**Claude Code · Codex · OpenCode · Kimi Code · Pi · MiniMax Code**
 
-ForgeBadger 處於 MVP / 本地優先發布候選開發階段。核心 Gateway、Web 控制台、持久終端機
-終端機鏈路、認證、加密 API Key 儲存、專案設定、適配器偵測和管理介面已經具備本地
-使用者測試條件，並已支援模型服務商 Profile 和線上模型同步。
+ForgeBadger 是一個本機優先的 AI 程式開發工作台：統一管理專案與終端機，透過 Copilot 協助開發，也支援 Agent 經 MCP 接入。部署在自己的電腦或可信任的私有主機上。
 
-模型/廠商配置是 per-CLI、user-global 的：Model Center（/models）保存服務商
-Profile、模型與加密憑據，顯式 apply-provider 會把所選內容按各 CLI 原生格式寫入
-全域設定檔（Codex 寫入 `~/.codex/config.toml` 與 `~/.codex/auth.json`）。工作階段
-與模型解耦，一律以宿主機環境憑據啟動，ForgeBadger 不在啟動時注入任何
-provider/model/credential 環境變數，也不讀取系統鑰匙圈。託管協作、計費、雲部署
-和自主遠端執行不屬於目前本地優先 MVP 範圍。
+[快速開始](#快速開始) · [功能一覽](#功能一覽) · [MCP 接入](#透過-mcp-接入-agent) · [文件導覽](#文件導覽) · [參與貢獻](#參與貢獻)
 
-產品、套件作用域、CLI、執行階段識別、本機狀態契約與公開 GitHub 倉庫現已統一使用
-ForgeBadger 品牌。以 `OF-` 開頭的歷史階段 ID 繼續作為穩定的證據識別保留。
+## 快速開始
 
-## 首次使用者試用
+安裝目前的 beta，啟動隨套件提供的 Gateway 和 Web 控制台：
 
-- [試用執行手冊](TRIAL-RUNBOOK.md)
-- [首次執行檢查表](TRIAL-CHECKLIST.md)
-- [疑難排解](TROUBLESHOOTING.md)
-- [回饋範本](TRIAL-FEEDBACK.md)
-- [GitHub 回饋 Issue 表單](../.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml)
+```bash
+npm install -g forgebadger@beta
+forgebadger start
+```
 
-## 為什麼使用 ForgeBadger
+在瀏覽器開啟終端機印出的 **Web Console 位址**。新安裝的 beta 預設使用 `http://127.0.0.1:18333`，Gateway 為 `http://127.0.0.1:18332`；既有設定會保留原來的連接埠。使用控制台期間，請保持啟動命令執行。
 
-- 在瀏覽器裡查看和恢復長時間執行的 AI CLI 工作。
-- 統一管理 Claude Code、OpenCode、Codex 和 Kimi Code 工作階段，透過可預覽、可回滾的綁定投影減少手動混改本地設定檔。
-- 透過內嵌 Session Server 保存工作階段：瀏覽器斷線或 Gateway 重啟後仍可恢復，不依賴瀏覽器分頁或資料庫日誌。
-- 在一個開發者控制台裡集中管理專案範本、Agent、Skill、API Key、模型和本地診斷。
-- 保持本地優先：密鑰、專案路徑、終端機程序和 SQLite 狀態都留在執行 Gateway 的主機上。
+首次啟動會自動建立本機執行設定並產生所需密鑰。**透過 npm 安裝，無需複製倉庫、安裝 pnpm、手動建置或設定 `.env`。**
 
-## 功能
+**準備條件：** Node.js **20.12 至 24**。你需要另外安裝並登入準備使用的 AI CLI，確保對應命令在 `PATH` 中。ForgeBadger 已包含 Web 控制台和終端機後端，不會替你安裝 AI CLI。可執行 `forgebadger doctor` 檢查環境，查看缺少工具的安裝提示。
 
-- 專案建立和匯入流程，支援 AI 工具設定生成與合規檢查。
-- 將專案的 AI CLI 設定沉澱為可複用範本，建立或匯入專案時選擇範本，並從公開 Git 倉庫匯入範本。
-- 基於 Session Server 的終端機工作階段，瀏覽器斷線或 Gateway 重啟後仍可恢復：
-  macOS/Linux/WSL 經 Unix socket，原生 Windows 經命名管道 + ConPTY。
-- 支援 Claude Code、OpenCode、Codex 的適配器偵測和受控工作階段啟動。
-- 模型服務商 Profile、加密 API Key 儲存，以及 OpenAI-compatible 服務商端點的
-  線上模型同步。
-- Web 控制台提供 Agent、Skill、範本、外掛、用量、歷史、通知和設定介面。
-- 工作階段快照、終端機專注模式、命令面板原型和本地診斷匯出。
-- 透過 WebSocket 事件流提供工作階段狀態、通知和快取刷新。
+| npm 渠道 | 安裝命令 | 適合用途 |
+| --- | --- | --- |
+| `beta` | `npm install -g forgebadger@beta` | 體驗本文介紹的目前功能，參與預發布測試 |
+| `latest` | `npm install -g forgebadger` | 安裝上一正式版本，可能不包含目前的 beta 功能 |
+
+beta 不會覆蓋 `latest`。已知回歸問題與平台限制見[發版計畫](RELEASE-PLAN.md)。實體 Windows/ConPTY 和 WSL 驗收仍待補充；原生依賴沒有適用的預編譯二進位檔時，安裝可能需要 C/C++ 建置工具。
+
+### 啟動你的第一個工作階段
+
+1. 開啟控制台，建立本機帳號。
+2. 匯入既有專案，或使用範本建立專案。
+3. 選擇已安裝的 AI CLI，啟動終端機工作階段。
+4. 按需在 **Models** 中設定模型，重用 **Skills** 和 **Templates**，或開啟 **Copilot** 取得專案上下文協助。
+
+## 功能一覽
+
+| 功能 | 你可以做什麼 |
+| --- | --- |
+| **專案與設定** | 建立、匯入專案，預覽 CLI 設定；從既有專案或公開 Git 倉庫重用範本。 |
+| **持久終端機** | 在瀏覽器中執行多個 AI CLI 工作階段；只要 Session Server 仍存活，瀏覽器斷線或 Gateway 重啟後都能重新連線。 |
+| **模型中心** | 管理服務商、模型與加密憑證；明確套用至各 CLI 的原生全域設定，支援備份與回復。 |
+| **Copilot** | 使用內建助手，結合專案上下文和平台工具協助開發。 |
+| **專案管理與工作區** | 管理目標、任務、驗收條件與證據；透過獨立 worktree 完成驗證、審查與明確交付。 |
+| **Skills、Agent 與範本** | 管理可重用的指令和專案設定，減少重複準備工作。 |
+| **外部 Agent 的 MCP 接入** | 使用限定專案與能力的可撤銷權杖，讓相容的 Agent 讀取和操作所選專案。 |
+| **狀態與診斷** | 查看工作階段狀態、通知、用量與歷史，匯出本機診斷；安裝可選 CodeGraph 工具後瀏覽唯讀程式碼圖譜。 |
+
+### 支援的 AI CLI
+
+| CLI | ForgeBadger 偵測的命令 |
+| --- | --- |
+| Claude Code | `claude` |
+| Codex | `codex` |
+| OpenCode | `opencode` |
+| Kimi Code | `kimi` |
+| Pi | `pi` |
+| MiniMax Code | `mcode` |
+
+工作階段使用各 CLI 既有的主機設定與憑證。模型中心的修改需要明確執行：套用服務商會寫入所選 CLI 的使用者層級設定；啟動工作階段不會向其環境注入服務商密鑰。
+
+### 透過 MCP 接入 Agent
+
+在 **Settings（設定）** 中啟用 MCP，重啟 ForgeBadger，再建立權杖，選擇允許存取的專案與能力。使用控制台顯示的連線設定，接入支援 **MCP Streamable HTTP** 的 Agent。
+
+MCP 工具涵蓋專案檢查、任務規劃、授權的 CLI 任務派發、審查與部分生命週期操作。Agent 的平台操作受權杖授權範圍限制，原生 CLI 的敏感確認仍需使用者處理。完整工具、設定與授權邊界見 [MCP API 文件](API.md#external-mcp-endpoint)。
+
+## CLI 與本機資料
+
+| 命令 | 用途 |
+| --- | --- |
+| `forgebadger start` | 啟動 Gateway 和 Web 控制台 |
+| `forgebadger doctor` | 唯讀檢查依賴，不建立執行狀態 |
+| `forgebadger --version` | 查看已安裝版本 |
+
+執行狀態預設儲存在 `~/.forgebadger`。專案倉庫與各 AI CLI 的原生設定保留在各自的位置。
+
+<details>
+<summary><strong>自訂連接埠與獨立狀態目錄</strong></summary>
+
+```bash
+forgebadger start --gateway-port 18342 --web-port 18343
+```
+
+透過 `FORGEBADGER_STATE_DIR` 分開管理多個執行個體。例如在 POSIX shell 中：
+
+```bash
+FORGEBADGER_STATE_DIR=/private/path/forgebadger-state forgebadger start
+```
+
+每個執行個體使用獨立的狀態目錄與資料庫。Web 控制台會使用啟動時選定的 Gateway 位址。
+
+</details>
+
+<details>
+<summary><strong>備份與還原</strong></summary>
+
+```bash
+forgebadger backup --output /private/path/new-backup
+# 還原前先停止 Gateway 和 Web 程序。
+forgebadger restore --from /private/path/new-backup --to /private/path/new-state
+# POSIX shell；先清除舊的 FORGEBADGER_DB_PATH 覆寫值。
+FORGEBADGER_STATE_DIR=/private/path/new-state forgebadger start
+```
+
+備份包含 SQLite 資料庫與實際執行設定，**也包含加密主密鑰與 JWT 密鑰**。請私密保存，它不是加密封存檔。還原會驗證備份，要求全新的目的地目錄，保留加密主密鑰並輪換瀏覽器認證，還原後需要重新登入。
+
+專案倉庫和原生 CLI 設定需另行備份。執行中的終端機、終端機歷史與檔案系統中的 CLI 設定回復檔案不在備份範圍內；還原工作階段中繼資料不會重建程序。完整範圍見[工作流程與復原指南](PERSONAL-TEAM-WORKFLOWS.md)。
+
+</details>
+
+<details>
+<summary><strong>解除安裝</strong></summary>
+
+```bash
+forgebadger uninstall --backup /private/path/new-backup
+npm uninstall -g forgebadger
+```
+
+先停止 Gateway 和 Web。第一條命令會先備份，經確認後刪除本機 ForgeBadger 狀態；第二條命令刪除 npm 套件。本機狀態包含資料庫與加密主密鑰，請保留備份。僅執行 `npm uninstall -g forgebadger` 會保留執行狀態。
+
+</details>
 
 ## 架構
 
 ```text
-瀏覽器 xterm.js
-  -> WebSocket
-  -> Gateway（經 Session Server IPC）
-  -> Session Server daemon（node-pty）
+瀏覽器 / Web 控制台
+  -> Gateway（HTTP + WebSocket）
+  -> 獨立 Session Server（node-pty）
   -> AI CLI 程序
 ```
 
-倉庫結構：
+Gateway 負責專案存取、SQLite、憑證和 CLI 程序管理；Web 控制台是 Next.js SPA。Session Server 獨立管理終端機，使工作階段能跨瀏覽器斷線和 Gateway 重啟繼續執行。
 
-```text
-packages/
-  cli/       npm 分發的 ForgeBadger CLI 包裝器
-  gateway/   Express、WebSocket、Session Server/node-pty、SQLite、適配器、服務層
-  web/       Next.js App Router、React、Tailwind CSS、xterm.js
-docs/        架構、發布、冒煙測試、試用和多語言文件
-templates/   內建 AI CLI 設定範本
-```
-
-關鍵規則：
-
-- Gateway 和 Web 是兩個獨立服務。Gateway API 行為不放進 Next.js API routes。
-- REST API 位於 `/api/v1`；終端機流量使用 `/ws/terminal/:sessionId`。
-- 內嵌 Session Server 是終端機工作階段持久化層（唯一終端後端）。
-- 終端機歷史透過 Session Server 渲染快照恢復，不寫入 SQLite。
-- CLI 工作階段以宿主機環境憑據啟動，不注入服務商密鑰。在模型中心執行「套用至 CLI」會明確寫入所選 CLI 的全域設定；平台儲存使用 AES-256-GCM 加密，日誌、事件和資料庫不包含明文密鑰。
-
-## 環境需求
-
-- Node.js 20.12 至 24
-- 原始碼開發需要 pnpm 10 或更新版本
-- 支援 SQLite 的本地檔案系統
-- 如需真實 AI CLI 工作階段，需要在 `PATH` 中安裝 Claude Code、OpenCode、Codex 和/或 Kimi Code
-
-終端機工作階段由內嵌 Session Server daemon 提供，無需安裝任何終端機多工器或其他前置二進位。
-
-## 從 npm 安裝
-
-```bash
-npm install -g forgebadger
-forgebadger doctor
-forgebadger start
-```
-
-在 `forgebadger start` 印出的 URL 開啟 Web 控制台。
-
-`forgebadger start` / `init` 啟動時會繪製零依賴的 ForgeBadger 文字 Logo 環境預檢橫幅。
-只有支援色彩的 TTY 使用品牌色；重新導向輸出、`NO_COLOR` 或 `TERM=dumb` 環境會自動降級為純文字。
-
-npm 包的 postinstall 不安裝系統軟體；`forgebadger start` / `init` 也不會安裝或升級任何系統級依賴。
-`forgebadger doctor` 只讀檢查依賴：檢查空狀態目錄不會建立設定、密鑰、資料庫或目錄。
-Claude Code、OpenCode、Codex 或 Kimi Code 需另外安裝並放入 `PATH`。
+終端機歷史儲存在 Session Server 的呈現畫面中，不寫入 SQLite。Daemon 退出或作業系統重啟會結束程序，系統不會靜默重建。實作細節見[技術架構](TECH-ARCHITECTURE.md)。
 
 ## 從原始碼開發
 
-安裝依賴：
+<details>
+<summary><strong>本機開發與驗證</strong></summary>
+
+使用支援的 Node.js 版本和根目錄 `packageManager` 指定的 pnpm（目前為 `pnpm@12.6.0`）。
 
 ```bash
-pnpm install
+git clone https://github.com/Lanzhou3/ForgeBadger.git
+cd ForgeBadger
+git switch dev
+pnpm install --frozen-lockfile
 ```
 
-建立本地 `.env` 檔案。不要提交此檔案。
+在根目錄建立 `.env`，填入以下設定。使用 `openssl rand -hex 32` 為每個密鑰變數分別產生新值，替換預留位置；不要提交此檔案。
+
+```dotenv
+FORGEBADGER_MASTER_KEY=<64位hex字串>
+FORGEBADGER_JWT_SECRET=<至少32字元>
+FORGEBADGER_PORT=18332
+FORGEBADGER_WEB_PORT=18333
+NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:18332
+```
 
 ```bash
-FORGEBADGER_PORT=48731
-FORGEBADGER_WEB_PORT=48732
-NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
-FORGEBADGER_MASTER_KEY=<使用-openssl-rand-hex-32-生成的64位hex字串>
-FORGEBADGER_JWT_SECRET=<32位以上隨機密鑰>
+pnpm dev
 ```
 
-分別在兩個 shell 中啟動 Gateway 和 Web 控制台：
-
-```bash
-pnpm --filter @forgebadger/gateway dev
-FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=48732 pnpm --filter @forgebadger/web dev
-```
-
-開啟 Web 控制台：
-
-```text
-http://127.0.0.1:48732
-```
-
-執行聚焦檢查：
-
-```bash
-pnpm --filter @forgebadger/web typecheck
-pnpm --filter @forgebadger/web test
-pnpm --filter @forgebadger/gateway typecheck
-pnpm --filter @forgebadger/gateway test
-git diff --check
-```
-
-準備發布級改動時執行全部包檢查：
+開啟 `http://127.0.0.1:18333`。原始碼開發需要設定 `.env`；npm 安裝會自動初始化執行設定。
 
 ```bash
 pnpm -r typecheck
 pnpm -r test
+node --test scripts/*.test.mjs
 pnpm -r build
-pnpm build:npm
-pnpm verify:npm
-pnpm smoke:npm
 ```
 
-## 文件
+npm 套件驗證命令：`pnpm build:npm`、`pnpm verify:npm`、`pnpm smoke:npm`。完整門檻見[發版流程](RELEASE-PLAN.md)。
 
-- [架構文件](TECH-ARCHITECTURE.md)
-- [產品需求](PRD-v1.1-MVP.md)
-- [開發計畫](DEVELOPMENT-PLAN.md)
-- [API 參考](API.md)
-- [安全說明](../SECURITY.md)
-- [冒煙測試指南](SMOKE-TEST.md)
-- [發布計畫](RELEASE-PLAN.md)
-- [疑難排解](TROUBLESHOOTING.md)
+```text
+packages/cli/       npm CLI 與隨套件執行環境
+packages/gateway/   API、WebSocket、Session Server、SQLite、CLI 適配器
+packages/web/       Next.js、React、Tailwind CSS、xterm.js
+scripts/            打包、驗證與測試腳本
+docs/               產品、架構、API 與維運文件
+```
 
-## 安全
+</details>
 
-- 不要提交 `.env`、SQLite 資料庫、API Key、JWT secret、加密密鑰、生成憑據或個人 AI CLI 設定。
-- 使用者級 Claude Code、Codex、OpenCode 設定應保留在倉庫外。
-- Gateway 會校驗專案路徑，並拒絕目錄穿越、符號連結逃逸和敏感系統路徑。
-- WebSocket 終端機存取同時需要 JWT 認證和工作階段級 attach 憑據。
-- ForgeBadger 是本地優先產品，但本地優先並不意味著可以降低終端機存取和 API Key 的敏感級別。
+## 文件導覽
 
-## 授權
+| 安裝與使用 | 開發與貢獻 |
+| --- | --- |
+| [試用執行手冊](TRIAL-RUNBOOK.md) | [技術架構](TECH-ARCHITECTURE.md) |
+| [首次執行檢查表](TRIAL-CHECKLIST.md) | [API 文件](API.md) |
+| [疑難排解](TROUBLESHOOTING.md) | [測試計畫](TEST-PLAN.md) |
+| [工作流程與復原](PERSONAL-TEAM-WORKFLOWS.md) | [開發計畫](DEVELOPMENT-PLAN.md) |
+| [回饋範本](TRIAL-FEEDBACK.md) | [發版計畫](RELEASE-PLAN.md) |
+| [診斷指南](SUPPORT-DIAGNOSTICS.md) | [外部驗收門檻](EXTERNAL-EVIDENCE-GATES.md) |
 
-ForgeBadger 使用 [MIT License](../LICENSE) 開源。
+## 參與貢獻
+
+歡迎試用 beta、回報可重現的問題、改進文件或貢獻程式碼。可填寫[試用回饋表單](../.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml)，或[建立 Issue](https://github.com/Lanzhou3/ForgeBadger/issues)。提交 PR 前，請閱讀[貢獻指南](../CONTRIBUTING.md)。
+
+ForgeBadger 面向可信任的本機或私有主機，MCP 專案授權不會把不可信任的程式碼放進沙箱。請私密保存備份與憑證，分享日誌、終端機截圖與 Issue 時移除密鑰。安全漏洞請按[安全政策](../SECURITY.md)回報。
+
+## 開源授權
+
+[MIT](../LICENSE)。Happy coding!

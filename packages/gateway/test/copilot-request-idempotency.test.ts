@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
-import { CopilotGrantRepository } from '../src/db/repositories/copilot-grant-repository.js';
 
 it('deduplicates a client request before busy checks and after completion', () => {
   const db = new Database(':memory:');
   try {
-    migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+    migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
     const user = new UserRepository(db).create('request@example.test', 'hash');
     const ledger = new CopilotRunLedger(db, user.id);
     const conversation = ledger.log.createConversation();
@@ -31,24 +31,20 @@ it('deduplicates a client request before busy checks and after completion', () =
   } finally { db.close(); }
 });
 
-it('scopes request keys to tenant/conversation and rechecks revoked grant on replay', () => {
+it('scopes request keys to tenant/conversation', () => {
   const db = new Database(':memory:');
   try {
-    migrate(drizzle(db), { migrationsFolder: new URL('../src/db/migrations', import.meta.url).pathname });
+    migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
     const users = new UserRepository(db);
     const alice = users.create('alice-request@example.test', 'hash');
     const bob = users.create('bob-request@example.test', 'hash');
     const ledger = new CopilotRunLedger(db, alice.id), other = new CopilotRunLedger(db, bob.id);
-    const grants = new CopilotGrantRepository(db, alice.id);
-    const grant = grants.create({ name: 'limited', scope: { projectIds: [], capabilities: ['memory.write'], allowedRoots: [] }, expiresAt: null, maxActions: 5, maxConcurrency: 1 });
     const conversation = ledger.log.createConversation();
-    const input = { userId: alice.id, conversationId: conversation.id, userText: 'Inspect', clientRequestId: 'same', grantId: grant.id };
+    const input = { userId: alice.id, conversationId: conversation.id, userText: 'Inspect', clientRequestId: 'same' };
     const first = ledger.admit(input, 16);
     assert.equal(ledger.admit(input, 16), first);
     const second = other.admit({ userId: bob.id, conversationId: other.log.createConversation().id, userText: 'Inspect', clientRequestId: 'same' }, 16);
     assert.notEqual(second, first);
     assert.throws(() => other.admit({ ...input, userId: bob.id }, 16), /not found/i);
-    db.prepare("UPDATE copilot_grants SET status='revoked' WHERE id=?").run(grant.id);
-    assert.throws(() => ledger.admit(input, 16), /revoked/i);
   } finally { db.close(); }
 });

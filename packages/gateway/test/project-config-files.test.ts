@@ -4,8 +4,26 @@ import { describe, it } from "node:test";
 import { buildProjectConfigFiles } from "../src/services/project-config-files.js";
 
 describe("buildProjectConfigFiles", () => {
+  it('materializes shared AGENTS instructions as native Claude memory', () => {
+    const content = '# Project instructions\nFollow the local rules.';
+    const files = buildProjectConfigFiles({ adapter: 'claude', templateFiles: [
+      { id: 'shared', relativePath: 'AGENTS.md', content },
+    ] });
+    assert.equal(files.find(file => file.relativePath === 'CLAUDE.md')?.content, '@AGENTS.md\n');
+    assert.equal(files.find(file => file.relativePath === 'AGENTS.md')?.content, content);
+  });
+
+  it('preserves explicitly authored Claude and shared memory when both exist', () => {
+    const templateFiles = [
+      { id: 'native', relativePath: 'CLAUDE.md', content: '@AGENTS.md\nClaude-specific rules' },
+      { id: 'shared', relativePath: 'AGENTS.md', content: 'Shared rules' },
+    ];
+    assert.deepEqual(buildProjectConfigFiles({ adapter: 'claude', templateFiles }), templateFiles);
+  });
+
   it("combines template files with enabled skills", () => {
     const files = buildProjectConfigFiles({
+      adapter: 'claude',
       templateFiles: [
         {
           id: "template-file-1",

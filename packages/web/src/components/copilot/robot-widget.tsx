@@ -6,10 +6,13 @@ import { XIcon } from "lucide-react";
 
 import { RobotSprite } from "@/components/copilot/RobotSprite";
 import { useRobotMotion } from "@/hooks/use-robot-motion";
+import { usePetAnimation } from "@/hooks/use-pet-animation";
 import { useLanguage } from "@/hooks/use-language";
 import { useNotifications } from "@/hooks/use-notifications";
 import { shouldTriggerBrowserNotification } from "@/lib/browser-notifications";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
+import { DEFAULT_PET_ID, type PetId } from "@/lib/pet-preference";
+import { PET_SPRITES, type PetFrameKey, type PetMode } from "@/lib/pet-sprites";
 import {
   toastDurationFor,
   toastToneFor,
@@ -24,7 +27,6 @@ import {
   type GatewayEvent,
 } from "@/lib/notifications";
 import {
-  BLINK_DURATION_MS,
   BLINK_MAX_INTERVAL_MS,
   BLINK_MIN_INTERVAL_MS,
   CLICK_DRAG_THRESHOLD_PX,
@@ -33,29 +35,31 @@ import {
   ROBOT_CORNER_STORAGE_KEY,
   ROBOT_NUDGE_DURATION_MS,
   ROBOT_SIZE_PX,
-  SIT_FRAME_INTERVAL_MS,
-  WALK_FRAME_INTERVAL_MS,
   bubblePlacement,
   cornerOffsetPosition,
   isRobotCorner,
   nearestCorner,
   type RobotCorner,
-  type RobotFrameKey,
   type RobotPosition,
   type ViewportSize,
 } from "@/lib/pixel-robot";
 import { cn } from "@/lib/utils";
 
 interface RobotWidgetProps {
+  petId?: PetId;
   /** Click/Enter on the robot: toggles the floating chat panel. */
   onActivate: () => void;
   /** When the Copilot page is open the robot stays visible but stays quiet. */
   suppressBubbles?: boolean;
   /** While the chat panel is open, notification bubbles stay out of the way. */
   panelOpen?: boolean;
+  /**
+   * Reports the viewport corner the robot is pinned to (restored preference,
+   * drag snap, …) so the chat panel can anchor beside it instead of always
+   * opening bottom-right.
+   */
+  onCornerChange?: (corner: RobotCorner) => void;
 }
-
-type RobotMode = "stand" | "walk" | "sit";
 
 interface RobotBubble {
   id: string;
@@ -78,7 +82,7 @@ interface DragState {
 
 const DIRECTION_DEAD_ZONE_PX = 2;
 
-export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = false }: RobotWidgetProps) {
+export function RobotWidget({ petId = DEFAULT_PET_ID, onActivate, suppressBubbles = false, panelOpen = false, onCornerChange }: RobotWidgetProps) {
   const { t } = useLanguage();
   const router = useRouter();
   const { markRead } = useNotifications();
@@ -88,12 +92,10 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
 
   const [pos, setPos] = useState<RobotPosition | null>(null);
   const [corner, setCorner] = useState<RobotCorner>("bottom-right");
-  const [mode, setMode] = useState<RobotMode>("stand");
+  const [mode, setMode] = useState<PetMode>("stand");
   const [dragging, setDragging] = useState(false);
-  const [flip, setFlip] = useState(false);
+  const [facingRight, setFacingRight] = useState(PET_SPRITES[petId].nativeFacing === "right");
   const [blinking, setBlinking] = useState(false);
-  const [walkFrame, setWalkFrame] = useState<RobotFrameKey>("walk1");
-  const [sitFrame, setSitFrame] = useState<RobotFrameKey>("sit1");
   const [bubbleQueue, setBubbleQueue] = useState<RobotBubble[]>([]);
   const bubbleQueueRef = useRef<RobotBubble[]>([]);
   const [nudge, setNudge] = useState(false);
@@ -103,11 +105,19 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bubbleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nudgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const modeRef = useRef<RobotMode>(mode);
+  const modeRef = useRef<PetMode>(mode);
   const cornerRef = useRef<RobotCorner>(corner);
+  // Latest callback in a ref: the report effect must only re-run when the
+  // corner changes, not when the parent re-renders with a fresh closure.
+  const onCornerChangeRef = useRef(onCornerChange);
+  useEffect(() => {
+    onCornerChangeRef.current = onCornerChange;
+  });
   const suppressBubblesRef = useRef(suppressBubbles);
   const motionEnabled = useRobotMotion();
   const motionEnabledRef = useRef(motionEnabled);
+  const actionFrame = usePetAnimation(petId, mode, motionEnabled);
+  const flip = facingRight !== (PET_SPRITES[petId].nativeFacing === "right");
 
   useEffect(() => {
     motionEnabledRef.current = motionEnabled;
@@ -120,6 +130,12 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
+
+  // Tell the host which corner the robot occupies so the floating panel
+  // anchors next to the pet (fires on mount restore and on every drag snap).
+  useEffect(() => {
+    onCornerChangeRef.current?.(corner);
+  }, [corner]);
 
   // The queue's head is the bubble on screen; dismissals always drop the head.
   const dismissHeadBubble = useCallback(() => {
@@ -141,7 +157,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
   // Mount: restore the persisted corner and keep the robot pinned on resize.
   useEffect(() => {
     const stored = window.localStorage.getItem(ROBOT_CORNER_STORAGE_KEY);
-    const initial = isRobotCorner(stored) ? stored : "bottom-right";
+    const initial = isRobotCorner(stored) ? stored : defaultCornerForViewport();
     setCorner(initial);
     cornerRef.current = initial;
     setPos(cornerOffsetPosition(initial, currentViewport(), ROBOT_SIZE_PX, CORNER_MARGIN_PX));
@@ -155,9 +171,9 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // Blink loop: a ~160ms closed-eye frame every 3-6s while standing or sitting.
+  // The badger's sit timeline includes its half/full blink; idle blinks remain random.
   useEffect(() => {
-    if (mode === "walk" || !motionEnabled) {
+    if (mode === "walk" || (mode === "sit" && petId === "honey-badger") || !motionEnabled) {
       setBlinking(false);
       return;
     }
@@ -174,7 +190,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
         openTimer = setTimeout(() => {
           setBlinking(false);
           if (!cancelled) scheduleBlink();
-        }, BLINK_DURATION_MS);
+        }, PET_SPRITES[petId].blinkDurationMs);
       }, delay);
     }
 
@@ -185,7 +201,7 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
       if (blinkTimer) clearTimeout(blinkTimer);
       if (openTimer) clearTimeout(openTimer);
     };
-  }, [mode, motionEnabled]);
+  }, [mode, motionEnabled, petId]);
 
   // Any interaction stands the robot back up and re-arms the 8s sit timer.
   const interact = useCallback(() => {
@@ -205,32 +221,6 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     };
   }, [interact]);
-
-  // Walk frames swap legs while dragging; reduced motion stays on one frame.
-  useEffect(() => {
-    if (mode !== "walk" || !motionEnabled) {
-      setWalkFrame("walk1");
-      return;
-    }
-    const id = setInterval(
-      () => setWalkFrame((current) => (current === "walk1" ? "walk2" : "walk1")),
-      WALK_FRAME_INTERVAL_MS
-    );
-    return () => clearInterval(id);
-  }, [mode, motionEnabled]);
-
-  // Sit frames loop a typing motion; reduced motion stays on one frame.
-  useEffect(() => {
-    if (mode !== "sit" || !motionEnabled) {
-      setSitFrame("sit1");
-      return;
-    }
-    const id = setInterval(
-      () => setSitFrame((current) => (current === "sit1" ? "sit2" : "sit1")),
-      SIT_FRAME_INTERVAL_MS
-    );
-    return () => clearInterval(id);
-  }, [mode, motionEnabled]);
 
   // Notification bubble: derive content from the shared gateway event bus.
   useEffect(() => {
@@ -348,9 +338,9 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
     }
     const directionDelta = event.clientX - drag.directionX;
     if (Math.abs(directionDelta) > DIRECTION_DEAD_ZONE_PX) {
-      // The rendered robot faces left natively. Follow the latest movement,
+      // Follow the latest horizontal movement for either pet's native facing,
       // while retaining sub-threshold deltas so slow drags can still turn.
-      setFlip(directionDelta > 0);
+      setFacingRight(directionDelta > 0);
       drag.directionX = event.clientX;
     }
     const viewport = currentViewport();
@@ -386,15 +376,11 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
 
   if (!pos) return null;
 
-  const frame: RobotFrameKey = blinking
+  const frame: PetFrameKey = blinking
     ? mode === "sit"
       ? "sitBlink"
       : "blink"
-    : mode === "walk"
-      ? walkFrame
-      : mode === "sit"
-        ? sitFrame
-        : "stand";
+    : actionFrame;
   const placement = bubblePlacement(corner);
   const ToneIcon = bubble ? toneIcons[bubble.tone] : null;
 
@@ -402,7 +388,10 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
   // when the robot lives in a top corner), horizontally centered on the robot
   // and clamped to the viewport so it never spills off-screen near edges.
   const viewportWidth = window.innerWidth;
-  const bubbleWidth = Math.min(288, Math.max(viewportWidth - 48, 160));
+  // Width clamp: cap at 288px, prefer viewport minus margins, but shrink the
+  // 160px floor itself on ultra-narrow screens so the bubble never exceeds
+  // the viewport (12px margin on each side).
+  const bubbleWidth = Math.min(288, Math.max(viewportWidth - 48, Math.min(160, viewportWidth - 24)));
   const minRelLeft = 12 - pos.x;
   const maxRelLeft = viewportWidth - bubbleWidth - 12 - pos.x;
   const bubbleRelLeft = clamp(
@@ -419,6 +408,9 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
     <div
       className={cn(
         "fixed z-40",
+        // Mobile: the chat panel is a near-fullscreen sheet, so a corner
+        // robot would be half-hidden behind it — keep it out of view.
+        panelOpen && "max-md:hidden",
         !dragging && "transition-[left,top] duration-300 ease-out motion-reduce:transition-none"
       )}
       style={{ left: pos.x, top: pos.y, width: ROBOT_SIZE_PX, height: ROBOT_SIZE_PX }}
@@ -463,14 +455,14 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
               bubble && motionEnabled && "forgebadger-robot-alert rounded-md"
             )}
           >
-            <RobotSprite frame={frame} flip={flip} size={ROBOT_SIZE_PX} />
+            <RobotSprite petId={petId} frame={frame} flip={flip} size={ROBOT_SIZE_PX} />
           </div>
         </div>
       </div>
       {bubble && ToneIcon && (
         <div
           className={cn(
-            "forgebadger-bubble-pop absolute rounded-lg border-[1.5px] border-zinc-900 bg-zinc-50 p-3 text-zinc-900 shadow-lg shadow-black/40",
+            "forgebadger-bubble-pop absolute rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-lg shadow-black/40",
             placement.vertical === "above" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"
           )}
           style={{ left: bubbleRelLeft, width: bubbleWidth }}
@@ -491,11 +483,11 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
               placement.vertical === "below" && "rotate-180"
             )}
           >
-            <path d="M0 0 H18 L6 12 Z" fill="#fafafa" />
+            <path d="M0 0 H18 L6 12 Z" className="fill-popover" />
             <path
               d="M18 0 L6 12 L0 0"
               fill="none"
-              stroke="#18181b"
+              className="stroke-border"
               strokeWidth="1.5"
               strokeLinejoin="miter"
             />
@@ -508,21 +500,21 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
             <button
               type="button"
               aria-label={t("common.close")}
-              className="-mr-1 -mt-0.5 shrink-0 rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-900/10 hover:text-zinc-700"
+              className="-mr-1 -mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               onClick={dismissHeadBubble}
             >
               <XIcon className="size-3.5" aria-hidden="true" />
             </button>
           </div>
           {bubble.description && (
-            <p className="mt-1 line-clamp-2 pl-[22px] text-xs leading-relaxed text-zinc-500">
+            <p className="mt-1 line-clamp-2 pl-[22px] text-xs leading-relaxed text-muted-foreground">
               {bubble.description}
             </p>
           )}
           <div className="mt-2.5 flex items-center gap-1.5 pl-[22px]">
             <button
               type="button"
-              className="h-7 rounded-md bg-zinc-900 px-3 text-xs font-medium text-zinc-50 transition-colors hover:bg-zinc-700"
+              className="h-7 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
               onClick={openBubble}
             >
               {t("notifications.openSession")}
@@ -536,6 +528,18 @@ export function RobotWidget({ onActivate, suppressBubbles = false, panelOpen = f
 
 function currentViewport(): ViewportSize {
   return { width: window.innerWidth, height: window.innerHeight };
+}
+
+/**
+ * Resting corner when the user has no persisted preference. Mobile pages are
+ * single-column full-width text whose right edge hosts primary actions and
+ * copy controls, so the pet defaults to the freer bottom-left; the desktop
+ * default stays bottom-right, clear of the left app sidebar (which occupies
+ * the bottom-left of the viewport). Dragging still snaps and persists as
+ * before.
+ */
+function defaultCornerForViewport(): RobotCorner {
+  return window.innerWidth < 768 ? "bottom-left" : "bottom-right";
 }
 
 function clamp(value: number, min: number, max: number): number {

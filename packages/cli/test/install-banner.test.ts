@@ -45,8 +45,8 @@ describe("ForgeBadger install banner", () => {
         version: 1,
         stateDir: "/tmp/forgebadger-state",
         dbPath: "/tmp/forgebadger-state/forgebadger.db",
-        gateway: { host: "127.0.0.1", port: 48731 },
-        web: { host: "127.0.0.1", port: 48732 },
+        gateway: { host: "127.0.0.1", port: 18332 },
+        web: { host: "127.0.0.1", port: 18333 },
         secrets: { masterKey: "a".repeat(64), jwtSecret: "abcdefghijklmnopqrstuvwxyz123456" }
       }),
       resolvePaths: () => ({

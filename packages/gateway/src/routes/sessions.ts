@@ -1,7 +1,9 @@
+import { adapterIds } from "../lib/adapter-ids.js";
 import { hasDeliveryHistory } from '../db/repositories/managed-project-access.js';
 import { PlatformActions } from "../services/platform-commands/actions.js";
 import { createPlatformCommands } from "../services/platform-commands/catalog.js";
 import { Router } from "express";
+import { CliObservationRepository } from '../db/repositories/cli-observation-repository.js';
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
@@ -25,8 +27,14 @@ import { recordSessionSnapshot } from "../services/session-snapshots.js";
 import { buildSessionBoard } from "../services/session-board.js";
 import {
   createLaunchPlan,
+  createTerminalLaunchPlan,
+  checkTerminalShell,
+  resolveAvailableTerminalShell,
   normalizeAdapter,
-  prepareAdapterLaunchExtras
+  normalizeSessionKind,
+  prepareAdapterLaunchExtras,
+  TERMINAL_SHELLS,
+  type TerminalShell
 } from "../services/session-launch-plan.js";
 export {
   createLaunchPlan,
@@ -35,9 +43,12 @@ export {
 };
 export type { LaunchPlanInput } from "../services/session-launch-plan.js";
 
+const terminalShellSchema = z.enum(TERMINAL_SHELLS).optional();
+
 const createSessionSchema = z.object({
   projectId: z.string().min(1),
-  aiTool: z.enum(["claude", "opencode", "codex", "kimi", "pi"]).optional()
+  aiTool: z.enum([...adapterIds, "terminal"]).optional(),
+  shell: terminalShellSchema
 }).strict();
 
 const listSessionsQuerySchema = z.object({
@@ -64,6 +75,20 @@ export function createSessionRoutes(
 ): Router {
   const router = Router();
   router.use(authenticate);
+
+  // Snapshot repairs missed events after navigation or event-stream reconnect.
+  // This is observational runtime state; no prompts or terminal history are stored.
+  router.get("/work-state", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const snapshotAt = Date.now();
+    const states = new SessionRepository(db, userId).list().map(session => {
+      const tracked = eventBus?.getSessionWorkState(userId, session.id);
+      return session.status === "running"
+        ? tracked ?? { sessionId: session.id, state: "unknown" as const, updatedAt: snapshotAt }
+        : { sessionId: session.id, state: "idle" as const, updatedAt: snapshotAt };
+    });
+    res.json({ code: 0, data: { states, snapshotAt }, message: "" });
+  });
 
   router.get("/", (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
@@ -102,7 +127,7 @@ export function createSessionRoutes(
       return;
     }
 
-    const { projectId, aiTool } = parseResult.data;
+    const { projectId, aiTool, shell } = parseResult.data;
     const projectRepo = new ProjectRepository(db, userId);
     const project = projectRepo.getById(projectId);
     if (!project) {
@@ -110,39 +135,61 @@ export function createSessionRoutes(
       return;
     }
 
-    if (!aiTool && !project.aiTool) {
+    const resolvedKind = aiTool ?? project.aiTool;
+    if (!resolvedKind) {
       res.status(400).json({
         code: 1,
         message: "Runtime CLI selection is required for CLI-agnostic projects"
       });
       return;
     }
-    const adapter = normalizeAdapter(aiTool ?? project.aiTool);
-    if (!adapter) {
+    const kind = normalizeSessionKind(resolvedKind);
+    if (!kind) {
       res.status(400).json({ code: 1, message: "Unsupported project adapter" });
       return;
     }
+    const isTerminal = kind === "terminal";
 
-    const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner, sessionManager.terminalBackendHealth());
-    if (!launchStatus.launchEnabled) {
-      res.status(409).json({
-        code: 1,
-        message: `${launchStatus.label} is not available for launch`,
-        details: {
-          adapter: launchStatus.id,
-          command: launchStatus.command,
-          status: launchStatus.status,
-          error: launchStatus.error
-        }
-      });
-      return;
+    let chosenShell = shell;
+    if (isTerminal) {
+      try {
+        chosenShell = shell ?? await resolveAvailableTerminalShell(undefined, undefined, adapterCommandRunner);
+      } catch (error) {
+        res.status(409).json({ code: 1, message: error instanceof Error ? error.message : "No supported shell is installed" });
+        return;
+      }
+      const shellStatus = await checkTerminalShell(chosenShell, undefined, undefined, adapterCommandRunner);
+      if (!shellStatus.available) {
+        res.status(409).json({
+          code: 1,
+          message: `${chosenShell} is not available for launch`,
+          details: { shell: chosenShell, command: shellStatus.command, error: shellStatus.error }
+        });
+        return;
+      }
+    } else {
+      const adapter = kind;
+      const launchStatus = await getAdapterLaunchStatus(adapter, adapterCommandRunner, sessionManager.terminalBackendHealth());
+      if (!launchStatus.launchEnabled) {
+        res.status(409).json({
+          code: 1,
+          message: `${launchStatus.label} is not available for launch`,
+          details: {
+            adapter: launchStatus.id,
+            command: launchStatus.command,
+            status: launchStatus.status,
+            error: launchStatus.error
+          }
+        });
+        return;
+      }
     }
 
     const sessionRepo = new SessionRepository(db, userId);
     const dbSession = sessionRepo.create({
       projectId: project.id,
       name: project.name,
-      aiTool: adapter,
+      aiTool: kind,
       workingDir: project.path,
       credentialMode: "host_environment"
     });
@@ -157,13 +204,23 @@ export function createSessionRoutes(
     });
 
     try {
-      const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, project.path);
-      const launchPlan = createLaunchPlan({
-        adapter,
-        projectRoot: project.path,
-        sessionId: dbSession.id,
-        ...(pluginDirs.length > 0 ? { pluginDirs } : {})
-      });
+      let launchPlan: LaunchPlan;
+      if (isTerminal) {
+        launchPlan = createTerminalLaunchPlan({
+          projectRoot: project.path,
+          sessionId: dbSession.id,
+          ...(chosenShell ? { shell: chosenShell } : {})
+        });
+      } else {
+        const adapter = kind;
+        const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, project.path);
+        launchPlan = createLaunchPlan({
+          adapter,
+          projectRoot: project.path,
+          sessionId: dbSession.id,
+          ...(pluginDirs.length > 0 ? { pluginDirs } : {})
+        });
+      }
       const attachToken = randomUUID();
       sessionRepo.update(dbSession.id, { attachToken });
 
@@ -230,6 +287,34 @@ export function createSessionRoutes(
         message: error instanceof Error ? error.message : "Failed to create session"
       });
     }
+  });
+
+  // Shell availability probe for the launch dialog (auto-select an installed
+  // default shell, grey out the rest). Must be registered before "/:id".
+  router.get("/shells", async (_req, res) => {
+    const shells = await Promise.all(
+      TERMINAL_SHELLS.map(async (shell) => {
+        const status = await checkTerminalShell(shell, undefined, undefined, adapterCommandRunner);
+        return {
+          shell,
+          available: status.available,
+          command: status.command
+        };
+      })
+    );
+    res.json({ code: 0, data: { platform: process.platform, shells }, message: "" });
+  });
+
+  router.get("/:id/summary", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const session = new SessionRepository(db, userId).getById(req.params.id);
+    if (!session) { res.status(404).json({ code: 1, message: 'Session not found' }); return; }
+    const records = new CliObservationRepository(db, userId);
+    res.json({ code: 0, data: {
+      summary: records.current(session.id, session.attachToken) ?? null,
+      latestResult: records.latestResult(session.id) ?? null,
+      workState: eventBus?.getSessionWorkState(userId, session.id)?.state ?? 'unknown',
+    }, message: '' });
   });
 
   router.get("/:id", (req, res) => {
@@ -348,13 +433,14 @@ export function createSessionRoutes(
 
   router.get("/:id/writer", (req, res) => {
     const userId=(req as unknown as AuthenticatedRequest).userId;
-    if(!new SessionRepository(db,userId).getById(req.params.id)) return res.status(404).json({code:1,message:"Session not found"});
+    const session = new SessionRepository(db,userId).getById(req.params.id);
+    if(!session) return res.status(404).json({code:1,message:"Session not found"});
     let mode: "manual" | "automated" = "manual";
     if(sessionManager.getSession(req.params.id)) {
       try { sessionManager.assertManualInputAllowed(userId,req.params.id); }
       catch(error) { if(error instanceof Error&&error.message==="SESSION_WRITER_BUSY")mode="automated";else return res.status(409).json({code:1,message:error instanceof Error?error.message:"Writer unavailable"}); }
     }
-    return res.json({code:0,data:{sessionId:req.params.id,mode,autonomy:"manual_only"},message:""});
+    return res.json({ code: 0, data: { sessionId: req.params.id, mode }, message: "" });
   });
 
   for (const action of ["start", "stop", "takeover"] as const) {
@@ -389,24 +475,39 @@ export function createSessionRoutes(
     if (hasDeliveryHistory(db,"session",dbSession.id)) {
       res.status(409).json({code:1,message:"Session has delivery history; close its task workspace",details:{code:"DELIVERY_HISTORY_REQUIRES_ARCHIVE"}}); return;
     }
+    // force=true is the operator escape hatch for a session whose CLI leader
+    // has exited but whose confirmed-stop receipt cannot be obtained (a
+    // lingering process group, or the signing daemon is gone). The force gate
+    // fails closed while the runtime may still be alive.
+    const force = req.query.force === "true";
     try {
       await sessionManager.runExclusive(req.params.id, async () => {
-        // Stop any still-live runtime session regardless of DB status, so a
-        // delete does not leave an orphan when the DB says idle/stopped but the
-        // backend session is actually alive.
-        const live = sessionManager.getSession(req.params.id);
-        const runtimeSessionName = live?.runtimeSessionName ?? dbSession.runtimeSessionName ?? undefined;
-        if (live || runtimeSessionName) {
-          await sessionManager.stopSession(req.params.id, runtimeSessionName, userId);
+        if (force) {
+          await sessionManager.forceStopSession(req.params.id, dbSession.runtimeSessionName ?? undefined, userId);
+        } else {
+          // Stop any still-live runtime session regardless of DB status, so a
+          // delete does not leave an orphan when the DB says idle/stopped but the
+          // backend session is actually alive.
+          const live = sessionManager.getSession(req.params.id);
+          const runtimeSessionName = live?.runtimeSessionName ?? dbSession.runtimeSessionName ?? undefined;
+          if (live || runtimeSessionName) {
+            await sessionManager.stopSession(req.params.id, runtimeSessionName, userId);
+          }
         }
         // Keep the row and its durable stop proof on every uncertain outcome.
         db.transaction(() => {
-          recordSessionActivity(db, undefined, userId, dbSession, "session_deleted", "warning", `Session ${dbSession.name} deleted`);
+          recordSessionActivity(db, undefined, userId, dbSession,
+            force ? "session_force_deleted" : "session_deleted", "warning",
+            `Session ${dbSession.name} deleted`, force ? { force: true } : undefined);
           sessionRepo.delete(req.params.id);
         })();
         sessionManager.removeSessionOutput(req.params.id);
       });
-    } catch {
+    } catch (error) {
+      if (force && error instanceof Error && error.message === "SESSION_FORCE_DELETE_NOT_ALLOWED") {
+        res.status(409).json({ code: 1, message: "Session runtime is still running or cannot be verified; force delete requires the runtime leader to have exited", details: { code: "SESSION_FORCE_DELETE_NOT_ALLOWED" } });
+        return;
+      }
       res.status(409).json({ code: 1, message: "Session stop has not been confirmed; retry after the runtime is available", details: { code: "SESSION_RUNTIME_STOP_UNCONFIRMED" } });
       return;
     }

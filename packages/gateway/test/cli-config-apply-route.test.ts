@@ -15,6 +15,7 @@ import { CliConfigAppliedProviderRepository } from "../src/db/repositories/cli-c
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createCliConfigRoutes } from "../src/routes/cli-config.js";
+import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
@@ -38,6 +39,7 @@ describe("cli-config apply-provider route", () => {
   let server: http.Server | undefined;
   let baseUrl: string;
   let configRoot: string;
+  let eventBus: ForgeBadgerEventBus;
 
   beforeEach(async () => {
     db = createTestDb();
@@ -45,11 +47,12 @@ describe("cli-config apply-provider route", () => {
     token = signJwt({ userId: user.id, email: user.email }, secret);
     configRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-apply-route-"));
     process.env.CLAUDE_CONFIG_DIR = configRoot;
+    eventBus = new ForgeBadgerEventBus();
 
     const app = express();
     app.locals.jwtSecret = secret;
     app.use(express.json());
-    app.use("/api/v1/cli-config", createCliConfigRoutes(db, masterKey, { resolveHost: publicResolver }));
+    app.use("/api/v1/cli-config", createCliConfigRoutes(db, masterKey, { resolveHost: publicResolver, eventBus }));
     server = http.createServer(app);
     await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
     const address = server.address();
@@ -135,6 +138,23 @@ describe("cli-config apply-provider route", () => {
 
     assert.equal(rolledBack.status, 200, JSON.stringify(rolledBack.json));
     assert.equal(pointers.get("claude"), undefined);
+  });
+
+  it("redacts credential-shaped provider names before broadcasting apply notifications", async () => {
+    const { provider, model } = createProvider();
+    const marker = "sk-FAKEPROVIDERNAME123456";
+    new ModelProviderRepository(db, userIdFromToken(), masterKey)
+      .updateProviderProfile(provider.id, { name: `Provider ${marker}` });
+    const events: ForgeBadgerEvent[] = [];
+    eventBus.on("event", event => events.push(event as ForgeBadgerEvent));
+    const applied = await post("/api/v1/cli-config/claude/apply-provider", {
+      providerProfileId: provider.id, modelProfileId: model.id
+    });
+    assert.equal(applied.status, 200, JSON.stringify(applied.json));
+    const notification = events.find(event => event.type === "app_action_notification");
+    assert.ok(notification);
+    assert.equal(JSON.stringify(notification).includes(marker), false);
+    assert.match(JSON.stringify(notification), /\[REDACTED\]/);
   });
 
   it("serves concurrent previews without lock contention (dry-run is lock-free)", async () => {

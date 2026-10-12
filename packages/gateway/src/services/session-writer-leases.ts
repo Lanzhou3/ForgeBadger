@@ -46,6 +46,20 @@ export class SessionWriterLeases {
     if (this.writers.get(lease.workspace) !== lease || lease.expiresAt<=this.now()) throw new Error("SESSION_WRITER_FENCE_STALE");
   }
 
+  /**
+   * Extend a still-held lease by one TTL (long-running programmatic writes
+   * like shell commands outlive the 30s default). Returns the renewed lease
+   * handle; callers must keep using the returned handle afterwards.
+   */
+  renew(lease: WriterLease): WriterLease {
+    const repository=this.repository(lease.userId);
+    if(repository){repository.renew(lease,this.now(),this.ttlMs);return lease;}
+    if (this.writers.get(lease.workspace) !== lease || lease.expiresAt<=this.now()) throw new Error("SESSION_WRITER_FENCE_STALE");
+    const renewed = Object.freeze({ ...lease, expiresAt: this.now() + this.ttlMs });
+    this.writers.set(lease.workspace, renewed);
+    return renewed;
+  }
+
   release(lease: WriterLease): void {
     const repository=this.repository(lease.userId);
     if(repository)return repository.release(lease);
@@ -58,13 +72,19 @@ export class SessionWriterLeases {
     if ((this.writers.get(this.workspace(scope.workspace))?.expiresAt??0)>this.now()) throw new Error("SESSION_WRITER_BUSY");
   }
 
+  /**
+   * Human-owner takeover: the same user can revoke a programmatic lease from
+   * ANY of their sessions in the workspace (e.g. take over a user-created
+   * terminal while Copilot holds the workspace lease in a Copilot shell).
+   * Leases are only ever held by programmatic flows, so the owner always wins.
+   */
   takeover(scope: WriterScope): void {
     const workspace = this.workspace(scope.workspace);
     const repository=this.repository(scope.userId);
-    if(repository)return repository.takeover(workspace,scope.sessionId,this.now());
+    if(repository)return repository.takeover(workspace,this.now());
     const lease = this.writers.get(workspace);
     if (!lease) return;
-    if (lease.userId !== scope.userId || lease.sessionId !== scope.sessionId) {
+    if (lease.userId !== scope.userId) {
       throw new Error("SESSION_WRITER_BUSY");
     }
     this.writers.delete(workspace);

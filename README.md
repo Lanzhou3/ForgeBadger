@@ -1,278 +1,270 @@
 <p align="center">
-  <img src="packages/web/public/brand/forgebadger-banner.png" alt="ForgeBadger" width="720">
+  <img src="packages/web/public/brand/forgebadger-banner.png" alt="ForgeBadger" width="640">
 </p>
 
-# ForgeBadger
+<h1 align="center">ForgeBadger</h1>
 
-[简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md)
+<p align="center"><strong>One local workspace for your AI coding tools.</strong></p>
 
-ForgeBadger is a local-first control plane for AI programming CLIs. It gives
-developers one Web console for managing projects, persistent terminal
-sessions, AI tool configuration, models, API keys, Agents, Skills, Templates,
-usage visibility, and session history across Claude Code, OpenCode, Codex,
-and Kimi Code.
+<p align="center">
+  <a href="https://www.npmjs.com/package/forgebadger"><img src="https://img.shields.io/npm/v/forgebadger/beta?label=npm%20beta" alt="npm beta version"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-20.12%20%E2%80%93%2024-43853d" alt="Node.js 20.12 through 24"></a>
+  <a href="https://github.com/Lanzhou3/ForgeBadger/blob/dev/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
+</p>
 
-ForgeBadger is built for self-hosted developer machines and private workspaces.
-The Gateway owns filesystem access, SQLite persistence, terminal sessions,
-WebSocket terminal traffic, encryption, and CLI process lifecycle. The Web
-console is a pure Next.js SPA that talks to the Gateway over HTTP and
-WebSocket.
+[简体中文](docs/README.zh-CN.md) · [繁體中文](docs/README.zh-TW.md)
 
-## Project Status
+**Claude Code · Codex · OpenCode · Kimi Code · Pi · MiniMax Code**
 
-ForgeBadger is in MVP / local-first release-candidate development. The core
-Gateway, Web console, persistent terminal flow, authentication, encrypted API key
-storage, project setup, adapter discovery, provider model profiles, live model
-sync, and management surfaces are in place for local user testing.
+ForgeBadger is a local workspace for your AI coding CLIs. Manage projects and
+terminals, get help from Copilot, and connect your own agents through MCP.
+Run it on your computer or a trusted private host.
 
-Model/provider setup is per-CLI and user-global: the Model Center (`/models`)
-keeps provider profiles, model profiles, and encrypted credentials, and an
-explicit apply-provider action writes the selection into each CLI's native
-global config — Claude `~/.claude/settings.json`, OpenCode `opencode.json`,
-Codex `~/.codex/config.toml` + `~/.codex/auth.json`, Kimi
-`~/.kimi-code/config.toml`. Sessions are model-agnostic and always launch with
-host-environment credentials; ForgeBadger injects no provider, model, or
-credential environment at launch, and never reads the OS keyring. Hosted collaboration, billing,
-cloud deployment, and autonomous remote execution are not part of the current
-local-first MVP.
+[Quick start](#quick-start) · [Features](#features) · [MCP](#connect-your-agents-through-mcp) · [Documentation](#documentation) · [Contributing](#contributing)
 
-The product, package scope, CLI, runtime identifiers, local state contract, and
-public GitHub repository now use the ForgeBadger brand. The rename compatibility
-window is closed: only ForgeBadger environment variables, state paths, browser
-storage keys, cookies, WebSocket protocols, and `fb-` session prefixes are
-accepted. Historical phase IDs beginning with `OF-` remain stable evidence
-identifiers.
+## Quick start
 
-## First User Trial
-
-- [Trial runbook](docs/TRIAL-RUNBOOK.md)
-- [Trial checklist](docs/TRIAL-CHECKLIST.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Trial feedback template](docs/TRIAL-FEEDBACK.md)
-- [GitHub feedback issue form](.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml)
-
-## Why ForgeBadger
-
-- Keep long-running AI CLI work visible and recoverable from a browser.
-- Manage Claude Code, OpenCode, Codex, and Kimi Code sessions without mixing their local
-  config files by hand.
-- Keep terminal persistence in the embedded Session Server—not in a browser
-  tab or database log.
-- Centralize project templates, Agents, Skills, API keys, models, and local
-  diagnostics in one developer control surface.
-- Stay local-first: secrets, project paths, terminal processes, and SQLite
-  state remain on the host running the Gateway.
-
-## Features
-
-- Project create/import flows with AI tool config generation and compliance
-  checks.
-- Extract a project's AI CLI config into a reusable template, pick a template
-  when creating or importing a project, and import template repos from public
-  Git repositories.
-- Session Server-backed terminal sessions that survive browser disconnects and
-  Gateway restarts, with no external terminal runtime to install.
-- Adapter discovery and gated session launch for Claude Code, OpenCode, Codex,
-  and Kimi Code.
-- Provider model profiles with encrypted API key storage and live model sync
-  for OpenAI-compatible provider endpoints.
-- Explicit apply-provider flow that writes a selected provider/model/credential
-  into each CLI's native global config with atomic `0600` writes, an
-  AES-256-GCM-encrypted backup, and rollback, with a redacted preview.
-- Agent, Skill, Template, usage, history, notification, and settings
-  surfaces in the Web console.
-- Session snapshots, terminal focus mode, command palette prototype, and local
-  diagnostics export.
-- WebSocket event stream for session status, notifications, and cache refresh.
-
-## Architecture
-
-```text
-Browser xterm.js
-  -> WebSocket
-  -> Gateway
-  -> embedded Session Server (node-pty)
-  -> AI CLI process
-```
-
-Repository layout:
-
-```text
-packages/
-  cli/       npm-distributed ForgeBadger CLI wrapper
-  gateway/   Express, WebSocket, Session Server/node-pty, SQLite, adapters, services
-  web/       Next.js App Router, React, Tailwind CSS, xterm.js
-docs/        architecture, release, smoke-test, trial, and localized docs
-templates/   built-in AI CLI configuration templates
-```
-
-Key rules:
-
-- Gateway and Web are separate services. Gateway API behavior does not live in
-  Next.js API routes.
-- REST APIs are under `/api/v1`; terminal traffic uses `/ws/terminal/:sessionId`.
-- The embedded Session Server is the persistence layer for terminal sessions.
-- Terminal history is recovered from the Session Server's rendered screen, not
-  stored in SQLite.
-- CLI sessions use host-environment credentials. Applying a Model Center provider
-  explicitly writes the selected CLI global configuration; session launch injects no provider secrets.
-
-## Requirements
-
-- Node.js 20.12 through 24
-- pnpm 10 or newer for source development
-- SQLite-compatible local filesystem
-- Claude Code, OpenCode, Codex, and/or Kimi Code installed on `PATH` for real AI CLI
-  sessions
-- CodeGraph (`npm install -g @colbymchenry/codegraph`) optionally, for the
-  read-only project code graph
-
-## Install From npm
+Install the current beta and start the bundled Gateway and Web console:
 
 ```bash
-npm install -g forgebadger
-forgebadger doctor
+npm install -g forgebadger@beta
 forgebadger start
 ```
 
-Open the Web console at the URL printed by `forgebadger start`.
+Open the **Web Console URL printed in your terminal**. New beta installations default
+to `http://127.0.0.1:18333` (Gateway: `http://127.0.0.1:18332`); existing saved ports
+are retained. Keep the start command running while you use the console.
 
-The interactive `start` / `init` preflight prints a dependency-free ForgeBadger
-text logo before any environment probe. Color is used only on a capable TTY;
-redirected, `NO_COLOR`, and `TERM=dumb` output stays plain text. On the first
-`forgebadger start` (no runtime config yet), a non-blocking environment check
-lists the detected AI CLIs, or prints their official install commands when none
-are found.
+The first start creates local runtime configuration and generates the required
+secrets automatically. **No repository clone, pnpm, manual build or `.env` setup
+is needed for npm installation.**
 
-The npm package postinstall does not install system software. `forgebadger
-doctor` reports the platform, architecture, and Node version, then checks the
-bundled `node-pty` native module, the supported AI CLIs (Claude Code, OpenCode,
-Codex, Kimi Code), and optional tooling (`codegraph`, `git`); each missing tool
-is paired with its official install command. If `node-pty` does not load,
-reinstall ForgeBadger to rebuild native modules. `forgebadger doctor` is
-read-only: inspecting an empty state directory does not create config, secrets,
-databases, or directories. Install the AI CLIs you plan to use separately and
-make sure they are available on `PATH`.
+**Before you start:** use Node.js **20.12 through 24**. Install and authenticate the
+AI CLI tools you want to use separately, and make sure their commands are on `PATH`.
+ForgeBadger bundles its Web console and terminal backend; it does not install the
+AI CLIs for you. Run `forgebadger doctor` to check your environment and see install
+hints for missing tools.
 
-## Development From Source
+| npm channel | Install command | Use it for |
+| --- | --- | --- |
+| `beta` | `npm install -g forgebadger@beta` | The current features described in this README; opt-in prerelease testing |
+| `latest` | `npm install -g forgebadger` | The previous stable release; it may not include current beta features |
 
-Install dependencies:
+Beta does not replace `latest`. Known regression and platform limitations are
+recorded in the [release plan](docs/RELEASE-PLAN.md). Physical Windows/ConPTY and
+WSL acceptance remain release caveats. Native dependencies may require a C/C++
+build toolchain when a compatible prebuilt binary is unavailable.
+
+### Your first session
+
+1. Open the console and create your local account.
+2. Import an existing project or create one with a reusable template.
+3. Select an installed AI CLI and launch its terminal session.
+4. Configure models in **Models**, reuse **Skills** and **Templates**, or open
+   **Copilot** for project-aware assistance as needed.
+
+## Features
+
+| Area | What you can do |
+| --- | --- |
+| **Projects & configuration** | Create/import projects, preview CLI configuration and reuse templates from local projects or public Git repositories. |
+| **Persistent terminals** | Run multiple AI CLI sessions in the browser. Reconnect after a browser disconnect or Gateway restart while the Session Server remains alive. |
+| **Model Center** | Manage provider/model profiles and encrypted credentials. Explicitly apply a selection to each CLI's native global configuration with backup and rollback. |
+| **Copilot** | Work with a built-in assistant that uses project context and platform tools to help with development. |
+| **Project Manager & Workspaces** | Organize goals, tasks, acceptance criteria and evidence; use isolated worktrees for verification, review and explicit delivery. |
+| **Skills, Agents & templates** | Manage reusable instructions and project setup across your CLI workflows. |
+| **MCP for external agents** | Let compatible agents read and operate on selected projects through scoped, revocable access tokens. |
+| **Visibility & diagnostics** | Inspect session status, notifications, usage and history; export local diagnostics and explore a read-only code graph with optional CodeGraph tooling. |
+
+### Supported AI CLIs
+
+| CLI | Command ForgeBadger detects |
+| --- | --- |
+| Claude Code | `claude` |
+| Codex | `codex` |
+| OpenCode | `opencode` |
+| Kimi Code | `kimi` |
+| Pi | `pi` |
+| MiniMax Code | `mcode` |
+
+Sessions use each CLI's existing host configuration and credentials. Model Center
+changes are explicit: applying a provider writes that CLI's user-level config;
+launching a session does not inject provider secrets into its environment.
+
+### Connect your agents through MCP
+
+Enable MCP in **Settings**, restart ForgeBadger, then create an access token for
+the projects and capabilities you want to share. Connect an agent that supports
+**MCP Streamable HTTP** using the configuration shown in the console.
+
+MCP tools cover project inspection, task planning, authorized CLI task dispatch,
+review and selected lifecycle operations. Agents act within the token's project
+and capability grants; sensitive native CLI prompts still require the owner.
+See the [MCP API reference](docs/API.md#external-mcp-endpoint) for the tools,
+configuration and authorization boundaries.
+
+## CLI & local data
+
+| Command | Purpose |
+| --- | --- |
+| `forgebadger start` | Start the Gateway and Web console |
+| `forgebadger doctor` | Inspect dependencies without creating runtime state |
+| `forgebadger --version` | Show the installed version |
+
+Runtime state is stored in `~/.forgebadger` by default. Project repositories and
+native AI CLI configuration remain in their own locations.
+
+<details>
+<summary><strong>Custom ports and a separate state directory</strong></summary>
 
 ```bash
-pnpm install
+forgebadger start --gateway-port 18342 --web-port 18343
 ```
 
-Create a local `.env` file. Do not commit it.
+Set `FORGEBADGER_STATE_DIR` to keep multiple installations separate. For example,
+in a POSIX shell:
 
 ```bash
-FORGEBADGER_PORT=48731
-FORGEBADGER_WEB_PORT=48732
-NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
-FORGEBADGER_MASTER_KEY=<64-hex-characters-from-openssl-rand-hex-32>
-FORGEBADGER_JWT_SECRET=<32+-character-random-secret>
+FORGEBADGER_STATE_DIR=/private/path/forgebadger-state forgebadger start
 ```
 
-Start the Gateway and Web console in separate shells:
+Use a separate state directory and database for each instance. The Web console
+uses the Gateway URL selected at startup.
 
-```bash
-pnpm --filter @forgebadger/gateway dev
-FORGEBADGER_WEB_HOST=127.0.0.1 FORGEBADGER_WEB_PORT=48732 pnpm --filter @forgebadger/web dev
-```
+</details>
 
-Open the Web console:
-
-```text
-http://127.0.0.1:48732
-```
-
-Run focused checks:
-
-```bash
-pnpm --filter @forgebadger/web typecheck
-pnpm --filter @forgebadger/web test
-pnpm --filter @forgebadger/gateway typecheck
-pnpm --filter @forgebadger/gateway test
-git diff --check
-```
-
-Run all package checks when preparing a release-sized change:
-
-```bash
-pnpm -r typecheck
-pnpm -r test
-pnpm -r build
-pnpm build:npm
-pnpm verify:npm
-pnpm smoke:npm
-```
-
-For Model Center and apply-provider changes, run the focused Gateway
-regression set (`test/model-provider-routes.test.ts`,
-`test/model-provider-repository.test.ts`, `test/cli-config-apply.test.ts`,
-`test/codex-provider-env.test.ts`, `test/session-adapter-decoupling.test.ts`)
-plus the Web provider tests and `packages/web/e2e/models.spec.ts` against a
-real loopback Gateway and Next composition. A real OpenAI-provider smoke,
-native Codex-account smoke, and native Windows Session Server lifecycle remain
-external evidence; unit/mocked coverage must not be reported as those real-host
-results.
-
-## Documentation
-
-- [Architecture](docs/TECH-ARCHITECTURE.md)
-- [Product requirements](docs/PRD-v1.1-MVP.md)
-- [Development plan](docs/DEVELOPMENT-PLAN.md)
-- [API reference](docs/API.md)
-- [Open source readiness](docs/OPEN-SOURCE-READINESS.md)
-- [External evidence gates](docs/EXTERNAL-EVIDENCE-GATES.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
-- [Smoke test guide](docs/SMOKE-TEST.md)
-- [Release plan](docs/RELEASE-PLAN.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
-
-## Security
-
-- Never commit `.env`, SQLite databases, API keys, JWT secrets, encryption
-  keys, generated credentials, or personal AI CLI config.
-- Keep local Claude Code, Codex, and OpenCode user-level config outside this
-  repository.
-- Gateway validates project paths and rejects traversal, symlink escapes, and
-  sensitive system paths.
-- WebSocket terminal access requires JWT authentication and session-scoped
-  attach credentials.
-- ForgeBadger is local-first, but local-first does not remove the need to treat
-  terminal access and API keys as sensitive.
-
-## License
-
-ForgeBadger is released under the [MIT License](LICENSE).
-
-### Backup and restore
+<details>
+<summary><strong>Backup and restore</strong></summary>
 
 ```bash
 forgebadger backup --output /private/path/new-backup
 # Stop the Gateway and Web processes before restoring.
 forgebadger restore --from /private/path/new-backup --to /private/path/new-state
+# POSIX shell; clear any old FORGEBADGER_DB_PATH override first.
 FORGEBADGER_STATE_DIR=/private/path/new-state forgebadger start
 ```
 
-Backup uses SQLite's online backup API, including committed WAL data. It stores the platform database and effective runtime `config.json`, **including the master encryption key and JWT secret**. Keep the backup private: directories are mode `0700` and files `0600`. Source selection follows `FORGEBADGER_STATE_DIR`, the saved runtime config and `FORGEBADGER_DB_PATH`; installations without a saved config must supply their original `FORGEBADGER_MASTER_KEY` and `FORGEBADGER_JWT_SECRET` in the environment. Keys are never printed or included in the manifest.
+Backup captures the SQLite database and effective runtime config, **including
+its encryption key and JWT secret**. Keep it private; it is not an encrypted
+archive. Restore validates the backup, requires a new destination, preserves
+the encryption key, rotates browser authentication and requires a new sign-in.
 
-Restore verifies file hashes, schema/migration compatibility, table counts, SQLite integrity, foreign keys and encrypted database contents. It requires a new destination, refuses symlink inputs and existing destinations, and checks that the recorded Gateway/Web endpoints are stopped. It publishes staged state atomically, preserves the master key for decryption, rotates the JWT secret and revokes restored browser authentication sessions. Clear an old `FORGEBADGER_DB_PATH` override before starting the restored instance. Unknown encryption formats or incompatible/future migrations are rejected rather than silently restored.
+Back up project repositories and native CLI configuration separately. Running
+terminals, terminal history and filesystem-side CLI config backups are not included;
+restoring session metadata does not recreate processes. See the
+[workflow and recovery guide](docs/PERSONAL-TEAM-WORKFLOWS.md) for the full scope.
 
-This backup does not contain project repositories, managed worktrees, running terminals, terminal history, host CLI login/configuration, filesystem-side CLI config rollback files or the account-recovery key. Restore those resources separately as needed; restored session metadata does not recreate processes. JWT rotation invalidates legacy JWTs, and restored opaque browser sessions are deleted; sign in again after restore. Source and backup authentication records remain unchanged. The backup is sensitive local state, not an encrypted archive.
+</details>
 
+<details>
+<summary><strong>Uninstall</strong></summary>
 
-## Personal and small-team delivery
+```bash
+forgebadger uninstall --backup /private/path/new-backup
+npm uninstall -g forgebadger
+```
 
-Open **Workspaces** to turn a project task into an isolated Git worktree, private CLI
-session, commit-bound verification receipt, review and explicit fast-forward delivery.
-Owners can add existing local users as developers, reviewers or viewers. Shared
-screens expose task evidence and diffs; terminals and host credentials stay private.
-This mode is for a trusted local/private host. It does not sandbox untrusted code or
-provide hosted multi-tenant execution. Verification currently supports macOS/Linux;
-native Windows process-tree containment remains an open release gate.
+Stop Gateway and Web first. The first command backs up and then removes local
+ForgeBadger state after confirmation; the second removes the npm package.
+State includes the database and encryption key, so keep your backup before
+removing it. `npm uninstall -g forgebadger` alone leaves runtime state in place.
 
-See [the workflow and recovery guide](docs/PERSONAL-TEAM-WORKFLOWS.md) for first delivery,
-roles, concurrency, backup scope and recovery limits. No workflow automatically starts
-an AI task, pushes a branch, opens a pull request, or deploys an application.
+</details>
+
+## Architecture
+
+```text
+Browser / Web console
+  -> Gateway (HTTP + WebSocket)
+  -> independent Session Server (node-pty)
+  -> AI CLI processes
+```
+
+The Gateway owns project access, SQLite, credentials and CLI processes. The Web
+console is a Next.js SPA. Session Server owns the live terminals, which lets
+sessions survive browser disconnects and Gateway restarts.
+
+Terminal history lives in the Session Server's rendered screen, not SQLite.
+Daemon shutdown or an OS restart ends those processes; they are not silently
+recreated. See [architecture](docs/TECH-ARCHITECTURE.md) for the implementation.
+
+## Develop from source
+
+<details>
+<summary><strong>Local setup and verification</strong></summary>
+
+Use a supported Node.js version and the root `packageManager` version
+(currently `pnpm@12.6.0`).
+
+```bash
+git clone https://github.com/Lanzhou3/ForgeBadger.git
+cd ForgeBadger
+git switch dev
+pnpm install --frozen-lockfile
+```
+
+Create a root `.env` with the following values. Generate a fresh secret for each
+secret variable using `openssl rand -hex 32`; replace the placeholders and never
+commit this file.
+
+```dotenv
+FORGEBADGER_MASTER_KEY=<64-hex-characters>
+FORGEBADGER_JWT_SECRET=<at-least-32-characters>
+FORGEBADGER_PORT=18332
+FORGEBADGER_WEB_PORT=18333
+NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:18332
+```
+
+```bash
+pnpm dev
+```
+
+Open `http://127.0.0.1:18333`. Unlike npm installation, source development
+requires this `.env` setup.
+
+```bash
+pnpm -r typecheck
+pnpm -r test
+node --test scripts/*.test.mjs
+pnpm -r build
+```
+
+Release packaging: `pnpm build:npm`, `pnpm verify:npm`, `pnpm smoke:npm`.
+Use the [release procedure](docs/RELEASE-PLAN.md) for the complete gates.
+
+```text
+packages/cli/       Published npm CLI and bundled runtime
+packages/gateway/   API, WebSocket, Session Server, SQLite, CLI adapters
+packages/web/       Next.js, React, Tailwind CSS, xterm.js
+scripts/            Packaging, validation and test harnesses
+docs/               Product, architecture, API and operations guides
+```
+
+</details>
+
+## Documentation
+
+| Get started & operate | Build & contribute |
+| --- | --- |
+| [Trial runbook](docs/TRIAL-RUNBOOK.md) | [Architecture](docs/TECH-ARCHITECTURE.md) |
+| [First-run checklist](docs/TRIAL-CHECKLIST.md) | [API reference](docs/API.md) |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | [Test plan](docs/TEST-PLAN.md) |
+| [Workflow & recovery](docs/PERSONAL-TEAM-WORKFLOWS.md) | [Development plan](docs/DEVELOPMENT-PLAN.md) |
+| [Feedback template](docs/TRIAL-FEEDBACK.md) | [Release plan](docs/RELEASE-PLAN.md) |
+| [Diagnostics](docs/SUPPORT-DIAGNOSTICS.md) | [External evidence gates](docs/EXTERNAL-EVIDENCE-GATES.md) |
+
+## Contributing
+
+Try the beta, report a reproducible bug, improve the docs or contribute code.
+Use the [trial feedback form](.github/ISSUE_TEMPLATE/forgebadger-trial-feedback.yml)
+or [open an issue](https://github.com/Lanzhou3/ForgeBadger/issues).
+Read the [contribution guide](CONTRIBUTING.md) before opening a pull request.
+
+ForgeBadger runs on a trusted local/private host. MCP project grants are not a
+sandbox for untrusted code. Keep backups and credentials private; redact secrets
+from logs, terminal captures and issues. Report vulnerabilities through the
+[security policy](SECURITY.md).
+
+## License
+
+[MIT](LICENSE). Happy coding!

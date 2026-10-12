@@ -41,7 +41,12 @@ export function createAdapterLaunchPlan(input: AdapterLaunchPlanInput): LaunchPl
     case "codex":
       return {
         command: "codex",
-        args: modelArgs(input.adapter, input.model),
+        // The shared Codex daemon retains its launch environment, including
+        // another terminal's hook identity. Keep execution inside this PTY's
+        // process tree so hooks inherit this session's id and attach token.
+        args: ["--no-daemon", "-c", 'tui.notifications=["approval-requested"]',
+          "-c", 'tui.notification_method="osc9"', "-c", 'tui.notification_condition="always"',
+          ...modelArgs(input.adapter, input.model)],
         cwd: input.projectRoot,
         env: input.env ?? {},
         secretEnvNames: input.secretEnvNames ?? [],
@@ -70,6 +75,19 @@ export function createAdapterLaunchPlan(input: AdapterLaunchPlanInput): LaunchPl
         secretEnvNames: input.secretEnvNames ?? [],
         credentialMode: input.credentialMode
       };
+    case "mcode":
+      // Zero-arg launch (host_environment policy, same as Kimi/PI): provider,
+      // model, and credential selection live in the applied global
+      // config.yaml, never in launch-time args/env. `--model` exists but only
+      // under `mcode exec`; the interactive TUI entry accepts no model flag.
+      return {
+        command: "mcode",
+        args: [],
+        cwd: input.projectRoot,
+        env: input.env ?? {},
+        secretEnvNames: input.secretEnvNames ?? [],
+        credentialMode: input.credentialMode
+      };
   }
 }
 
@@ -80,6 +98,11 @@ export function formatAdapterModelId(
 ): string {
   if (adapter === "opencode" && !modelId.includes("/")) {
     return `${provider}/${modelId}`;
+  }
+  if (adapter === "mcode" && !modelId.startsWith("custom_provider:")) {
+    // Custom providers are addressed with the explicit prefix; the bare
+    // `<provider>/<model>` form only resolves inside the bundled registry.
+    return `custom_provider:${provider}/${modelId}`;
   }
   return modelId;
 }

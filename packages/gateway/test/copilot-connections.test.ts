@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { randomBytes } from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -23,7 +25,7 @@ import { createCopilotConnectionRoutes } from '../src/routes/copilot-connections
 import { signJwt } from '../src/auth/jwt.js';
 
 async function fixture(mode: 'success'|'error'|'disconnect'|'duplicate'='success') {
- const db=new Database(':memory:'); migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations/',import.meta.url).pathname});
+ const db=new Database(':memory:'); migrate(drizzle(db),{migrationsFolder:path.join(path.dirname(fileURLToPath(import.meta.url)),'../src/db/migrations')});
  const user=new UserRepository(db).create(`${randomBytes(4).toString('hex')}@test.dev`,'hash');
  const masterKey=randomBytes(32).toString('hex'), secret=randomBytes(24).toString('base64url');
  let calls=0;
@@ -55,7 +57,7 @@ it('discovers real SDK tools, scopes credentials, and requires explicit tool ena
   assert.equal(f.registry.tools.size,1);assert.equal(ready.hasCredential,true);assert.ok(!JSON.stringify(ready).includes(f.secret));
   assert.ok(!f.svc.repo.get(ready.id)!.credential_encrypted!.includes(f.secret));
   const stranger=new CopilotConnections(f.db,'foreign',f.masterKey);assert.equal(stranger.repo.get(ready.id),undefined);
-  for(const visibility of [{grantBound:true},{scheduled:true},{reactive:true}])assert.equal(visibleToolSchemas(f.registry,{hasSessionManager:false,...visibility}).length,0);
+  for(const visibility of [{scheduled:true},{reactive:true}])assert.equal(visibleToolSchemas(f.registry,{hasSessionManager:false,...visibility}).length,0);
   const tool=[...f.registry.tools.values()][0]!;assert.equal((await executeAgentTool(tool,{message:'hello'},{db:f.db,userId:f.user.id,masterKey:f.masterKey})).ok,false);assert.equal(f.calls(),0);
   assert.throws(()=>f.svc.update(ready.id,{revision:1,enabled:false}),/changed/);
   f.svc.update(ready.id,{revision:ready.revision,enabled:false});assert.equal(f.registry.tools.size,0);

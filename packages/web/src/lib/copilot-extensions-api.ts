@@ -7,9 +7,9 @@ export interface CopilotSkill {
   version: string; currentVersion: string; revisionId: string; source: SkillSource;
   isEnabled: boolean; available: boolean; unavailableReason: string | null;
   compatible: boolean; incompatibilityReasons: string[]; requiredTools: string[];
-  reviewRequired: boolean; editable: boolean; updatedAt: string;
+  reviewRequired: boolean; customized?: boolean; reviewedBuiltinVersion?: string | null; editable: boolean; updatedAt: string;
 }
-export interface CopilotSkillDetail extends CopilotSkill { files: ExtensionFile[]; content: string; }
+export interface CopilotSkillDetail extends CopilotSkill { files: ExtensionFile[]; content: string; bundled?: { version: string; files: ExtensionFile[] } | null; }
 export interface SkillRevision {
   id: string; version: string; source: SkillSource; createdAt: string; packageDigest: string;
   fileCount: number; action: "import" | "update" | "rollback" | "legacy" | "builtin-update";
@@ -43,3 +43,5 @@ export const createCopilotConnection = (input: { name: string; endpoint: string;
 export const updateCopilotConnection = (id: string, input: { revision: number; name?: string; endpoint?: string; bearerToken?: string | null; enabled?: boolean; enabledTools?: string[] }) => fetchJson<{ connection: CopilotConnection }>(connectionPath(id), { method: "PUT", body: JSON.stringify(input) });
 export const discoverCopilotConnection = (id: string, revision: number) => fetchJson<{ connection: CopilotConnection }>(`${connectionPath(id)}/discover`, { method: "POST", body: JSON.stringify({ revision }) });
 export const deleteCopilotConnection = (id: string, revision: number) => fetchJson<{ deleted: boolean }>(`${connectionPath(id)}?revision=${revision}`, { method: "DELETE" });
+
+export const adoptBuiltinSkill = (id: string, expectedRevisionId: string, version: string) => fetchJson<{ skill: CopilotSkillDetail }>(`${skillPath(id)}/adopt-builtin`, { method: "POST", body: JSON.stringify({ expectedRevisionId, version }) });

@@ -7,6 +7,8 @@
  * remembers about the platform, a project, or a conversation. All access is
  * scoped by user_id; writes are idempotent via the operation log.
  */
+import { MemorySearchIndex, MAX_MEMORY_CHARACTERS as MAX_MEMORY_TEXT } from './memory-search-index.js';
+import { recallTerms, ftsExpression } from "./recall-query.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../../db/types.js";
 import type { AgentMemoryEntry } from "./types.js";
@@ -37,7 +39,6 @@ interface MemoryRow {
   updated_at: number;
 }
 
-const MAX_MEMORY_TEXT = 8 * 1024;
 const MAX_SEARCH_LIMIT = 20;
 
 export class AgentMemoryRepository {
@@ -71,10 +72,7 @@ export class AgentMemoryRepository {
         INSERT INTO copilot_memory (id, user_id, scope, project_id, conversation_id, kind, text, metadata_json, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(entry.id, entry.user_id, entry.scope, entry.project_id, entry.conversation_id, entry.kind, entry.text, entry.metadata_json, entry.created_at, entry.updated_at);
-      this.db.prepare(`
-        INSERT INTO copilot_memory_fts (memory_id, user_id, scope, project_id, kind, text)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(entry.id, entry.user_id, entry.scope, entry.project_id ?? "", entry.kind, entry.text);
+      new MemorySearchIndex(this.db, this.userId).write(entry);
     }).immediate();
 
     return toEntry(entry);
@@ -113,15 +111,24 @@ export class AgentMemoryRepository {
 
   search(query: string, scope: AgentMemoryScope, limit = 10): AgentMemoryEntry[] {
     this.validateScope(scope);
-    const q = query.trim();
-    if (!q) return [];
+    const terms = recallTerms(query, 'all');
+    if (!terms.length) return [];
+    return new MemorySearchIndex(this.db, this.userId).withReadySnapshot([scope], () => {
+      this.validateScope(scope);
+      return this.find(terms, scope, limit, 'all');
+    });
+  }
+
+  private find(terms: string[], scope: AgentMemoryScope, limit: number, mode: 'all' | 'any'): AgentMemoryEntry[] {
+    if (!terms.length) return [];
+    const maximum = Math.max(1, Math.min(limit, MAX_SEARCH_LIMIT));
     const rows = this.db.prepare(`
       SELECT m.* FROM copilot_memory m
       INNER JOIN copilot_memory_fts fts ON fts.memory_id = m.id
       WHERE m.user_id = ? AND fts.user_id = m.user_id AND fts.copilot_memory_fts MATCH ?
         AND m.scope = ? AND m.project_id IS ? AND m.conversation_id IS ?
-      ORDER BY rank LIMIT ?
-    `).all(this.userId, quoteFts(q), scope.scope, scope.projectId ?? null, scope.conversationId ?? null, Math.max(1, Math.min(limit, MAX_SEARCH_LIMIT))) as MemoryRow[];
+      ORDER BY rank, m.updated_at DESC, m.id LIMIT ?
+    `).all(this.userId, ftsExpression(terms, mode), scope.scope, scope.projectId ?? null, scope.conversationId ?? null, maximum) as MemoryRow[];
     return rows.map(toEntry);
   }
 
@@ -135,34 +142,30 @@ export class AgentMemoryRepository {
    * text and a single relevant keyword should surface the entry.
    */
   searchMulti(scopes: AgentMemoryScope[], query: string, limit = 10): AgentMemoryEntry[] {
-    const q = query.trim();
-    if (!q) return [];
-    const max = Math.max(1, Math.min(limit, MAX_SEARCH_LIMIT));
-    const priority = { session: 0, project: 1, global: 2 };
-    const candidates = [...scopes].sort((a, b) => priority[a.scope] - priority[b.scope]).map(scope => {
-      this.validateScope(scope);
-      const rows = this.db.prepare(`
-        SELECT m.* FROM copilot_memory m
-        INNER JOIN copilot_memory_fts fts ON fts.memory_id = m.id
-        WHERE m.user_id = ? AND fts.user_id = m.user_id AND fts.copilot_memory_fts MATCH ?
-          AND m.scope = ? AND m.project_id IS ? AND m.conversation_id IS ?
-        ORDER BY rank LIMIT ?
-      `).all(this.userId, quoteFtsOr(q), scope.scope, scope.projectId ?? null, scope.conversationId ?? null, max) as MemoryRow[];
-      return rows.map(toEntry);
-    });
-    const seen = new Set<string>();
-    const merged: AgentMemoryEntry[] = [];
-    for (let rank = 0; rank < max; rank++) {
-      for (const rows of candidates) {
-        const entry = rows[rank];
-        if (!entry) continue;
-        if (seen.has(entry.id)) continue;
-        seen.add(entry.id);
-        merged.push(entry);
-        if (merged.length >= max) return merged;
+    for (const scope of scopes) this.validateScope(scope);
+    const terms = recallTerms(query, 'any');
+    if (!terms.length) return [];
+    return new MemorySearchIndex(this.db, this.userId).withReadySnapshot(scopes, () => {
+      const max = Math.max(1, Math.min(limit, MAX_SEARCH_LIMIT));
+      const priority = { session: 0, project: 1, global: 2 };
+      const candidates = [...scopes].sort((a, b) => priority[a.scope] - priority[b.scope]).map(scope => {
+        this.validateScope(scope);
+        return this.find(terms, scope, max, 'any');
+      });
+      const seen = new Set<string>();
+      const merged: AgentMemoryEntry[] = [];
+      for (let rank = 0; rank < max; rank++) {
+        for (const rows of candidates) {
+          const entry = rows[rank];
+          if (!entry) continue;
+          if (seen.has(entry.id)) continue;
+          seen.add(entry.id);
+          merged.push(entry);
+          if (merged.length >= max) return merged;
+        }
       }
-    }
-    return merged;
+      return merged;
+    });
   }
 
   get(id: string): AgentMemoryEntry | undefined {
@@ -193,24 +196,4 @@ function toEntry(row: MemoryRow): AgentMemoryEntry {
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at)
   };
-}
-
-/** Escape FTS5 query so user input cannot break out of the match expression. */
-function quoteFts(query: string): string {
-  return query
-    .replace(/"/gu, " ")
-    .split(/\s+/u)
-    .filter(Boolean)
-    .map((token) => `"${token}"`)
-    .join(" AND ");
-}
-
-/** OR-token FTS query: any token match suffices (used by recall). */
-function quoteFtsOr(query: string): string {
-  return query
-    .replace(/"/gu, " ")
-    .split(/\s+/u)
-    .filter(Boolean)
-    .map((token) => `"${token}"`)
-    .join(" OR ");
 }

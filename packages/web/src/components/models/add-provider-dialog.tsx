@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { runtimeAdapterIds } from "@/lib/api";
 import type { ProviderApiFormat, ProviderAuthType, ProviderProfile, ProviderSupportedAdapter } from "@/lib/api";
 import {
   filterProviderPresets,
@@ -29,6 +30,7 @@ import {
   authTypeLabel,
   customProviderHasEndpoint,
   customProviderHasPlaintextHttp,
+  customProviderHasPrivateNetworkUrl,
   slugifyProviderKey,
   type CredentialForm,
   type CustomProviderForm,
@@ -37,16 +39,14 @@ import {
 
 const API_FORMATS: ProviderApiFormat[] = [
   "anthropic",
-  "openai",
+  "openai-responses",
   "openai-compatible",
   "google",
-  "bedrock",
-  "local",
 ];
 
 const AUTH_TYPES: ProviderAuthType[] = ["api_key", "bearer_token", "oauth", "none"];
 
-const SUPPORTED_ADAPTERS: ProviderSupportedAdapter[] = ["claude", "opencode", "codex", "kimi", "pi"];
+const SUPPORTED_ADAPTERS: ProviderSupportedAdapter[] = [...runtimeAdapterIds];
 
 interface AddProviderDialogProps {
   open: boolean;
@@ -89,12 +89,17 @@ export function AddProviderDialog({
   const requiresCredential = customProvider.authType !== "none";
   const hasEndpoint = customProviderHasEndpoint(customProvider);
   const hasPlaintextHttp = hasEndpoint && customProviderHasPlaintextHttp(customProvider);
-  const canSubmit =
-    !isCreating &&
-    customProvider.name.trim().length > 0 &&
-    customProvider.providerKey.trim().length > 0 &&
-    hasEndpoint &&
-    customProvider.supportedAdapters.length > 0;
+  const hasPrivateNetwork = hasEndpoint && customProviderHasPrivateNetworkUrl(customProvider);
+  // A disabled save button with no explanation is a dead end: name every
+  // missing field (also replaces the red "base URL required" error that used
+  // to appear before the user typed anything).
+  const submitBlockers: string[] = [];
+  if (customProvider.name.trim().length === 0) submitBlockers.push(t("models.providerFormMissingName"));
+  if (customProvider.providerKey.trim().length === 0) submitBlockers.push(t("models.providerFormMissingKey"));
+  if (!hasEndpoint) submitBlockers.push(t("models.providerFormMissingEndpoint"));
+  if (customProvider.supportedAdapters.length === 0) submitBlockers.push(t("models.supportedAdapters"));
+  const cannotSubmitReason = submitBlockers.join("、");
+  const canSubmit = !isCreating && submitBlockers.length === 0;
 
   function handleNameChange(name: string) {
     onCustomProviderChange({
@@ -135,6 +140,7 @@ export function AddProviderDialog({
                 value={presetQuery}
                 onChange={(event) => setPresetQuery(event.target.value)}
                 placeholder={t("models.searchProviderPlaceholder")}
+                aria-label={t("models.searchProviderPlaceholder")}
                 className="h-9 pl-9"
               />
             </div>
@@ -263,9 +269,11 @@ export function AddProviderDialog({
             </div>
           </div>
 
-          {!hasEndpoint && (
-            <p className="text-xs text-destructive">{t("models.baseUrlRequired")}</p>
-          )}
+          {submitBlockers.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {t("models.providerFormCannotSave").replace("{reasons}", cannotSubmitReason)}
+            </p>
+          ) : null}
 
           {hasPlaintextHttp && (
             <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3">
@@ -281,6 +289,23 @@ export function AddProviderDialog({
                 <span>{t("models.allowPlaintextHttp")}</span>
               </label>
               <p className="pl-6 text-xs text-muted-foreground">{t("models.allowPlaintextHttpHint")}</p>
+            </div>
+          )}
+
+          {hasPrivateNetwork && (
+            <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4 accent-brand"
+                  checked={customProvider.allowPrivateNetworks}
+                  onChange={(event) =>
+                    onCustomProviderChange({ ...customProvider, allowPrivateNetworks: event.target.checked })
+                  }
+                />
+                <span>{t("models.allowPrivateNetworks")}</span>
+              </label>
+              <p className="pl-6 text-xs text-muted-foreground">{t("models.allowPrivateNetworksHint")}</p>
             </div>
           )}
 
@@ -336,7 +361,11 @@ export function AddProviderDialog({
           ))}
 
           <DialogFooter>
-            <Button type="submit" disabled={!canSubmit}>
+            <Button
+              type="submit"
+              disabled={!canSubmit}
+              title={submitBlockers.length > 0 ? t("models.providerFormCannotSave").replace("{reasons}", cannotSubmitReason) : undefined}
+            >
               {isCreating ? (
                 <RefreshCw className="size-4 animate-spin" />
               ) : editing ? (

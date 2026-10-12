@@ -21,8 +21,8 @@ describe("run-with-root-env", () => {
       path.join(root, ".env"),
       [
         "FORGEBADGER_DB_PATH=/repo/forgebadger.db",
-        "FORGEBADGER_PORT=48731",
-        "NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731"
+        "FORGEBADGER_PORT=18332",
+        "NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:18332"
       ].join("\n")
     );
 
@@ -36,8 +36,8 @@ describe("run-with-root-env", () => {
     });
 
     assert.equal(env.FORGEBADGER_DB_PATH, "/tmp/operator/forgebadger.db");
-    assert.equal(env.FORGEBADGER_PORT, "48731");
-    assert.equal(env.NEXT_PUBLIC_GATEWAY_URL, "http://127.0.0.1:48731");
+    assert.equal(env.FORGEBADGER_PORT, "18332");
+    assert.equal(env.NEXT_PUBLIC_GATEWAY_URL, "http://127.0.0.1:18332");
     assert.equal(env.EXISTING_EMPTY, "");
     assert.equal("UNDEFINED_VALUE" in env, false);
   });
@@ -96,13 +96,13 @@ describe("run-with-root-env", () => {
       buildWindowsInvocation(
         {
           command: "sh",
-          args: ["-lc", "next dev -H ${FORGEBADGER_WEB_HOST:-127.0.0.1} -p ${FORGEBADGER_WEB_PORT:-48732}"]
+          args: ["-lc", "next dev -H ${FORGEBADGER_WEB_HOST:-127.0.0.1} -p ${FORGEBADGER_WEB_PORT:-18333}"]
         },
         { FORGEBADGER_WEB_HOST: "127.0.0.1", ComSpec: "C:\\Windows\\system32\\cmd.exe" }
       ),
       {
         command: "C:\\Windows\\system32\\cmd.exe",
-        args: ["/d", "/s", "/c", "next dev -H 127.0.0.1 -p 48732"]
+        args: ["/d", "/s", "/c", "next dev -H 127.0.0.1 -p 18333"]
       }
     );
 

@@ -681,6 +681,15 @@ function isBuiltInTemplateId(id: string): boolean {
   return BUILTIN_TEMPLATE_IDS.some((templateId) => templateId === id);
 }
 
+/** Built-in definitions for side-effect-free MCP reads. */
+export function builtInTemplateSummaries() {
+  return builtInTemplateDefinitions().map(({ template }) => ({
+    id: template.id!, name: template.name!, description: template.description ?? null,
+    version: template.version!, adapter: template.adapter ?? null,
+    isBuiltin: true, status: template.status ?? "active"
+  }));
+}
+
 export class TemplateRepository {
   private drizzle;
   private db: Database;
@@ -688,6 +697,20 @@ export class TemplateRepository {
   constructor(db: Database, private userId: string) {
     this.drizzle = drizzle(db);
     this.db = db;
+  }
+
+  getSnapshotById(id: string): { id: string; adapter: string | null; files: TemplateFile[] } | undefined {
+    const definition = builtInTemplateDefinitions().find(({ template }) => template.id === id);
+    if (definition) return {
+      id,
+      adapter: definition.template.adapter ?? null,
+      files: definition.files.map((file, index) => ({
+        id: -(index + 1), templateId: id, filePath: file.filePath,
+        content: file.content, fileType: file.fileType ?? "markdown"
+      }))
+    };
+    const custom = this.getById(id);
+    return custom?.files ? { id: custom.id, adapter: custom.adapter, files: custom.files } : undefined;
   }
 
   listBuiltIn(): Template[] {

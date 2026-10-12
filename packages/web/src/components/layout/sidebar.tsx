@@ -169,11 +169,11 @@ function NavLinkItem({
       title={collapsed ? t(item.labelKey) : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group relative flex h-8 items-center gap-2.5 rounded-md text-[13px] font-medium transition-colors duration-150",
+        "group relative flex h-8 items-center gap-2.5 rounded-md text-[13px] font-medium transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring",
         collapsed ? "justify-center px-2" : "px-2.5",
         active
           ? "bg-brand/10 text-foreground"
-          : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground"
       )}
     >
       <item.icon
@@ -227,7 +227,7 @@ function NavLinks({
           {collapsed ? (
             groupIndex > 0 && <div className="mx-2 my-2 h-px bg-border/60" aria-hidden="true" />
           ) : (
-            <div className="px-2.5 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50 select-none">
+            <div className="px-2.5 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 select-none">
               {t(group.labelKey)}
             </div>
           )}
@@ -289,7 +289,7 @@ export function Sidebar({
   );
 
   const UserSection = (
-    <div className="mt-auto border-t border-white/[0.06] px-2 py-2.5">
+    <div className="mt-auto border-t border-border px-2 py-2.5">
       <div className="flex items-center gap-2.5 rounded-md px-1.5 py-1">
         <Avatar size="sm" className="size-6">
           <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
@@ -317,7 +317,7 @@ export function Sidebar({
       onClick={onToggleCollapse}
       aria-label={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
       title={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
-      className="absolute -right-3 top-1/2 z-20 flex size-6 -translate-y-1/2 items-center justify-center rounded-full border border-white/[0.08] bg-[#0b0f16] text-muted-foreground opacity-0 shadow-lg transition-opacity duration-150 hover:text-foreground focus-visible:opacity-100 group-hover/sidebar:opacity-100"
+      className="absolute -right-3 top-1/2 z-20 flex size-6 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-lg transition-opacity duration-150 hover:text-foreground focus-visible:opacity-100 group-hover/sidebar:opacity-100"
     >
       {collapsed ? <ChevronsRight className="size-3.5" /> : <ChevronsLeft className="size-3.5" />}
     </button>
@@ -326,16 +326,21 @@ export function Sidebar({
   return (
     <>
       {/* Mobile trigger */}
-      <div className="fixed left-4 top-4 z-50 md:hidden">
+      <div className="fixed left-4 top-4 z-50 md:hidden" data-app-sidebar-trigger>
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger asChild>
-            <Button variant="outline" size="icon" aria-label="Open navigation">
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={t("nav.openNavigation")}
+              className="bg-card shadow-md"
+            >
               <Menu className="size-5" />
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="w-[232px] p-0">
             <div className="flex h-full flex-col py-3">
-              <SheetTitle className="sr-only">ForgeBadger navigation</SheetTitle>
+              <SheetTitle className="sr-only">{t("nav.sheetTitle")}</SheetTitle>
               {BrandHeader}
               <NavLinks onNavigate={() => setOpen(false)} />
               {UserSection}
@@ -346,8 +351,9 @@ export function Sidebar({
 
       {/* Desktop sidebar */}
       <aside
+        data-app-sidebar
         className={cn(
-          "group/sidebar relative hidden h-full flex-col border-r border-white/[0.06] bg-[#080b10] bg-gradient-to-b from-white/[0.02] to-transparent py-3 transition-[width] duration-200 ease-out md:flex",
+          "group/sidebar relative hidden h-full flex-col border-r border-border bg-card py-3 transition-[width] duration-200 ease-out md:flex",
           collapsed ? "w-[60px]" : "w-[220px]"
         )}
       >
@@ -358,7 +364,7 @@ export function Sidebar({
               <BrandMark />
             </div>
             <NavLinks collapsed />
-            <div className="mt-auto flex flex-col items-center gap-2.5 border-t border-white/[0.06] px-2 pt-3">
+            <div className="mt-auto flex flex-col items-center gap-2.5 border-t border-border px-2 pt-3">
               <Avatar size="sm" className="size-6">
                 <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
               </Avatar>

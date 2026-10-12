@@ -23,9 +23,15 @@ import type {
 import type {
   ManagementResponse,
   LaunchPlanPayload,
-  PaneSnapshot
+  PaneSnapshot,
+  SessionInfo,
+  SessionNotificationMessage
 } from "./session-server/index.js";
 import { isRecord } from "./session-server/ipc-validation.js";
+import {
+  isTerminalNotification,
+  type TerminalNotification
+} from "./session-server/terminal-notification-scanner.js";
 import { performClientHello } from "./session-server/hello-handshake.js";
 import {
   readSessionServerTokenFile,
@@ -77,6 +83,11 @@ export class SessionServerClient implements TerminalBackendClient {
   onDisconnect: (() => void) | undefined;
   /** Fired when a connect attempt fails — drives circuit-breaker re-arm. */
   onConnectError: ((error: Error) => void) | undefined;
+  /**
+   * Fired for terminal-native notifications (OSC 9/99/777, bell) observed
+   * on a PTY, relayed by the daemon over the management socket.
+   */
+  onSessionNotification: ((sessionId: string, notification: TerminalNotification) => void) | undefined;
 
   /** Maps runtime session name → sessionId (the names are identical today;
    *  the map keeps the historical fb-{user8}-{sessionId} naming contract). */
@@ -117,7 +128,7 @@ export class SessionServerClient implements TerminalBackendClient {
 
     let hello;
     try {
-      hello = await performClientHello(socket, this.resolveToken(), timeoutMs);
+      hello = await performClientHello(socket, this.resolveToken(), timeoutMs, "management");
     } catch (error) {
       socket.destroy();
       this.onConnectError?.(error as Error);
@@ -267,10 +278,22 @@ export class SessionServerClient implements TerminalBackendClient {
   }
 
   private handleMessage(line: string): void {
-    let msg: ManagementResponse;
+    // The management socket also receives unsolicited `session_notification`
+    // pushes, so the parsed line is wider than the request/response union.
+    let msg: ManagementResponse | SessionNotificationMessage;
     try {
-      msg = JSON.parse(line) as ManagementResponse;
+      msg = JSON.parse(line) as ManagementResponse | SessionNotificationMessage;
     } catch {
+      return;
+    }
+
+    if (
+      isRecord(msg)
+      && msg.type === "session_notification"
+      && typeof msg.sessionId === "string"
+      && isTerminalNotification(msg.notification)
+    ) {
+      this.onSessionNotification?.(msg.sessionId, msg.notification);
       return;
     }
 
@@ -411,6 +434,13 @@ export class SessionServerClient implements TerminalBackendClient {
     // Return sessionIds (runtime session names; the identity mapping above
     // keeps the historical fb-{user8}-{sessionId} shape)
     return result.map((s) => s.sessionId);
+  }
+
+  async listSessionInfos(): Promise<SessionInfo[]> {
+    return this.sendRequest<SessionInfo[]>({
+      id: randomUUID(),
+      type: "list_sessions"
+    });
   }
 
   async hasSession(name: string): Promise<boolean> {

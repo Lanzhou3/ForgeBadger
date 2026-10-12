@@ -1,4 +1,5 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { closeSync, constants, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 
@@ -13,6 +14,8 @@ export interface WriteConfigPlanOptions {
   backupRoot?: string;
   failBeforeWrite?: string;
   failRollbackFor?: string[];
+  createOnly?: boolean;
+  beforeWrite?: () => void;
 }
 
 interface AppliedWrite {
@@ -59,6 +62,7 @@ export async function writeConfigPlan(
 
   try {
     for (const file of plan.files) {
+      options.beforeWrite?.();
       const conflict = conflicts.find((current) => current.relativePath === file.relativePath);
       const decision =
         conflict?.conflictType === "exists"
@@ -73,6 +77,18 @@ export async function writeConfigPlan(
 
       if (options.failBeforeWrite === file.relativePath) {
         throw new Error(`Injected write failure for ${file.relativePath}`);
+      }
+
+      if (options.createOnly) {
+        const absolutePath = safeResolve(plan.targetRoot, file.relativePath);
+        mkdirSync(dirname(absolutePath), { recursive: true });
+        options.beforeWrite?.();
+        if (safeResolve(plan.targetRoot, file.relativePath) !== absolutePath) throw new Error("Config parent path changed");
+        const fd = openSync(absolutePath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0), 0o600);
+        appliedWrites.push({ relativePath: file.relativePath, absolutePath, created: true });
+        try { writeFileSync(fd, file.content, "utf8"); } finally { closeSync(fd); }
+        writtenFiles.push(file.relativePath);
+        continue;
       }
 
       const absolutePath = safeResolve(plan.targetRoot, file.relativePath);
@@ -106,7 +122,7 @@ export async function writeConfigPlan(
       rollbackAvailable: appliedWrites.length > 0
     };
   } catch (error) {
-    const rollbackResult = await rollbackAppliedWrites(appliedWrites, options);
+    const rollbackResult = await rollbackAppliedWrites(appliedWrites, plan.targetRoot, options);
     const outcome = rollbackResult.success ? "rolled_back" : "rollback_failed";
     return {
       writtenFiles,
@@ -152,6 +168,7 @@ async function readExistingFile(absolutePath: string): Promise<string | undefine
 
 async function rollbackAppliedWrites(
   appliedWrites: AppliedWrite[],
+  targetRoot: string,
   options: WriteConfigPlanOptions
 ): Promise<RollbackResult> {
   const restoredFiles: string[] = [];
@@ -165,7 +182,12 @@ async function rollbackAppliedWrites(
       }
 
       if (write.created) {
-        await rm(write.absolutePath, { force: true });
+        if (options.createOnly) {
+          if (safeResolve(targetRoot, write.relativePath) !== write.absolutePath) throw new Error("Config rollback path changed");
+          rmSync(write.absolutePath, { force: true });
+        } else {
+          await rm(write.absolutePath, { force: true });
+        }
         removedFiles.push(write.relativePath);
         continue;
       }

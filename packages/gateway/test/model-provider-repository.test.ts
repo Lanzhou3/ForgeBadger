@@ -73,7 +73,7 @@ describe("model provider repository", () => {
     }), /public HTTPS endpoint/u);
     assert.doesNotThrow(() => repo.createProviderProfile({
       name: "Local no auth", providerKey: "local-no-auth", baseUrl: "http://127.0.0.1:11434/v1",
-      authType: "none", apiFormat: "local", supportedAdapters: ["opencode"]
+      authType: "none", apiFormat: "openai-compatible", supportedAdapters: ["opencode"]
     }));
   });
 
@@ -107,6 +107,78 @@ describe("model provider repository", () => {
       name: "Private http", providerKey: "private-http", baseUrl: "http://192.168.1.10/v1",
       authType: "api_key", apiFormat: "openai-compatible", supportedAdapters: ["opencode"], allowPlaintextHttp: true
     }), /private or loopback/iu);
+  });
+
+  it("persists the private-networks trust flag and allows loopback endpoints with it", () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("private-net@example.com", "hash");
+    const repo = new ModelProviderRepository(db, user.id, masterKey);
+
+    // The flag alone must not relax the protocol requirement.
+    assert.throws(() => repo.createProviderProfile({
+      name: "Ollama no protocol trust", providerKey: "ollama-np", baseUrl: "http://127.0.0.1:11434/v1",
+      authType: "api_key", apiFormat: "openai-compatible", supportedAdapters: ["opencode"], allowPrivateNetworks: true
+    }), /public HTTPS endpoint/u);
+
+    // Both flags together accept the loopback endpoint and the flag round-trips.
+    const provider = repo.createProviderProfile({
+      name: "Ollama", providerKey: "ollama", baseUrl: "http://127.0.0.1:11434/v1",
+      authType: "api_key", apiFormat: "openai-compatible", supportedAdapters: ["opencode"],
+      allowPlaintextHttp: true, allowPrivateNetworks: true
+    });
+    assert.equal(repo.getProviderProfile(provider.id)?.allowPrivateNetworks, true);
+    assert.equal(repo.listProviderProfiles().find((item) => item.id === provider.id)?.allowPrivateNetworks, true);
+
+    // Default stays false; updates round-trip both ways on a public endpoint.
+    const publicProvider = repo.createProviderProfile({
+      name: "DeepSeek", providerKey: "deepseek-flagless2", baseUrl: "https://api.deepseek.com",
+      authType: "api_key", apiFormat: "openai-compatible", supportedAdapters: ["opencode"]
+    });
+    assert.equal(repo.getProviderProfile(publicProvider.id)?.allowPrivateNetworks, false);
+    assert.equal(repo.updateProviderProfile(publicProvider.id, { allowPrivateNetworks: true })?.allowPrivateNetworks, true);
+    assert.equal(repo.updateProviderProfile(publicProvider.id, { allowPrivateNetworks: false })?.allowPrivateNetworks, false);
+  });
+
+  it("round-trips per-model thinking effort fields with nullable clearing", () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("effort-fields@example.com", "hash");
+    const repo = new ModelProviderRepository(db, user.id, masterKey);
+    const provider = repo.createProviderProfile({
+      name: "DeepSeek Gateway",
+      providerKey: "deepseek-efforts",
+      baseUrl: "https://api.deepseek.com",
+      authType: "api_key",
+      apiFormat: "openai-compatible",
+      supportedAdapters: ["opencode"]
+    });
+    const model = repo.createModelProfile({
+      providerProfileId: provider.id,
+      name: "Reasoner",
+      modelId: "deepseek-reasoner",
+      supportEfforts: ["low", "high"],
+      defaultEffort: "high"
+    });
+    assert.deepEqual(repo.getModelProfile(model.id)?.supportEfforts, ["low", "high"]);
+    assert.equal(repo.getModelProfile(model.id)?.defaultEffort, "high");
+
+    // Omitted fields default to an empty list and a null default.
+    const plain = repo.createModelProfile({
+      providerProfileId: provider.id,
+      name: "Plain",
+      modelId: "plain-model"
+    });
+    assert.deepEqual(plain.supportEfforts, []);
+    assert.equal(plain.defaultEffort, null);
+
+    // Explicit null clears a stored default; omitted fields keep their values.
+    assert.equal(repo.updateModelProfile(model.id, { defaultEffort: null })?.defaultEffort, null);
+    assert.deepEqual(repo.updateModelProfile(model.id, { name: "Renamed" })?.supportEfforts, ["low", "high"]);
+    const updatedPlain = repo.updateModelProfile(plain.id, {
+      supportEfforts: ["medium", "max"],
+      defaultEffort: "max"
+    });
+    assert.deepEqual(updatedPlain?.supportEfforts, ["medium", "max"]);
+    assert.equal(updatedPlain?.defaultEffort, "max");
   });
 
 });

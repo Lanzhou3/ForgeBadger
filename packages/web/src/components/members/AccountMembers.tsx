@@ -4,13 +4,14 @@ import {useRouter} from "next/navigation";
 import {TeamError} from "@/components/teams/TeamShared";
 import {AccountInvitations} from "@/components/members/AccountInvitations";
 import {ResetAccountPassword} from "@/components/members/ResetAccountPassword";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldAlert, UsersRound } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
 import {
@@ -69,13 +70,11 @@ export function AccountMembers() {
   return (
     <div className="space-y-6">
       <AccountInvitations actorId={user.id}/>
-      {isError ? <TeamError error={error} retry={()=>void refetch()}/> : isLoading ? (
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            {t("members.loading")}
-          </CardContent>
-        </Card>
-      ) : members.length === 0 ? (
+      {/* A failed refetch with cached data keeps the list and shows the error
+          banner; only a failed initial load replaces the table. */}
+      {isError ? <TeamError error={error} retry={()=>void refetch()}/> : null}
+      {data ? (
+        members.length === 0 ? (
         <Card className="forgebadger-animate-in">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
@@ -89,13 +88,15 @@ export function AccountMembers() {
             </div>
           </CardContent>
         </Card>
-      ) : (
+        ) : (
         <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
           <div className="hidden items-center gap-3 px-4 py-2.5 md:flex text-xs font-medium text-muted-foreground">
             <div className="min-w-0 basis-full md:flex-1">{t("common.name")}</div>
             <div className="w-32 shrink-0">{t("members.role")}</div>
             <div className="w-32 shrink-0">{t("members.status")}</div>
-            <div className="w-20 shrink-0 text-right">{t("common.actions")}</div>
+            {/* The trailing column only holds the row save button; label it
+                accordingly instead of the broader "actions". */}
+            <div className="w-20 shrink-0 text-right">{t("members.save")}</div>
           </div>
           {members.map((member, index) => (
             <MemberRow
@@ -106,7 +107,14 @@ export function AccountMembers() {
             />
           ))}
         </div>
-      )}
+        )
+      ) : isLoading ? (
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            {t("members.loading")}
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }
@@ -130,11 +138,24 @@ function MemberRow({
     status: member.status === "disabled" ? "disabled" : "active",
   });
   const [error, setError] = useState("");
+  const [pendingImpact, setPendingImpact] = useState<"disable" | "demote" | null>(null);
+
+  // Re-sync the draft when the server-side values change (refetch after
+  // another admin's edit, or this row's own successful save): the initial
+  // useState snapshot alone leaves the selects stale. Unchanged values leave
+  // the draft untouched, so a failed save keeps the user's input for retry.
+  useEffect(() => {
+    setForm({
+      role: member.role === "admin" ? "admin" : "user",
+      status: member.status === "disabled" ? "disabled" : "active",
+    });
+  }, [member.role, member.status]);
 
   const mutation = useMutation({
     mutationFn: () => updateAdminUser(member.id, form),
     onSuccess: () => {
       setError("");
+      setPendingImpact(null);
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
     },
     onError: (err) => {
@@ -143,6 +164,24 @@ function MemberRow({
   });
 
   const effectiveStatus = isSelf ? member.status : form.status;
+
+  // Disabling an account or demoting an admin takes effect immediately on the
+  // server: gate the save behind an explicit confirmation naming the member.
+  const resolveImpact = (): "disable" | "demote" | null => {
+    if (isSelf) return null;
+    if (form.status === "disabled" && member.status !== "disabled") return "disable";
+    if (form.role === "user" && member.role === "admin") return "demote";
+    return null;
+  };
+
+  function handleSave() {
+    const impact = resolveImpact();
+    if (impact) {
+      setPendingImpact(impact);
+      return;
+    }
+    mutation.mutate();
+  }
 
   return (
     <div
@@ -208,12 +247,28 @@ function MemberRow({
         <Button
           size="sm"
           variant="outline"
-          onClick={() => mutation.mutate()}
+          onClick={handleSave}
           disabled={isSelf || mutation.isPending}
         >
           {mutation.isPending ? t("members.saving") : t("members.save")}
         </Button>
       </div>
+      <ConfirmDialog
+        open={pendingImpact !== null}
+        destructive
+        pending={mutation.isPending}
+        title={t(pendingImpact === "disable" ? "members.disableConfirmTitle" : "members.demoteConfirmTitle")}
+        description={t(
+          pendingImpact === "disable"
+            ? "members.disableConfirmDescription"
+            : "members.demoteConfirmDescription"
+        ).replace("{email}", member.email)}
+        confirmLabel={t(pendingImpact === "disable" ? "members.disableAction" : "members.demoteAction")}
+        onOpenChange={(open) => {
+          if (!open) setPendingImpact(null);
+        }}
+        onConfirm={() => mutation.mutate()}
+      />
       <div className="w-full"><ResetAccountPassword userId={member.id} email={member.email} isSelf={isSelf} onSelfReset={()=>void logout().then(()=>router.replace("/login"))}/></div>
     </div>
   );

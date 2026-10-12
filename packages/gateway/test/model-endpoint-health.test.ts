@@ -296,4 +296,121 @@ describe("checkModelEndpoint", () => {
     assert.equal(result.healthy, true);
     assert.equal(result.statusCode, 200);
   });
+
+  it("allows a loopback endpoint when allowPrivateNetworks is trusted", async () => {
+    let fetchCalled = false;
+    const result = await checkModelEndpoint({
+      endpoint: "http://127.0.0.1:11434",
+      timeoutMs: 100,
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response("ok", { status: 200 });
+      },
+      resolveHost: publicHostResolver,
+      allowPlaintextHttp: true,
+      allowPrivateNetworks: true
+    });
+
+    assert.equal(result.healthy, true);
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.error, undefined);
+    assert.equal(fetchCalled, true);
+  });
+
+  it("allows a localhost hostname when allowPrivateNetworks is trusted", async () => {
+    const result = await checkModelEndpoint({
+      endpoint: "http://localhost:8000/v1",
+      timeoutMs: 100,
+      fetchImpl: async () => new Response("ok", { status: 200 }),
+      resolveHost: publicHostResolver,
+      allowPlaintextHttp: true,
+      allowPrivateNetworks: true
+    });
+
+    assert.equal(result.healthy, true);
+    assert.equal(result.error, undefined);
+  });
+
+  it("still blocks cloud metadata even when allowPrivateNetworks is trusted", async () => {
+    let fetchCalled = false;
+    const result = await checkModelEndpoint({
+      endpoint: "http://169.254.169.254/latest/meta-data/",
+      timeoutMs: 100,
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response("ok", { status: 200 });
+      },
+      resolveHost: publicHostResolver,
+      allowPlaintextHttp: true,
+      allowPrivateNetworks: true
+    });
+
+    assert.equal(result.healthy, false);
+    assert.equal(result.error, "Cloud metadata service is not allowed");
+    assert.equal(fetchCalled, false);
+  });
+
+  it("still blocks metadata hostnames even when allowPrivateNetworks is trusted", async () => {
+    const result = await checkModelEndpoint({
+      endpoint: "http://metadata.google.internal/",
+      timeoutMs: 100,
+      fetchImpl: async () => new Response("ok", { status: 200 }),
+      resolveHost: publicHostResolver,
+      allowPlaintextHttp: true,
+      allowPrivateNetworks: true
+    });
+
+    assert.equal(result.healthy, false);
+    assert.equal(result.error, "Metadata hostnames are not allowed");
+  });
+
+  it("still requires https when allowPrivateNetworks is trusted without allowPlaintextHttp", async () => {
+    const result = await checkModelEndpoint({
+      endpoint: "http://127.0.0.1:11434",
+      timeoutMs: 100,
+      fetchImpl: async () => new Response("ok", { status: 200 }),
+      resolveHost: publicHostResolver,
+      allowPrivateNetworks: true
+    });
+
+    assert.equal(result.healthy, false);
+    assert.equal(result.error, "Only https protocol is allowed");
+  });
+
+  it("still blocks .internal hostnames even when allowPrivateNetworks is trusted", async () => {
+    let fetchCalled = false;
+    const result = await checkModelEndpoint({
+      endpoint: "https://ssrf.internal/",
+      timeoutMs: 100,
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response("ok", { status: 200 });
+      },
+      resolveHost: publicHostResolver,
+      allowPrivateNetworks: true
+    });
+
+    assert.equal(result.healthy, false);
+    assert.equal(result.error, "Internal hostnames are not allowed");
+    assert.equal(fetchCalled, false);
+  });
+
+  it("still blocks the Alibaba cloud metadata IP even when allowPrivateNetworks is trusted", async () => {
+    let fetchCalled = false;
+    const result = await checkModelEndpoint({
+      endpoint: "http://100.100.100.200/latest/meta-data/",
+      timeoutMs: 100,
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response("ok", { status: 200 });
+      },
+      resolveHost: publicHostResolver,
+      allowPlaintextHttp: true,
+      allowPrivateNetworks: true
+    });
+
+    assert.equal(result.healthy, false);
+    assert.equal(result.error, "Cloud metadata service is not allowed");
+    assert.equal(fetchCalled, false);
+  });
 });

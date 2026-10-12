@@ -3,6 +3,7 @@ import {
   collectEnvironmentInfo,
   type CliCommandRunner,
   type CliEnvironmentInfo,
+  type NativeModuleLoader,
   type NodePtyLoader
 } from "../runtime/dependency-check.js";
 import {
@@ -19,6 +20,7 @@ interface OutputWriter {
 export interface DoctorOptions {
   dependencyRunner?: CliCommandRunner;
   loadNodePty?: NodePtyLoader;
+  loadBetterSqlite3?: NativeModuleLoader;
   collectEnvironment?: () => CliEnvironmentInfo;
   loadConfig?: () => Promise<RuntimeConfig>;
   inspectConfig?: (options: LoadRuntimeConfigOptions) => Promise<RuntimeConfigInspection>;
@@ -34,7 +36,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<number> {
   const stderr = options.stderr ?? process.stderr;
   const environment = (options.collectEnvironment ?? collectEnvironmentInfo)();
   const inspection = await resolveDoctorRuntimeInspection(options);
-  const dependencies = await checkCliDependencies(options.dependencyRunner, options.loadNodePty);
+  const dependencies = await checkCliDependencies(options.dependencyRunner, options.loadNodePty, options.loadBetterSqlite3);
   const requiredMissing = dependencies.filter((item) => item.required && !item.available);
 
   stdout.write(`Environment: ${environment.platform} ${environment.arch}, Node ${environment.nodeVersion}\n`);

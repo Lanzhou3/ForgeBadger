@@ -1,6 +1,11 @@
+import { executeTaskPacket, assertTaskDispatchable } from '../project-manager/task-execution.js';
+import { taskCloseInput, closeTask } from '../project-manager/task-progress.js';
+import { PlatformNoEffectError } from './errors.js';
 import {mutateAssignedTask} from '../project-manager/tasks.js';
 import {assertLegacyTaskExecution} from '../project-manager/access.js';
+import { importProject, applyMcpConfig } from '../mcp/project-workflow.js';
 import { createDevelopmentCommands } from '../development/commands.js';
+import { createMcpLifecycleCommands } from '../mcp/lifecycle.js';
 import { getAdapterLaunchStatus } from '../adapter-discovery.js';
 import { createHash } from 'node:crypto';
 import { createManagementCommands } from '../project-manager/management.js';
@@ -11,19 +16,46 @@ import { SessionRepository } from '../../db/repositories/session-repository.js';
 import { ProjectManagerRepository } from '../../db/repositories/project-manager-repository.js';
 import { TemplateRepository } from '../../db/repositories/template-repository.js';
 import { AgentMemoryRepository } from '../agent/memory.js';
-import { buildTaskPacket, createTaskPacketContext, createTaskPacketSessionName, resolveTaskPacketSession, withTaskPacketSessionLink, toTaskPacketSessionDto } from '../project-manager/task-packets.js';
+import { buildTaskPacket, createTaskPacketContext, createTaskPacketSessionName, findWorkItemByTaskPacketSession, resolveTaskPacketSession, withTaskPacketSessionLink, toTaskPacketSessionDto } from '../project-manager/task-packets.js';
 import { createSessionCommands } from './session-commands.js';
-import { assertAdapterAutonomy } from '../adapter-autonomy.js';
+import { runShellCommand, runShellCommandInSession, openCopilotShell, closeCopilotShell, assertCopilotShellSession, SHELL_COMMAND_MAX_LENGTH, SHELL_COMMAND_MAX_TIMEOUT_MS } from '../shell-command-execution.js';
+import { redactAgentValue } from '../agent/redaction.js';
+import { dispatchSessionInput } from '../agent/platform-access.js';
+import { normalizeAdapter } from '../session-launch-plan.js';
 import { canonical, canonicalRoot } from './actions.js';
 import type { CommandContext, PlatformCommand } from './types.js';
+import { PlatformActionRepository } from '../../db/repositories/platform-action-repository.js';
 const id = z.string().min(1).max(128);
 const projectInput = z.object({ projectId: id }).strict();
 export const projectCreateInput = z.object({ name: z.string().trim().min(1).max(200), path: z.string().trim().min(1).max(1024), description: z.string().max(2000).optional(), techStack: z.string().max(2000).optional(), templateId: id.optional() }).strict();
+export const projectConfigApplyInput = z.object({ projectId: id, templateId: id, expectedDigest: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
 export const workItemCreateInput = z.object({ projectId: id, title: z.string().min(1).max(256), description: z.string().max(4000).nullable().optional(), priority: z.number().int().min(0).max(100).optional(), acceptanceCriteria: z.array(z.string().max(1000)).max(50).optional(), stageId: id.nullable().optional() }).strict();
 const evidenceRef = z.object({ kind: z.string().trim().min(1).max(64).refine(value=>!/^(delivery|verified|verification|integrated)$/i.test(value),'Reserved delivery evidence kind').optional(), label: z.string().min(1).max(256).optional(), status: z.string().min(1).max(64).optional(), ref: z.string().min(1).max(512).optional(), path: z.string().min(1).max(512).optional(), sessionId: id.optional(), feishuChatId: id.optional(), feishuMessageId: id.optional(), createdAt: z.string().min(1).max(64).optional() }).strict();
 const workItemWithEvidence = workItemCreateInput.extend({assigneeId:id.nullable().optional(),reviewerId:id.nullable().optional(), status: z.literal('todo').optional(), evidenceRefs: z.array(evidenceRef).max(20).optional() });
 export const workItemUpdateInput = z.object({expectedRevision:z.number().int().positive().optional(),assigneeId:id.nullable().optional(),reviewerId:id.nullable().optional(), projectId: id, workItemId: id, title: z.string().min(1).max(256).optional(), description: z.string().max(4000).nullable().optional(), priority: z.number().int().min(0).max(100).optional(), acceptanceCriteria: z.array(z.string().max(1000)).max(50).optional(), stageId: id.nullable().optional() }).strict();
 export const taskPrepareInput = z.object({ projectId: id, workItemId: id, aiTool: z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).optional() }).strict();
+export const sessionDispatchInput = z.object({ sessionId: id, message: z.string().min(1).max(4000) }).strict();
+export const terminalRunInput = z.object({ projectId: id, command: z.string().min(1).max(SHELL_COMMAND_MAX_LENGTH), timeoutMs: z.number().int().min(1).max(SHELL_COMMAND_MAX_TIMEOUT_MS).optional(), sessionId: id.optional() }).strict();
+export const terminalOpenInput = z.object({ projectId: id }).strict();
+export const terminalCloseInput = z.object({ sessionId: id }).strict();
+
+function terminalProgressEmitter(ctx: CommandContext, projectId: string, command: string, sessionId?: string) {
+    const bus = ctx.eventBus;
+    if (!bus) return undefined;
+    const base = {
+        type: 'terminal_command_progress' as const,
+        userId: ctx.userId,
+        projectId,
+        commandPreview: command.slice(0, 120),
+        ...(sessionId ? { sessionId } : {}),
+        ...(typeof ctx.conversationId === 'string' ? { conversationId: ctx.conversationId } : {}),
+        ...(typeof ctx.runId === 'string' ? { runId: ctx.runId } : {}),
+        ...(typeof ctx.stepId === 'string' ? { stepId: ctx.stepId } : {})
+    };
+    return (outputTail: string, status: 'running' | 'completed' | 'timed_out' | 'user_took_over' | 'error') => {
+        bus.emitEvent({ ...base, outputTail: String(redactAgentValue(outputTail)), status, occurredAt: new Date() });
+    };
+}
 export const memoryWriteInput = z.object({ kind: z.enum(['fact', 'preference', 'decision', 'project_note']), scope: z.enum(['global', 'project', 'session']), text: z.string().min(1).max(8192), projectId: id.optional(), conversationId: id.optional(), metadata: z.record(z.unknown()).optional() }).strict();
 function project(ctx: CommandContext, id: string) {
     const p = new ProjectRepository(ctx.db, ctx.userId).getById(id);
@@ -42,7 +74,9 @@ function itemResources(ctx: CommandContext, input: unknown) {
     const item = new ProjectManagerRepository(ctx.db, ctx.userId).getWorkItem(v.projectId, v.workItemId);
     if (!item)
         throw new Error('Work item not found');
-    return { projectIds: [p.id], revision: createHash('sha256').update(canonical({ p, item })).digest('hex') };
+    const linked = resolveTaskPacketSession(ctx.db, ctx.userId, p.id, item);
+    const binding = linked ? { id: linked.id, projectId: linked.projectId, aiTool: linked.aiTool, workingDir: linked.workingDir } : null;
+    return { projectIds: [p.id], rootPaths: linked && linked.workingDir !== p.path ? [p.path, linked.workingDir] : [p.path], revision: createHash('sha256').update(canonical({ p, item, binding })).digest('hex') };
 }
 function sessionResources(ctx: CommandContext, input: unknown) {
     const v = z.object({ sessionId: id }).passthrough().parse(input);
@@ -50,7 +84,15 @@ function sessionResources(ctx: CommandContext, input: unknown) {
     if (!s)
         throw new Error('Session not found');
     project(ctx, s.projectId);
-    return { projectIds: [s.projectId], revision: createHash('sha256').update(canonical(s)).digest('hex') };
+    return { projectIds: [s.projectId], rootPaths: [s.workingDir], revision: createHash('sha256').update(canonical(s)).digest('hex') };
+}
+function taskAdapter(ctx: CommandContext, input: z.infer<typeof taskPrepareInput>) {
+    const p = project(ctx, input.projectId);
+    const item = new ProjectManagerRepository(ctx.db, ctx.userId).getWorkItem(input.projectId, input.workItemId);
+    if (!item) throw new Error('Work item not found');
+    const session = resolveTaskPacketSession(ctx.db, ctx.userId, p.id, item);
+    if (input.aiTool && session && input.aiTool !== session.aiTool) throw new Error('Task adapter mismatch');
+    return z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(session?.aiTool ?? input.aiTool ?? p.aiTool);
 }
 function command<T>(c: Omit<PlatformCommand, 'capability'>): PlatformCommand {
     return { ...c, capability: c.id };
@@ -59,7 +101,8 @@ import { assertNewProjectResource } from '../../db/repositories/managed-project-
 
 export function createPlatformCommands(): Map<string, PlatformCommand> {
     const commands: PlatformCommand[] = [
-        command({ id: 'project.create', effect: 'external', delegatable: true, inputSchema: projectCreateInput,
+        ...createMcpLifecycleCommands(),
+        command({ id: 'project.create', effect: 'external', inputSchema: projectCreateInput,
             resolve(_ctx, input) {
                 const v = projectCreateInput.parse(input);
                 return { projectIds: [], rootPaths: [canonicalRoot(v.path)], revision: canonicalRoot(v.path) };
@@ -76,41 +119,58 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 mkdirSync(root, { recursive: true });
                 if (!statSync(root).isDirectory())
                     throw new Error('Project root must be a directory');
-                return new ProjectRepository(ctx.db, ctx.userId).create({ ...v, path: canonicalRoot(root), aiTool: '' });
+                const finalRoot = canonicalRoot(root);
+                ctx.externalAuthorize?.({ projectIds: [], rootPaths: [finalRoot], revision: finalRoot });
+                return new ProjectRepository(ctx.db, ctx.userId).create({ ...v, path: finalRoot, aiTool: '' });
             } }),
-        command({ id: 'project.metadata.update', effect: 'database', delegatable: true, inputSchema: projectInput.extend({ name: z.string().min(1).max(200).optional(), description: z.string().max(2000).optional() }), resolve: projectResources,
+        command({ id: 'project.import', effect: 'database', inputSchema: projectCreateInput,
+            resolve(_ctx, input) {
+                const root = canonicalRoot(projectCreateInput.parse(input).path);
+                return { projectIds: [], rootPaths: [root], revision: root };
+            },
+            execute(ctx, input) { return importProject(ctx.db, ctx.userId, projectCreateInput.parse(input), root => ctx.externalAuthorize?.({ projectIds: [], rootPaths: [root], revision: root })); } }),
+        command({ id: 'project.config.apply', effect: 'external', inputSchema: projectConfigApplyInput,
+            resolve: projectResources,
+            async execute(ctx, input) {
+                const v = projectConfigApplyInput.parse(input);
+                ctx.authorize?.();
+                const result = await applyMcpConfig(ctx.db, ctx.userId, v.projectId, v.templateId, v.expectedDigest, () => ctx.authorize?.());
+                ctx.authorize?.();
+                return result;
+            } }),
+        command({ id: 'project.metadata.update', effect: 'database', inputSchema: projectInput.extend({ name: z.string().min(1).max(200).optional(), description: z.string().max(2000).optional() }), resolve: projectResources,
             execute(ctx, input) {
                 const v = z.object({ projectId: id, name: z.string().optional(), description: z.string().optional() }).parse(input);
                 return new ProjectRepository(ctx.db, ctx.userId).updateMetadata(v.projectId, v);
             } }),
-        command({ id: 'pm.work_item.create', effect: 'database', delegatable: true, inputSchema: workItemCreateInput, resolve: projectResources,
+        command({ id: 'pm.work_item.create', effect: 'database', inputSchema: workItemCreateInput, resolve: projectResources,
             execute(ctx, input) {
                 const v = workItemCreateInput.parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
                 return new ProjectManagerRepository(ctx.db, ctx.userId).createWorkItem(v.projectId, v);
             } }),
-        command({ id: 'pm.work_item.create_with_evidence', effect: 'database', delegatable: false, inputSchema: workItemWithEvidence, resolve: projectResources, execute(ctx, input) {
+        command({ id: 'pm.work_item.create_with_evidence', effect: 'database', inputSchema: workItemWithEvidence, resolve: projectResources, execute(ctx, input) {
                 const v = workItemWithEvidence.parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
                 return mutateAssignedTask(ctx.db,ctx.userId,v.projectId,undefined,v);
             } }),
-        command({ id: 'pm.work_item.update', effect: 'database', delegatable: false, inputSchema: workItemUpdateInput, resolve: itemResources,
+        command({ id: 'pm.work_item.update', effect: 'database', inputSchema: workItemUpdateInput, resolve: itemResources,
             execute(ctx, input) {
                 const v = workItemUpdateInput.parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
                 return mutateAssignedTask(ctx.db,ctx.userId,v.projectId,v.workItemId,v);
             } }),
-        command({ id: 'pm.work_item.metadata', effect: 'database', delegatable: true, inputSchema: workItemUpdateInput.omit({ acceptanceCriteria: true, stageId: true,assigneeId:true,reviewerId:true }), resolve: itemResources,
+        command({ id: 'pm.work_item.metadata', effect: 'database', inputSchema: workItemUpdateInput.omit({ acceptanceCriteria: true, stageId: true,assigneeId:true,reviewerId:true }), resolve: itemResources,
             execute(ctx, input) {
                 const v = workItemUpdateInput.omit({ acceptanceCriteria: true, stageId: true,assigneeId:true,reviewerId:true }).parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
                 return mutateAssignedTask(ctx.db,ctx.userId,v.projectId,v.workItemId,v);
             } }),
-        command({ id: 'pm.task.prepare', effect: 'database', delegatable: true, inputSchema: taskPrepareInput, resolve: itemResources,
+        command({ id: 'pm.task.prepare', effect: 'database', inputSchema: taskPrepareInput, resolve: itemResources,
             async prepare(ctx, input) {
                 const v = taskPrepareInput.parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
-                const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(v.aiTool ?? project(ctx, v.projectId).aiTool);
+                const adapter = taskAdapter(ctx, v);
                 const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
                 if (!status.launchEnabled)
                     throw new Error(`${status.label} is not available for launch`);
@@ -123,26 +183,61 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 let item = repo.getWorkItem(v.projectId, v.workItemId)!;
                 let session = resolveTaskPacketSession(ctx.db, ctx.userId, p.id, item);
                 const existed = !!session;
+                ctx.db.transaction(() => {
                 if (!session) {
                     const adapter = z.enum(['claude', 'opencode', 'codex', 'kimi', 'pi']).parse(v.aiTool ?? p.aiTool);
                     session = new SessionRepository(ctx.db, ctx.userId).create({ projectId: p.id, name: createTaskPacketSessionName(item.title), aiTool: adapter, workingDir: p.path, credentialMode: 'host_environment' });
                     item = repo.updateWorkItem(p.id, item.id, { details: withTaskPacketSessionLink(item.details, session, p, createTaskPacketContext(item, p)) });
                 }
-                return { taskPacket: buildTaskPacket({ project: p, workItem: item, session }), session: toTaskPacketSessionDto(session), existed };
+                }).immediate();
+                return { taskPacket: buildTaskPacket({ project: p, workItem: item, session }), session: toTaskPacketSessionDto(session!), existed };
             } }),
-        command({ id: 'pm.task.execute', effect: 'external', delegatable: false, inputSchema: taskPrepareInput, resolve(ctx, input) {
-                itemResources(ctx, input);
-                assertAdapterAutonomy(taskPrepareInput.parse(input).aiTool ?? 'claude');
-            }, execute() {
-                throw new Error('CLI_AUTONOMY_MANUAL_ONLY');
+        command({ id: 'pm.task.execute', effect: 'external', inputSchema: taskPrepareInput,
+            resolve(ctx, input) {
+                const resources = itemResources(ctx, input);
+                return resources;
+            },
+            async prepare(ctx, input) {
+                const v = taskPrepareInput.parse(input);
+                assertLegacyTaskExecution(ctx.db,v.projectId);
+                const item = new ProjectManagerRepository(ctx.db, ctx.userId).getWorkItem(v.projectId, v.workItemId)!;
+                assertTaskDispatchable(item);
+                const adapter = taskAdapter(ctx, v);
+                const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
+                if (!status.launchEnabled)
+                    throw new Error(`${status.label} is not available for launch`);
+            },
+            async execute(ctx, input) {
+                return executeTaskPacket(ctx, taskPrepareInput.parse(input));
             } }),
-        command({ id: 'session.dispatch', effect: 'external', delegatable: false, inputSchema: z.object({ sessionId: id, message: z.string().min(1).max(4000) }).strict(), resolve(ctx, input) {
-                sessionResources(ctx, input);
-                assertAdapterAutonomy('claude');
-            }, execute() {
-                throw new Error('CLI_AUTONOMY_MANUAL_ONLY');
+        command({ id: 'pm.task.close', effect: 'database', inputSchema: taskCloseInput, resolve: itemResources,
+            execute(ctx, input) { return closeTask(ctx, taskCloseInput.parse(input)); } }),
+        command({ id: 'session.dispatch', effect: 'external', inputSchema: sessionDispatchInput,
+            resolve(ctx, input) {
+                const resources = sessionResources(ctx, input);
+                const { sessionId } = sessionDispatchInput.parse(input);
+                const session = new SessionRepository(ctx.db, ctx.userId).getById(sessionId)!;
+                if (new ProjectManagerRepository(ctx.db, ctx.userId).hasTaskPacketSession(session.projectId, sessionId))
+                    throw new PlatformNoEffectError('TASK_SESSION_REQUIRES_PACKET_EXECUTION: use pm_execute_task_packet for this linked task');
+                const adapter = normalizeAdapter(session.aiTool);
+                if (!adapter)
+                    throw new Error('Unsupported session adapter');
+                return resources;
+            },
+            async execute(ctx, input) {
+                const { sessionId, message } = sessionDispatchInput.parse(input);
+                const sessionRepo = new SessionRepository(ctx.db, ctx.userId);
+                const session = sessionRepo.getById(sessionId)!;
+                const adapter = normalizeAdapter(session.aiTool);
+                if (!adapter)
+                    throw new Error('Unsupported session adapter');
+                const manager = ctx.sessionManager;
+                if (!manager)
+                    throw new Error('Session runtime unavailable');
+                ctx.authorize?.();
+                return dispatchSessionInput(manager, sessionId, adapter, message, { authorize: ctx.authorize });
             } }),
-        command({ id: 'memory.write', effect: 'database', delegatable: true, inputSchema: memoryWriteInput,
+        command({ id: 'memory.write', effect: 'database', inputSchema: memoryWriteInput,
             resolve(ctx, input) {
                 const v = memoryWriteInput.parse(input);
                 if (v.scope === 'project') {
@@ -153,7 +248,12 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 if (v.scope === 'session') {
                     if (!v.conversationId || !ctx.db.prepare('SELECT id FROM copilot_conversations WHERE user_id=? AND id=?').get(ctx.userId, v.conversationId))
                         throw new Error('Conversation not found');
-                    return { projectIds: [], revision: v.conversationId };
+                    if (ctx.actionOrigin?.kind === 'copilot') {
+                        const origin = new PlatformActionRepository(ctx.db, ctx.userId).copilotOrigin(ctx.actionOrigin.runId, ctx.actionOrigin.stepId);
+                        if (v.projectId !== undefined || origin?.conversation_id !== v.conversationId)
+                            throw new Error('Session memory must match the originating conversation without a project scope');
+                    }
+                    return { projectIds: [], conversationId: v.conversationId, revision: v.conversationId };
                 }
                 return { projectIds: [], revision: 'global' };
             },
@@ -162,6 +262,88 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 return new AgentMemoryRepository(ctx.db, ctx.userId).create({ kind: v.kind, scope: v.scope, text: v.text, ...(v.projectId ? { projectId: v.projectId } : {}), ...(v.conversationId ? { conversationId: v.conversationId } : {}), ...(v.metadata ? { metadata: v.metadata } : {}) });
             } })
     ];
-    commands.push(...createSessionCommands(), ...createManagementCommands(), ...createDevelopmentCommands());
+    commands.push(
+        command({ id: 'terminal.run', effect: 'external', inputSchema: terminalRunInput,
+            resolve(ctx, input) {
+                const v = terminalRunInput.parse(input);
+                const p = project(ctx, v.projectId);
+                if (v.sessionId) assertCopilotShellSession(ctx.db, ctx.userId, v.sessionId);
+                return { projectIds: [p.id], rootPaths: [p.path], revision: createHash('sha256').update(canonical(p)).digest('hex') };
+            },
+            async execute(ctx, input) {
+                const v = terminalRunInput.parse(input);
+                const p = project(ctx, v.projectId);
+                const manager = ctx.sessionManager;
+                if (!manager) throw new Error('Session runtime unavailable');
+                ctx.authorize?.();
+                const emit = terminalProgressEmitter(ctx, p.id, v.command);
+                let result;
+                try {
+                    if (v.sessionId) {
+                        result = await runShellCommandInSession({
+                            db: ctx.db,
+                            userId: ctx.userId,
+                            sessionManager: manager,
+                            projectId: p.id,
+                            sessionId: v.sessionId,
+                            command: v.command,
+                            signal: ctx.signal,
+                            authorize: ctx.authorize,
+                            ...(v.timeoutMs ? { timeoutMs: v.timeoutMs } : {}),
+                            ...(emit ? { onProgress: (tail: string) => emit(tail, 'running') } : {})
+                        });
+                    } else {
+                        result = await runShellCommand({
+                            db: ctx.db,
+                            userId: ctx.userId,
+                            sessionManager: manager,
+                            projectId: p.id,
+                            projectRoot: p.path,
+                            command: v.command,
+                            signal: ctx.signal,
+                            authorize: ctx.authorize,
+                            ...(v.timeoutMs ? { timeoutMs: v.timeoutMs } : {}),
+                            ...(emit ? { onProgress: (tail: string) => emit(tail, 'running') } : {})
+                        });
+                    }
+                } catch (error) {
+                    emit?.("", 'error');
+                    throw error;
+                }
+                emit?.(result.output.slice(-2000), result.userTookOver ? 'user_took_over' : result.timedOut ? 'timed_out' : 'completed');
+                return { projectId: p.id, sessionId: result.sessionId, exitCode: result.exitCode, output: result.output, timedOut: result.timedOut, userTookOver: result.userTookOver };
+            } }),
+        command({ id: 'terminal.open', effect: 'external', inputSchema: terminalOpenInput,
+            resolve(ctx, input) {
+                const v = terminalOpenInput.parse(input);
+                const p = project(ctx, v.projectId);
+                return { projectIds: [p.id], rootPaths: [p.path], revision: createHash('sha256').update(canonical(p)).digest('hex') };
+            },
+            async execute(ctx, input) {
+                const v = terminalOpenInput.parse(input);
+                const p = project(ctx, v.projectId);
+                const manager = ctx.sessionManager;
+                if (!manager) throw new Error('Session runtime unavailable');
+                ctx.authorize?.();
+                const shell = await openCopilotShell(ctx.db, ctx.userId, manager, { id: p.id, path: p.path });
+                return { projectId: p.id, sessionId: shell.sessionId, reused: shell.reused };
+            } }),
+        command({ id: 'terminal.close', effect: 'external', inputSchema: terminalCloseInput,
+            resolve(ctx, input) {
+                const v = terminalCloseInput.parse(input);
+                const s = assertCopilotShellSession(ctx.db, ctx.userId, v.sessionId);
+                project(ctx, s.projectId);
+                return { projectIds: [s.projectId], rootPaths: [s.workingDir], revision: createHash('sha256').update(canonical(s)).digest('hex') };
+            },
+            async execute(ctx, input) {
+                const v = terminalCloseInput.parse(input);
+                const s = assertCopilotShellSession(ctx.db, ctx.userId, v.sessionId);
+                const manager = ctx.sessionManager;
+                if (!manager) throw new Error('Session runtime unavailable');
+                ctx.authorize?.();
+                await closeCopilotShell(ctx.db, ctx.userId, manager, s);
+                return { projectId: s.projectId, sessionId: s.id, closed: true };
+            } }),
+        ...createSessionCommands(), ...createManagementCommands(), ...createDevelopmentCommands());
     return new Map(commands.map(c => [c.id, c]));
 }

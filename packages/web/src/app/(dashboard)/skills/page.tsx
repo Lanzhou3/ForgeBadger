@@ -1,22 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { type FormEvent, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Eye, Pencil, Plus, RefreshCw, Save, Sparkles, Trash2, Wrench } from "lucide-react";
+import { CircleArrowUp, Eye, Github, Pencil, Plus, RefreshCw, Save, Sparkles, Trash2, Wrench, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { QueryState } from "@/components/ui/query-state";
 import { Switch } from "@/components/ui/switch";
 import {
+  checkAllSkillUpdates,
+  checkSkillUpdate,
   createSkill,
   deleteSkill,
   listSkills,
   listSkillSources,
   listSkillTemplates,
+  parseSkillRemoteProvenance,
   syncLocalSkills,
   toggleSkill,
   updateSkill,
@@ -33,6 +38,9 @@ import {
   type VisibilityFilter,
 } from "@/lib/visibility";
 import { useLanguage } from "@/hooks/use-language";
+import { SkillNavigation } from '@/components/skills/SkillNavigation';
+import { SkillPackageReview } from '@/components/skills/SkillPackageReview';
+import { SkillHistory } from '@/components/skills/SkillHistory';
 import { cn } from "@/lib/utils";
 
 const emptySkillForm: SkillInput = {
@@ -46,6 +54,7 @@ const emptySkillForm: SkillInput = {
 
 export default function SkillsPage() {
   const { t } = useLanguage();
+  const [updateId, setUpdateId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const [form, setForm] = useState<SkillInput>(emptySkillForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -53,11 +62,14 @@ export default function SkillsPage() {
   const [sourceFilter, setSourceFilter] = useState("all");
   const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>("all");
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<{ name?: string; content?: string }>({});
+  const [dismissedError, setDismissedError] = useState<Error | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error: listError, refetch } = useQuery({
     queryKey: ["skills"],
     queryFn: listSkills,
   });
+  const [deletingSkill, setDeletingSkill] = useState<Skill | null>(null);
 
   const { data: sourcesData } = useQuery({
     queryKey: ["skill-sources"],
@@ -76,6 +88,9 @@ export default function SkillsPage() {
       ? data?.skills ?? []
       : (data?.skills ?? []).filter((skill) => skill.source === sourceFilter);
   const filteredSkills = filterByVisibility(sourceFilteredSkills, visibilityFilter);
+  const remoteSkillCount = (data?.skills ?? []).filter(
+    (skill) => parseSkillRemoteProvenance(skill) !== null
+  ).length;
 
   const toggleMutation = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
@@ -100,6 +115,17 @@ export default function SkillsPage() {
       }
     },
   });
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const payload = compactSkillInput(form);
+    const nextFieldErrors: { name?: string; content?: string } = {};
+    if (!payload.name) nextFieldErrors.name = t("skills.fieldRequired");
+    if (!payload.content) nextFieldErrors.content = t("skills.fieldRequired");
+    setFieldErrors(nextFieldErrors);
+    if (nextFieldErrors.name || nextFieldErrors.content) return;
+    saveMutation.mutate();
+  };
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -130,6 +156,28 @@ export default function SkillsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
   });
 
+  const checkUpdateMutation = useMutation({
+    mutationFn: checkSkillUpdate,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
+  });
+
+  const checkAllUpdatesMutation = useMutation({
+    mutationFn: checkAllSkillUpdates,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
+  });
+
+  // A failed list fetch with no cached data must surface as an error state, not
+  // as an error banner stacked on top of the empty card.
+  const listFailedWithoutData = listError instanceof Error && !data;
+  const actionError =
+    (listFailedWithoutData ? null : listError) ??
+    toggleMutation.error ??
+    deleteMutation.error ??
+    syncMutation.error ??
+    checkUpdateMutation.error ??
+    checkAllUpdatesMutation.error;
+  const failedChecks = checkAllUpdatesMutation.data?.results.filter(result => result.error) ?? [];
+
   const startEdit = (skill: Skill) => {
     setEditingId(skill.id);
     setForm({
@@ -141,6 +189,7 @@ export default function SkillsPage() {
       visibility: normalizeVisibility(skill.visibility),
     });
     setError("");
+    setFieldErrors({});
   };
 
   const applyTemplate = (template: SkillTemplate) => {
@@ -154,7 +203,10 @@ export default function SkillsPage() {
       visibility: "private",
     });
     setError("");
+    setFieldErrors({});
   };
+
+  const isCustomSource = !sources.some((source) => source.id === form.source);
 
   const sourceLabel = (sourceId: string) => {
     switch (sourceId) {
@@ -170,15 +222,15 @@ export default function SkillsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
+    <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{t("skills.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("skills.subtitle")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
-            <Link href="/skills/install">
+          <Button asChild size="sm" variant="brand">
+            <Link href="/skills/discover">
               <Plus className="size-4" />
               {t("skills.install")}
             </Link>
@@ -193,9 +245,40 @@ export default function SkillsPage() {
             <RefreshCw className={syncMutation.isPending ? "size-4 animate-spin" : "size-4"} />
             {t("skills.syncLocal")}
           </Button>
+          {remoteSkillCount > 0 && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => checkAllUpdatesMutation.mutate()}
+              disabled={checkAllUpdatesMutation.isPending}
+            >
+              <RefreshCw className={checkAllUpdatesMutation.isPending ? "size-4 animate-spin" : "size-4"} />
+              {checkAllUpdatesMutation.isPending
+                ? t("skills.checkingAllUpdates")
+                : t("skills.checkAllUpdates")}
+            </Button>
+          )}
         </div>
       </div>
 
+      <SkillNavigation />
+      {actionError && actionError !== dismissedError ? (
+        <div role="alert" className="flex items-start justify-between gap-3">
+          <p className="text-sm text-destructive">{actionError.message}</p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("common.close")}
+            onClick={() => setDismissedError(actionError)}
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+      ) : null}
+      {failedChecks.length ? <div role="alert" className="space-y-1 text-sm text-destructive">{failedChecks.map(result => <p key={result.skillId}>{result.name}: {result.error}</p>)}</div> : null}
+      {updateId ? <SkillPackageReview input={{ skillId: updateId }} onClose={() => setUpdateId(null)} /> : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant={sourceFilter === "all" ? "default" : "outline"}
@@ -277,6 +360,7 @@ export default function SkillsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <form className="space-y-4" onSubmit={handleSubmit} noValidate>
           {templates.length > 0 && (
             <div className="rounded-md border border-border/70 bg-muted/20 p-3">
               <div className="mb-3 flex items-center gap-2 text-sm font-medium">
@@ -312,9 +396,17 @@ export default function SkillsPage() {
               <Input
                 id="skill-name"
                 value={form.name}
-                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                onChange={(event) => {
+                  setForm((current) => ({ ...current, name: event.target.value }));
+                  if (fieldErrors.name) setFieldErrors((current) => ({ ...current, name: undefined }));
+                }}
                 placeholder="safe-review"
+                aria-invalid={Boolean(fieldErrors.name)}
+                aria-describedby={fieldErrors.name ? "skill-name-error" : undefined}
               />
+              {fieldErrors.name ? (
+                <p id="skill-name-error" className="text-xs text-destructive">{fieldErrors.name}</p>
+              ) : null}
             </div>
             <div className="space-y-2">
               <Label htmlFor="skill-source">{t("skills.source")}</Label>
@@ -330,13 +422,23 @@ export default function SkillsPage() {
                     {source.label}
                   </Button>
                 ))}
+                <Button
+                  type="button"
+                  variant={isCustomSource ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setForm((current) => ({ ...current, source: "" }))}
+                >
+                  {t("skills.sourceCustom")}
+                </Button>
               </div>
-              <Input
-                id="skill-source"
-                value={form.source}
-                onChange={(event) => setForm((current) => ({ ...current, source: event.target.value }))}
-                placeholder="local"
-              />
+              {isCustomSource ? (
+                <Input
+                  id="skill-source"
+                  value={form.source}
+                  onChange={(event) => setForm((current) => ({ ...current, source: event.target.value }))}
+                  placeholder="local"
+                />
+              ) : null}
             </div>
             <div className="space-y-2">
               <Label htmlFor="skill-version">{t("skills.version")}</Label>
@@ -380,8 +482,16 @@ export default function SkillsPage() {
               id="skill-content"
               className="min-h-36 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               value={form.content}
-              onChange={(event) => setForm((current) => ({ ...current, content: event.target.value }))}
+              onChange={(event) => {
+                setForm((current) => ({ ...current, content: event.target.value }));
+                if (fieldErrors.content) setFieldErrors((current) => ({ ...current, content: undefined }));
+              }}
+              aria-invalid={Boolean(fieldErrors.content)}
+              aria-describedby={fieldErrors.content ? "skill-content-error" : undefined}
             />
+            {fieldErrors.content ? (
+              <p id="skill-content-error" className="text-xs text-destructive">{fieldErrors.content}</p>
+            ) : null}
           </div>
           <div className="rounded-md border border-border/70 bg-muted/20 p-3">
             <div className="mb-2 flex items-center gap-2 text-sm font-medium">
@@ -400,9 +510,9 @@ export default function SkillsPage() {
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex flex-wrap gap-2">
             <Button
+              type="submit"
               size="sm"
-              className="bg-brand text-brand-foreground hover:bg-brand/90"
-              onClick={() => saveMutation.mutate()}
+              variant="brand"
               disabled={saveMutation.isPending}
             >
               {editingId ? <Save className="size-4" /> : <Plus className="size-4" />}
@@ -410,22 +520,33 @@ export default function SkillsPage() {
             </Button>
             {editingId && (
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 onClick={() => {
                   setEditingId(null);
                   setForm(emptySkillForm);
                   setError("");
+                  setFieldErrors({});
                 }}
               >
                 {t("common.cancel")}
               </Button>
             )}
           </div>
+          </form>
         </CardContent>
       </Card>
 
-      {isLoading ? (
+      {listFailedWithoutData ? (
+        <QueryState
+          isLoading={false}
+          isError
+          isEmpty={false}
+          onRetry={() => void refetch()}
+          empty={null}
+        />
+      ) : isLoading ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {t("skills.loading")}
@@ -444,7 +565,7 @@ export default function SkillsPage() {
               </p>
             </div>
             <Button asChild size="sm" variant="outline">
-              <Link href="/skills/install">
+              <Link href="/skills/discover">
                 <Plus className="size-4" />
                 {t("skills.install")}
               </Link>
@@ -455,10 +576,12 @@ export default function SkillsPage() {
         <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
           {filteredSkills.map((skill, index) => {
             const isPreviewing = previewSkillId === skill.id;
+            const provenance = parseSkillRemoteProvenance(skill);
+            const updateAvailable = provenance?.lastCheck?.updateAvailable === true;
             return (
               <div key={skill.id}>
                 <div
-                  className="flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
+                  className="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
                   style={{ animationDelay: `${index * 40}ms` }}
                 >
                   <span
@@ -472,6 +595,7 @@ export default function SkillsPage() {
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {t(skill.resourceManifest ? "skills.resourcePackage" : "skills.markdownOnly")}
                     </p>
+                    {provenance && (provenance.storage !== 'database' || provenance.legacyGlobalMirror) ? <p className="mt-1 text-xs text-amber-600 dark:text-amber-300">{t("skills.legacyGlobalCopy")}</p> : null}
                     {skill.description && (
                       <div className="mt-0.5 truncate text-xs text-muted-foreground">
                         {skill.description}
@@ -481,6 +605,17 @@ export default function SkillsPage() {
                   <div className="hidden shrink-0 items-center gap-1.5 md:flex">
                     <Badge variant="outline">{sourceLabel(skill.source)}</Badge>
                     <Badge variant="outline">{skill.version ?? "1.0.0"}</Badge>
+                    {provenance && (
+                      <Badge variant="outline" title={provenance.sourceUrl ?? `${provenance.repo}@${provenance.resolvedCommitSha}`}>
+                        {provenance.repo ? <Github className="mr-1 size-3" /> : null}
+                        {provenance.repo || provenance.kind}@{provenance.resolvedCommitSha.slice(0, 7)}
+                      </Badge>
+                    )}
+                    {updateAvailable && (
+                      <Badge variant="secondary" className="bg-amber-500/10 text-amber-600">
+                        {t("skills.updateAvailable")}
+                      </Badge>
+                    )}
                     <Badge variant="secondary">
                       {t(visibilityLabelKey(normalizeVisibility(skill.visibility)))}
                     </Badge>
@@ -488,9 +623,41 @@ export default function SkillsPage() {
                   <Switch
                     checked={skill.isEnabled}
                     onCheckedChange={(enabled) => toggleMutation.mutate({ id: skill.id, enabled })}
-                    disabled={toggleMutation.isPending}
+                    disabled={toggleMutation.isPending && toggleMutation.variables?.id === skill.id}
+                    aria-label={`${skill.name} ${t("common.enabled")}`}
                   />
                   <div className="flex shrink-0 items-center gap-1">
+                    {provenance && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => checkUpdateMutation.mutate(skill.id)}
+                          disabled={checkUpdateMutation.isPending}
+                        >
+                          <RefreshCw
+                            className={
+                              checkUpdateMutation.isPending ? "size-4 animate-spin" : "size-4"
+                            }
+                          />
+                          <span className="sr-only">{t("skills.checkUpdate")}</span>
+                        </Button>
+                        {updateAvailable && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-amber-600"
+                            onClick={() => {
+                              setUpdateId(skill.id);
+                            }}
+                            disabled={false}
+                          >
+                            <CircleArrowUp className="size-4" />
+                            <span className="sr-only">{t("skills.updateSkill")}</span>
+                          </Button>
+                        )}
+                      </>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -507,11 +674,7 @@ export default function SkillsPage() {
                       variant="ghost"
                       size="icon"
                       className="text-destructive"
-                      onClick={() => {
-                        if (window.confirm(t("skills.deleteConfirm"))) {
-                          deleteMutation.mutate(skill.id);
-                        }
-                      }}
+                      onClick={() => setDeletingSkill(skill)}
                     >
                       <Trash2 className="size-4" />
                       <span className="sr-only">{t("common.delete")}</span>
@@ -523,6 +686,7 @@ export default function SkillsPage() {
                     <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background p-3 text-xs">
                       {skill.content?.trim() || t("skills.previewEmpty")}
                     </pre>
+                    {provenance ? <SkillHistory skillId={skill.id} /> : null}
                   </div>
                 )}
               </div>
@@ -530,6 +694,26 @@ export default function SkillsPage() {
           })}
         </div>
       )}
+
+      <ConfirmDialog
+        open={deletingSkill !== null}
+        destructive
+        pending={deleteMutation.isPending}
+        title={t("skills.deleteConfirmTitle")}
+        description={
+          deletingSkill
+            ? t("skills.deleteConfirmNamed").replace("{name}", deletingSkill.name)
+            : ""
+        }
+        confirmLabel={t("common.delete")}
+        onOpenChange={(open) => {
+          if (!open) setDeletingSkill(null);
+        }}
+        onConfirm={() => {
+          if (deletingSkill) deleteMutation.mutate(deletingSkill.id);
+          setDeletingSkill(null);
+        }}
+      />
     </div>
   );
 }

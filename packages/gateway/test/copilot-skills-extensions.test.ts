@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -7,7 +8,7 @@ import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { SkillRepository } from '../src/db/repositories/skill-repository.js';
 import { CopilotSkillService } from '../src/services/agent/skills/copilot-skill-service.js';
 function fixture() {
- const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations/',import.meta.url).pathname});
+ const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations/',import.meta.url))});
  const user=new UserRepository(db).create('extensions@test.dev','hash');
  return {db,user,service:new CopilotSkillService(db,user.id)};
 }
@@ -38,14 +39,13 @@ it('rejects traversal and invalid packages while retained execution-dependent pa
   assert.throws(()=>f.service.setEnabled(unsupported.id,true,unsupported.revisionId),/incompatible/i);
  }finally{f.db.close();}
 });
-it('pins resource reads to current revision and denies disabled, foreign, Grant and traversal reads',()=>{
+it('pins resource reads to current revision and denies disabled, foreign and traversal reads',()=>{
  const f=fixture();try{
   const imported=f.service.importFiles({kind:'upload'},files);
   const input={skillId:imported.id,revisionId:imported.revisionId,relativePath:'references/checklist.md'};
   assert.deepEqual(f.service.readResource(input,{availableToolNames:['get_project']}),{found:false});
   f.service.setEnabled(imported.id,true,imported.revisionId);
   assert.equal(f.service.readResource(input,{availableToolNames:['get_project']}).found,true);
-  assert.equal(f.service.readResource(input,{availableToolNames:['get_project'],grantBound:true}).found,false);
   assert.throws(()=>f.service.readResource({...input,relativePath:'../private'}),/path/i);
   const other=new UserRepository(f.db).create('other-extensions@test.dev','hash');
   const foreign=new CopilotSkillService(f.db,other.id);
@@ -80,14 +80,17 @@ it('validates duplicate, colliding, binary, oversized and aliased YAML packages 
   assert.equal(new SkillRepository(f.db,f.user.id,'copilot').listOwnedBySource('copilot-import').length,0);
  }finally{f.db.close();}
 });
-it('preserves canonical Grant trust only for the exact builtin package, never added resources',()=>{
+it('preserves canonical builtin availability for the exact package and pins added resources to their revision',()=>{
  const f=fixture();try{
   const builtin=f.service.details({availableToolNames:[]}).find(row=>row.name==='safety-and-approvals')!;
-  assert.equal(f.service.get(builtin.id,{availableToolNames:[],grantBound:true})?.available,true);
+  assert.equal(builtin.available,true);
+  assert.deepEqual(builtin.files.map(file=>file.path),['SKILL.md']);
   const changed=f.service.update(builtin.id,{expectedRevisionId:builtin.revisionId,files:[...builtin.files,{path:'references/secret.md',content:'private owner data'}]});
-  assert.equal(f.service.get(builtin.id,{availableToolNames:[],grantBound:true})?.available,false);
-  assert.deepEqual(f.service.readResource({skillId:builtin.id,revisionId:changed.revisionId,relativePath:'references/secret.md'},{availableToolNames:[],grantBound:true}),{found:false});
+  assert.notEqual(changed.revisionId,builtin.revisionId);
+  assert.equal(changed.available,true);
+  assert.ok(changed.files.some(file=>file.path==='references/secret.md'));
   assert.equal(f.service.readResource({skillId:builtin.id,revisionId:changed.revisionId,relativePath:'references/secret.md'},{availableToolNames:[]}).found,true);
+  assert.deepEqual(f.service.readResource({skillId:builtin.id,revisionId:builtin.revisionId,relativePath:'references/secret.md'},{availableToolNames:[]}),{found:false});
  }finally{f.db.close();}
 });
 it('bounds installed external packages and resource payloads without mutating retained packages',()=>{

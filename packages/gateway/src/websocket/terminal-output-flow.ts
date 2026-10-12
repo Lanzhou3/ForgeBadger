@@ -1,4 +1,4 @@
-type OutputType = "terminal_history" | "terminal_output";
+type OutputType = "terminal_history" | "terminal_history_end" | "terminal_output";
 interface OutputFrame { type: OutputType; payload: { data: string; sequence: number } }
 interface Options {
   send: (frame: OutputFrame) => void;

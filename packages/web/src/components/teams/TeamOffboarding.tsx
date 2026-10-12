@@ -2,7 +2,7 @@
 import { PlanRevision } from "./PlanRevision";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useLanguage } from "@/hooks/use-language";
+import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import {
   teamsApi,
   type TeamMember,
@@ -73,6 +73,7 @@ function ImpactForm({
   canResume: boolean;
 }) {
   const { t } = useLanguage();
+  const locale = useUiLocale();
   const [selected, setSelected] = useState<
     Record<string, Partial<HandoffSelection>>
   >({});
@@ -197,7 +198,7 @@ function ImpactForm({
         <div className="space-y-3 rounded-md border border-amber-500/40 p-3">
           <p className="text-sm">{t("teams.planNotice")}</p>
           <p className="text-xs">
-            {t("teams.expires")}: {new Date(plan.expiresAt).toLocaleString()}
+            {t("teams.expires")}: {new Date(plan.expiresAt).toLocaleString(locale)}
           </p>
           {snapshot.map((s) => {
             const p = displayedImpact.projects.find(

@@ -85,6 +85,21 @@ export class CatalogRepository {
       .get() as CatalogItem | undefined;
   }
 
+  getSource(sourceId: string): CatalogSource | undefined {
+    return this.drizzle.select().from(catalogSources).where(and(eq(catalogSources.userId,this.userId),eq(catalogSources.type,"skill"),eq(catalogSources.sourceId,sourceId))).get() as CatalogSource | undefined;
+  }
+
+  setSourceStatus(sourceId: string, status: string): void {
+    this.drizzle.update(catalogSources).set({status,updatedAt:new Date()}).where(and(eq(catalogSources.userId,this.userId),eq(catalogSources.type,"skill"),eq(catalogSources.sourceId,sourceId))).run();
+  }
+
+  deleteSource(sourceId: string): void {
+    this.db.transaction(()=>{
+      this.drizzle.delete(catalogItems).where(and(eq(catalogItems.userId,this.userId),eq(catalogItems.itemType,"skill"),eq(catalogItems.sourceId,sourceId))).run();
+      this.drizzle.delete(catalogSources).where(and(eq(catalogSources.userId,this.userId),eq(catalogSources.type,"skill"),eq(catalogSources.sourceId,sourceId))).run();
+    })();
+  }
+
   upsertSource(input: UpsertCatalogSourceInput): CatalogSource {
     const existing = this.drizzle
       .select()
@@ -129,14 +144,15 @@ export class CatalogRepository {
       .get() as CatalogSource;
   }
 
-  replaceItems(sourceId: string, items: CreateCatalogItemInput[]): CatalogItem[] {
+  replaceItems(sourceId: string, items: CreateCatalogItemInput[], itemType?: CatalogType): CatalogItem[] {
+    if (itemType && items.some(item => item.itemType !== itemType)) throw new Error("Catalog item type mismatch");
     // Delete-then-insert must be atomic: if the insert fails mid-way, the
     // catalog keeps its previous complete state instead of being left half
     // empty (a partial refresh would break installs that resolve by id).
     const run = this.db.transaction(() => {
       this.drizzle
         .delete(catalogItems)
-        .where(and(eq(catalogItems.userId, this.userId), eq(catalogItems.sourceId, sourceId)))
+        .where(and(eq(catalogItems.userId, this.userId), eq(catalogItems.sourceId, sourceId), itemType ? eq(catalogItems.itemType, itemType) : undefined))
         .run();
 
       return items.map((item) =>

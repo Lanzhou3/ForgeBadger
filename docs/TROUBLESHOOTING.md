@@ -24,10 +24,20 @@ cause before applying the smallest fix or workaround.
 
 | Symptom | Likely cause | Check | Fix or workaround |
 | --- | --- | --- | --- |
-| Gateway or Web startup fails with `EADDRINUSE`, health checks hit another process, or the browser opens the wrong app. | Loopback port conflict on the trial ports. | Check the configured ports, then run `curl --noproxy '*' -i http://127.0.0.1:48731/api/v1/health` and `curl --noproxy '*' -i http://127.0.0.1:48732/login`. | Stop the conflicting process or restart ForgeBadger with different Gateway and Web ports. For source fallback, keep `FORGEBADGER_GATEWAY_URL` and `NEXT_PUBLIC_GATEWAY_URL` aligned with the Gateway port. |
+| Gateway or Web startup fails with `EADDRINUSE`, health checks hit another process, or the browser opens the wrong app. | Loopback port conflict on the trial ports. | Check the configured ports, then run `curl --noproxy '*' -i http://127.0.0.1:18332/api/v1/health` and `curl --noproxy '*' -i http://127.0.0.1:18333/login`. | Stop the conflicting process or restart ForgeBadger with different Gateway and Web ports. For source fallback, keep `FORGEBADGER_GATEWAY_URL` and `NEXT_PUBLIC_GATEWAY_URL` aligned with the Gateway port. |
 | Gateway or Web cannot bind `127.0.0.1`, or Chrome/Playwright cannot connect from the test process. | Restricted environment, sandbox, container networking, or loopback binding policy. | Confirm the exact bind host and port in startup logs. Run the two `curl --noproxy '*'` checks from the same environment that will open the browser or run Playwright. | Use a normal local shell with loopback access. If a container is required, expose and map the Gateway and Web ports explicitly and keep browser checks inside the same network namespace. |
 | Health checks fail only when normal `curl` is used, or they appear to go through an unrelated proxy. | Proxy environment variables are intercepting loopback requests. | Run `env | rg -i 'proxy'` and compare normal `curl` with `curl --noproxy '*'`. | Use `curl --noproxy '*'` for local ForgeBadger checks. If needed, add `127.0.0.1,localhost` to `NO_PROXY` for the shell that starts ForgeBadger. |
 | Chrome/Playwright fails to launch or Next/Turbopack fails with `Operation not permitted`. | Sandbox limits prevent browser launch, worker process creation, socket operations, or Turbopack internals. | Read the first failing log line and confirm whether it mentions Chrome, Playwright, Next, Turbopack, or `Operation not permitted`. | Treat this as an environment limitation first. Re-run in a less restricted shell or CI profile. For local Web startup, try the documented Next command from the runbook and capture the full error if it still fails. |
+
+## Copilot Git Status
+
+`COPILOT_GIT_STATUS_FILTER_UNSUPPORTED` means Git config defines an executable
+clean/process filter or a required filter. Copilot refuses these configurations
+to avoid running filter commands while counting changes. Check repository,
+global, and system config for filters, including Git LFS. Do not disable filters
+on a working project just to clear this diagnostic. Use native Git status for
+such repositories; isolated test fixtures must explicitly exclude unrelated
+host config. An intentional `GIT_CONFIG_NOSYSTEM=1` is honored by the Gateway.
 
 ## Automation Boundary
 

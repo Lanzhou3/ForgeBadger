@@ -138,7 +138,7 @@ export async function refreshRemoteCatalog(
     url: input.url,
     lastRefreshedAt: new Date()
   });
-  const items = repo.replaceItems(input.sourceId, manifestToItems(input.sourceId, manifest));
+  const items = repo.replaceItems(input.sourceId, manifestToItems(input.sourceId, manifest), input.type);
   return { source, items };
 }
 

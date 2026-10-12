@@ -1,4 +1,5 @@
 import { createNativeFeishuRuntime, type NativeFeishuIO } from './services/channels/native-feishu-runtime.js';
+import { createNativeTelegramRuntime, type NativeTelegramIO, type NativeTelegramRuntime } from './services/channels/native-telegram-runtime.js';
 import express from "express";
 import { createServer as createHttpServer, type Server } from "node:http";
 
@@ -13,10 +14,17 @@ import type { CommandRunner } from "./lib/dependency-check.js";
 import type { FeishuChannelRuntime } from "./services/integrations/feishu-channel-runtime.js";
 import type { RegistrationMode } from "./routes/auth.js";
 import type { LocalAccountRecovery } from "./services/local-account-recovery.js";
-import type { AgentStackDeps } from "./services/agent/agent-stack.js";
+import { buildAgentStack, type AgentStackDeps } from "./services/agent/agent-stack.js";
 import { startAutomationScheduler, type AutomationScheduler } from "./services/automation/scheduler.js";
 import { startCopilotRuntime } from "./services/agent/runtime.js";
+import { attachDispatchSupervisor, type DispatchSupervisor } from "./services/agent/dispatch-supervisor.js";
 import { RuntimeAuthorizationInvalidator } from "./services/runtime-authorization-invalidation.js";
+import {
+  createRuntimeSettingsStore,
+  type RuntimeSettingsEffective,
+  type RuntimeSettingsStore
+} from "./services/runtime-settings.js";
+import type { GatewayEnv } from "./config/env.js";
 
 import { mountRoutes } from "./routes/index.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -32,12 +40,16 @@ export interface ServerDeps {
   adapterCommandRunner?: CommandRunner | undefined;
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
   nativeFeishuIO?: NativeFeishuIO;
-  registrationMode?: RegistrationMode | undefined;
+  telegramChannelRuntime?: NativeTelegramRuntime | undefined;
+  nativeTelegramIO?: NativeTelegramIO;
+  registrationMode?: RegistrationMode | (() => RegistrationMode) | undefined;
   accountRecovery?: LocalAccountRecovery | undefined;
   copilotAgent?: AgentStackDeps | undefined;
   runtimeAuthorizationInvalidator: RuntimeAuthorizationInvalidator;
   /** Mounts the external MCP endpoint (/mcp) and its token management routes. */
   mcpEnabled?: boolean | undefined;
+  /** DB-backed runtime settings (absent in minimal test apps → API 503). */
+  runtimeSettings?: RuntimeSettingsStore | undefined;
 }
 
 export interface GatewayApp {
@@ -61,6 +73,8 @@ export interface GatewayAppOptions {
   adapterCommandRunner?: CommandRunner | undefined;
   feishuChannelRuntime?: FeishuChannelRuntime | undefined;
   nativeFeishuIO?: NativeFeishuIO;
+  telegramChannelRuntime?: NativeTelegramRuntime | undefined;
+  nativeTelegramIO?: NativeTelegramIO;
   registrationMode?: RegistrationMode | undefined;
   accountRecovery?: LocalAccountRecovery | undefined;
   runtimeAuthorizationInvalidator?: RuntimeAuthorizationInvalidator | undefined;
@@ -77,6 +91,15 @@ export interface GatewayAppOptions {
   llmFetch?: typeof fetch | undefined;
   /** Mounts the external MCP endpoint (/mcp) and its token management routes. */
   mcpEnabled?: boolean | undefined;
+  /** Enables the dispatch supervisor: hook-driven PM work-item auto-advance for programmatically dispatched tasks. */
+  pmAutoDispatchEnabled?: boolean | undefined;
+  /**
+   * Full process env; when provided the Gateway builds the DB-backed runtime
+   * settings store (settings page overrides on top of these defaults) and
+   * hot-applies session prefix / registration mode / dispatch supervisor
+   * changes.
+   */
+  env?: GatewayEnv | undefined;
 }
 
 export function createServer(deps: ServerDeps): express.Express {
@@ -120,6 +143,30 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const eventBus = options.eventBus ?? new ForgeBadgerEventBus();
   const runtimeAuthorizationInvalidator = options.runtimeAuthorizationInvalidator
     ?? new RuntimeAuthorizationInvalidator();
+
+  // DB-backed runtime settings (settings page). The apply hook pushes hot
+  // changes into the live process: session name prefix, registration mode
+  // (read per request via the getter below) and the dispatch supervisor.
+  // mcp_enabled is restart-only (route mounting).
+  let dispatchSupervisor: DispatchSupervisor | undefined;
+  const runtimeSettings: RuntimeSettingsStore | undefined = options.env
+    ? createRuntimeSettingsStore(options.db, {
+        env: options.env,
+        apply: (effective: RuntimeSettingsEffective) => {
+          options.sessionManager.setSessionPrefix(effective.sessionPrefix);
+          // The supervisor only advances already-dispatched work items from
+          // CLI completion evidence; it never launches or retries a CLI, so
+          // it follows the behavior preference alone.
+          const wantSupervisor = effective.pmAutoDispatch;
+          if (wantSupervisor && !dispatchSupervisor) {
+            dispatchSupervisor = attachDispatchSupervisor({ db: options.db, eventBus });
+          } else if (!wantSupervisor && dispatchSupervisor) {
+            dispatchSupervisor.stop();
+            dispatchSupervisor = undefined;
+          }
+        }
+      })
+    : undefined;
   const copilotAgent: AgentStackDeps = {
     db: options.db,
     masterKey: options.masterKey,
@@ -131,7 +178,9 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
 
   const copilotRuntime = startCopilotRuntime(copilotAgent);
   const recoveryReady = copilotRuntime.ready;
-  const feishuChannelRuntime = options.feishuChannelRuntime ?? createNativeFeishuRuntime(options.db,options.masterKey,options.nativeFeishuIO);
+  const feishuChannelRuntime = options.feishuChannelRuntime ?? createNativeFeishuRuntime(options.db,options.masterKey,options.nativeFeishuIO,
+    (userId,input)=>buildAgentStack(copilotAgent,userId).orchestrator.recordApprovalDecision({userId,...input,decisionOrigin:'channel'}));
+  const telegramChannelRuntime = options.telegramChannelRuntime ?? createNativeTelegramRuntime(options.db,options.masterKey,options.nativeTelegramIO);
 
   const app = createServer({
     db: options.db,
@@ -143,11 +192,15 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     appVersion: options.appVersion ?? "0.0.0",
     adapterCommandRunner: options.adapterCommandRunner,
     feishuChannelRuntime,
-    registrationMode: options.registrationMode,
+    telegramChannelRuntime,
+    registrationMode: runtimeSettings
+      ? () => runtimeSettings.effective().registration
+      : options.registrationMode,
     accountRecovery: options.accountRecovery,
     copilotAgent,
     runtimeAuthorizationInvalidator,
-    mcpEnabled: options.mcpEnabled
+    mcpEnabled: runtimeSettings?.effective().mcpEnabled ?? options.mcpEnabled,
+    runtimeSettings
   });
 
   const server = createHttpServer(app);
@@ -158,6 +211,15 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const automationScheduler: AutomationScheduler | undefined = copilotAgent
     ? startAutomationScheduler(copilotAgent)
     : undefined;
+  // The dispatch supervisor advances PM work items on CLI completion
+  // evidence; it requires the auto-dispatch behavior opt-in. The runtime
+  // settings applier may already have attached (or detached) it, so only fill
+  // in the env-driven default when nothing is attached yet.
+  if (!dispatchSupervisor) {
+    dispatchSupervisor = options.pmAutoDispatchEnabled
+      ? attachDispatchSupervisor({ db: options.db, eventBus })
+      : undefined;
+  }
 
   // The Session Server is the single terminal backend; the terminal
   // WebSocket handler relays browser I/O to it over IPC.
@@ -178,6 +240,9 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   // Opening the provider connection is intentionally last.
   void feishuChannelRuntime.start().catch(() => {
     console.error("[feishu-runtime] startup failed", { code: "FEISHU_RUNTIME_START_FAILED" });
+  });
+  void telegramChannelRuntime.start().catch(() => {
+    console.error("[telegram-runtime] startup failed", { code: "TELEGRAM_RUNTIME_START_FAILED" });
   });
 
   return {
@@ -200,7 +265,9 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
       );
       await runShutdownStage(failures, () => typeof app.locals.stopDelivery === "function" ? app.locals.stopDelivery() : undefined);
       await runShutdownStage(failures, () => feishuChannelRuntime.stop());
+      await runShutdownStage(failures, () => telegramChannelRuntime.stop());
       automationScheduler?.stop();
+      dispatchSupervisor?.stop();
       await runShutdownStage(failures, () => copilotRuntime.stop());
       const httpResult = await httpCloseResult;
       if (!httpResult.ok) {

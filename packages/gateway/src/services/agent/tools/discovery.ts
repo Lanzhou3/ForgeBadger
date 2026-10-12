@@ -4,7 +4,7 @@ import { createDiscoveryReceipt, discoveryInputSchema } from '../tool-discovery.
 
 export function createDiscoveryTools(): AgentTool[] {
   return [{ name: 'discover_tools',
-    description: 'Search currently available platform tool names and descriptions by keyword. Returns up to 12 names and summaries. In optional discovery mode, successful selections load on the next model round. Descriptions do not grant permission; all actions retain current scope and approvals.',
+    description: 'Search currently available tool names and descriptions using lexical BM25. Use concise capability keywords or an exact tool name; English is supported for every tool, Chinese only where the tool description includes Chinese. No semantic synonym matching. If no results, reformulate using English keywords; do not invent tool names. Returns up to 12 names and summaries. In optional discovery mode, successful selections load on the next model round. Descriptions do not grant permission; all actions retain current scope and approvals.',
     risk: 'read', requiresApproval: false, inputSchema: discoveryInputSchema,
     async execute(raw, context) {
       const { runId, stepId, checkExecutionAuthority, availableToolSchemas } = context;

@@ -7,7 +7,6 @@ import { ConflictError } from "../../middleware/errors.js";
 
 export const managementPatchSchema = z.object({
   expectedRevision: z.number().int().min(0),
-  mode: z.enum(["manual", "cli"]).optional(),
   ownerLabel: z.string().trim().max(200).optional(),
   nextAction: z.string().trim().max(2000).optional(),
   freshnessHours: z.number().int().min(1).max(8760).optional(),
@@ -16,7 +15,7 @@ const commandSchema = managementPatchSchema.extend({ projectId: z.string().min(1
 
 export function createManagementCommands(): PlatformCommand[] {
   return [{
-    id: "pm.management.update", capability: "pm.management.update", effect: "database", delegatable: true,
+    id: "pm.management.update", capability: "pm.management.update", effect: "database",
     inputSchema: commandSchema,
     resolve(context, raw) {
       const { projectId, expectedRevision } = commandSchema.parse(raw);
@@ -27,7 +26,6 @@ export function createManagementCommands(): PlatformCommand[] {
     execute(context, raw) {
       const { projectId, expectedRevision, ...patch } = commandSchema.parse(raw);
       return new ProjectManagementRepository(context.db, context.userId).update(projectId, expectedRevision, {
-        ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
         ...(patch.ownerLabel !== undefined ? { ownerLabel: patch.ownerLabel } : {}),
         ...(patch.nextAction !== undefined ? { nextAction: patch.nextAction } : {}),
         ...(patch.freshnessHours !== undefined ? { freshnessHours: patch.freshnessHours } : {}),
@@ -70,7 +68,6 @@ export function projectManagementOverview(context: CommandContext, allowedProjec
     const goal = pm.getGoal(project.id);
     return { id: project.id, name: project.name, management, counts,
       goal: goal ? { summary: goal.summary, status: goal.status } : null,
-      evidenceFreshness: evidenceFreshness(rows, management.freshnessHours, now),
-      autonomy: "manual_only" as const };
+      evidenceFreshness: evidenceFreshness(rows, management.freshnessHours, now) };
   }), observedAt: now };
 }

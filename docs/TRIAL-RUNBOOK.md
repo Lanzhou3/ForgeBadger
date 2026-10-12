@@ -160,20 +160,20 @@ database, or account-recovery key.
 Start Gateway and Web on the trial ports:
 
 ```bash
-forgebadger start --gateway-port 48731 --web-port 48732
+forgebadger start --gateway-port 18332 --web-port 18333
 ```
 
 Expected:
 
-- Gateway listens on `127.0.0.1:48731`.
-- Web listens on `127.0.0.1:48732`.
+- Gateway listens on `127.0.0.1:18332`.
+- Web listens on `127.0.0.1:18333`.
 - The CLI prints the Web console URL.
 - Runtime state defaults to `~/.forgebadger` unless `FORGEBADGER_STATE_DIR` is set.
 
 Open:
 
 ```text
-http://127.0.0.1:48732/login
+http://127.0.0.1:18333/login
 ```
 
 For npm/CLI startup, do not hand-create secrets unless you are intentionally
@@ -194,11 +194,11 @@ Create or update `.env` with source runtime values:
 
 ```bash
 FORGEBADGER_HOST=127.0.0.1
-FORGEBADGER_PORT=48731
+FORGEBADGER_PORT=18332
 FORGEBADGER_WEB_HOST=127.0.0.1
-FORGEBADGER_WEB_PORT=48732
-FORGEBADGER_GATEWAY_URL=http://127.0.0.1:48731
-NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:48731
+FORGEBADGER_WEB_PORT=18333
+FORGEBADGER_GATEWAY_URL=http://127.0.0.1:18332
+NEXT_PUBLIC_GATEWAY_URL=http://127.0.0.1:18332
 FORGEBADGER_DB_PATH=/tmp/forgebadger-trial/forgebadger.db
 FORGEBADGER_MASTER_KEY=<64-character-hex-key-from-openssl-rand-hex-32>
 FORGEBADGER_JWT_SECRET=<32-or-more-random-characters>
@@ -232,21 +232,21 @@ operators run an isolated trial by prefixing a specific variable, for example
 Open:
 
 ```text
-http://127.0.0.1:48732/login
+http://127.0.0.1:18333/login
 ```
 
 ## 4. Ports And Health Checks
 
 Default trial ports:
 
-- Gateway: `48731`
-- Web: `48732`
+- Gateway: `18332`
+- Web: `18333`
 
 Use `curl --noproxy '*'` so local proxy settings do not hide loopback failures:
 
 ```bash
-curl --noproxy '*' -i http://127.0.0.1:48731/api/v1/health
-curl --noproxy '*' -i http://127.0.0.1:48732/login
+curl --noproxy '*' -i http://127.0.0.1:18332/api/v1/health
+curl --noproxy '*' -i http://127.0.0.1:18333/login
 ```
 
 Expected Gateway result:

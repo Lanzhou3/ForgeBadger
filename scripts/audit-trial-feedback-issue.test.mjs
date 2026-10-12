@@ -172,8 +172,8 @@ terminal ready
 ### Startup and health checks
 
 Command: pnpm --dir packages/gateway dev
-Web URL: http://127.0.0.1:48732
-Gateway URL: http://127.0.0.1:48731
+Web URL: http://127.0.0.1:18333
+Gateway URL: http://127.0.0.1:18332
 Gateway health envelope: code 0
 /login result: HTTP 200
 

@@ -137,8 +137,8 @@ describe("runStart", () => {
       assert.equal(code, 12);
       assert.deepEqual(loadCalls, [{ gatewayPort: 49931, webPort: 49932, host: "127.0.0.1" }]);
       assert.deepEqual(portChecks, [
-        { host: "127.0.0.1", port: 48731 },
-        { host: "127.0.0.1", port: 48732 }
+        { host: "127.0.0.1", port: 18332 },
+        { host: "127.0.0.1", port: 18333 }
       ]);
       assert.deepEqual(prepareCalls, [
         {
@@ -149,29 +149,29 @@ describe("runStart", () => {
       assert.deepEqual(runtimeWrites, [
         {
           webPublicDir: path.join(config.stateDir, "runtime", "web", "packages", "web", "public"),
-          gatewayBaseUrl: "http://127.0.0.1:48731"
+          gatewayBaseUrl: "http://127.0.0.1:18332"
         }
       ]);
       assert.equal(spawns[0]?.entry, paths.gatewayEntry);
       assert.equal(spawns[0]?.env[parentEnvName], "from-parent-env");
       assert.equal(spawns[0]?.env.FORGEBADGER_HOST, "127.0.0.1");
-      assert.equal(spawns[0]?.env.FORGEBADGER_PORT, "48731");
+      assert.equal(spawns[0]?.env.FORGEBADGER_PORT, "18332");
       assert.equal(spawns[0]?.env.FORGEBADGER_STATE_DIR, "/tmp/forgebadger-state");
       assert.equal(spawns[0]?.env.FORGEBADGER_DB_PATH, "/tmp/forgebadger-state/forgebadger.db");
       assert.equal(spawns[0]?.env.FORGEBADGER_MASTER_KEY, config.secrets.masterKey);
       assert.equal(spawns[0]?.env.FORGEBADGER_JWT_SECRET, config.secrets.jwtSecret);
-      assert.equal(spawns[0]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
+      assert.equal(spawns[0]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:18332");
       assert.equal(spawns[1]?.entry, path.join(config.stateDir, "runtime", "web", "packages", "web", "server.js"));
       assert.equal(spawns[1]?.env[parentEnvName], undefined);
       assert.equal(spawns[1]?.env.HOSTNAME, "127.0.0.1");
-      assert.equal(spawns[1]?.env.PORT, "48732");
-      assert.equal(spawns[1]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
+      assert.equal(spawns[1]?.env.PORT, "18333");
+      assert.equal(spawns[1]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:18332");
       assert.equal(spawns[1]?.env.FORGEBADGER_MASTER_KEY, undefined);
       assert.equal(spawns[1]?.env.FORGEBADGER_JWT_SECRET, undefined);
       assert.deepEqual(shutdownChildren, spawnedChildren);
       assert.equal(shutdownChildren.length, 2);
-      assert.match(stdout.text, /ForgeBadger Web Console: http:\/\/127\.0\.0\.1:48732\n/);
-      assert.match(stdout.text, /ForgeBadger Gateway: http:\/\/127\.0\.0\.1:48731\n/);
+      assert.match(stdout.text, /ForgeBadger Web Console: http:\/\/127\.0\.0\.1:18333\n/);
+      assert.match(stdout.text, /ForgeBadger Gateway: http:\/\/127\.0\.0\.1:18332\n/);
       assert.match(stdout.text, /--open is not supported yet; open the URL manually\.\n/);
     } finally {
       if (originalParentEnv === undefined) {
@@ -255,8 +255,8 @@ describe("runStart", () => {
     const codePromise = runStart({
       loadConfig: async () =>
         createRuntimeConfig("/tmp/forgebadger-state", {
-          gateway: { host: "0.0.0.0", port: 48731 },
-          web: { host: "0.0.0.0", port: 48732 }
+          gateway: { host: "0.0.0.0", port: 18332 },
+          web: { host: "0.0.0.0", port: 18333 }
         }),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
@@ -277,11 +277,11 @@ describe("runStart", () => {
 
     // Assert
     assert.equal(spawns[0]?.env.FORGEBADGER_HOST, "0.0.0.0");
-    assert.equal(spawns[0]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
+    assert.equal(spawns[0]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:18332");
     assert.equal(spawns[1]?.env.HOSTNAME, "0.0.0.0");
-    assert.equal(spawns[1]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:48731");
-    assert.match(stdout.text, /ForgeBadger Web Console: http:\/\/127\.0\.0\.1:48732\n/);
-    assert.match(stdout.text, /ForgeBadger Gateway: http:\/\/127\.0\.0\.1:48731\n/);
+    assert.equal(spawns[1]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:18332");
+    assert.match(stdout.text, /ForgeBadger Web Console: http:\/\/127\.0\.0\.1:18333\n/);
+    assert.match(stdout.text, /ForgeBadger Gateway: http:\/\/127\.0\.0\.1:18332\n/);
   });
 
   it("formats IPv6 browser URLs with brackets", async () => {
@@ -292,8 +292,8 @@ describe("runStart", () => {
     const codePromise = runStart({
       loadConfig: async () =>
         createRuntimeConfig("/tmp/forgebadger-state", {
-          gateway: { host: "::1", port: 48731 },
-          web: { host: "::1", port: 48732 }
+          gateway: { host: "::1", port: 18332 },
+          web: { host: "::1", port: 18333 }
         }),
       resolvePaths: () => createInstalledPaths(),
       checkPort: async () => undefined,
@@ -314,11 +314,11 @@ describe("runStart", () => {
 
     // Assert
     assert.equal(spawns[0]?.env.FORGEBADGER_HOST, "::1");
-    assert.equal(spawns[0]?.env.FORGEBADGER_GATEWAY_URL, "http://[::1]:48731");
+    assert.equal(spawns[0]?.env.FORGEBADGER_GATEWAY_URL, "http://[::1]:18332");
     assert.equal(spawns[1]?.env.HOSTNAME, "::1");
-    assert.equal(spawns[1]?.env.FORGEBADGER_GATEWAY_URL, "http://[::1]:48731");
-    assert.match(stdout.text, /ForgeBadger Web Console: http:\/\/\[::1\]:48732\n/);
-    assert.match(stdout.text, /ForgeBadger Gateway: http:\/\/\[::1\]:48731\n/);
+    assert.equal(spawns[1]?.env.FORGEBADGER_GATEWAY_URL, "http://[::1]:18332");
+    assert.match(stdout.text, /ForgeBadger Web Console: http:\/\/\[::1\]:18333\n/);
+    assert.match(stdout.text, /ForgeBadger Gateway: http:\/\/\[::1\]:18332\n/);
   });
 
   it("rejects matching gateway and web bind endpoints before checking ports", async () => {
@@ -331,8 +331,8 @@ describe("runStart", () => {
         runStart({
           loadConfig: async () =>
             createRuntimeConfig("/tmp/forgebadger-state", {
-              gateway: { host: "127.0.0.1", port: 48731 },
-              web: { host: "127.0.0.1", port: 48731 }
+              gateway: { host: "127.0.0.1", port: 18332 },
+              web: { host: "127.0.0.1", port: 18332 }
             }),
           resolvePaths: () => createInstalledPaths(),
           checkPort: async (host, port) => {
@@ -346,7 +346,7 @@ describe("runStart", () => {
           },
           stdout: createMemoryWriter()
         }),
-      /Gateway and Web cannot use the same bind endpoint: 127\.0\.0\.1:48731/
+      /Gateway and Web cannot use the same bind endpoint: 127\.0\.0\.1:18332/
     );
     assert.deepEqual(portChecks, []);
   });
@@ -361,8 +361,8 @@ describe("runStart", () => {
         runStart({
           loadConfig: async () =>
             createRuntimeConfig("/tmp/forgebadger-state", {
-              gateway: { host: "0.0.0.0", port: 48731 },
-              web: { host: "127.0.0.1", port: 48731 }
+              gateway: { host: "0.0.0.0", port: 18332 },
+              web: { host: "127.0.0.1", port: 18332 }
             }),
           resolvePaths: () => createInstalledPaths(),
           checkPort: async (host, port) => {
@@ -376,7 +376,7 @@ describe("runStart", () => {
           },
           stdout: createMemoryWriter()
         }),
-      /Gateway and Web cannot use overlapping bind endpoints: 0\.0\.0\.0:48731 and 127\.0\.0\.1:48731/
+      /Gateway and Web cannot use overlapping bind endpoints: 0\.0\.0\.0:18332 and 127\.0\.0\.1:18332/
     );
     assert.deepEqual(portChecks, []);
   });
@@ -391,8 +391,8 @@ describe("runStart", () => {
         runStart({
           loadConfig: async () =>
             createRuntimeConfig("/tmp/forgebadger-state", {
-              gateway: { host: "localhost", port: 48731 },
-              web: { host: "127.0.0.1", port: 48731 }
+              gateway: { host: "localhost", port: 18332 },
+              web: { host: "127.0.0.1", port: 18332 }
             }),
           resolvePaths: () => createInstalledPaths(),
           checkPort: async (host, port) => {
@@ -406,7 +406,7 @@ describe("runStart", () => {
           },
           stdout: createMemoryWriter()
         }),
-      /Gateway and Web cannot use overlapping bind endpoints: localhost:48731 and 127\.0\.0\.1:48731/
+      /Gateway and Web cannot use overlapping bind endpoints: localhost:18332 and 127\.0\.0\.1:18332/
     );
     assert.deepEqual(portChecks, []);
   });
@@ -421,8 +421,8 @@ describe("runStart", () => {
         runStart({
           loadConfig: async () =>
             createRuntimeConfig("/tmp/forgebadger-state", {
-              gateway: { host: "localhost", port: 48731 },
-              web: { host: "::1", port: 48731 }
+              gateway: { host: "localhost", port: 18332 },
+              web: { host: "::1", port: 18332 }
             }),
           resolvePaths: () => createInstalledPaths(),
           checkPort: async (host, port) => {
@@ -436,7 +436,7 @@ describe("runStart", () => {
           },
           stdout: createMemoryWriter()
         }),
-      /Gateway and Web cannot use overlapping bind endpoints: localhost:48731 and \[::1\]:48731/
+      /Gateway and Web cannot use overlapping bind endpoints: localhost:18332 and \[::1\]:18332/
     );
     assert.deepEqual(portChecks, []);
   });
@@ -559,8 +559,8 @@ describe("runStart", () => {
       inspectConfig: async () => ({
         stateDir: "/tmp/forgebadger-state",
         initialized: false,
-        gateway: { host: "127.0.0.1", port: 48731 },
-        web: { host: "127.0.0.1", port: 48732 }
+        gateway: { host: "127.0.0.1", port: 18332 },
+        web: { host: "127.0.0.1", port: 18333 }
       }),
       dependencyChecker: async () => {
         checked = true;
@@ -606,8 +606,8 @@ describe("runStart", () => {
       inspectConfig: async () => ({
         stateDir: "/tmp/forgebadger-state",
         initialized: true,
-        gateway: { host: "127.0.0.1", port: 48731 },
-        web: { host: "127.0.0.1", port: 48732 }
+        gateway: { host: "127.0.0.1", port: 18332 },
+        web: { host: "127.0.0.1", port: 18333 }
       }),
       dependencyChecker: async () => {
         throw new Error("dependencyChecker must not run for initialized state");
@@ -794,8 +794,8 @@ function createRuntimeConfig(
     version: 1,
     stateDir,
     dbPath: `${stateDir}/forgebadger.db`,
-    gateway: overrides.gateway ?? { host: "127.0.0.1", port: 48731 },
-    web: overrides.web ?? { host: "127.0.0.1", port: 48732 },
+    gateway: overrides.gateway ?? { host: "127.0.0.1", port: 18332 },
+    web: overrides.web ?? { host: "127.0.0.1", port: 18333 },
     secrets: {
       masterKey: "a".repeat(64),
       jwtSecret: "abcdefghijklmnopqrstuvwxyz123456"

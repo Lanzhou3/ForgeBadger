@@ -1,4 +1,5 @@
 import type {DaemonIdentity} from './confirmed-stop.js';
+import type {TerminalNotification} from './terminal-notification-scanner.js';
 /**
  * IPC protocol for the Session Server.
  *
@@ -30,6 +31,10 @@ export interface HelloMessage {
   type: "hello";
   protocolVersion: number;
   token: string;
+  /** Role of the connecting client. The management connection (the Gateway's
+   *  long-lived control socket) sets "management" so the daemon knows which
+   *  socket to relay terminal-native notifications on. */
+  role?: "management" | undefined;
 }
 
 export interface HelloOkResponse {
@@ -247,7 +252,16 @@ export interface SessionExitMessage {
   exitCode: number;
 }
 
-export type IoStreamResponse = ClientOutputMessage | AttachAckMessage | SessionExitMessage;
+/** Session Server → Gateway: a terminal-native notification (OSC 9/99/777 or
+ *  bell) detected in the session's PTY output. Relayed only on the
+ *  management connection — I/O stream clients never see it. */
+export interface SessionNotificationMessage {
+  type: "session_notification";
+  sessionId: string;
+  notification: TerminalNotification;
+}
+
+export type IoStreamResponse = ClientOutputMessage | AttachAckMessage | SessionExitMessage | SessionNotificationMessage;
 
 // ---------------------------------------------------------------------------
 // Shared types

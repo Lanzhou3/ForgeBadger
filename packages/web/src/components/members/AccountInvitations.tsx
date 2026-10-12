@@ -1,9 +1,11 @@
 "use client";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useLanguage } from "@/hooks/use-language";
-import { accountsApi } from "@/lib/teams-api";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useLanguage, useUiLocale } from "@/hooks/use-language";
+import { accountsApi, type AccountInvitation } from "@/lib/teams-api";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useAdminCopy } from "@/components/settings/admin-copy";
 import {
   Panel,
   TeamError,
@@ -12,8 +14,14 @@ import {
 } from "@/components/teams/TeamShared";
 export function AccountInvitations({ actorId }: { actorId: string }) {
   const { t } = useLanguage();
-  const [code, setCode] = useState("");
+  const locale = useUiLocale();
+  const adminCopy = useAdminCopy();
+  const [invite, setInvite] = useState<AccountInvitation | null>(null);
+  const [revoking, setRevoking] = useState<AccountInvitation | null>(null);
   const action = useTeamAction();
+  const copy = useMutation({
+    mutationFn: (value: string) => navigator.clipboard.writeText(value),
+  });
   const query = useQuery({
     queryKey: ["admin-users", "invitations", actorId],
     queryFn: accountsApi.invitations,
@@ -28,20 +36,40 @@ export function AccountInvitations({ actorId }: { actorId: string }) {
         disabled={action.isPending}
         onClick={() =>
           action.mutate(async () =>
-            setCode((await accountsApi.invite()).invite.code),
+            setInvite((await accountsApi.invite()).invite),
           )
         }
       >
         {t("teams.invite")}
       </Button>
-      {code && (
-        <input
-          aria-label={t("teams.inviteCode")}
-          className="w-full rounded-md border border-input bg-background p-2 text-xs"
-          value={code}
-          readOnly
-          onFocus={(e) => e.target.select()}
-        />
+      {invite && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <input
+              aria-label={t("teams.inviteCode")}
+              className="min-w-0 flex-1 rounded-md border border-input bg-background p-2 text-xs"
+              value={invite.code}
+              readOnly
+              onFocus={(e) => e.target.select()}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={copy.isPending}
+              onClick={() => copy.mutate(invite.code)}
+            >
+              {copy.isSuccess ? adminCopy.inviteCodeCopied : adminCopy.copyInviteCode}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t("teams.expires")}: {new Date(invite.expiresAt).toLocaleString(locale)}
+          </p>
+          {copy.isError && (
+            <p role="alert" className="text-xs">
+              {t("teams.copyFailed")}
+            </p>
+          )}
+        </div>
       )}
       <TeamError error={action.error} />
       {query.isLoading ? (
@@ -69,7 +97,7 @@ export function AccountInvitations({ actorId }: { actorId: string }) {
                   />
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {t("teams.expires")}: {new Date(i.expiresAt).toLocaleString()}
+                  {t("teams.expires")}: {new Date(i.expiresAt).toLocaleString(locale)}
                 </p>
               </div>
               {!i.usedAt && (
@@ -77,12 +105,7 @@ export function AccountInvitations({ actorId }: { actorId: string }) {
                   size="sm"
                   variant="outline"
                   disabled={action.isPending}
-                  onClick={() =>
-                    action.mutate(async () => {
-                      await accountsApi.revoke(i.id);
-                      if (code === i.code) setCode("");
-                    })
-                  }
+                  onClick={() => setRevoking(i)}
                 >
                   {t("teams.revoke")}
                 </Button>
@@ -93,6 +116,32 @@ export function AccountInvitations({ actorId }: { actorId: string }) {
       ) : (
         <p className="text-sm">{t("teams.noInvites")}</p>
       )}
+
+      <ConfirmDialog
+        open={revoking !== null}
+        destructive
+        pending={action.isPending}
+        title={adminCopy.revokeInviteConfirmTitle}
+        description={
+          revoking
+            ? adminCopy.revokeInviteConfirmDescription.replace("{code}", revoking.code)
+            : ""
+        }
+        confirmLabel={t("teams.revoke")}
+        onOpenChange={(open) => {
+          if (!open) setRevoking(null);
+        }}
+        onConfirm={() => {
+          const target = revoking;
+          setRevoking(null);
+          if (target) {
+            void action.mutate(async () => {
+              await accountsApi.revoke(target.id);
+              if (invite?.code === target.code) setInvite(null);
+            });
+          }
+        }}
+      />
     </Panel>
   );
 }

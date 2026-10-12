@@ -145,6 +145,8 @@ export function attachEventsWebSocket(options: EventsWebSocketOptions): void {
 function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
   const notificationMeta = buildNotificationMeta(event);
   switch (event.type) {
+    case "session_work_state_changed":
+      return { session_id: event.sessionId, state: event.state, updated_at: event.updatedAt };
     case "session_status_changed":
       return {
         session_id: event.sessionId,
@@ -164,7 +166,7 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
         session_id: event.sessionId,
         ...notificationMeta
       };
-    case "claude_notification":
+    case "session_notification":
       return {
         session_id: event.sessionId,
         ...(event.projectId ? { project_id: event.projectId } : {}),
@@ -173,7 +175,7 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
         hook_event_name: event.hookEventName,
         notification_type: event.notificationType,
         message: event.message,
-        adapter: event.adapter ?? "claude",
+        ...(event.adapter ? { adapter: event.adapter } : {}),
         ...(event.title ? { title: event.title } : {}),
         ...(event.toolName ? { tool_name: event.toolName } : {}),
         ...notificationMeta
@@ -201,6 +203,18 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
       };
     case "copilot_development_updated":
       return {task_id:event.taskId,status:event.status,revision:event.revision,event_id:event.eventId};
+    case "terminal_command_progress":
+      return {
+        project_id: event.projectId,
+        ...(event.sessionId ? { session_id: event.sessionId } : {}),
+        ...(event.conversationId ? { conversation_id: event.conversationId } : {}),
+        ...(event.runId ? { run_id: event.runId } : {}),
+        ...(event.stepId ? { step_id: event.stepId } : {}),
+        command: event.commandPreview,
+        output_tail: event.outputTail,
+        status: event.status,
+        occurred_at: event.occurredAt.toISOString()
+      };
     case "copilot_run_updated":
       return {
         run_id: event.runId,
@@ -208,6 +222,7 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
         status: event.status,
         ...(event.source !== undefined ? { source: event.source } : {}),
         ...(event.textDelta !== undefined ? { text_delta: event.textDelta } : {}),
+        ...(event.textStepId !== undefined ? { text_step_id: event.textStepId, text_fence: event.textFence, text_sequence: event.textSequence } : {}),
         ...(event.thinkingDelta !== undefined ? { thinking_delta: event.thinkingDelta } : {}),
         ...(event.toolName ? { tool_name: event.toolName } : {}),
         ...(event.pendingActionId ? { pending_action_id: event.pendingActionId } : {}),
@@ -226,6 +241,7 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
 }
 
 function buildNotificationMeta(event: ForgeBadgerEvent): Record<string, unknown> {
+  if (event.type === "session_work_state_changed") return {};
   if (
     event.type === "activity_created"
     || event.type === "copilot_run_updated"

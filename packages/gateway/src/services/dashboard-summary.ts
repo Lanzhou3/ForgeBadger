@@ -15,6 +15,12 @@ export interface DashboardStats {
 export interface DashboardHealthItem {
   healthy: boolean;
   count?: number;
+  /**
+   * Stable machine-readable key for the current state. Clients map this to
+   * localized text instead of rendering `message` (which stays English for
+   * backward compatibility and diagnostics exports).
+   */
+  code: string;
   message: string;
 }
 
@@ -67,31 +73,36 @@ export function getDashboardSummary(
   return {
     stats,
     health: {
-      gateway: { healthy: true, message: "Gateway is responding" },
-      database: { healthy: true, message: "Database query completed" },
+      gateway: { healthy: true, code: "ok", message: "Gateway is responding" },
+      database: { healthy: true, code: "ok", message: "Database query completed" },
       projectConfig: {
         healthy: stats.projects > 0 && stats.templates > 0,
         count: stats.projects,
+        code: stats.projects > 0 ? "ready" : "create_project",
         message: stats.projects > 0 ? "Projects can use available templates" : "Create or import a project"
       },
       models: {
         healthy: true,
         count: stats.models,
+        code: stats.models > 0 ? "ready" : "host_environment",
         message: stats.models > 0 ? "Models are configured" : "Optional: CLI sessions use models configured in the host environment"
       },
       credentials: {
         healthy: true,
         count: stats.apiKeys,
+        code: stats.apiKeys > 0 ? "ready" : "host_credentials",
         message: stats.apiKeys > 0 ? "Encrypted API keys are available" : "Optional: CLI sessions use host credentials; verify login in the CLI"
       },
       sessions: {
         healthy: stats.sessions > 0,
         count: stats.sessions,
+        code: stats.sessions > 0 ? "ready" : "create_session",
         message: stats.sessions > 0 ? "Sessions exist" : "Create a session from a project"
       },
       skills: {
         healthy: stats.skills > 0,
         count: stats.skills,
+        code: stats.skills > 0 ? "ready" : "create_skill",
         message: stats.skills > 0 ? "Skills are configured" : "Create a Skill"
       }
     }

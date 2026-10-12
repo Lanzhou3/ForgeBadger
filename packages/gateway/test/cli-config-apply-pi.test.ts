@@ -331,12 +331,67 @@ describe("cli-config apply: PI", () => {
     assert.deepEqual(model.input, ["text"], "user-tuned input preserved");
   });
 
+  it("writes input: [\"text\", \"image\"] from the profile vision capability", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("apply-pi-vision@example.com", "hash");
+    const root = await useConfigRoot("forgebadger-apply-pi-vision-");
+    const fixture = createFixture(db, user.id);
+    fixture.repo.updateModelProfile(fixture.modelId, { capabilities: ["chat", "vision"] });
+    // A non-vision sibling model must stay text-only (no input field at all).
+    fixture.repo.createModelProfile({ providerProfileId: fixture.providerId, name: "Plain", modelId: "pi-plain" });
+
+    const first = await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+    assert.equal(first.changed, true);
+    const readModels = async () => (JSON.parse(await readFile(path.join(root, "models.json"), "utf8")) as {
+      providers: Record<string, { models: Array<Record<string, unknown>> }>;
+    }).providers["pi-provider"].models;
+    let models = await readModels();
+    const vision = models.find((model) => model.id === "pi-model-1");
+    const textOnly = models.find((model) => model.id === "pi-plain");
+    assert.ok(vision && textOnly, "both models written");
+    assert.deepEqual(vision.input, ["text", "image"], "vision capability enables PI image input");
+    assert.equal(textOnly.input, undefined, "non-vision models get no input field");
+
+    // Re-applying the same state is a no-op.
+    const second = await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+    assert.equal(second.changed, false, "idempotent with a capability-written input");
+
+    // Removing the capability must not strip the image input PI already has
+    // (monotonic, like a hand-set reasoning: true).
+    fixture.repo.updateModelProfile(fixture.modelId, { capabilities: ["chat"] });
+    await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+    models = await readModels();
+    assert.deepEqual(models.find((model) => model.id === "pi-model-1")?.input, ["text", "image"], "image input is not stripped when the capability is removed");
+
+    // A user who hand-set image input on a non-vision model keeps it.
+    const manual = JSON.parse(await readFile(path.join(root, "models.json"), "utf8")) as {
+      providers: Record<string, { models: Array<Record<string, unknown>> }>;
+    };
+    manual.providers["pi-provider"].models.find((model) => model.id === "pi-plain")!.input = ["text", "image"];
+    await writeFile(path.join(root, "models.json"), JSON.stringify(manual, null, 2) + "\n", "utf8");
+    await applyCliConfigToAdapter({
+      db, userId: user.id, masterKey, adapter: "pi",
+      providerProfileId: fixture.providerId, resolveHost: publicResolver
+    });
+    models = await readModels();
+    assert.deepEqual(models.find((model) => model.id === "pi-plain")?.input, ["text", "image"], "hand-set image input preserved for a non-vision model");
+  });
+
   it("maps provider api formats to PI api names and endpoints", async () => {
     const cases = [
       { name: "anthropic", apiFormat: "anthropic", providerKey: "relay", expectedApi: "anthropic-messages", expectedUrl: "https://api.deepseek.com/anthropic" },
-      { name: "openai-native", apiFormat: "openai", providerKey: "openai", expectedApi: "openai-responses", expectedUrl: "https://api.deepseek.com/v1" },
+      { name: "openai-native", apiFormat: "openai-responses", providerKey: "openai", expectedApi: "openai-responses", expectedUrl: "https://api.deepseek.com/v1" },
       { name: "google", apiFormat: "google", providerKey: "gemini-relay", expectedApi: "google-generative-ai", expectedUrl: "https://api.deepseek.com/v1" },
-      { name: "local", apiFormat: "local", providerKey: "ollama", expectedApi: "openai-completions", expectedUrl: "https://api.deepseek.com/v1" }
+      { name: "openai-compatible", apiFormat: "openai-compatible", providerKey: "ollama", expectedApi: "openai-completions", expectedUrl: "https://api.deepseek.com/v1" }
     ] as const;
     for (const testCase of cases) {
       const db = createTestDb();
@@ -365,33 +420,6 @@ describe("cli-config apply: PI", () => {
       assert.equal(models.providers[testCase.providerKey].api, testCase.expectedApi, testCase.name);
       assert.equal(models.providers[testCase.providerKey].baseUrl, testCase.expectedUrl, testCase.name);
     }
-  });
-
-  it("rejects bedrock providers without touching the config files", async () => {
-    const db = createTestDb();
-    const user = new UserRepository(db).create("apply-pi-bedrock@example.com", "hash");
-    const root = await useConfigRoot("forgebadger-apply-pi-bedrock-");
-    const repo = new ModelProviderRepository(db, user.id, masterKey);
-    const provider = repo.createProviderProfile({
-      name: "bedrock provider",
-      providerKey: "bedrock",
-      baseUrl: "https://bedrock.example.com",
-      authType: "api_key",
-      apiFormat: "bedrock",
-      supportedAdapters: ["pi"]
-    });
-    repo.createModelProfile({ providerProfileId: provider.id, name: "M", modelId: "m-1", isDefault: true });
-    repo.createCredential({ providerProfileId: provider.id, label: "c", plaintextSecret: "sk-x" });
-
-    const error = await applyCliConfigToAdapter({
-      db, userId: user.id, masterKey, adapter: "pi",
-      providerProfileId: provider.id, resolveHost: publicResolver
-    }).catch((caught: unknown) => caught);
-
-    assert.ok(error instanceof Error);
-    assert.equal((error as { code?: string }).code, "CLI_CONFIG_APPLY_ADAPTER_UNSUPPORTED");
-    assert.equal(existsSync(path.join(root, "models.json")), false);
-    assert.equal(existsSync(path.join(root, "settings.json")), false);
   });
 
   it("never writes auth.json and warns when it shadows the applied key", async () => {

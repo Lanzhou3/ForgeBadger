@@ -22,7 +22,7 @@ export function createConnectionTools(db: Database, userId: string, masterKey: s
     async execute(input,context) {
      const preflight=()=>{
       const current=repo.get(row.id);
-      if(context.userId!==userId||context.grantId||context.source!=='user'||!context.conversationId) throw new Error('External tool authority rejected');
+      if(context.userId!==userId||context.source!=='user'||!context.conversationId) throw new Error('External tool authority rejected');
       if(!current?.enabled||current.revision!==row.revision||!(JSON.parse(current.enabled_tools_json) as string[]).includes(tool.name)) throw new Error('Connection changed or disabled; create a fresh request');
       if(typeof context.checkExecutionAuthority!=='function'||!context.checkExecutionAuthority()) throw new Error('Run no longer active');
       const action=typeof context.externalActionId==='string'?new CopilotConversationLog(db,userId).getPendingAction(context.externalActionId):undefined;

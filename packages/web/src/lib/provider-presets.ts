@@ -53,7 +53,7 @@ export const providerPresets: ProviderPreset[] = [
     id: "openai",
     name: "OpenAI",
     description: "Official OpenAI API endpoint.",
-    apiFormat: "openai",
+    apiFormat: "openai-responses",
     openaiBaseUrl: "https://api.openai.com/v1",
     supportedAdapters: ["opencode", "codex", "kimi", "pi"],
   }),
@@ -284,9 +284,11 @@ export function providerPresetToForm(preset: ProviderPreset): CustomProviderForm
     providerKey: preset.id,
     apiFormat: preset.apiFormat,
     authType: preset.authType,
+    baseUrl: "",
     anthropicBaseUrl: preset.anthropicBaseUrl ?? "",
     openaiBaseUrl: preset.openaiBaseUrl ?? "",
     supportedAdapters: [...preset.supportedAdapters],
     allowPlaintextHttp: false,
+    allowPrivateNetworks: false,
   };
 }

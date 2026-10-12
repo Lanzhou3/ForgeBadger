@@ -59,12 +59,11 @@ export default function ProjectPage() {
   if (context.data.privateDetailAllowed)
     return <PrivateProjectPage key={`${user?.id}:${id}`} taskAuthority={authority} />;
   return (
-    <main className="mx-auto max-w-[1500px] space-y-5 p-4 pt-16 md:p-6">
-      <Link href="/projects" className="text-sm text-muted-foreground">
-        ← {t("nav.projects")}
+    <main className="mx-auto max-w-[1500px] space-y-5 p-4 md:p-6">
+      <Link href="/projects" className="text-sm text-muted-foreground hover:text-foreground">
+        ← {t("projects.back")}
       </Link>
       <h1 className="text-xl font-semibold">{context.data.project.name}</h1>
-      <h2 className="text-sm font-medium">{t("projects.devTasks")}</h2>
         <ProjectManagerPanel
           key={`${user?.id}:${id}`}
           projectId={id}

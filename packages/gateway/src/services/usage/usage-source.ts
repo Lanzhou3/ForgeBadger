@@ -13,7 +13,12 @@ import path from "node:path";
 
 import { expandUserPath } from "../../lib/user-path.js";
 
-export type UsageTokenAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi";
+/**
+ * Adapters with a registered usage source. Narrower than `AdapterId` on
+ * purpose: an adapter without a source must be absent rather than present and
+ * silently returning zero rows.
+ */
+export type UsageTokenAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
 
 export interface TokenUsageRecord {
   /** Which CLI the record came from. */

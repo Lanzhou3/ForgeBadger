@@ -8,7 +8,7 @@ import {taskArtifactsApi} from "@/lib/project-task-api";
 import {ProjectManagerWorkItemDetailSheet} from "./WorkItemDetailSheet";
 import {TaskAuthorityContext} from "./TaskAuthority";
 import type {ComponentProps} from "react";
-vi.mock("@/hooks/use-language",()=>({useLanguage:()=>({t:(key:Parameters<typeof getTranslation>[1])=>getTranslation("en",key)})}));
+vi.mock("@/hooks/use-language",()=>({useLanguage:()=>({t:(key:Parameters<typeof getTranslation>[1])=>getTranslation("en",key)}),useUiLocale:()=>"en-US"}));
 vi.mock("@/components/workspaces/RunPanel",()=>({RunPanel:({runId}:{runId:string})=><p>Selected run: {runId}</p>}));
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 const project: WorkspaceDetail={project:{id:"project",name:"Project",role:"owner",memberCount:1,revision:1,verificationRevision:1,executionEnabled:true,verification:null},members:[],tasks:[],events:[]};

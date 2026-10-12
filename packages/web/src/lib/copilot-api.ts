@@ -20,7 +20,6 @@ export type CopilotRunStatus =
 export interface CopilotConversation {
   id: string;
   title: string | null;
-  grantId?: string | null;
   status: string;
   created_at: number;
   updated_at: number;
@@ -42,6 +41,9 @@ export interface CopilotMessage {
 }
 
 export interface CopilotRun {
+  phase?: string;
+  phaseStartedAt?: string;
+  usage?: { chargedTokens: number; reportedTokens: number; estimatedCalls: number; calls: number };
   revision?: number;
   stopReason?: string;
   id: string;
@@ -95,7 +97,7 @@ export interface CopilotToolInfo {
   available: boolean;
   unavailableReason: string | null;
   effectiveEnabled?: boolean;
-  authorization?: "read" | "approval_or_grant" | "unavailable";
+  authorization?: "read" | "owner_action" | "unavailable";
 }
 
 export interface CopilotPlaybook {
@@ -135,10 +137,10 @@ export function listConversations() {
   return fetchJson<{ conversations: CopilotConversation[] }>("/api/v1/copilot/conversations");
 }
 
-export function createConversation(title?: string, grantId?: string) {
+export function createConversation(title?: string) {
   return fetchJson<{ conversation: CopilotConversation }>("/api/v1/copilot/conversations", {
     method: "POST",
-    body: JSON.stringify({ ...(title ? { title } : {}), ...(grantId ? { grantId } : {}) }),
+    body: JSON.stringify(title ? { title } : {}),
   });
 }
 
@@ -164,6 +166,9 @@ export function listMessages(conversationId: string) {
 
 /** Run a turn; returns the run id. Streaming deltas arrive via /ws/events. */
 export interface CopilotMessageOptions {
+  reviewTaskResults?: boolean;
+  repairFailedChecks?: boolean;
+  toolDiscovery?: boolean;
   projectId?: string;
   clientRequestId?: string;
 }
@@ -184,8 +189,13 @@ export function listConversationRuns(conversationId: string) {
   );
 }
 
+/** Revoke the repair authorization chain of a run; later repair attempts are rejected. */
+export function revokeRunRepairs(runId: string) {
+  return fetchJson<{ revoked: boolean }>(`/api/v1/copilot/runs/${encodeURIComponent(runId)}/repairs`, { method: "DELETE" });
+}
+
 export function getRun(runId: string) {
-  return fetchJson<{ run: CopilotRun; pendingActions: CopilotPendingAction[] }>(
+  return fetchJson<{ run: CopilotRun; pendingActions: CopilotPendingAction[]; provisionalText?: import("@/lib/copilot-text-stream").CopilotProvisionalText }>(
     `/api/v1/copilot/runs/${encodeURIComponent(runId)}`
   );
 }
@@ -249,15 +259,37 @@ export function deleteMemoryEntry(id: string) {
   );
 }
 
-export function editMessage(conversationId: string, messageId: string, content: string) {
+export function editMessage(conversationId: string, messageId: string, content: string, options?: CopilotMessageOptions & { modelId?: string; toolDiscovery?: boolean }) {
   return fetchJson<{ runId: string }>(
     `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/edit-message`,
-    { method: "POST", body: JSON.stringify({ messageId, content }) }
+    { method: "POST", body: JSON.stringify({ messageId, content, ...options }) }
   );
 }
 
 export function getCopilotCapabilities() {
   return fetchJson<{ tools: CopilotToolInfo[] }>("/api/v1/copilot/capabilities");
+}
+
+export type CopilotThinkingEffort = "off" | "low" | "medium" | "high";
+
+export interface CopilotPreferences {
+  /** Preferred model profile id; null follows the platform default. */
+  modelId: string | null;
+  thinkingEffort: CopilotThinkingEffort;
+}
+
+export function getCopilotPreferences() {
+  return fetchJson<CopilotPreferences>("/api/v1/copilot/preferences");
+}
+
+export function updateCopilotPreferences(patch: {
+  modelId?: string | null;
+  thinkingEffort?: CopilotThinkingEffort;
+}) {
+  return fetchJson<CopilotPreferences>("/api/v1/copilot/preferences", {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
 }
 
 /** Toggle one Copilot tool for the current user (owner switch). */
@@ -309,6 +341,8 @@ export interface CopilotAutomationRun {
 export interface CopilotAutomationSuggestion {
   id: string;
   source: string;
+  /** Stable catalog key (e.g. catalog:daily-briefing); map via automations-copy. */
+  dedupKey: string;
   status: "pending" | "accepted" | "dismissed";
   jobSpec: string;
 }
@@ -389,3 +423,16 @@ export function dismissAutomationSuggestion(suggestionId: string) {
 
 // Re-export the envelope helper for tests that assert on the HTTP envelope.
 export { fetchEnvelope };
+
+export interface CopilotFollowup { id: string; status: string; runId: string | null; content: string; error: string | null; createdAt: number; }
+export function listFollowups(conversationId: string) {
+  return fetchJson<{ followups: CopilotFollowup[] }>(`/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/followups`);
+}
+export function queueFollowup(conversationId: string, content: string, options: CopilotMessageOptions & { clientRequestId: string; modelId?: string }) {
+  return fetchJson<{ followup: { id: string; status: string; runId: string | null } }>(`/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/followups`, {
+    method: 'POST', body: JSON.stringify({ content, ...options }),
+  });
+}
+export function cancelFollowup(id: string) {
+  return fetchJson<{ cancelled: boolean }>(`/api/v1/copilot/followups/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}

@@ -59,7 +59,7 @@ describe("local diagnostics export", () => {
         providerKey: "openai",
         baseUrl: "https://api.openai.com/v1",
         authType: "api_key",
-        apiFormat: "openai",
+        apiFormat: "openai-responses",
         supportedAdapters: ["opencode"]
       });
       providers.createModelProfile({
@@ -119,7 +119,7 @@ describe("local diagnostics export", () => {
       assert.equal(report.modelProviders.counts.activeCredentials, 1);
       assert.equal(report.modelProviders.counts.defaultModels, 1);
       assert.deepEqual(report.modelProviders.apiFormats, {
-        openai: 1,
+        "openai-responses": 1,
         "openai-compatible": 1
       });
       assert.deepEqual(report.modelProviders.providers, [
@@ -127,7 +127,7 @@ describe("local diagnostics export", () => {
           id: openAiProvider.id,
           name: "OpenAI",
           providerKey: "openai",
-          apiFormat: "openai",
+          apiFormat: "openai-responses",
           authType: "api_key",
           status: "active",
           modelCount: 1,

@@ -6,8 +6,12 @@ import type { Terminal as TerminalInstance } from "@xterm/xterm";
 import { RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useColorMode } from "@/hooks/use-color-mode";
+import { useTerminalFont } from "@/hooks/use-terminal-font";
 import { useLanguage } from "@/hooks/use-language";
 import { fetchJson } from "@/lib/api";
+import { ensureTerminalFontLoaded } from "@/lib/terminal-font";
+import { getTerminalPalette } from "@/lib/terminal-theme";
 import { cn } from "@/lib/utils";
 
 /** Shape of `GET /api/v1/sessions/:id/output`. */
@@ -38,9 +42,14 @@ export function SessionOutputHistory({
   onClose: () => void;
 }) {
   const { t } = useLanguage();
+  const { resolved: colorModeResolved } = useColorMode();
+  const terminalFont = useTerminalFont();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<TerminalInstance | null>(null);
   const fitAddonRef = useRef<FitAddonInstance | null>(null);
+  // Mirror of the font settings for the async creation closure.
+  const terminalFontRef = useRef(terminalFont);
+  terminalFontRef.current = terminalFont;
   const outputRef = useRef<SessionOutputResponse | null>(null);
   const [loadState, setLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string>("");
@@ -76,7 +85,11 @@ export function SessionOutputHistory({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]).then(
+    void Promise.all([
+      import("@xterm/xterm"),
+      import("@xterm/addon-fit"),
+      ensureTerminalFontLoaded(terminalFontRef.current.fontFamily)
+    ]).then(
       ([xterm, fit]) => {
         if (cancelled) return;
         const host = hostRef.current;
@@ -85,14 +98,13 @@ export function SessionOutputHistory({
         const terminal = new xterm.Terminal({
           scrollback: 100000,
           cursorBlink: false,
-          fontFamily:
-            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-          fontSize: 14,
-          theme: {
-            background: "#05070a",
-            foreground: "#e5edf7",
-            cursor: "#5cc8ff"
-          }
+          fontFamily: terminalFontRef.current.fontFamily,
+          fontSize: terminalFontRef.current.fontSize,
+          // Palette from the DOM class: the beforeInteractive script keeps
+          // <html> in sync with the stored preference before first paint.
+          theme: getTerminalPalette(
+            document.documentElement.classList.contains("dark") ? "dark" : "light"
+          )
         });
         // Read-only: never forward any key to the terminal.
         terminal.attachCustomKeyEventHandler(() => false);
@@ -119,6 +131,22 @@ export function SessionOutputHistory({
       fitAddonRef.current = null;
     };
   }, [open]);
+
+  // Follow the app color mode while the panel is open (xterm re-renders the
+  // viewport on a theme change; no re-open needed).
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.theme = getTerminalPalette(colorModeResolved);
+  }, [colorModeResolved]);
+
+  // Follow the terminal font preference while the panel is open.
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.fontFamily = terminalFont.fontFamily;
+    terminal.options.fontSize = terminalFont.fontSize;
+  }, [terminalFont.fontFamily, terminalFont.fontSize]);
 
   // Fetch the buffered output whenever the panel opens or is refreshed.
   useEffect(() => {
@@ -156,7 +184,7 @@ export function SessionOutputHistory({
   return (
     <div
       data-testid="session-output-history"
-      className="absolute inset-0 z-20 flex flex-col overflow-hidden bg-[#05070a]"
+      className="absolute inset-0 z-20 flex flex-col overflow-hidden bg-terminal"
     >
       <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
         <span className="truncate font-medium">{t("terminal.historyOutput")}</span>

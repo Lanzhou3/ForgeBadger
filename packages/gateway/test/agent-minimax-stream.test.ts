@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {it, type TestContext} from 'node:test';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import {drizzle} from 'drizzle-orm/better-sqlite3';
 import {migrate} from 'drizzle-orm/better-sqlite3/migrator';
@@ -10,7 +11,7 @@ const frame=(delta:unknown,reason:string|null=null)=>'data: '+JSON.stringify({ch
 const tool={index:0,id:'call_one',type:'function',function:{name:'list_projects',arguments:'{}'}};
 const complete=frame({content:'Ready'})+frame({tool_calls:[tool]},'tool_calls');
 function setup(t:TestContext,response:Response,baseUrl='https://api.minimaxi.com/v1'){
- const db=new Database(':memory:');t.after(()=>db.close());migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations',import.meta.url).pathname});
+ const db=new Database(':memory:');t.after(()=>db.close());migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
  const user=new UserRepository(db).create('minimax-stream@test.dev','hash');const repo=new ModelProviderRepository(db,user.id,'a'.repeat(32));
  const provider=repo.createProviderProfile({name:'fixture',providerKey:'fixture',baseUrl,apiFormat:'openai-compatible',allowPlaintextHttp:baseUrl.startsWith('http:'),authType:'api_key',supportedAdapters:['opencode']});
  repo.createModelProfile({providerProfileId:provider.id,name:'fixture',modelId:'MiniMax-M2',isDefault:true,capabilities:['chat']});repo.createCredential({providerProfileId:provider.id,label:'fixture',plaintextSecret:'fixture-secret'});

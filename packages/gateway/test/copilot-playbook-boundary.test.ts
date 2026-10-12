@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { fileURLToPath } from "node:url";
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -11,7 +12,7 @@ import { createSkillTools } from '../src/services/agent/tools/skills.js';
 it('keeps Copilot playbooks outside the default CLI skill scope', () => {
  const db = new Database(':memory:');
  try {
-  migrate(drizzle(db), {migrationsFolder:new URL('../src/db/migrations/',import.meta.url).pathname});
+  migrate(drizzle(db), {migrationsFolder: fileURLToPath(new URL('../src/db/migrations/', import.meta.url))});
   const user = new UserRepository(db).create('boundary@test.dev','hash');
   const repo = new SkillRepository(db,user.id);
   seedBuiltinSkills(repo);

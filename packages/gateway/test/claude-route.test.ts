@@ -153,7 +153,7 @@ async function createRouteFixture(enabled = true): Promise<RouteFixture> {
     providerKey: "deepseek",
     baseUrl: "https://api.deepseek.com/v1",
     authType: "api_key",
-    apiFormat: "openai",
+    apiFormat: "openai-compatible",
     supportedAdapters: ["claude", "opencode"]
   });
   const model = repo.createModelProfile({
@@ -536,7 +536,7 @@ describe("ClaudeRouteRepository", () => {
       providerKey: "assign",
       baseUrl: "https://api.deepseek.com/v1",
       authType: "api_key",
-      apiFormat: "openai",
+      apiFormat: "openai-compatible",
       supportedAdapters: ["claude"]
     });
     const credentialA = providerRepo.createCredential({ providerProfileId: provider.id, label: "A", plaintextSecret: "sk-a" });
@@ -611,7 +611,7 @@ describe("claude route forwarder", () => {
       providerKey: "rotating",
       baseUrl: "https://api.deepseek.com/v1",
       authType: "api_key",
-      apiFormat: "openai",
+      apiFormat: "openai-compatible",
       supportedAdapters: ["claude"]
     });
     repo.createModelProfile({ providerProfileId: provider.id, name: "M", modelId: "m-1", isDefault: true });
@@ -961,7 +961,7 @@ describe("claude route management API", () => {
       providerKey: "admin-routed",
       baseUrl: "https://api.deepseek.com/v1",
       authType: "api_key",
-      apiFormat: "openai",
+      apiFormat: "openai-compatible",
       supportedAdapters: ["claude"]
     });
     repo.createModelProfile({ providerProfileId: provider.id, name: "M", modelId: "m-1", isDefault: true });

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "methodology": "Fixed lexical tool discovery probes against the real registered catalog. Development and held-out queries are reported separately; not a live model task benchmark.",
+  "cases": [
+    {"split":"development","query":"write_memory","expected":"write_memory"},
+    {"split":"development","query":"保存长期偏好","expected":"write_memory"},
+    {"split":"development","query":"回忆之前的约定","expected":"search_memory"},
+    {"split":"development","query":"调查原因","expected":"research_project"},
+    {"split":"development","query":"search source text","expected":"search_project_files"},
+    {"split":"development","query":"read_project_file","expected":"read_project_file"},
+    {"split":"holdout","query":"持久记录我的使用习惯","expected":"write_memory"},
+    {"split":"holdout","query":"找回过去保存的决定","expected":"search_memory"},
+    {"split":"holdout","query":"分析故障的原因","expected":"research_project"},
+    {"split":"holdout","query":"find source files containing text","expected":"search_project_files"},
+    {"split":"holdout","query":"ＳＥＡＲＣＨ＿ＭＥＭＯＲＹ","expected":"search_memory"},
+    {"split":"holdout","query":"zzunrelatedcapabilityzz","expected":null}
+  ]
+}

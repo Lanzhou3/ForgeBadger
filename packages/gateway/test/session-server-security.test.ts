@@ -126,6 +126,17 @@ describe("buildSanitizedEnv", () => {
     assert.deepStrictEqual(env, { PATH: "/usr/bin" });
   });
 
+  for (const noColor of ["", "1"]) {
+    it(`does not inherit host NO_COLOR=${JSON.stringify(noColor)} into terminal sessions`, () => {
+      const env = buildSanitizedEnv({
+        TERM: "xterm-256color",
+        COLORTERM: "truecolor",
+        NO_COLOR: noColor
+      });
+      assert.deepStrictEqual(env, { TERM: "xterm-256color", COLORTERM: "truecolor" });
+    });
+  }
+
   it("drops undefined values", () => {
     const env = buildSanitizedEnv({ PATH: "/usr/bin", HOME: undefined });
     assert.deepStrictEqual(env, { PATH: "/usr/bin" });

@@ -28,6 +28,7 @@ export interface CheckModelEndpointInput {
     options: { all: true }
   ) => Promise<Array<{ address: string; family: number }>>;
   allowPlaintextHttp?: boolean;
+  allowPrivateNetworks?: boolean;
 }
 
 export async function checkModelEndpoint(input: CheckModelEndpointInput): Promise<ModelEndpointHealth> {
@@ -42,6 +43,7 @@ export async function checkModelEndpoint(input: CheckModelEndpointInput): Promis
   try {
     const validationError = await validatePublicHttpsEndpointUrl(input.endpoint, resolveHost, {
       allowPlaintextHttp: input.allowPlaintextHttp,
+      allowPrivateNetworks: input.allowPrivateNetworks
     });
     if (validationError) {
       const latencyMs = Math.max(0, now() - start);
@@ -103,7 +105,7 @@ export async function validatePublicHttpsEndpointUrl(
     return "Only https protocol is allowed";
   }
 
-  return validateOutboundHost(endpointUrl.hostname, resolveHost);
+  return validateOutboundHost(endpointUrl.hostname, resolveHost, options);
 }
 
 function maskRemoteError(error: unknown): string {

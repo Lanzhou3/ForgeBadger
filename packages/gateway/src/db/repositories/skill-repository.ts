@@ -11,6 +11,7 @@ export interface CreateSkillInput {
   source?: string | undefined;
   content: string;
   resourceManifest?: string | null | undefined;
+  remoteProvenance?: string | null | undefined;
   version?: string | undefined;
   visibility?: "private" | "shared" | "admin" | undefined;
   isEnabled?: boolean | undefined;
@@ -18,6 +19,7 @@ export interface CreateSkillInput {
 
 export interface UpdateSkillInput {
   resourceManifest?: string | null | undefined;
+  remoteProvenance?: string | null | undefined;
   name?: string | undefined;
   description?: string | undefined;
   source?: string | undefined;
@@ -29,6 +31,7 @@ export interface UpdateSkillInput {
 export interface Skill {
   runtimeTarget: "cli" | "copilot";
   resourceManifest: string | null;
+  remoteProvenance: string | null;
   id: string;
   userId: string;
   name: string;
@@ -56,6 +59,7 @@ export class SkillRepository {
         userId: this.userId,
         runtimeTarget: this.runtimeTarget,
         resourceManifest: input.resourceManifest ?? null,
+        remoteProvenance: input.remoteProvenance ?? null,
         name: input.name,
         description: input.description ?? null,
         source: input.source ?? "local",
@@ -130,6 +134,7 @@ export class SkillRepository {
   update(id: string, input: UpdateSkillInput): Skill | undefined {
     const updateData: Record<string, unknown> = {};
     if (input.resourceManifest !== undefined) updateData.resourceManifest = input.resourceManifest;
+    if (input.remoteProvenance !== undefined) updateData.remoteProvenance = input.remoteProvenance;
     if (input.name !== undefined) updateData.name = input.name;
     if (input.description !== undefined) updateData.description = input.description;
     if (input.source !== undefined) updateData.source = input.source;

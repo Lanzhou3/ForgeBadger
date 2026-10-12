@@ -12,10 +12,13 @@ export interface CustomProviderForm {
   providerKey: string;
   apiFormat: ProviderApiFormat;
   authType: ProviderAuthType;
+  /** Raw stored endpoint; kept so an edit never drops a provider's bare baseUrl. */
+  baseUrl: string;
   anthropicBaseUrl: string;
   openaiBaseUrl: string;
   supportedAdapters: ProviderSupportedAdapter[];
   allowPlaintextHttp: boolean;
+  allowPrivateNetworks: boolean;
 }
 
 export interface CredentialForm {
@@ -31,12 +34,16 @@ export interface ModelForm {
   /** Free-form supplement for capabilities outside the common set. */
   customCapabilities: string;
   contextWindow: string;
+  /** Checked thinking effort levels (Kimi Code support_efforts). */
+  supportEfforts: string[];
+  /** Default thinking effort (Kimi Code default_effort); "" = unset. */
+  defaultEffort: string;
 }
 
 export type DeleteTarget =
-  | { kind: "provider"; providerId: string }
-  | { kind: "model"; modelId: string }
-  | { kind: "credential"; credentialId: string };
+  | { kind: "provider"; providerId: string; name: string }
+  | { kind: "model"; modelId: string; name: string }
+  | { kind: "credential"; credentialId: string; name: string };
 
 export type Translate = (key: any) => string;
 
@@ -45,10 +52,12 @@ export const emptyCustomProvider: CustomProviderForm = {
   providerKey: "",
   apiFormat: "anthropic",
   authType: "api_key",
+  baseUrl: "",
   anthropicBaseUrl: "",
   openaiBaseUrl: "",
   supportedAdapters: ["claude"],
   allowPlaintextHttp: false,
+  allowPrivateNetworks: false,
 };
 
 export function slugifyProviderKey(name: string): string {
@@ -59,13 +68,72 @@ export function slugifyProviderKey(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/**
+ * Build the provider-dialog form from a stored provider profile. Providers
+ * created outside this dialog may carry only a bare baseUrl, so when neither
+ * format-specific field is set, fall back to it on the side matching the
+ * provider's wire format (anthropic vs. everything else).
+ */
+export function hydrateCustomProviderForm(provider: ProviderProfile): CustomProviderForm {
+  const anthropicBaseUrl = provider.anthropicBaseUrl ?? "";
+  const openaiBaseUrl = provider.openaiBaseUrl ?? "";
+  const baseUrl = provider.baseUrl ?? "";
+  const fallbackBaseUrl = baseUrl && !anthropicBaseUrl && !openaiBaseUrl ? baseUrl : "";
+  return {
+    name: provider.name,
+    providerKey: provider.providerKey,
+    apiFormat: provider.apiFormat,
+    authType: provider.authType,
+    baseUrl,
+    anthropicBaseUrl: anthropicBaseUrl || (provider.apiFormat === "anthropic" ? fallbackBaseUrl : ""),
+    openaiBaseUrl: openaiBaseUrl || (provider.apiFormat === "anthropic" ? "" : fallbackBaseUrl),
+    supportedAdapters: [...provider.supportedAdapters],
+    allowPlaintextHttp: provider.allowPlaintextHttp ?? false,
+    allowPrivateNetworks: provider.allowPrivateNetworks ?? false,
+  };
+}
+
+/** Endpoint submitted as the provider's bare baseUrl. */
+export function customProviderPrimaryBaseUrl(form: CustomProviderForm): string {
+  return form.anthropicBaseUrl.trim() || form.openaiBaseUrl.trim() || form.baseUrl.trim();
+}
+
 export function customProviderHasEndpoint(form: CustomProviderForm): boolean {
-  return Boolean(form.anthropicBaseUrl.trim() || form.openaiBaseUrl.trim());
+  return Boolean(customProviderPrimaryBaseUrl(form));
 }
 
 export function customProviderHasPlaintextHttp(form: CustomProviderForm): boolean {
-  const urls = [form.anthropicBaseUrl.trim(), form.openaiBaseUrl.trim()].filter(Boolean);
+  const urls = [form.baseUrl, form.anthropicBaseUrl, form.openaiBaseUrl].map((url) => url.trim()).filter(Boolean);
   return urls.some((url) => url.toLowerCase().startsWith("http://"));
+}
+
+/** True when any configured endpoint points at a loopback / private / single-label host. */
+export function customProviderHasPrivateNetworkUrl(form: CustomProviderForm): boolean {
+  const urls = [form.baseUrl, form.anthropicBaseUrl, form.openaiBaseUrl].map((url) => url.trim()).filter(Boolean);
+  return urls.some((url) => {
+    let host: string;
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      return false;
+    }
+    if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+    if (host === "localhost" || host === "::1") return true;
+    if (host.startsWith("fd") || host.startsWith("fc")) return true; // IPv6 unique-local
+    if (host.endsWith(".local")) return true;
+    if (!host.includes(".")) return true; // single-label: mDNS / LAN / docker service name
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+      const octets = host.split(".").map((segment) => Number.parseInt(segment, 10));
+      const a = octets[0] ?? 0;
+      const b = octets[1] ?? 0;
+      if (a === 127 || a === 10 || a === 0) return true;
+      if (a === 192 && b === 168) return true;
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      if (a === 169 && b === 254) return true;
+      if (a === 100 && b >= 64 && b <= 127) return true;
+    }
+    return false;
+  });
 }
 
 export const emptyCredential: CredentialForm = {
@@ -79,6 +147,8 @@ export const emptyModel: ModelForm = {
   capabilities: ["chat", "code"],
   customCapabilities: "",
   contextWindow: "",
+  supportEfforts: [],
+  defaultEffort: "",
 };
 
 export function adapterLabel(adapter: ProviderSupportedAdapter): string {
@@ -97,9 +167,9 @@ export function productTypeLabel(productType: string | null | undefined, t: Tran
   return t("models.productTypePaygApi");
 }
 
-export function formatCheckedAt(value: string): string {
+export function formatCheckedAt(value: string, locale: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale);
 }
 
 /**
@@ -131,11 +201,9 @@ export function applyTargetsForProvider(provider: ProviderProfile | undefined): 
 export function apiFormatLabel(format: ProviderApiFormat, t: Translate): string {
   switch (format) {
     case "anthropic": return t("models.apiFormatAnthropic");
-    case "openai": return t("models.apiFormatOpenai");
-    case "openai-compatible": return t("models.apiFormatOpenaiCompatible");
+    case "openai-responses": return t("models.apiFormatOpenaiResponses");
+    case "openai-compatible": return t("models.apiFormatOpenaiChat");
     case "google": return t("models.apiFormatGoogle");
-    case "bedrock": return t("models.apiFormatBedrock");
-    case "local": return t("models.apiFormatLocal");
     default: return format;
   }
 }
@@ -144,11 +212,9 @@ export function apiFormatLabel(format: ProviderApiFormat, t: Translate): string 
 export function apiFormatHint(format: ProviderApiFormat, t: Translate): string {
   switch (format) {
     case "anthropic": return t("models.apiFormatHintAnthropic");
-    case "openai": return t("models.apiFormatHintOpenai");
-    case "openai-compatible": return t("models.apiFormatHintOpenaiCompatible");
+    case "openai-responses": return t("models.apiFormatHintOpenaiResponses");
+    case "openai-compatible": return t("models.apiFormatHintOpenaiChat");
     case "google": return t("models.apiFormatHintGoogle");
-    case "bedrock": return t("models.apiFormatHintBedrock");
-    case "local": return t("models.apiFormatHintLocal");
     default: return "";
   }
 }
@@ -176,7 +242,15 @@ export function authTypeHint(authType: ProviderAuthType, t: Translate): string {
 }
 
 /** Common capability tags offered as one-tap checkboxes in the model form. */
-export const COMMON_MODEL_CAPABILITIES = ["chat", "code", "vision", "tools", "reasoning", "embedding"] as const;
+export const COMMON_MODEL_CAPABILITIES = ["chat", "code", "vision", "video", "tools", "reasoning", "embedding"] as const;
+
+/**
+ * Thinking effort levels understood by Kimi Code model entries
+ * (config.toml support_efforts / default_effort). Mirrors the Gateway enum;
+ * Codex's minimal|low|medium|high request-parameter ladder is a separate
+ * mechanism and is not part of this list.
+ */
+export const THINKING_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export function parseCapabilities(input: string): string[] {
   const seen = new Set<string>();

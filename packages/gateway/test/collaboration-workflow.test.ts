@@ -26,6 +26,7 @@ import { validateTerminalRuntimeAuthorization } from '../src/websocket/terminal-
 
 import {InMemorySessionManager} from '../src/services/session-manager.js';
 import type {TerminalBackendClient} from '../src/services/terminal-backend.js';
+import {confirmedStopHostAvailable} from './fixtures/confirmed-stop-host.js';
 
 interface RunDto {id:string;sessionId:string|null;state:string;baseCommit:string;error:string|null}
 interface ReceiptDto {id:string;commit:string;status:string;current:boolean}
@@ -173,7 +174,7 @@ test('post-merge database failure retains unknown intent and reconciliation does
  }finally{await f.close();}
 });
 
-test('real source PTY blocks integration until stopped; revocation closes actual managed WebSocket and process', {timeout:30000,skip:process.platform==='win32'},async()=>{
+test('real source PTY blocks integration until stopped; revocation closes actual managed WebSocket and process', {timeout:30000,skip:process.platform==='win32'||!confirmedStopHostAvailable},async()=>{
  const {startAndConnectSessionServer}=await import('../src/services/session-server-integration.js');
  const {InMemorySessionManager}=await import('../src/services/session-manager.js');
  const {RuntimeAuthorizationInvalidator}=await import('../src/services/runtime-authorization-invalidation.js');
@@ -296,4 +297,45 @@ test('retired verification and policy endpoints cannot change configuration or c
   assert.equal(detail.status,200);assert.equal(detail.body.data.verifications[0].id,old.id);
   assert.equal((await f.request(f.outsider,'GET',f.base+`/runs/${run.id}`)).status,404);
  }finally{await f.close();}
+});
+
+
+test('provisioning session creation returns project metadata while public reads remain guarded', async () => {
+ const f = await fixture();
+ try {
+  const task = await f.task(), run = await f.run(f.owner, task.id);
+  assert.ok(run.sessionId);
+  const row = f.db.prepare('SELECT workspace_project_id, authority_epoch FROM delivery_runs WHERE id=?').get(run.id) as {workspace_project_id:string;authority_epoch:string};
+  const repo = new SessionRepository(f.db, f.owner.id);
+  f.db.prepare("UPDATE delivery_runs SET state='provisioning', session_id=NULL WHERE id=?").run(run.id);
+  f.db.prepare('DELETE FROM sessions WHERE id=?').run(run.sessionId);
+  const input = {projectId:row.workspace_project_id, name:'Provisioning', aiTool:'codex', workingDir:f.workspace(run.id)};
+  const count = () => (f.db.prepare('SELECT count(*) AS n FROM sessions').get() as {n:number}).n;
+  assert.throws(() => repo.create(input, randomUUID()), /MANAGED_WORKSPACE_REQUIRES_TASK_WORKFLOW/);
+  assert.throws(() => new SessionRepository(f.db, f.outsider.id).create(input, run.id), /MANAGED_PROJECT_ACCESS_DENIED/);
+  assert.throws(() => repo.create({...input, workingDir:path.join(input.workingDir, 'nested')}, run.id), /MANAGED_WORKSPACE_REQUIRES_TASK_WORKFLOW/);
+  f.db.prepare("UPDATE delivery_runs SET authority_epoch='stale' WHERE id=?").run(run.id);
+  assert.throws(() => repo.create(input, run.id), /MANAGED_PROJECT_ACCESS_DENIED/);
+  f.db.prepare('UPDATE delivery_runs SET authority_epoch=? WHERE id=?').run(row.authority_epoch, run.id);
+  assert.equal(count(), 0, 'denied creation must not insert a session');
+
+  const session = repo.create(input, run.id);
+  assert.ok(session?.id);
+  assert.equal(session.projectName, `Shared project · A real change`);
+  assert.equal(repo.getById(session.id), undefined);
+  assert.deepEqual(repo.list(), []);
+  assert.deepEqual(repo.listByProject(input.projectId), []);
+  assert.deepEqual(repo.listByIds(input.projectId, [session.id]), []);
+  f.db.prepare("UPDATE delivery_runs SET state='ready', session_id=? WHERE id=?").run(session.id, run.id);
+  assert.equal(repo.getById(session.id)?.projectName, session.projectName);
+  assert.equal(repo.listByProject(input.projectId).length, 1);
+  assert.equal(new SessionRepository(f.db, f.outsider.id).getById(session.id), undefined);
+  assert.throws(() => repo.create(input, run.id), /MANAGED_WORKSPACE_REQUIRES_TASK_WORKFLOW/);
+  f.db.prepare("UPDATE delivery_runs SET state='provisioning' WHERE id=?").run(run.id);
+  f.db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(f.owner.id);
+  assert.throws(() => repo.create(input, run.id), /MANAGED_PROJECT_ACCESS_DENIED/);
+  f.db.prepare("UPDATE users SET status='active' WHERE id=?").run(f.owner.id);
+  assert.throws(() => repo.create(input, run.id), /MANAGED_PROJECT_ACCESS_DENIED/, 'reenabling a user must not revive an old execution epoch');
+  assert.equal(count(), 1);
+ } finally { await f.close(); }
 });

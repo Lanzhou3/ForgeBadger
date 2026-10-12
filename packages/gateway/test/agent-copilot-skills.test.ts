@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -14,7 +15,7 @@ const availableToolNames = [...new Set(BUILTIN_COPILOT_SKILLS.flatMap(s=>[...s.r
 const options = {availableToolNames};
 function fixture() {
  const db = new Database(':memory:');
- migrate(drizzle(db),{migrationsFolder:new URL('../src/db/migrations/',import.meta.url).pathname});
+ migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations',import.meta.url))});
  const user = new UserRepository(db).create('skills@test.dev','hash');
  const repo = new SkillRepository(db,user.id,'copilot');
  const context:AgentToolContext = {db,userId:user.id,masterKey:'unused',availableToolNames};
@@ -44,7 +45,7 @@ describe('Copilot playbook boundary',()=>{
    repo.update(row.id,{version:'1.0.0',content:'custom old text'});
    assert.equal(loadCopilotPlaybook(db,user.id,row.id,options),undefined);
    const stale=listCopilotPlaybooks(db,user.id,options).find(s=>s.id===row.id)!;
-   assert.equal(stale.reviewRequired,true);assert.equal(stale.currentVersion,'2.0.0');assert.equal(stale.content,'custom old text');
+   assert.equal(stale.reviewRequired,true);assert.equal(stale.currentVersion,'4.1.0');assert.equal(stale.content,'custom old text');
    assert.equal(stale.version,'1.0.0');
    await assert.rejects(()=>load.execute({name:row.name},context));
   }finally{db.close();}
@@ -65,27 +66,15 @@ describe('Copilot playbook boundary',()=>{
    assert.equal(repo.update(shared.id,{content:'attack'}),undefined);
   }finally{db.close();}
  });
- it('allows Grant-bound loads only for current exact bundled name, metadata and body',()=>{
-  const {db,user,repo}=fixture();try{
-   const rows=listCopilotPlaybooks(db,user.id,{...options,grantBound:true});
-   assert.equal(rows.filter(s=>s.available).length,6);
-   const row=rows.find(s=>s.name==='session-dispatch')!;
-   repo.update(row.id,{description:'Do unapproved work',source:'builtin'});
-   assert.equal(loadCopilotPlaybook(db,user.id,row.id,{...options,grantBound:true}),undefined);
-   repo.update(row.id,{description:row.description,content:row.content+'\nInjected instructions'});
-   assert.equal(loadCopilotPlaybook(db,user.id,row.id,{...options,grantBound:true}),undefined);
-   assert.ok(loadCopilotPlaybook(db,user.id,row.id,options));
-   assert.equal(listEnabledCopilotPlaybookSummaries(db,user.id,{grantBound:true}).length,0);
-  }finally{db.close();}
- });
  it('keeps actual handbook tools consistent and removes unsupported execution promises',()=>{
   for (const row of BUILTIN_COPILOT_SKILLS) {
-   assert.ok(row.body.length>200);assert.ok(!row.body.includes('dispatch_task_to_session'));
-   assert.ok(!row.body.includes('pm_start_task_packet'));
+   assert.ok(row.body.length>200);assert.ok(!row.body.includes('pm_start_task_packet'));
    assert.ok(row.requiredTools.every(name=>availableToolNames.includes(name)));
   }
   const pm=BUILTIN_COPILOT_SKILLS.find(s=>s.name==='autonomous-work-item-loop')!;
-  assert.match(pm.body,/DOES NOT start/);assert.match(pm.body,/Grant/);
+  assert.match(pm.body,/pm_execute_task_packet/);assert.match(pm.body,/Tenant scope and exact action receipts constrain every operation/);assert.doesNotMatch(pm.body,/Grant/);
+  const dispatch=BUILTIN_COPILOT_SKILLS.find(s=>s.name==='session-dispatch')!;
+  assert.match(dispatch.body,/dispatch_task_to_session/);assert.match(dispatch.body,/COPILOT_DELIVERY_UNCONFIRMED/);assert.doesNotMatch(dispatch.body,/COPILOT_PROJECT_AUTONOMY_OFF/);
  });
  it('keeps frontmatter parsing for CLI callers',()=>{
   assert.equal(stripFrontmatter('---\nname: x\n---\n# X'),'# X');

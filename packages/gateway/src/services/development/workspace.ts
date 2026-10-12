@@ -21,20 +21,20 @@ export function sourcePath(root:string,value:string,mustExist=true):string {
   if(mustExist&&!fs.existsSync(resolved))throw new Error('DEVELOPMENT_SOURCE_MISSING');
   return resolved;
 }
-export function readSource(root:string,value:string) {
+export function readSource(root:string,value:string,maxBytes=MAX_SOURCE_BYTES) {
   const target=sourcePath(root,value);const fd=fs.openSync(target,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
-  try {const stat=fs.fstatSync(fd);if(!stat.isFile())throw new Error('DEVELOPMENT_SOURCE_NOT_REGULAR');if(stat.size>MAX_SOURCE_BYTES)throw new Error('DEVELOPMENT_SOURCE_TOO_LARGE');
-    const buffer=Buffer.allocUnsafe(MAX_SOURCE_BYTES+1);let size=0;while(size<buffer.length){const count=fs.readSync(fd,buffer,size,buffer.length-size,null);if(!count)break;size+=count;}const data=buffer.subarray(0,size);if(data.length>MAX_SOURCE_BYTES||data.includes(0))throw new Error('DEVELOPMENT_SOURCE_NOT_TEXT');
+  try {const stat=fs.fstatSync(fd);if(!stat.isFile())throw new Error('DEVELOPMENT_SOURCE_NOT_REGULAR');if(stat.size>maxBytes)throw new Error('DEVELOPMENT_SOURCE_TOO_LARGE');
+    const buffer=Buffer.allocUnsafe(maxBytes+1);let size=0;while(size<buffer.length){const count=fs.readSync(fd,buffer,size,buffer.length-size,null);if(!count)break;size+=count;}const data=buffer.subarray(0,size);if(data.length>maxBytes||data.includes(0))throw new Error('DEVELOPMENT_SOURCE_NOT_TEXT');
     const content=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(data);return {path:value,content,sha256:hashText(content),bytes:data.length};
   } finally {fs.closeSync(fd);}
 }
-export function listSourceFiles(root:string,directory='',limit=100) {
+export function listSourceFiles(root:string,directory='',limit=100,offset=0) {
   const start=directory?sourcePath(root,directory):fs.realpathSync(root);validateProjectRoot(start);
   const files:string[]=[];let visited=0;let truncated=false;
   function walk(dir:string,depth:number) {
-    if(depth>10||visited>2000||files.length>=limit){truncated=true;return;}
+    if(depth>10||visited>20_000||files.length>=limit+offset+1){truncated=true;return;}
     for(const entry of fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))) {
-      if(++visited>2000||files.length>=limit){truncated=true;return;}
+      if(++visited>20_000||files.length>=limit+offset+1){truncated=true;return;}
       const full=path.join(dir,entry.name),relative=path.relative(fs.realpathSync(root),full).split(path.sep).join('/');
       try{permittedSourcePath(relative);}catch{continue;}
       if(entry.isSymbolicLink())continue;
@@ -42,7 +42,8 @@ export function listSourceFiles(root:string,directory='',limit=100) {
       else if(entry.isFile())files.push(relative);
     }
   }
-  walk(start,0);return {files,truncated};
+  walk(start,0);return {files:files.slice(offset,offset+limit),truncated:truncated||files.length>offset+limit,
+    nextOffset:files.length>offset+limit?offset+limit:null,scanLimitReached:visited>20_000};
 }
 export interface PreparedSource {plan:DevelopmentPlan;root:string;before:Map<string,string>;after:Map<string,string>;sourceDigest:string;outputDigest:string;recipeDigest:string;}
 export function treeDigest(files:Map<string,string>):string {return hashText(JSON.stringify([...files].sort(([a],[b])=>a.localeCompare(b)).map(([p,c])=>[p,hashText(c)])));}

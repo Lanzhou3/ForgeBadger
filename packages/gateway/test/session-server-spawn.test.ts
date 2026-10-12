@@ -17,6 +17,7 @@ import {
   type SessionServerIntegration
 } from "../src/services/session-server-integration.js";
 import { SESSION_SERVER_TOKEN_FILE_NAME } from "../src/services/session-server/auth-token.js";
+import { confirmedStopHostAvailable } from "./fixtures/confirmed-stop-host.js";
 
 const stateDir = mkdtempSync(join(tmpdir(), "fb-ss-e2e-"));
 const ipcPath = process.platform === "win32"
@@ -84,7 +85,7 @@ describe("Session Server spawn (e2e)", () => {
     await pollUntilTrue(async () => !(await client.hasSession("e2e-1")), 15_000);
   });
 
-  it("kills a long-lived session", async () => {
+  it("kills a long-lived session", { skip: !confirmedStopHostAvailable }, async () => {
     const { client } = integration;
 
     await client.createSession({ name: "e2e-2", cwd: stateDir, ...longSession, env: {} });

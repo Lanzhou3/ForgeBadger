@@ -8,7 +8,7 @@ import type { ThemedToken } from "shiki";
 import { Button } from "@/components/ui/button";
 import { getProjectWorkspaceFile, putProjectWorkspaceFile } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useLanguage } from "@/hooks/use-language";
+import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import { highlightWorkspaceCode, tokenFontStyle } from "./highlight";
 import { formatBytes, formatWorkspaceTime } from "./utils";
 
@@ -33,6 +33,7 @@ export function WorkspaceFileViewer({
   className,
 }: WorkspaceFileViewerProps) {
   const { t } = useLanguage();
+  const locale = useUiLocale();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
   const fileQuery = useQuery({
@@ -133,7 +134,7 @@ export function WorkspaceFileViewer({
           <div className="flex shrink-0 items-center gap-2">
             {file ? (
               <span className="text-[11px] text-muted-foreground">
-                {formatBytes(file.sizeBytes)} · {formatWorkspaceTime(file.updatedAt)}
+                {formatBytes(file.sizeBytes)} · {formatWorkspaceTime(file.updatedAt, locale)}
               </span>
             ) : null}
             {savedFlash && !editing ? (

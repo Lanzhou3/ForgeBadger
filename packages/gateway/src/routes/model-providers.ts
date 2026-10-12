@@ -1,10 +1,12 @@
+import bcrypt from "bcryptjs";
+import { adapterIds } from "../lib/adapter-ids.js";
 import { Router } from "express";
 import { z } from "zod";
 
 import { authenticate, type AuthenticatedRequest, userIsInstanceAdmin } from "../auth/middleware.js";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import { isForeignKeyError } from "../lib/db-errors.js";
-import { redactSensitiveErrorMessage } from "../lib/redaction.js";
+import { redactSensitiveContent, redactSensitiveErrorMessage } from "../lib/redaction.js";
 import {
   ModelProviderRepository,
   type ModelProfile,
@@ -14,6 +16,8 @@ import {
   type UpdateModelProfileInput
 } from "../db/repositories/model-provider-repository.js";
 import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-config-applied-provider-repository.js";
+import { AuditLogRepository } from "../db/repositories/audit-log-repository.js";
+import { UserRepository } from "../db/repositories/user-repository.js";
 import type { Database } from "../db/types.js";
 import { checkModelEndpoint } from "../services/model-endpoint-health.js";
 import {
@@ -30,10 +34,11 @@ import { getProviderCapabilities } from "../services/provider-capabilities.js";
 import { buildAppliedProvidersOverview } from "../services/model-provider-applied.js";
 import type { AdapterId } from "../services/adapter-discovery.js";
 import type { CliConfigSnapshot } from "../services/cli-config.js";
+import { THINKING_EFFORT_LEVELS } from "../services/model-capability-projection.js";
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 
-const adapterSchema = z.enum(["claude", "opencode", "codex", "kimi", "pi"]);
-const providerAdapterSchema = z.enum(["claude", "opencode", "codex", "kimi", "pi"]);
+const adapterSchema = z.enum(adapterIds);
+const providerAdapterSchema = z.enum(adapterIds);
 const productTypeSchema = z.enum(["payg_api", "coding_plan", "token_plan", "subscription", "local"]);
 const createProviderSchema = z.object({
   name: z.string().min(1).optional(),
@@ -44,9 +49,10 @@ const createProviderSchema = z.object({
   region: z.string().optional(),
   productType: productTypeSchema.optional(),
   authType: z.enum(["api_key", "bearer_token", "oauth", "none"]).optional(),
-  apiFormat: z.enum(["anthropic", "openai", "openai-compatible", "google", "bedrock", "local"]).optional(),
+  apiFormat: z.enum(["anthropic", "openai-responses", "openai-compatible", "google"]).optional(),
   supportedAdapters: z.array(providerAdapterSchema).optional(),
-  allowPlaintextHttp: z.boolean().optional()
+  allowPlaintextHttp: z.boolean().optional(),
+  allowPrivateNetworks: z.boolean().optional()
 });
 const updateProviderSchema = createProviderSchema.partial();
 const createModelProfileSchema = z.object({
@@ -54,6 +60,8 @@ const createModelProfileSchema = z.object({
   modelId: z.string().min(1),
   capabilities: z.array(z.string().min(1)).optional(),
   contextWindow: z.number().int().positive().nullable().optional(),
+  supportEfforts: z.array(z.enum(THINKING_EFFORT_LEVELS)).optional(),
+  defaultEffort: z.enum(THINKING_EFFORT_LEVELS).nullable().optional(),
   isDefault: z.boolean().optional()
 });
 const updateModelProfileSchema = createModelProfileSchema.partial();
@@ -62,6 +70,9 @@ const createCredentialSchema = z.object({
   plaintextSecret: z.string().min(1)
 });
 const rotateCredentialSchema = createCredentialSchema;
+const revealCredentialSchema = z.object({
+  password: z.string().min(1)
+});
 const endpointTestSchema = z.object({
   timeoutMs: z.number().int().min(100).max(15000).optional()
 });
@@ -73,6 +84,19 @@ const balanceSchema = z.object({
   credentialId: z.string().min(1).optional(),
   timeoutMs: z.number().int().min(100).max(15000).optional()
 });
+
+/**
+ * Cross-field rule: a default effort must be one of the model's supported
+ * efforts. An empty/absent support list imposes no constraint (the CLI will
+ * simply not expose the effort selector for that model).
+ */
+function invalidEffortSelection(supportEfforts: readonly string[], defaultEffort: string | null): string | null {
+  if (!defaultEffort || supportEfforts.length === 0) return null;
+  if (!supportEfforts.includes(defaultEffort)) {
+    return "defaultEffort must be one of the selected supportEfforts";
+  }
+  return null;
+}
 
 export interface ModelProviderRouteOptions {
   fetchProviderModels?: (input: FetchProviderModelsInput) => Promise<FetchedProviderModel[]>;
@@ -94,6 +118,11 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
   router.use("/:id/test", probeLimiter);
   router.use("/:id/models/sync", probeLimiter);
   router.use("/:id/balance", probeLimiter);
+
+  // Reveal demands the account password on top of the JWT; keep the per-user
+  // attempt budget tight so a leaked session cannot brute-force it.
+  const revealLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 5 });
+  router.use("/:id/credentials/:credentialId/reveal", revealLimiter);
 
   // Sidebar polling would otherwise spray provider endpoints; cache balance
   // reads briefly and let POST /:id/balance act as the explicit refresh.
@@ -134,6 +163,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
         baseUrls,
         apiKey: credential ? repo.decryptCredential(credential.id) : undefined,
         allowPlaintextHttp: provider.allowPlaintextHttp,
+        allowPrivateNetworks: provider.allowPrivateNetworks,
         ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {})
       });
       return { ok: true, result };
@@ -244,6 +274,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     if (parseResult.data.apiFormat !== undefined) updateInput.apiFormat = parseResult.data.apiFormat;
     if (parseResult.data.supportedAdapters !== undefined) updateInput.supportedAdapters = parseResult.data.supportedAdapters;
     if (parseResult.data.allowPlaintextHttp !== undefined) updateInput.allowPlaintextHttp = parseResult.data.allowPlaintextHttp;
+    if (parseResult.data.allowPrivateNetworks !== undefined) updateInput.allowPrivateNetworks = parseResult.data.allowPrivateNetworks;
     const provider = repoFor(db, masterKey, req).updateProviderProfile(req.params.id, updateInput);
     if (!provider) {
       res.status(404).json({ code: 1, message: "Provider not found" });
@@ -288,6 +319,14 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       res.status(400).json({ code: 1, message: "Invalid model profile payload" });
       return;
     }
+    const effortError = invalidEffortSelection(
+      parseResult.data.supportEfforts ?? [],
+      parseResult.data.defaultEffort ?? null
+    );
+    if (effortError) {
+      res.status(400).json({ code: 1, message: effortError });
+      return;
+    }
     const repo = repoFor(db, masterKey, req);
     const modelInput: CreateModelProfileInput = {
       providerProfileId: req.params.id,
@@ -295,6 +334,8 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       modelId: parseResult.data.modelId,
       ...(parseResult.data.capabilities !== undefined ? { capabilities: parseResult.data.capabilities } : {}),
       ...(parseResult.data.contextWindow !== undefined ? { contextWindow: parseResult.data.contextWindow } : {}),
+      ...(parseResult.data.supportEfforts !== undefined ? { supportEfforts: parseResult.data.supportEfforts } : {}),
+      ...(parseResult.data.defaultEffort !== undefined ? { defaultEffort: parseResult.data.defaultEffort } : {}),
       ...(parseResult.data.isDefault !== undefined ? { isDefault: parseResult.data.isDefault } : {})
     };
     const model = repo.createModelProfile(modelInput);
@@ -344,6 +385,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
         apiFormat: provider.apiFormat,
         defaultHeaders: provider.defaultHeaders,
         allowPlaintextHttp: provider.allowPlaintextHttp,
+        allowPrivateNetworks: provider.allowPrivateNetworks,
         ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
       });
       const { created, backfilled } = syncFetchedModels(repo, provider, fetchedModels);
@@ -440,12 +482,22 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
       res.status(400).json({ code: 1, message: "Model does not belong to the selected provider" });
       return;
     }
+    const effortError = invalidEffortSelection(
+      parseResult.data.supportEfforts ?? model.supportEfforts,
+      parseResult.data.defaultEffort !== undefined ? parseResult.data.defaultEffort : model.defaultEffort
+    );
+    if (effortError) {
+      res.status(400).json({ code: 1, message: effortError });
+      return;
+    }
     const updateInput: UpdateModelProfileInput = {};
     if (parseResult.data.name !== undefined) updateInput.name = parseResult.data.name;
     if (parseResult.data.modelId !== undefined) updateInput.modelId = parseResult.data.modelId;
     if (parseResult.data.capabilities !== undefined) updateInput.capabilities = parseResult.data.capabilities;
     if (parseResult.data.contextWindow !== undefined) updateInput.contextWindow = parseResult.data.contextWindow;
     if (parseResult.data.isDefault !== undefined) updateInput.isDefault = parseResult.data.isDefault;
+    if (parseResult.data.supportEfforts !== undefined) updateInput.supportEfforts = parseResult.data.supportEfforts;
+    if (parseResult.data.defaultEffort !== undefined) updateInput.defaultEffort = parseResult.data.defaultEffort;
     const updated = repo.updateModelProfile(model.id, updateInput);
     res.json({ code: 0, data: { model: updated }, message: "" });
   });
@@ -541,6 +593,53 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     res.json({ code: 0, data: { credential: updated }, message: "" });
   });
 
+  // Reveal the stored secret for copying into other tools. It is gated on a
+  // fresh account-password check (on top of the session JWT) and audit-logged;
+  // only the owning user's own active credentials can be revealed.
+  router.post("/:id/credentials/:credentialId/reveal", async (req, res) => {
+    const parseResult = revealCredentialSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid reveal payload" });
+      return;
+    }
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const user = new UserRepository(db).findById(userId);
+    if (!user || !(await bcrypt.compare(parseResult.data.password, user.passwordHash))) {
+      res.status(401).json({ code: 1, message: "Invalid password" });
+      return;
+    }
+    const repo = repoFor(db, masterKey, req);
+    if (!repo.getProviderProfile(req.params.id)) {
+      res.status(404).json({ code: 1, message: "Provider not found" });
+      return;
+    }
+    const credential = repo.getCredential(req.params.credentialId);
+    if (!credential) {
+      res.status(404).json({ code: 1, message: "Credential not found" });
+      return;
+    }
+    if (credential.providerProfileId !== req.params.id) {
+      res.status(400).json({ code: 1, message: "Credential does not belong to the selected provider" });
+      return;
+    }
+    if (credential.status !== "active") {
+      res.status(400).json({ code: 1, message: "Only an active credential can be revealed" });
+      return;
+    }
+    try {
+      const secret = repo.decryptCredential(credential.id);
+      new AuditLogRepository(db, userId).create({
+        action: "model_provider.credential.reveal",
+        resourceType: "provider_credential",
+        resourceId: credential.id,
+        ipAddress: req.ip
+      });
+      res.json({ code: 0, data: { secret }, message: "" });
+    } catch {
+      res.status(500).json({ code: 1, message: "Failed to reveal credential" });
+    }
+  });
+
   router.delete("/:id/credentials/:credentialId", (req, res) => {
     const repo = repoFor(db, masterKey, req);
     if (!repo.getProviderProfile(req.params.id)) {
@@ -587,6 +686,7 @@ export function createModelProviderRoutes(db: Database, masterKey: string, optio
     const health = await checkModelEndpoint({
       endpoint: provider.baseUrl,
       allowPlaintextHttp: provider.allowPlaintextHttp,
+      allowPrivateNetworks: provider.allowPrivateNetworks,
       ...(parseResult.data.timeoutMs ? { timeoutMs: parseResult.data.timeoutMs } : {})
     });
     res.json({ code: 0, data: { health }, message: "" });
@@ -610,7 +710,8 @@ function createCustom(repo: ModelProviderRepository, input: z.infer<typeof creat
     authType: input.authType,
     apiFormat: input.apiFormat,
     supportedAdapters: input.supportedAdapters ?? ["claude"],
-    ...(input.allowPlaintextHttp !== undefined ? { allowPlaintextHttp: input.allowPlaintextHttp } : {})
+    ...(input.allowPlaintextHttp !== undefined ? { allowPlaintextHttp: input.allowPlaintextHttp } : {}),
+    ...(input.allowPrivateNetworks !== undefined ? { allowPrivateNetworks: input.allowPrivateNetworks } : {})
   });
 }
 
@@ -680,8 +781,8 @@ function emitModelSyncNotification(
     titleKey: input.status === "success"
       ? "notifications.modelSyncSucceeded"
       : "notifications.modelSyncFailed",
-    message: `${input.detail} (${input.provider.name})`,
+    message: redactSensitiveContent(`${input.detail} (${input.provider.name})`),
     providerId: input.provider.id,
-    providerName: input.provider.name
+    providerName: redactSensitiveContent(input.provider.name)
   });
 }

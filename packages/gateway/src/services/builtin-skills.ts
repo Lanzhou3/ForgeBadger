@@ -1,6 +1,5 @@
 /** CLI skill seeds and separately scoped, versioned Copilot playbook upgrades. */
 import { BUILTIN_COPILOT_SKILLS } from "./agent/skills/copilot-skills.js";
-import { LEGACY_COPILOT_SKILLS } from "./agent/skills/legacy-copilot-skills.js";
 import type { SkillRepository } from "../db/repositories/skill-repository.js";
 
 export interface BuiltinSkillSeed {
@@ -66,7 +65,7 @@ export function seedBuiltinSkills(repo: SkillRepository): void {
   }
 }
 
-/** Target-scoped seeding preserves IDs, disable choices and edited legacy bodies. */
+/** Creation only. Version upgrades belong to the revision service so history and rollback survive. */
 export function seedBuiltinCopilotPlaybooks(repo: SkillRepository): void {
   if (repo.runtimeTarget !== "copilot") throw new Error("Copilot repository scope required");
   for (const bundled of BUILTIN_COPILOT_SKILLS) {
@@ -76,10 +75,6 @@ export function seedBuiltinCopilotPlaybooks(repo: SkillRepository): void {
         version: bundled.version, source: "builtin", visibility: "private", isEnabled: true});
       continue;
     }
-    const legacy = LEGACY_COPILOT_SKILLS.find(skill => skill.name === bundled.name);
-    if (existing.source === "builtin" && existing.version === "1.0.0" && legacy &&
-        existing.content === legacy.body && existing.description === legacy.description) {
-      repo.update(existing.id, {content: bundled.body, description: bundled.description, version: bundled.version});
-    }
+
   }
 }

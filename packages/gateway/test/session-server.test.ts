@@ -6,7 +6,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -36,6 +36,8 @@ describe("PlatformAdapter", () => {
     const dir = mkdtempSync(join(tmpdir(), "fb-winshim-"));
     try {
       const payload = join(dir, "node_modules", "example", "cli.js");
+      mkdirSync(join(dir, "node_modules", "example"), { recursive: true });
+      writeFileSync(payload, "");
       writeFileSync(join(dir, "example.cmd"), `@node "${payload}" %*`);
       assert.deepStrictEqual(adapter.resolveCommand("example", { Path: dir }), {
         command: process.execPath, args: [payload]

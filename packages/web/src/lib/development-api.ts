@@ -43,11 +43,14 @@ export function previewDevelopmentAction(task: DevelopmentTask, action: "cancel"
     body: JSON.stringify({ commandId: `development.task.${action}`, input: { projectId: task.projectId, taskId: task.id, ...(action === "accept" ? { artifactDigest: task.artifactDigest } : {}) }, idempotencyKey }),
   });
 }
-export function approveDevelopmentAction(intent: PlatformIntent) {
-  return fetchJson<{ intent: PlatformIntent }>(`/api/v1/platform-actions/${encodeURIComponent(intent.id)}/decide`, {
-    method: "POST", body: JSON.stringify({ digest: intent.digest, approved: true }),
-  });
-}
 export function executeDevelopmentAction(intentId: string) {
   return fetchJson<{ receipt: PlatformReceipt }>(`/api/v1/platform-actions/${encodeURIComponent(intentId)}/execute`, { method: "POST", body: "{}" });
+}
+
+/** Verify the recorded execution identity; never requeue or replay its work. */
+export function reconcileDevelopmentTask(projectId: string, taskId: string, expectedRevision: number) {
+  return fetchJson<{ task: DevelopmentTask }>(`${base}/tasks/${encodeURIComponent(taskId)}/reconcile`, {
+    method: "POST",
+    body: JSON.stringify({ projectId, expectedRevision }),
+  });
 }

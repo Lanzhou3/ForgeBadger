@@ -4,12 +4,12 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { CopilotSettingsPage } from "./copilot-settings-page";
 import { LanguageProvider } from "@/hooks/use-language";
+import { listModelProviders } from "@/lib/api";
+import { getCopilotPreferences } from "@/lib/copilot-api";
 const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("@/lib/api", () => ({ listModelProviders: vi.fn().mockResolvedValue({ models: [] }) }));
-vi.mock("@/lib/platform-actions-api", () => ({
-  listGrants: vi.fn().mockResolvedValue({ grants: [], capabilities: [] }),
-}));
+vi.mock("@/lib/copilot-api", () => ({ getCopilotPreferences: vi.fn().mockResolvedValue({ modelId: null, thinkingEffort: "medium" }) }));
 vi.mock("@/lib/copilot-extensions-api", () => ({
   copilotSkillsKey: ["copilot", "skills"],
   copilotConnectionsKey: ["copilot", "connections"],
@@ -17,6 +17,7 @@ vi.mock("@/lib/copilot-extensions-api", () => ({
   listCopilotConnections: vi.fn().mockResolvedValue({ connections: [] }),
 }));
 vi.mock("./copilot-memory-panel", () => ({ CopilotMemoryPanel: () => <div>Memory</div> }));
+vi.mock("./copilot-autonomy-panel", () => ({ CopilotAutonomyPanel: () => null }));
 function mount() {
   render(
     <LanguageProvider>
@@ -26,19 +27,36 @@ function mount() {
     </LanguageProvider>,
   );
 }
-beforeEach(() => { cleanup(); vi.clearAllMocks(); });
+beforeEach(() => {
+  cleanup(); vi.clearAllMocks();
+  vi.mocked(getCopilotPreferences).mockResolvedValue({ modelId: null, thinkingEffort: "medium" });
+});
+it("displays the effective chat model instead of always showing the platform default", async () => {
+  vi.mocked(listModelProviders).mockResolvedValueOnce({ providers: [], credentials: [], models: [
+    { id: "default", name: "Default", providerName: "Provider", isDefault: true, status: "active" },
+    { id: "chosen", name: "Chosen", providerName: "Provider", isDefault: false, status: "active" },
+  ].map(model => ({ ...model, providerProfileId: "provider", providerKey: "openai", baseUrl: null,
+    modelId: model.id, capabilities: [], contextWindow: null, supportEfforts: [], defaultEffort: null })) });
+  vi.mocked(getCopilotPreferences).mockResolvedValue({ modelId: "chosen", thinkingEffort: "medium" });
+  mount();
+  expect(await screen.findByText("Provider / Chosen", { exact: false })).toBeTruthy();
+  expect(screen.queryByText("Provider / Default", { exact: false })).toBeNull();
+});
 it("renders the settings nav with entries into every Copilot settings section", () => {
   mount();
   expect(screen.getByRole("heading", { name: "Copilot 设置" })).toBeTruthy();
   const nav = screen.getByRole("navigation", { name: "Copilot 设置导航" });
-  expect(nav.querySelector('a[href="/copilot/settings/access"]')).toBeTruthy();
   expect(nav.querySelector('a[href="/copilot/extensions"]')).toBeTruthy();
   expect(nav.querySelector('a[href="/copilot/channels"]')).toBeTruthy();
   expect(nav.querySelector('a[href="/copilot/automations"]')).toBeTruthy();
+  // Horizontal chip row on mobile: the overflow is hinted with a right-edge
+  // fade, and the desktop column drops both the mask and the overflow.
+  expect(nav.className).toContain("overflow-x-auto");
+  expect(nav.className).toContain("[mask-image:linear-gradient");
+  expect(nav.className).toContain("lg:[mask-image:none]");
 });
-it("links summary cards to access, extensions, channels and automations", () => {
+it("links summary cards to extensions, channels and automations", () => {
   mount();
-  expect(screen.getAllByRole("link", { name: /授权/ }).some((link) => link.getAttribute("href") === "/copilot/settings/access")).toBe(true);
   expect(screen.getAllByRole("link", { name: /Copilot 扩展/ }).some((link) => link.getAttribute("href") === "/copilot/extensions")).toBe(true);
   expect(screen.getAllByRole("link", { name: /远程渠道/ }).some((link) => link.getAttribute("href") === "/copilot/channels")).toBe(true);
   expect(screen.getAllByRole("link", { name: /定时自动化/ }).some((link) => link.getAttribute("href") === "/copilot/automations")).toBe(true);

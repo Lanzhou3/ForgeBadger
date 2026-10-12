@@ -11,6 +11,7 @@ import {
   createTemplate,
   createSession,
   deleteProviderCredential,
+  deleteSession,
   deleteModelProvider,
   deleteProviderModel,
   chooseDefaultRuntimeAdapter,
@@ -73,7 +74,11 @@ import {
   applyConfigSync,
   previewConfig,
   previewConfigSync,
-  previewSkillSource,
+  previewGitHubSkillSource,
+  checkSkillUpdate,
+  checkAllSkillUpdates,
+  refreshMarketplace,
+  parseSkillRemoteProvenance,
   rotateApiKey,
   resetPassword,
   markAllNotificationsRead,
@@ -132,6 +137,13 @@ describe("api client", () => {
     vi.stubGlobal("fetch", vi.fn(() => mockEnvelope({})));
   });
 
+  it("updates authorization projects on the existing token using a strict PATCH body", async () => {
+    await apiModule.updateMcpTokenProjects({ id: 'token/id', projectIds: ['p1', 'p2'], expectedProjectIds: ['p1'] });
+    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:18332/api/v1/mcp/tokens/token%2Fid', expect.objectContaining({
+      method: 'PATCH', body: JSON.stringify({ projectIds: ['p1', 'p2'], expectedProjectIds: ['p1'] }),
+    }));
+  });
+
   it("reports aborted gateway requests as a clear timeout error", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new DOMException("signal is aborted without reason", "AbortError"))));
 
@@ -148,7 +160,7 @@ describe("api client", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/auth/reset-password",
+      "http://127.0.0.1:18332/api/v1/auth/reset-password",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -168,7 +180,7 @@ describe("api client", () => {
     );
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/auth/register",
+      "http://127.0.0.1:18332/api/v1/auth/register",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -192,7 +204,7 @@ describe("api client", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/model-providers",
+      "http://127.0.0.1:18332/api/v1/model-providers",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -215,7 +227,7 @@ describe("api client", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/model-providers/provider-1",
+      "http://127.0.0.1:18332/api/v1/model-providers/provider-1",
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({
@@ -230,7 +242,7 @@ describe("api client", () => {
     await deleteModelProvider("provider-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/model-providers/provider-1",
+      "http://127.0.0.1:18332/api/v1/model-providers/provider-1",
       expect.objectContaining({ method: "DELETE" })
     );
   });
@@ -239,7 +251,7 @@ describe("api client", () => {
     await syncProviderModels("provider-1", { credentialId: "credential-1" });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/models/sync",
+      "http://127.0.0.1:18332/api/v1/model-providers/provider-1/models/sync",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ credentialId: "credential-1" }),
@@ -259,7 +271,7 @@ describe("api client", () => {
     const result = await checkProviderBalance("provider-1", { credentialId: "credential-1" });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/balance",
+      "http://127.0.0.1:18332/api/v1/model-providers/provider-1/balance",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ credentialId: "credential-1" }),
@@ -276,7 +288,7 @@ describe("api client", () => {
     const result = await checkProviderBalance("provider-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/balance",
+      "http://127.0.0.1:18332/api/v1/model-providers/provider-1/balance",
       expect.objectContaining({ method: "POST", body: JSON.stringify({}) })
     );
     expect(result.supported).toBe(false);
@@ -311,19 +323,19 @@ describe("api client", () => {
     await apiModule.rollbackCliConfigApply("kimi", "backup-1");
     await apiModule.rollbackCliConfigApply("kimi");
 
-    expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:48731/api/v1/cli-config/kimi/apply-provider/preview", expect.objectContaining({
+    expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:18332/api/v1/cli-config/kimi/apply-provider/preview", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ providerProfileId: "provider-1", modelProfileId: "model-1", credentialId: "credential-1" }),
     }));
-    expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:48731/api/v1/cli-config/kimi/apply-provider", expect.objectContaining({
+    expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:18332/api/v1/cli-config/kimi/apply-provider", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ providerProfileId: "provider-1", modelProfileId: "model-1" }),
     }));
-    expect(fetch).toHaveBeenNthCalledWith(3, "http://127.0.0.1:48731/api/v1/cli-config/kimi/rollback", expect.objectContaining({
+    expect(fetch).toHaveBeenNthCalledWith(3, "http://127.0.0.1:18332/api/v1/cli-config/kimi/rollback", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ backupId: "backup-1" }),
     }));
-    expect(fetch).toHaveBeenNthCalledWith(4, "http://127.0.0.1:48731/api/v1/cli-config/kimi/rollback", expect.objectContaining({
+    expect(fetch).toHaveBeenNthCalledWith(4, "http://127.0.0.1:18332/api/v1/cli-config/kimi/rollback", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({}),
     }));
@@ -333,8 +345,8 @@ describe("api client", () => {
     await apiModule.getCliConfigFields("codex");
     await apiModule.getCliConfigFieldValues("codex");
 
-    expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:48731/api/v1/cli-config/codex/fields", expect.objectContaining({}));
-    expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:48731/api/v1/cli-config/codex/field-values", expect.objectContaining({}));
+    expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:18332/api/v1/cli-config/codex/fields", expect.objectContaining({}));
+    expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:18332/api/v1/cli-config/codex/field-values", expect.objectContaining({}));
   });
 
   it("manages provider model profiles through REST", async () => {
@@ -347,7 +359,7 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/models/model-1",
+      "http://127.0.0.1:18332/api/v1/model-providers/provider-1/models/model-1",
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({ name: "Updated", capabilities: ["chat", "reasoning"] }),
@@ -355,12 +367,12 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/models/model-1/set-default",
+      "http://127.0.0.1:18332/api/v1/model-providers/provider-1/models/model-1/set-default",
       expect.objectContaining({ method: "POST" })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/models/model-1",
+      "http://127.0.0.1:18332/api/v1/model-providers/provider-1/models/model-1",
       expect.objectContaining({ method: "DELETE" })
     );
   });
@@ -374,7 +386,7 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/credentials/credential-1/rotate",
+      "http://127.0.0.1:18332/api/v1/model-providers/provider-1/credentials/credential-1/rotate",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ label: "new", plaintextSecret: "sk-new" }),
@@ -382,7 +394,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/model-providers/provider-1/credentials/credential-1",
+      "http://127.0.0.1:18332/api/v1/model-providers/provider-1/credentials/credential-1",
       expect.objectContaining({ method: "DELETE" })
     );
   });
@@ -391,7 +403,7 @@ describe("api client", () => {
     await discoverAdapters();
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/adapters/discovery",
+      "http://127.0.0.1:18332/api/v1/adapters/discovery",
       expect.objectContaining({ headers: expect.any(Object) })
     );
   });
@@ -405,18 +417,18 @@ describe("api client", () => {
         counts: { projects: 1 },
         dashboardHealth: {},
         adapters: [{ id: "claude", command: "claude", runtimeModes: ["terminal"] }],
-        environment: { FORGEBADGER_PORT: "48731" },
+        environment: { FORGEBADGER_PORT: "18332" },
       },
     })));
 
     const result = await exportDiagnostics();
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/diagnostics/export",
+      "http://127.0.0.1:18332/api/v1/diagnostics/export",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(result.report.app.name).toBe("ForgeBadger");
-    expect(result.report.environment.FORGEBADGER_PORT).toBe("48731");
+    expect(result.report.environment.FORGEBADGER_PORT).toBe("18332");
   });
 
   it("creates Gate A sessions with the current login token", async () => {
@@ -439,7 +451,7 @@ describe("api client", () => {
 
     expect(session.id).toBe("gate-a-session");
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/gate-a/sessions",
+      "http://127.0.0.1:18332/api/v1/gate-a/sessions",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -459,22 +471,22 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/notifications",
+      "http://127.0.0.1:18332/api/v1/notifications",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/notifications/notification-1/read",
+      "http://127.0.0.1:18332/api/v1/notifications/notification-1/read",
       expect.objectContaining({ method: "POST" })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/notifications/read-all",
+      "http://127.0.0.1:18332/api/v1/notifications/read-all",
       expect.objectContaining({ method: "POST" })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       4,
-      "http://127.0.0.1:48731/api/v1/notifications",
+      "http://127.0.0.1:18332/api/v1/notifications",
       expect.objectContaining({ method: "DELETE" })
     );
   });
@@ -506,7 +518,7 @@ describe("api client", () => {
     const result = await listNotifications({ category: "app_action" });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/notifications?category=app_action",
+      "http://127.0.0.1:18332/api/v1/notifications?category=app_action",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(result.unreadCount).toBe(1);
@@ -526,7 +538,7 @@ describe("api client", () => {
           notifications: [
             {
               id: "notification-legacy-1",
-              type: "claude_notification",
+              type: "session_notification",
               titleKey: "notifications.taskCompleted",
               message: "done",
               href: "/sessions/session-1",
@@ -552,12 +564,12 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/admin/users",
+      "http://127.0.0.1:18332/api/v1/admin/users",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/admin/users/user-1",
+      "http://127.0.0.1:18332/api/v1/admin/users/user-1",
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({ role: "admin", status: "disabled" }),
@@ -573,7 +585,7 @@ describe("api client", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/activities?sessionId=session-1&type=session_started%2Csession_ended&limit=20",
+      "http://127.0.0.1:18332/api/v1/activities?sessionId=session-1&type=session_started%2Csession_ended&limit=20",
       expect.objectContaining({ headers: expect.any(Object) })
     );
   });
@@ -584,12 +596,12 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/snapshots?projectId=project-1",
+      "http://127.0.0.1:18332/api/v1/snapshots?projectId=project-1",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/snapshots/snapshot-1/restore",
+      "http://127.0.0.1:18332/api/v1/snapshots/snapshot-1/restore",
       expect.objectContaining({ method: "POST" })
     );
   });
@@ -601,17 +613,17 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/ai-config",
+      "http://127.0.0.1:18332/api/v1/projects/project-1/ai-config",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/ai-config/global",
+      "http://127.0.0.1:18332/api/v1/projects/project-1/ai-config/global",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/ai-config/files",
+      "http://127.0.0.1:18332/api/v1/projects/project-1/ai-config/files",
       expect.objectContaining({
         method: "PUT",
         body: JSON.stringify({ relativePath: "AGENTS.md", content: "# Updated\n" }),
@@ -626,17 +638,17 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/usage/summary",
+      "http://127.0.0.1:18332/api/v1/usage/summary",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/usage/rates",
+      "http://127.0.0.1:18332/api/v1/usage/rates",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/usage/rates/model-1",
+      "http://127.0.0.1:18332/api/v1/usage/rates/model-1",
       expect.objectContaining({ method: "PUT" })
     );
   });
@@ -655,29 +667,89 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/catalog/sources",
+      "http://127.0.0.1:18332/api/v1/catalog/sources",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/catalog/items",
+      "http://127.0.0.1:18332/api/v1/catalog/items",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/catalog/refresh",
+      "http://127.0.0.1:18332/api/v1/catalog/refresh",
       expect.objectContaining({ method: "POST" })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       4,
-      "http://127.0.0.1:48731/api/v1/catalog/items/catalog-item-1/install",
+      "http://127.0.0.1:18332/api/v1/catalog/items/catalog-item-1/install",
       expect.objectContaining({ method: "POST" })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       5,
-      "http://127.0.0.1:48731/api/v1/catalog/items/catalog-skill-1/install",
+      "http://127.0.0.1:18332/api/v1/catalog/items/catalog-skill-1/install",
       expect.objectContaining({ method: "POST" })
     );
+  });
+
+  it("previews a GitHub Skill source and checks for updates", async () => {
+    await previewGitHubSkillSource({ repo: "anthropics/skills", ref: "main" });
+    await checkSkillUpdate("skill-1");
+    await checkAllSkillUpdates();
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:18332/api/v1/skills/install/github/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ repo: "anthropics/skills", ref: "main" }),
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:18332/api/v1/skills/skill-1/check-update",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:18332/api/v1/skills/check-updates",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("refreshes a GitHub marketplace into the catalog", async () => {
+    await refreshMarketplace({ repo: "anthropics/skills", label: "Anthropic Skills" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:18332/api/v1/catalog/marketplace-refresh",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ repo: "anthropics/skills", label: "Anthropic Skills" }),
+      })
+    );
+  });
+
+  it("parses Skill remote provenance and tolerates invalid JSON", () => {
+    expect(
+      parseSkillRemoteProvenance({
+        remoteProvenance: JSON.stringify({
+          kind: "github",
+          repo: "anthropics/skills",
+          ref: "main",
+          resolvedCommitSha: "abc123def456",
+          contentHash: "sha256:deadbeef",
+          installedAt: "2026-09-22T00:00:00Z",
+          lastCheck: {
+            checkedAt: "2026-09-22T01:00:00Z",
+            latestCommitSha: "def456abc123",
+            updateAvailable: true,
+          },
+        }),
+      })
+    ).toMatchObject({ repo: "anthropics/skills", lastCheck: { updateAvailable: true } });
+    expect(parseSkillRemoteProvenance({ remoteProvenance: null })).toBeNull();
+    expect(parseSkillRemoteProvenance({ remoteProvenance: "not-json" })).toBeNull();
+    expect(parseSkillRemoteProvenance({ remoteProvenance: JSON.stringify({ kind: "github" }) })).toBeNull();
   });
 
   it("creates, lists, and rotates API keys without response plaintext expectations", async () => {
@@ -691,12 +763,12 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/api-keys",
+      "http://127.0.0.1:18332/api/v1/api-keys",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/api-keys",
+      "http://127.0.0.1:18332/api/v1/api-keys",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -708,7 +780,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/api-keys/key-1/rotate",
+      "http://127.0.0.1:18332/api/v1/api-keys/key-1/rotate",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ plaintextKey: "test-api-key-new" }),
@@ -723,7 +795,7 @@ describe("api client", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/sessions",
+      "http://127.0.0.1:18332/api/v1/sessions",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -738,11 +810,25 @@ describe("api client", () => {
     await createSession({ projectId: "project-1" });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/sessions",
+      "http://127.0.0.1:18332/api/v1/sessions",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ projectId: "project-1" }),
       })
+    );
+  });
+
+  it("deletes sessions through REST, with force as an opt-in query flag", async () => {
+    await deleteSession("session-1");
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:18332/api/v1/sessions/session-1",
+      expect.objectContaining({ method: "DELETE" })
+    );
+
+    await deleteSession("session-1", { force: true });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:18332/api/v1/sessions/session-1?force=true",
+      expect.objectContaining({ method: "DELETE" })
     );
   });
 
@@ -773,7 +859,7 @@ describe("api client", () => {
       },
       {
         id: "codex",
-        label: "Codex CLI",
+        label: "Codex",
         command: "codex",
         supportLevel: "prototype",
         launchEnabled: true,
@@ -802,12 +888,12 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/workspace/tree?path=src&depth=2&limit=20",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/workspace/tree?path=src&depth=2&limit=20",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/workspace/file?path=src%2Findex.ts",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/workspace/file?path=src%2Findex.ts",
       expect.objectContaining({ headers: expect.any(Object) })
     );
   });
@@ -867,12 +953,12 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/goal",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/goal",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/goal",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/goal",
       expect.objectContaining({
         method: "PUT",
         body: JSON.stringify({
@@ -885,12 +971,12 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items?status=blocked&limit=50",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/work-items?status=blocked&limit=50",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       4,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/work-items",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -904,12 +990,12 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       5,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       6,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1",
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({
@@ -922,7 +1008,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       7,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/status",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/status",
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({
@@ -934,7 +1020,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       8,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/batch/status",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/work-items/batch/status",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -947,7 +1033,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       9,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/evidence",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/evidence",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -962,7 +1048,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       10,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-3",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-3",
       expect.objectContaining({
         method: "DELETE",
         body: JSON.stringify({ confirm: true }),
@@ -970,7 +1056,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       11,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/ledger?eventType=work_item_status_changed&limit=10",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/ledger?eventType=work_item_status_changed&limit=10",
       expect.objectContaining({ headers: expect.any(Object) })
     );
   });
@@ -985,17 +1071,17 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/task-packets?limit=20",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/task-packets?limit=20",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/task-packet",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/task-packet",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/task-packet/session-link",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/task-packet/session-link",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ sessionId: "session/1" }),
@@ -1003,7 +1089,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       4,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/task-packet/start",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/work-items/work%2Fitem-1/task-packet/start",
       expect.objectContaining({ method: "POST" })
     );
   });
@@ -1014,12 +1100,12 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/starter-packs",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/starter-packs",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/projects/project%2F1/project-manager/starter-packs/code-review/task-packet",
+      "http://127.0.0.1:18332/api/v1/projects/project%2F1/project-manager/starter-packs/code-review/task-packet",
       expect.objectContaining({ method: "POST" })
     );
   });
@@ -1060,10 +1146,6 @@ describe("api client", () => {
       sourceId: "github",
       name: "review-workflow",
     });
-    await previewSkillSource({
-      sourceId: "github",
-      url: "https://raw.githubusercontent.com/acme/review/main/SKILL.md",
-    });
     await updateSkill("skill-1", { description: "Updated", visibility: "admin" });
     await listProjectSkills("project-1");
     await setProjectSkill("project-1", "skill-1", true);
@@ -1071,22 +1153,22 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/skills/sources",
+      "http://127.0.0.1:18332/api/v1/skills/sources",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/skills/templates",
+      "http://127.0.0.1:18332/api/v1/skills/templates",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/skills/local-sync",
+      "http://127.0.0.1:18332/api/v1/skills/local-sync",
       expect.objectContaining({ method: "POST" })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       4,
-      "http://127.0.0.1:48731/api/v1/skills",
+      "http://127.0.0.1:18332/api/v1/skills",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -1098,7 +1180,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       5,
-      "http://127.0.0.1:48731/api/v1/skills/install",
+      "http://127.0.0.1:18332/api/v1/skills/install",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -1109,26 +1191,15 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       6,
-      "http://127.0.0.1:48731/api/v1/skills/install/preview",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          sourceId: "github",
-          url: "https://raw.githubusercontent.com/acme/review/main/SKILL.md",
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      7,
-      "http://127.0.0.1:48731/api/v1/skills/skill-1",
+      "http://127.0.0.1:18332/api/v1/skills/skill-1",
       expect.objectContaining({
         method: "PUT",
         body: JSON.stringify({ description: "Updated", visibility: "admin" }),
       })
     );
     expect(fetch).toHaveBeenNthCalledWith(
-      8,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/skills",
+      7,
+      "http://127.0.0.1:18332/api/v1/projects/project-1/skills",
       expect.objectContaining({
         headers: expect.objectContaining({
           "Content-Type": "application/json",
@@ -1136,16 +1207,16 @@ describe("api client", () => {
       })
     );
     expect(fetch).toHaveBeenNthCalledWith(
-      9,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/skills/skill-1",
+      8,
+      "http://127.0.0.1:18332/api/v1/projects/project-1/skills/skill-1",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ enabled: true }),
       })
     );
     expect(fetch).toHaveBeenNthCalledWith(
-      10,
-      "http://127.0.0.1:48731/api/v1/skills/skill-1",
+      9,
+      "http://127.0.0.1:18332/api/v1/skills/skill-1",
       expect.objectContaining({ method: "DELETE" })
     );
   });
@@ -1155,7 +1226,7 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/audit-logs?resourceType=skill&resourceId=review-skill&limit=20",
+      "http://127.0.0.1:18332/api/v1/audit-logs?resourceType=skill&resourceId=review-skill&limit=20",
       expect.objectContaining({ headers: expect.any(Object) })
     );
   });
@@ -1166,7 +1237,7 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/config/sync/preview",
+      "http://127.0.0.1:18332/api/v1/projects/project-1/config/sync/preview",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ credentialMode: "host_environment" }),
@@ -1174,7 +1245,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/config/sync/apply",
+      "http://127.0.0.1:18332/api/v1/projects/project-1/config/sync/apply",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -1193,7 +1264,7 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/config/compliance?templateId=template-1&credentialMode=stored_encrypted_key",
+      "http://127.0.0.1:18332/api/v1/projects/project-1/config/compliance?templateId=template-1&credentialMode=stored_encrypted_key",
       expect.objectContaining({ headers: expect.any(Object) })
     );
   });
@@ -1202,7 +1273,7 @@ describe("api client", () => {
     await updateProjectTemplate("project-1", null);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/projects/project-1",
+      "http://127.0.0.1:18332/api/v1/projects/project-1",
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({ templateId: null }),
@@ -1212,7 +1283,7 @@ describe("api client", () => {
     await updateProjectTemplate("project-1", "template-9");
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/projects/project-1",
+      "http://127.0.0.1:18332/api/v1/projects/project-1",
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({ templateId: "template-9" }),
@@ -1222,7 +1293,7 @@ describe("api client", () => {
     await updateProjectTemplate("project-1", undefined);
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/projects/project-1",
+      "http://127.0.0.1:18332/api/v1/projects/project-1",
       expect.objectContaining({
         method: "PATCH",
         body: "{}",
@@ -1263,7 +1334,7 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/templates",
+      "http://127.0.0.1:18332/api/v1/templates",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -1275,7 +1346,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/templates/builtin-claude-code/clone",
+      "http://127.0.0.1:18332/api/v1/templates/builtin-claude-code/clone",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ name: "Cloned" }),
@@ -1283,7 +1354,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/templates/template-1",
+      "http://127.0.0.1:18332/api/v1/templates/template-1",
       expect.objectContaining({
         method: "PUT",
         body: JSON.stringify({ description: "Updated", visibility: "admin" }),
@@ -1291,12 +1362,12 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       8,
-      "http://127.0.0.1:48731/api/v1/templates/template-1/versions/7/restore",
+      "http://127.0.0.1:18332/api/v1/templates/template-1/versions/7/restore",
       expect.objectContaining({ method: "POST" })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       9,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/config/preview",
+      "http://127.0.0.1:18332/api/v1/projects/project-1/config/preview",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -1307,7 +1378,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       10,
-      "http://127.0.0.1:48731/api/v1/projects/project-1/config/write",
+      "http://127.0.0.1:18332/api/v1/projects/project-1/config/write",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -1319,17 +1390,17 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       5,
-      "http://127.0.0.1:48731/api/v1/templates/template-1/export",
+      "http://127.0.0.1:18332/api/v1/templates/template-1/export",
       expect.objectContaining({ headers: expect.any(Object) })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       6,
-      "http://127.0.0.1:48731/api/v1/templates/import",
+      "http://127.0.0.1:18332/api/v1/templates/import",
       expect.objectContaining({ method: "POST" })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       7,
-      "http://127.0.0.1:48731/api/v1/templates/template-1/versions",
+      "http://127.0.0.1:18332/api/v1/templates/template-1/versions",
       expect.objectContaining({ headers: expect.any(Object) })
     );
   });
@@ -1361,7 +1432,7 @@ describe("api client", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/projects",
+      "http://127.0.0.1:18332/api/v1/projects",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -1399,7 +1470,7 @@ describe("api client", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/projects/import",
+      "http://127.0.0.1:18332/api/v1/projects/import",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -1429,7 +1500,7 @@ describe("api client", () => {
     expect(capabilities.directoryPickerSupported).toBe(true);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/system/desktop",
+      "http://127.0.0.1:18332/api/v1/system/desktop",
       expect.any(Object)
     );
   });
@@ -1454,9 +1525,50 @@ describe("api client", () => {
     expect(result.path).toBe("C:\\Users\\dev\\projects\\demo");
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/system/select-directory",
+      "http://127.0.0.1:18332/api/v1/system/select-directory",
       expect.objectContaining({ method: "POST" })
     );
+  });
+
+  it("allows directory selection to take longer than a normal API request", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => {
+        setTimeout(() => resolve(mockEnvelope({
+          supported: true, path: "D:\\workspace\\project", cancelled: false,
+        })), 45_000);
+      })));
+      const selected = selectNativeDirectory().then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      );
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(await selected).toMatchObject({
+        result: { path: "D:\\workspace\\project", cancelled: false },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("times out an unresponsive directory picker after the host dialog deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+      let settled = false;
+      const selected = selectNativeDirectory().finally(() => { settled = true; }).then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      );
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await selected).toMatchObject({
+        error: { message: "Gateway request timed out. Check that the Gateway service is running." },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("builds safe default config decisions from conflict reports", () => {
@@ -1488,7 +1600,7 @@ describe("api client", () => {
     await getDashboardSummary();
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/dashboard/summary",
+      "http://127.0.0.1:18332/api/v1/dashboard/summary",
       expect.objectContaining({
         headers: expect.objectContaining({
           "Content-Type": "application/json",
@@ -1503,7 +1615,7 @@ describe("api client", () => {
     await getDependencies();
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/gate-a/dependencies",
+      "http://127.0.0.1:18332/api/v1/gate-a/dependencies",
       expect.objectContaining({
         cache: "no-store",
         headers: expect.objectContaining({
@@ -1527,7 +1639,7 @@ describe("api client", () => {
     const status = await getFeishuIntegrationStatus();
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/integrations/feishu/status",
+      "http://127.0.0.1:18332/api/v1/integrations/feishu/status",
       expect.objectContaining({
         cache: "no-store",
         headers: expect.objectContaining({
@@ -1562,7 +1674,7 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/integrations/feishu/config",
+      "http://127.0.0.1:18332/api/v1/integrations/feishu/config",
       expect.objectContaining({
         cache: "no-store",
         headers: expect.objectContaining({
@@ -1572,7 +1684,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/integrations/feishu/config",
+      "http://127.0.0.1:18332/api/v1/integrations/feishu/config",
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({
@@ -1608,7 +1720,7 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/integrations/feishu/user-mappings",
+      "http://127.0.0.1:18332/api/v1/integrations/feishu/user-mappings",
       expect.objectContaining({
         cache: "no-store",
         headers: expect.objectContaining({
@@ -1618,7 +1730,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/integrations/feishu/user-mappings",
+      "http://127.0.0.1:18332/api/v1/integrations/feishu/user-mappings",
       expect.objectContaining({
         method: "PUT",
         body: JSON.stringify({
@@ -1635,7 +1747,7 @@ describe("api client", () => {
     await listSessions({ projectId: "project-1" });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:48731/api/v1/sessions?projectId=project-1",
+      "http://127.0.0.1:18332/api/v1/sessions?projectId=project-1",
       expect.objectContaining({
         headers: expect.objectContaining({
           "Content-Type": "application/json",
@@ -1669,17 +1781,17 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi",
+      "http://127.0.0.1:18332/api/v1/cli-config/kimi",
       expect.objectContaining({})
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi/file?path=config.toml",
+      "http://127.0.0.1:18332/api/v1/cli-config/kimi/file?path=config.toml",
       expect.objectContaining({})
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi/file",
+      "http://127.0.0.1:18332/api/v1/cli-config/kimi/file",
       expect.objectContaining({
         method: "PUT",
         body: JSON.stringify({ path: "config.toml", content: "default_model = \"k2\"" }),
@@ -1687,7 +1799,7 @@ describe("api client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       4,
-      "http://127.0.0.1:48731/api/v1/cli-config/kimi/default-model",
+      "http://127.0.0.1:18332/api/v1/cli-config/kimi/default-model",
       expect.objectContaining({
         method: "PUT",
         body: JSON.stringify({ model: "moonshot/kimi-k2.5" }),

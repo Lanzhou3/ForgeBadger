@@ -16,7 +16,11 @@ const mainFiles: Record<ProviderAdapter, string> = {
   // PI's provider registry (providers.<id> with baseUrl/api/apiKey/models).
   // auth.json is deliberately NOT a managed target: it is owned by pi's own
   // /login (OAuth refresh included) and ForgeBadger must never clobber it.
-  pi: "models.json"
+  pi: "models.json",
+  // MiniMax Code keeps third-party providers in `custom_provider` inside a
+  // single YAML file. The auth tree under the same root is owned by the CLI's
+  // own OAuth flow and is never a managed target.
+  mcode: "config.yaml"
 };
 
 export function cliConfigMainFile(adapter: ProviderAdapter): string {
@@ -39,6 +43,12 @@ export function cliConfigTargetPath(input: {
       // writing a misleading <project>/models.json.
       throw new Error("PI config is global-only ($PI_CODING_AGENT_DIR); project scope is not supported");
     }
+    if (input.adapter === "mcode") {
+      // MiniMax Code has no project-level config.yaml: providers and models
+      // are global. Its project surface is .mcode/commands and .mcode/agents,
+      // which carry no provider selection.
+      throw new Error("MiniMax Code config is global-only; project scope is not supported");
+    }
     return path.join(root, mainFiles[input.adapter]);
   }
   return path.join(globalConfigRoot(input.adapter), mainFiles[input.adapter]);
@@ -54,6 +64,19 @@ export function globalConfigRoot(
   if (adapter === "codex") return resolveUserRoot(env.CODEX_HOME, path.join(homeDir, ".codex"), homeDir);
   if (adapter === "kimi") return resolveUserRoot(env.KIMI_CODE_HOME, path.join(homeDir, ".kimi-code"), homeDir);
   if (adapter === "pi") return resolveUserRoot(env.PI_CODING_AGENT_DIR, path.join(homeDir, ".pi", "agent"), homeDir);
+  if (adapter === "mcode") {
+    // MiniMax Code's data directory. Verified against @minimax-ai/code
+    // 0.4.12: it reads MINIMAX_DATA_DIR, then MAVIS_DATA_DIR, then the default.
+    // There is no MCODE_HOME — MCODE_INSTALL_DIR only relocates the install
+    // tree (~/.minimax-code), which holds the PATH launcher, not user data.
+    // A selected profile would use ~/.minimax-<name>, which this does not
+    // resolve; that limitation is documented rather than guessed at.
+    return resolveUserRoot(
+      env.MINIMAX_DATA_DIR || env.MAVIS_DATA_DIR,
+      path.join(homeDir, ".minimax"),
+      homeDir
+    );
+  }
   const xdgRoot = resolveUserRoot(env.XDG_CONFIG_HOME, path.join(homeDir, ".config"), homeDir);
   return resolveUserRoot(env.OPENCODE_CONFIG_DIR, path.join(xdgRoot, "opencode"), homeDir);
 }

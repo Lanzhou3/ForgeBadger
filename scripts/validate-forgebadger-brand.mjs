@@ -12,6 +12,7 @@ const historicalSecurityAllowlist = new Map([
   ["scripts/validate-trial-feedback-intake.mjs", ["openforge\\.token"]],
   ["scripts/smoke-local-release.mjs", ["OPENFORGE_MASTER_KEY", "OPENFORGE_JWT_SECRET", "OPENFORGE_ATTACH_TOKEN"]],
   ["packages/gateway/src/services/redaction.ts", ["(?:FORGEBADGER|OPENFORGE)"]],
+  ["packages/gateway/src/services/agent/redaction.ts", ["(?:forgebadger|openforge|openai|anthropic|deepseek)_[a-z_]*(?:key|token|secret)"]],
   ["packages/gateway/src/lib/redaction.ts", ["(?:FORGEBADGER|OPENFORGE)", "OPENFORGE_ATTACH_TOKEN"]],
   ["packages/gateway/src/services/project-ai-config.ts", ["(?:FORGEBADGER|OPENFORGE)"]],
   ["packages/gateway/src/db/repositories/project-manager-repository.ts", ["(?:FORGEBADGER|OPENFORGE)"]],

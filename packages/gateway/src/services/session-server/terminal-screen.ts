@@ -27,6 +27,10 @@ const { SerializeAddon } = addonSerialize;
 type HeadlessTerminal = InstanceType<typeof Terminal>;
 
 export const DEFAULT_SCROLLBACK_LINES = 10_000;
+/** Attach replay is bounded to this tail of the scrollback: a full 10k-line
+ *  snapshot streams into the browser as many 64KB frames and repaints the
+ *  TUI repeatedly instead of swapping the screen in one frame. */
+export const DEFAULT_SNAPSHOT_SCROLLBACK_LINES = 1_000;
 export const DEFAULT_HIGH_WATER_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_LOW_WATER_BYTES = 512 * 1024;
 export const DEFAULT_IDLE_TIMEOUT_MS = 1_000;
@@ -184,10 +188,12 @@ export class TerminalScreen {
     return this.serializer.serialize({ scrollback: scrollbackLines });
   }
 
-  /** Full-fidelity snapshot for attach replay: entire scrollback, screen,
-   *  alt-screen state, modes and cursor position. */
-  serializeSnapshot(): string {
-    return this.serializer.serialize();
+  /** Attach replay snapshot: tail of scrollback + screen, alt-screen state,
+   *  modes and cursor position. Bounded to the last `scrollbackLines` lines
+   *  so the browser swap stays a single frame; pass a larger value for
+   *  full-fidelity capture. */
+  serializeSnapshot(scrollbackLines: number = DEFAULT_SNAPSHOT_SCROLLBACK_LINES): string {
+    return this.serializer.serialize({ scrollback: scrollbackLines });
   }
 
   /** Rendered text of the current viewport (post-escape-interpretation). */

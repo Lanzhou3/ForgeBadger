@@ -18,8 +18,9 @@ import {ProjectRepository} from '../src/db/repositories/project-repository.js';
 import {SessionRepository} from '../src/db/repositories/session-repository.js';
 import {DeliveryService} from '../src/services/collaboration/delivery-service.js';
 import type {DeliveryRun} from '../src/services/collaboration/types.js';
+import {confirmedStopHostAvailable} from './fixtures/confirmed-stop-host.js';
 
-for(const state of ['error','pending'] as const)test(`stop probes real PTY despite cached ${state} and keeps IPC uncertainty pending`,{skip:process.platform==='win32',timeout:15000},async(t)=>{
+for(const state of ['error','pending'] as const)test(`stop probes real PTY despite cached ${state} and keeps IPC uncertainty pending`,{skip:process.platform==='win32'||!confirmedStopHostAvailable,timeout:15000},async(t)=>{
  const root=realpathSync(mkdtempSync(path.join(tmpdir(),'fb-stop-proof-'))),ipcPath=path.join(root,'runtime.sock'),token=randomBytes(32).toString('hex'),daemon=new SessionServer(),ipc=new IpcServer({ipcPath,sessionServer:daemon,token}),db=new Database(':memory:');let client:SessionServerClient|undefined;let release=()=>{};
  t.after(async()=>{release();await client?.disconnect().catch(()=>{});await daemon.destroy();await ipc.stop();db.close();rmSync(root,{recursive:true,force:true});});
  const git=(...args:string[])=>execFileSync('git',args,{cwd:root,stdio:'ignore'});git('init','-b','main');git('config','user.email','test@example.invalid');git('config','user.name','Fixture');writeFileSync(path.join(root,'README'),'fixture');git('add','.');git('commit','-m','fixture');

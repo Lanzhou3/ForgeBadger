@@ -13,7 +13,7 @@ const fileSchema = z.object({relativePath:z.string().min(1).max(512),content:z.s
 const exportManifestSchema = z.object({version:z.literal(1),files:z.array(z.object({relativePath:z.string(),sha256:z.string().regex(/^[a-f0-9]{64}$/u)}).strict()).max(MAX_RESOURCE_FILES+1)}).strict();
 const manifestSchema = z.object({version:z.literal(1),kind:z.literal('utf8-package'),sourcePath:z.string().max(4096),files:z.array(fileSchema).max(MAX_RESOURCE_FILES)}).strict();
 
-function resourcePath(value: string): string {
+export function resourcePath(value: string): string {
   const parts = value.split('/');
   if (value.includes('\\') || /[\x00-\x1f:%]/u.test(value) || path.posix.isAbsolute(value)
     || parts.some(part=>!part || part==='.' || part==='..' || /[. ]$/u.test(part)

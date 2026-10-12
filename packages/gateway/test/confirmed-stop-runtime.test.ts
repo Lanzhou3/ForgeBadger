@@ -9,8 +9,9 @@ import {IpcServer} from '../src/services/session-server/ipc-server.js';
 import {SessionServerClient} from '../src/services/session-server-client.js';
 import {groupIsAbsent} from '../src/services/session-server/confirmed-stop.js';
 import {createPlatformAdapter,type PlatformPtyAdapter} from '../src/services/session-server/platform-adapter.js';
+import {confirmedStopHostAvailable} from './fixtures/confirmed-stop-host.js';
 
-const native={skip:process.platform==='win32',timeout:20000};
+const native={skip:process.platform==='win32'||!confirmedStopHostAvailable,timeout:20000};
 async function until(fn:()=>boolean,ms=5000){const start=Date.now();while(!fn()){if(Date.now()-start>ms)throw new Error('fixture timeout');await new Promise(r=>setTimeout(r,20));}}
 function fixture(platformAdapter?:PlatformPtyAdapter){
  const root=realpathSync(mkdtempSync(path.join(tmpdir(),'fb-confirm-stop-'))),server=new SessionServer(platformAdapter?{platformAdapter}:{}),nonce=randomUUID(),sessionId=randomUUID(),ready=path.join(root,'ready');
@@ -65,7 +66,7 @@ test('IPC reconnect recovers a lost stop reply while another daemon identity can
  }finally{await client.disconnect();await ipc.stop();await f.close();}
 });
 
-test('a proven command-resolution failure retains a generation-bound not-started receipt without treating an unknown nonce as stopped',native,async()=>{
+test('a proven command-resolution failure retains a generation-bound not-started receipt without treating an unknown nonce as stopped',{skip:process.platform==='win32',timeout:20000},async()=>{
  const adapter=createPlatformAdapter(),resolve=adapter.resolveCommand.bind(adapter);
  adapter.resolveCommand=(command,env)=>{if(command.endsWith('/nonexistent-cli'))throw new Error('Fixture command is unavailable');return resolve(command,env);};
  const f=fixture(adapter);try{

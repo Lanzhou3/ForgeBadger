@@ -41,7 +41,7 @@ Required for direct Gateway/source startup:
 
 Optional:
 
-- `FORGEBADGER_PORT` - default `3000`
+- `FORGEBADGER_PORT` - default `18332`
 - `FORGEBADGER_DB_PATH` - default `~/.forgebadger/forgebadger.db`
 - `FORGEBADGER_SESSION_PREFIX` - default `fb-`
 - `FORGEBADGER_SESSION_SERVER_IPC_PATH` - override the Session Server IPC endpoint (Windows named pipe / POSIX socket); per-platform default when unset
@@ -90,7 +90,7 @@ Use the installed CLI for local npm-distributed runtime checks:
 
 ```bash
 forgebadger doctor
-forgebadger start --gateway-port 48731 --web-port 48732
+forgebadger start --gateway-port 18332 --web-port 18333
 ```
 
 `forgebadger start` loads or creates runtime configuration and then starts
@@ -144,7 +144,7 @@ List sessions and their runtime state:
 
 ```bash
 curl -H "Authorization: Bearer <token>" \
-  http://127.0.0.1:48731/api/v1/sessions
+  http://127.0.0.1:18332/api/v1/sessions
 ```
 
 Watch session status events in real time:
@@ -180,9 +180,13 @@ The MVP-5 `forgebadger init` prototype can generate ForgeBadger project config
 without opening the Web console:
 
 ```bash
-pnpm forgebadger -- init --path /path/to/project --dry-run
+pnpm forgebadger -- init --path /path/to/project --template-id builtin-claude-code --dry-run
 pnpm forgebadger -- init --path /path/to/project --template-id builtin-claude-code
 ```
+
+`--template-id` is required: a template declares the CLI adapter its config
+files render for, so the command has no implicit default. `forgebadger
+init --list-templates` prints the available template ids.
 
 Dry-run returns a JSON envelope with generated file paths, hashes, and detected
 conflicts. A non-dry run writes the rendered config through the same

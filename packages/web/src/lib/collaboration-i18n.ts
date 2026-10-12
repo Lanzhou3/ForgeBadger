@@ -312,7 +312,7 @@ const zh: Record<keyof typeof en, string> = {
   "workspace.cancel": "取消",
 };
 const zhTW: Record<keyof typeof en, string> = {
-  "workspace.runtimeUpgrade": "目前 Session Server 無法確認 CLI 處理程序已退出，暫時無法啟動新的受管執行。請等待現有 CLI 全部正常結束後升級 Session Server，再安全啟動團隊執行。既有終端仍可連線，請勿強制終止其他成員的工作階段。",
+  "workspace.runtimeUpgrade": "目前 Session Server 無法確認 CLI 處理程序已退出，暫時無法啟動新的受管執行。請等待現有 CLI 全部正常結束後升級 Session Server，再安全啟動團隊執行。既有終端仍可連線，請勿強制終止其他成員的會話。",
   "workspace.stopSourceCli": "交付前，請先停止來源專案的所有活動終端。",
   "workspace.operationActive": "交付操作正在進行，暫時無法審核或合併。",
   "workspace.operationInterrupted": "上次交付操作已中斷，確認結果後才能繼續。",
@@ -349,7 +349,7 @@ const zhTW: Record<keyof typeof en, string> = {
   "workspace.stopCliHint": "審核或合併前請先停止私有 CLI。",
   "workspace.criteriaRequired": "請先為任務補充至少一條驗收條件，再進行驗證。",
   "workspace.assignedElsewhere":
-    "任務已分配給其他開發者。請先調整负責人，再準備你的開發嘗試。",
+    "任務已分配給其他開發者。請先調整負責人，再準備你的開發嘗試。",
   "workspace.event.policy_updated": "更新執行策略",
   "workspace.event.execution_disabled": "已停用託管執行",
   "workspace.event.member_added": "更新成員角色",
@@ -377,7 +377,7 @@ const zhTW: Record<keyof typeof en, string> = {
   "workspace.noTasks": "暫無任務。先定義一個小改動和驗收條件。",
   "workspace.taskTitle": "任務標題",
   "workspace.criteria": "驗收條件（每行一條）",
-  "workspace.assignee": "负責人",
+  "workspace.assignee": "負責人",
   "workspace.reviewAssignee": "審核人",
   "workspace.unassigned": "未分配",
   "workspace.editTask": "編輯任務",

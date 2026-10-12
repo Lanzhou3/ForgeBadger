@@ -48,6 +48,17 @@ it("preserves valid output sequence numbers and rejects malformed sequences", ()
     }
   }
 });
+it("parses the terminal_history_end marker", () => {
+  expect(parseTerminalWebSocketMessage(JSON.stringify({ type: "terminal_history_end", payload: { sequence: 1, data: "" } })))
+    .toEqual({ type: "terminal_history_end", payload: { data: "", sequence: 1 } });
+  expect(parseTerminalWebSocketMessage(JSON.stringify({ type: "terminal_history_end", payload: { sequence: 1 } })))
+    .toEqual({ type: "terminal_history_end", payload: { data: "", sequence: 1 } });
+  expect(parseTerminalWebSocketMessage(JSON.stringify({ type: "terminal_history_end", payload: {} })))
+    .toEqual({ type: "terminal_history_end", payload: { data: "" } });
+  for (const sequence of [0, -1, 1.5, "1"]) {
+    expect(parseTerminalWebSocketMessage(JSON.stringify({ type: "terminal_history_end", payload: { sequence } }))).toBeNull();
+  }
+});
 it("recognizes process exit messages", () => {
   expect(parseTerminalWebSocketMessage(JSON.stringify({ type: "terminal_exit", payload: { exitCode: 0 } })))
     .toEqual({ type: "terminal_exit", payload: { exitCode: 0 } });

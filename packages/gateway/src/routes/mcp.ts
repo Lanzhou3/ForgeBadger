@@ -5,7 +5,8 @@
  * McpServer + transport pair, so no session state survives a Gateway restart
  * and no SSE streams are held open. Authentication is a long-lived access
  * token (`fbmcp_…`, see routes/mcp-tokens.ts) presented as a Bearer
- * credential; only the SHA-256 hash is stored, revocation is immediate, and
+ * credential; only the SHA-256 hash is stored, revocation is immediate, CLI
+ * dispatch tokens expire on schedule, and
  * the owning user's status is re-read on every request.
  *
  * This surface intentionally does not use the project API envelope — it
@@ -32,7 +33,7 @@ import { buildMcpServer } from "../services/mcp/mcp-server.js";
 import type { ServerDeps } from "../server.js";
 
 interface McpAuthenticatedRequest extends Request {
-  mcpAuth?: { userId: string; scopes: McpTokenScope[] };
+  mcpAuth?: { userId: string; tokenId: string; scopes: McpTokenScope[] };
 }
 
 export function createMcpRoutes(deps: Pick<ServerDeps, "db" | "masterKey" | "sessionManager" | "appVersion" | "adapterCommandRunner">): Router {
@@ -58,6 +59,7 @@ export function createMcpRoutes(deps: Pick<ServerDeps, "db" | "masterKey" | "ses
       db: deps.db,
       masterKey: deps.masterKey,
       userId: auth.userId,
+      tokenId: auth.tokenId,
       scopes: auth.scopes,
       appVersion: deps.appVersion,
       sessionManager: deps.sessionManager,
@@ -129,7 +131,7 @@ function createMcpAuthenticator(db: Database) {
     } catch {
       // A failed last-used touch must not block the request.
     }
-    req.mcpAuth = { userId: record.userId, scopes: parseMcpTokenScopes(record.scopes) };
+    req.mcpAuth = { userId: record.userId, tokenId: record.id, scopes: parseMcpTokenScopes(record.scopes) };
     next();
   };
 }

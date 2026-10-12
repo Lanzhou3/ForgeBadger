@@ -1,3 +1,8 @@
+import { connectionError, LlmConnectionError } from './llm-connection-error.js';
+import { providerRejection } from './provider-error.js';
+import { fetchModelWithRetry } from "./model-transport.js";
+import { matchingReplay, replayIdentity, withoutPrivateReplay } from "./llm-replay.js";
+import type { ProviderReplay } from "./llm-replay.js";
 /**
  * Provider-agnostic LLM client for the Copilot harness.
  *
@@ -8,19 +13,21 @@
  * with tool calling. Secrets are decrypted in memory and never logged.
  */
 import { lookup } from "node:dns/promises";
-import type { ModelProviderRepository, ProviderApiFormat } from "../../db/repositories/model-provider-repository.js";
+import type { ModelProviderRepository, ModelProfile, ProviderApiFormat } from "../../db/repositories/model-provider-repository.js";
+import type { CopilotPreferences, ThinkingEffort } from "../../db/repositories/copilot-preferences-repository.js";
 import { assertResolvedPublicHttpsEndpoint } from "../network-policy.js";
 import { AgentError } from "./types.js";
 import { redactAgentErrorMessage } from "./redaction.js";
-import { createAgentPublicFetch } from "./llm-public-fetch.js";
+import { createAgentPublicFetch, type ConnectionProgress } from "./llm-public-fetch.js";
 import { readOpenAiCompletion } from "./llm-openai.js";
 import { readAnthropicCompletion } from "./llm-anthropic.js";
 import { withAbort, type LlmResult, type LlmUsage } from "./llm-response.js";
-import { MAX_CONTEXT_CHARS } from "./context.js";
+import { contextTokenBudget, estimateJsonTokens } from "./token-estimate.js";
 
 export interface AgentLlmMessage {
   role: "user" | "assistant" | "tool";
   content: string;
+  providerReplay?: ProviderReplay;
   /** Tool call id, when role === "tool". */
   toolCallId?: string;
   /** Tool calls emitted by the assistant, when role === "assistant". */
@@ -46,6 +53,7 @@ export interface AgentLlmRequest {
   messages: AgentLlmMessage[];
   tools: AgentToolSchema[];
   maxSteps?: number;
+  maxOutputTokens?: number;
   modelId?: string;
   /** System prompt override; defaults to the Copilot agent prompt. */
   system?: string;
@@ -62,7 +70,9 @@ export interface AgentLlmProviderResolution {
   apiKey: string;
   authType: "api_key" | "bearer_token" | "oauth" | "none";
   defaultHeaders: Record<string, string>;
+  contextWindow?: number | null;
   allowPlaintextHttp?: boolean;
+  allowPrivateNetworks?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -74,35 +84,59 @@ export function createAgentLlmClient(input: {
   fetchImpl?: AgentFetch;
   resolveHost?: (hostname: string, options: { all: true }) => Promise<Array<{ address: string; family: number }>>;
   timeoutMs?: number;
+  /**
+   * The user's Copilot preferences (model + thinking strength). When a
+   * request carries no explicit modelId, the preferred model is the first
+   * fallback before the system default.
+   */
+  preferences?: { get(): CopilotPreferences } | undefined;
 }) {
   const resolveHost = input.resolveHost ?? lookup;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  // Per-client resolution cache. The client is constructed per user per stack,
-  // so a cached resolution lives only for the current turn/stack — this avoids
-  // re-decrypting credentials across the step loop and the summarize/title/
-  // curation calls that each resolve independently.
-  const resolutionCache = new Map<string, AgentLlmProviderResolution>();
-
   /** Resolve a model profile to a concrete provider resolution. */
   function resolveProvider(modelId?: string): AgentLlmProviderResolution {
-    const cacheKey = modelId ?? "__default__";
-    const cached = resolutionCache.get(cacheKey);
-    if (cached) return cached;
-
     const repo = input.modelProviderRepository;
-    const profile = modelId ? repo.getModelProfile(modelId) : repo.listModelProfiles().find((m) => m.isDefault) ?? repo.listModelProfiles()[0];
+    let profile: ModelProfile | undefined;
+    if (modelId) {
+      profile = repo.getModelProfile(modelId);
+    } else {
+      // Preference fallback: the user's chosen Copilot model, resolved fresh
+      // on every call because it can change at any time (never cached).
+      const preferredModelId = input.preferences?.get().modelId;
+      if (preferredModelId) {
+        const preferred = repo.getModelProfile(preferredModelId);
+        if (preferred && preferred.status === "active") {
+          profile = preferred;
+        }
+      }
+      if (!profile) {
+        const profiles = repo.listModelProfiles();
+        profile = profiles.find((m) => m.isDefault) ?? profiles[0];
+      }
+    }
     if (!profile) throw new AgentError("AGENT_NO_MODEL", "No model provider configured");
     if (profile.status !== "active") throw new AgentError("AGENT_MODEL_INACTIVE", "Model is not active");
     const provider = repo.getProviderProfile(profile.providerProfileId);
     if (!provider || provider.status !== "active") throw new AgentError("AGENT_PROVIDER_INACTIVE", "Provider is not active");
-    const credentials = repo.listCredentials(profile.providerProfileId);
-    const credential = credentials[0];
-    if (!credential || credential.status !== "active") throw new AgentError("AGENT_NO_CREDENTIAL", "No active provider credential");
-    const apiKey = repo.decryptCredential(credential.id);
+    // Shared by modelInfo (including channel selection) and every actual model request.
+    // Empty capability metadata is legacy/unspecified, not an explicit denial of chat.
+    if (profile.capabilities.length && !profile.capabilities.includes('chat'))
+      throw new AgentError('AGENT_MODEL_NOT_CHAT', 'Model does not support chat');
+    // The Copilot transport is Anthropic Messages for anthropic-format providers
+    // and OpenAI Chat Completions for every OpenAI-flavored format — including
+    // openai-responses endpoints, which also serve chat completions.
+    if (!['anthropic','openai-responses','openai-compatible'].includes(provider.apiFormat))
+      throw new AgentError('AGENT_MODEL_TRANSPORT_UNSUPPORTED', 'Provider protocol is not supported by Copilot');
+    // Resolve current authorization on every request, including auxiliary calls.
+    // A completed request does not authorize reuse of rotated credentials/config.
+    const credential = provider.authType === 'none' ? undefined : repo.listCredentials(profile.providerProfileId).find(row => row.status === 'active');
+    if (provider.authType !== 'none' && !credential) throw new AgentError("AGENT_NO_CREDENTIAL", "No active provider credential");
+    const apiKey = credential ? repo.decryptCredential(credential.id) : '';
     const baseUrl = pickBaseUrl(provider.apiFormat, provider.anthropicBaseUrl ?? profile.baseUrl, provider.openaiBaseUrl ?? profile.baseUrl);
     if (!baseUrl) throw new AgentError("AGENT_NO_BASE_URL", "Provider has no base URL");
     const resolution: AgentLlmProviderResolution = {
       modelProfileId: profile.id,
+      contextWindow: profile.contextWindow,
       providerKey: provider.providerKey,
       modelId: profile.modelId,
       apiFormat: provider.apiFormat,
@@ -110,38 +144,72 @@ export function createAgentLlmClient(input: {
       apiKey,
       authType: provider.authType,
       defaultHeaders: provider.defaultHeaders,
-      allowPlaintextHttp: provider.allowPlaintextHttp
+      allowPlaintextHttp: provider.allowPlaintextHttp,
+      allowPrivateNetworks: provider.allowPrivateNetworks
     };
-    resolutionCache.set(cacheKey, resolution);
     return resolution;
   }
 
   /** Stream one model request; emits text/tool deltas. Resolves on completion. */
   async function stream(request: AgentLlmRequest): Promise<LlmResult> {
+    return streamInternal(request, true);
+  }
+
+  /**
+   * Internal stream implementation. `applyPreferencesThinking` gates the
+   * user's thinking-strength preference: the main conversational request
+   * applies it, while the auxiliary calls (summarize / title / memory
+   * proposal) keep their requests lean. The model fallback to the preference
+   * applies on every path — only the thinking parameters are gated.
+   */
+  async function streamInternal(request: AgentLlmRequest, applyPreferencesThinking: boolean): Promise<LlmResult> {
     const resolution = resolveProvider(request.modelId);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const startedAt = Date.now();
+    let connectionProgress: ConnectionProgress | undefined;
+    const timeout = setTimeout(() => controller.abort(new DOMException('Model request deadline exceeded', 'TimeoutError')), timeoutMs);
     const outer = request.signal;
-    if (outer?.aborted) controller.abort();
-    const abort = () => controller.abort();
+    if (outer?.aborted) controller.abort(outer.reason);
+    const abort = () => controller.abort(outer?.reason);
     outer?.addEventListener("abort", abort, { once: true });
+    const thinkingEffort = applyPreferencesThinking ? input.preferences?.get().thinkingEffort ?? null : null;
     try {
       controller.signal.throwIfAborted();
       if (input.fetchImpl) {
         try {
-          await withAbort(assertResolvedPublicHttpsEndpoint(resolution.baseUrl, resolveHost, { allowPlaintextHttp: resolution.allowPlaintextHttp }), controller.signal);
+          await withAbort(assertResolvedPublicHttpsEndpoint(resolution.baseUrl, resolveHost, { allowPlaintextHttp: resolution.allowPlaintextHttp, allowPrivateNetworks: resolution.allowPrivateNetworks }), controller.signal);
         } catch (error) {
           if (controller.signal.aborted) throw error;
           throw new AgentError("AGENT_HOST_BLOCKED", "Provider endpoint failed public-network validation");
         }
       }
-      const fetchImpl = input.fetchImpl ?? createAgentPublicFetch({ resolveHost, allowPlaintextHttp: resolution.allowPlaintextHttp ?? false });
-
-      if (resolution.apiFormat === "anthropic") {
-        return await streamAnthropic(resolution, request, fetchImpl, controller.signal);
+      const fetchImpl = input.fetchImpl ?? createAgentPublicFetch({ onProgress: progress => { connectionProgress = progress; }, resolveHost, allowPlaintextHttp: resolution.allowPlaintextHttp ?? false, allowPrivateNetworks: resolution.allowPrivateNetworks ?? false });
+      const invoke = (effort: ThinkingEffort | null) => resolution.apiFormat === "anthropic"
+        ? streamAnthropic(resolution, request, fetchImpl, controller.signal, effort)
+        : streamOpenAi(resolution, request, fetchImpl, controller.signal, effort);
+      let result: LlmResult;
+      try { result = await invoke(thinkingEffort); }
+      catch (error) {
+        // A rejected request may retry without thinking, using the SAME resolved
+        // provider/model/credentials and deadline as the metered logical call.
+        if (thinkingEffort === null || thinkingEffort === "off" || !(error instanceof AgentError)
+          || error.code !== "AGENT_HTTP_ERROR" || !error.message.includes("HTTP 400")) throw error;
+        controller.signal.throwIfAborted();
+        result = await invoke(null);
       }
-      return await streamOpenAi(resolution, request, fetchImpl, controller.signal);
+      if (result.assistant) {
+        result.assistant.providerReplay ??= { format: resolution.apiFormat === 'anthropic' ? 'anthropic' : 'openai' };
+        result.assistant.providerReplay.identity = replayIdentity(resolution);
+      }
+      return result;
     } catch (error) {
+      if (error instanceof LlmConnectionError) throw error;
+      if (controller.signal.aborted) {
+        const failure = connectionError(error, connectionProgress?.stage ?? 'response', connectionProgress?.delivery ?? 'possibly_sent', controller.signal);
+        failure.diagnostic.attempts = connectionProgress?.attempts ?? 1;
+        failure.diagnostic.elapsedMs = Date.now() - (connectionProgress?.startedAt ?? startedAt);
+        throw failure;
+      }
       if (error instanceof AgentError) throw error;
       throw new AgentError("AGENT_LLM_FAILED", redactAgentErrorMessage(error instanceof Error ? error.message : "LLM request failed"));
     } finally {
@@ -151,10 +219,10 @@ export function createAgentLlmClient(input: {
   }
 
   /** Fold a message list into a concise summary (non-streaming; used for context compression). */
-  async function summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal }): Promise<string> {
+  async function summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal; onUsage?: (usage: import("./llm-response.js").LlmUsage | undefined) => void }): Promise<string> {
     let text = "";
-    await stream({
-      messages: input.messages,
+    const response = await streamInternal({
+      messages: input.messages.map(withoutPrivateReplay),
       tools: [],
       system: SUMMARY_SYSTEM_PROMPT,
       ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
@@ -162,7 +230,8 @@ export function createAgentLlmClient(input: {
       onEvent: (event) => {
         if (event.type === "text_delta") text += event.text ?? "";
       }
-    });
+    }, false);
+    input.onUsage?.(response.usage);
     return text.trim();
   }
 
@@ -173,9 +242,9 @@ export function createAgentLlmClient(input: {
    * the model returned nothing usable. Never throws — failures fall through to
    * the empty result and the conversation keeps its null title.
    */
-  async function generateTitle(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<string> {
+  async function generateTitle(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal; onUsage?: (usage: import("./llm-response.js").LlmUsage | undefined) => void }): Promise<string> {
     let text = "";
-    await stream({
+    const response = await streamInternal({
       messages: [
         { role: "user", content: input.userText },
         { role: "assistant", content: input.assistantText }
@@ -187,7 +256,8 @@ export function createAgentLlmClient(input: {
       onEvent: (event) => {
         if (event.type === "text_delta") text += event.text ?? "";
       }
-    });
+    }, false);
+    input.onUsage?.(response.usage);
     return sanitizeTitle(text);
   }
 
@@ -196,14 +266,14 @@ export function createAgentLlmClient(input: {
    * array on parse failure or an unusable model response — curation is always
    * best-effort and never throws.
    */
-  async function proposeMemory(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<Array<{
+  async function proposeMemory(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal; onUsage?: (usage: import("./llm-response.js").LlmUsage | undefined) => void }): Promise<Array<{
     kind: "fact" | "preference" | "decision" | "project_note";
     scope: "global" | "project" | "session";
     text: string;
     projectId?: string;
   }>> {
     let text = "";
-    await stream({
+    const response = await streamInternal({
       messages: [
         { role: "user", content: input.userText },
         { role: "assistant", content: input.assistantText }
@@ -215,11 +285,14 @@ export function createAgentLlmClient(input: {
       onEvent: (event) => {
         if (event.type === "text_delta") text += event.text ?? "";
       }
-    });
+    }, false);
+    input.onUsage?.(response.usage);
     return parseMemoryProposals(text);
   }
 
-  return { resolveProvider, stream, summarize, generateTitle, proposeMemory };
+  return { resolveProvider, stream, summarize, generateTitle, proposeMemory,
+    modelInfo: (modelId?: string) => { const r=resolveProvider(modelId); return {modelProfileId:r.modelProfileId,modelId:r.modelId,apiFormat:r.apiFormat}; },
+    contextBudget: (modelId?: string) => contextTokenBudget(resolveProvider(modelId).contextWindow) };
 }
 
 const SUMMARY_SYSTEM_PROMPT = [
@@ -230,13 +303,40 @@ const SUMMARY_SYSTEM_PROMPT = [
   "- open questions and pending actions",
   "- the user's goals and preferences",
   "If a previous summary is included in the messages, merge it with the new messages",
-  "rather than repeating it. Keep the summary under 800 characters and use the",
+  "rather than repeating it. Use up to 4000 characters. Preserve exact user constraints,",
+  "unfinished tasks, blockers, file paths and evidence IDs. Distinguish observations from claims.",
+  "Use sections: Goal; Constraints; Decisions; Evidence; Pending work. Use the",
   "same language as the conversation."
 ].join("\n");
 
 function pickBaseUrl(format: ProviderApiFormat, anthropicUrl: string | null, openaiUrl: string | null): string | null {
   if (format === "anthropic") return anthropicUrl ?? openaiUrl;
   return openaiUrl ?? anthropicUrl;
+}
+
+// Anthropic thinking budgets per strength; "off" applies nothing.
+const THINKING_BUDGET_TOKENS: Record<Exclude<ThinkingEffort, "off">, number> = {
+  low: 2048,
+  medium: 4096,
+  high: 8192
+};
+
+/**
+ * Map the user's thinking-strength preference onto the provider request body.
+ * "off" (or no preference) leaves the body untouched. OpenAI-compatible
+ * endpoints get `reasoning_effort`; Anthropic gets an enabled thinking budget
+ * block plus a `max_tokens` large enough to cover the budget (thinking tokens
+ * count against `max_tokens`).
+ */
+function applyThinkingPreference(body: Record<string, unknown>, format: "openai" | "anthropic", effort: ThinkingEffort | null): void {
+  if (effort === null || effort === "off") return;
+  if (format === "anthropic") {
+    const budgetTokens = THINKING_BUDGET_TOKENS[effort];
+    body.thinking = { type: "enabled", budget_tokens: budgetTokens };
+    body.max_tokens = budgetTokens + 8192;
+    return;
+  }
+  body.reasoning_effort = effort;
 }
 
 function authHeaders(resolution: AgentLlmProviderResolution): Record<string, string> {
@@ -251,13 +351,18 @@ async function streamAnthropic(
   resolution: AgentLlmProviderResolution,
   request: AgentLlmRequest,
   fetchImpl: AgentFetch,
-  signal: AbortSignal
+  signal: AbortSignal,
+  thinkingEffort: ThinkingEffort | null
 ): Promise<LlmResult> {
   const system = request.system ?? SYSTEM_PROMPT;
   const apiMessages: Array<{ role: "user" | "assistant"; content: Array<Record<string, unknown>> }> = [];
-  for (const message of request.messages) {
+  for (const original of request.messages) {
+    const message = original.providerReplay && !matchingReplay(original, resolution) ? withoutPrivateReplay(original) : original;
     const role = message.role === "assistant" ? "assistant" : "user";
-    const content: Array<Record<string, unknown>> = message.role === "tool"
+    const replay = matchingReplay(message, resolution);
+    const content: Array<Record<string, unknown>> = message.role === "assistant" && replay?.blocks
+      ? replay.blocks.map(block => ({ ...block }))
+      : message.role === "tool"
       ? [{ type: "tool_result", tool_use_id: message.toolCallId, content: message.content }]
       : [...(message.content ? [{ type: "text", text: message.content }] : []),
         ...(message.toolCalls ?? []).map((call) => ({ type: "tool_use", id: call.id, name: call.name, input: safeJsonParse(call.arguments) }))];
@@ -270,25 +375,27 @@ async function streamAnthropic(
     model: resolution.modelId,
     stream: true,
     max_tokens: 8192,
-    system,
+    system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     messages: apiMessages,
     tools: request.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema }))
   };
+  applyThinkingPreference(body, "anthropic", thinkingEffort);
+  if(request.maxOutputTokens!==undefined)body.max_tokens=checkedOutputLimit(request.maxOutputTokens);
 
-  const response = await withAbort(fetchImpl(`${resolution.baseUrl}/v1/messages`, {
+  const response = await withAbort(fetchModelWithRetry(fetchImpl, `${resolution.baseUrl}/v1/messages`, {
     method: "POST",
     redirect: "error",
     headers: {
       "content-type": "application/json",
-      "x-api-key": resolution.apiKey,
+      ...(resolution.authType !== 'none' ? { 'x-api-key': resolution.apiKey } : {}),
       "anthropic-version": "2023-06-01",
       ...authHeaders(resolution),
       ...resolution.defaultHeaders
     },
-    body: serializeProviderRequest(body),
+    body: serializeProviderRequest(body, contextTokenBudget(resolution.contextWindow)),
     signal
   }), signal);
-  if (!response.ok) throw new AgentError("AGENT_HTTP_ERROR", await readError(response));
+  if (!response.ok) throw await providerRejection(response, signal);
 
   return readAnthropicCompletion(response, request.onEvent, signal);
 }
@@ -297,9 +404,16 @@ async function streamOpenAi(
   resolution: AgentLlmProviderResolution,
   request: AgentLlmRequest,
   fetchImpl: AgentFetch,
-  signal: AbortSignal
+  signal: AbortSignal,
+  thinkingEffort: ThinkingEffort | null
 ): Promise<LlmResult> {
-  const mapped = request.messages.map((m) => {
+  const mapped = request.messages.map((original) => {
+    const m = original.providerReplay && !matchingReplay(original, resolution) ? withoutPrivateReplay(original) : original;
+    const replay = m.role === "assistant" ? matchingReplay(m, resolution) : undefined;
+    const reasoning = replay ? {
+      ...(replay.reasoningContent === undefined ? {} : { reasoning_content: replay.reasoningContent }),
+      ...(replay.reasoningDetails === undefined ? {} : { reasoning_details: replay.reasoningDetails }),
+    } : {};
     if (m.role === "tool") {
       return { role: "tool" as const, tool_call_id: m.toolCallId, content: m.content };
     }
@@ -307,22 +421,29 @@ async function streamOpenAi(
       return {
         role: "assistant" as const,
         content: m.content || null,
+        ...reasoning,
         tool_calls: m.toolCalls.map((tc) => ({ id: tc.id, type: "function" as const, function: { name: tc.name, arguments: tc.arguments } }))
       };
     }
-    return { role: m.role as "user" | "assistant", content: m.content };
+    return { role: m.role as "user" | "assistant", content: m.content, ...reasoning };
   });
   const apiMessages = [{ role: "system" as const, content: request.system ?? SYSTEM_PROMPT }, ...mapped];
 
   const body: Record<string, unknown> = {
     model: resolution.modelId,
     stream: true,
+    stream_options: { include_usage: true },
     messages: apiMessages,
     tools: request.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }))
   };
+  applyThinkingPreference(body, "openai", thinkingEffort);
+  if(request.maxOutputTokens!==undefined)body.max_completion_tokens=checkedOutputLimit(request.maxOutputTokens);
 
   const endpoint = new URL(`${resolution.baseUrl}/chat/completions`);
-  const response = await withAbort(fetchImpl(endpoint.href, {
+  const officialMiniMax = endpoint.protocol === "https:"
+    && ["api.minimaxi.com", "api.minimax.cn", "api.minimax.io"].includes(endpoint.hostname);
+  if (officialMiniMax) body.reasoning_split = true;
+  const response = await withAbort(fetchModelWithRetry(fetchImpl, endpoint.href, {
     method: "POST",
     redirect: "error",
     headers: {
@@ -330,14 +451,14 @@ async function streamOpenAi(
       ...authHeaders(resolution),
       ...resolution.defaultHeaders
     },
-    body: serializeProviderRequest(body),
+    body: serializeProviderRequest(body, contextTokenBudget(resolution.contextWindow)),
     signal
   }), signal);
-  if (!response.ok) throw new AgentError("AGENT_HTTP_ERROR", await readError(response));
+  if (!response.ok) throw await providerRejection(response, signal);
 
-  const allowFinishReasonEof = endpoint.protocol === "https:"
-    && ["api.minimaxi.com", "api.minimax.cn", "api.minimax.io"].includes(endpoint.hostname);
-  return readOpenAiCompletion(response, request.onEvent, signal, { allowFinishReasonEof });
+  const allowFinishReasonEof = officialMiniMax;
+  return readOpenAiCompletion(response, request.onEvent, signal, { allowFinishReasonEof, toolNames: request.tools.map(tool => tool.name),
+    ...(allowFinishReasonEof ? { reasoningDetailsMode: "snapshot" as const } : {}) });
 }
 
 const SYSTEM_PROMPT = [
@@ -347,21 +468,37 @@ const SYSTEM_PROMPT = [
   "- sessions: list and inspect AI CLI sessions",
   "- memory: read/write scoped memory (global, project, session)",
   "",
-  "Be concise. When you need to take an operate action, request it and it will be",
-  "authorized by a matching scoped Grant or an exact owner approval before execution.",
+  "Be concise. Use tools to complete authorized work. Routine scoped platform operations",
+  "run automatically for direct owner requests; high-risk actions require exact approval.",
+  "Tenant ownership, tool switches and exact approvals are enforced by the platform.",
   "Use list_playbooks and load_playbook for Copilot operating guides. CLI Skills",
   "belong to CLI sessions and do not add tools to your runtime. Task preparation",
-  "does not start a CLI or dispatch a prompt. Autonomous dispatch is unavailable.",
+  "does not start a CLI or dispatch a prompt. Use pm_execute_task_packet to prepare,",
+  "start and deliver work through an operator-enabled CLI adapter. Never bypass native CLI permissions.",
+  "A native trust/permission prompt or PROGRAMMATIC_SUBMIT_NATIVE_APPROVAL_REQUIRED requires an owner terminal decision: stop dispatch attempts and report the blocker. Resume only after it is resolved.",
+  "Choose the tools and next steps from the user's goal and current tool results; there is no fixed workflow.",
+  "Project-management tools support work items, execution, progress and evidence-based reports.",
+  "Use pm_get_task_progress or get_session_output when evidence about an existing attempt is needed.",
+  "Do not redispatch a delivered or uncertain task. An incomplete/not_sent result means preparation",
+  "may have succeeded but the prompt was NOT delivered; inspect readiness before a new authorized attempt.",
+  "Use pm_close_task with the returned attempt and notification evidence IDs to record a completion report.",
+  "A CLI completion hook is only a completion candidate. Report actual evidence, remaining checks,",
+  "and whether acceptance is still pending; never equate it with tests passing, merge or deployment.",
+  "For session stops, keep each get_session_output target attached to that output. Never match titles to IDs by list order.",
+  "Read the requested task's current screen, use its exact target.observationId and taskTitle, and let the owner verify the server-bound target in approval.",
+  "If titles are ambiguous or absent, ask which session; do not guess. A target mismatch/stale error requires fresh evidence and a new approval.",
+  "A terminal/process-group stop does not prove detached or shared background work stopped. Report the returned scope; never stop a shared Codex daemon to clear a thread lock.",
   "Never claim a write happened until",
   "the tool result confirms it."
 ].join("\n");
 
 /** Final wire guard: provider envelopes and JSON escaping can exceed projection estimates. */
-function serializeProviderRequest(body: Record<string, unknown>): string {
+function serializeProviderRequest(body: Record<string, unknown>, budget: number): string {
   const serialized = JSON.stringify(body);
-  if (serialized.length > MAX_CONTEXT_CHARS) {
+  const estimated = estimateJsonTokens(body);
+  if (estimated > budget) {
     throw new AgentError("COPILOT_CONTEXT_TOO_LARGE",
-      `Final provider request exceeds ${MAX_CONTEXT_CHARS} application characters (${serialized.length})`);
+      `Final provider request exceeds ${budget} estimated tokens (${estimated})`);
   }
   return serialized;
 }
@@ -370,10 +507,6 @@ function safeJsonParse(value: string): unknown {
   try { return JSON.parse(value); } catch { return {}; }
 }
 
-async function readError(response: Response): Promise<string> {
-  void response.body?.cancel().catch(() => undefined);
-  return `Provider returned HTTP ${response.status}`;
-}
 
 export function toolSchemaToModelFormat(tool: { name: string; description: string; inputSchema: Record<string, unknown> }): AgentToolSchema {
   return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema };
@@ -451,4 +584,9 @@ function sanitizeTitle(raw: string): string {
   const slice = trimmed.slice(0, TITLE_MAX_CHARS);
   // Drop a trailing half-character so we don't return "你帮我做一个 K8s pod".
   return slice.replace(/[\s\p{P}]$/u, "").trim() || trimmed.slice(0, TITLE_MAX_CHARS);
+}
+
+function checkedOutputLimit(value:number):number {
+ if(!Number.isSafeInteger(value)||value<1||value>16384)throw new AgentError('AGENT_OUTPUT_LIMIT','Invalid output token limit');
+ return value;
 }

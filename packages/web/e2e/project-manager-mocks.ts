@@ -111,6 +111,27 @@ export async function mockProjectDetailApis(
       return;
     }
 
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/context` && method === 'GET') {
+      await route.fulfill({ json: envelope({
+        project: { id: PROJECT_ID, name: 'Project Manager E2E', description: null, status: 'active' },
+        access: { role: 'owner', capabilities: ['read', 'comment', 'develop', 'review', 'manage'],
+          teamId: null, logicalOwnerId: 'user-e2e' },
+        privateDetailAllowed: true, shared: false, revisionRequired: false,
+        managedExecution: { supported: true, reason: null },
+      }) });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/collaboration/projects/${PROJECT_ID}` && method === 'GET') {
+      await route.fulfill({ json: envelope({
+        project: { id: PROJECT_ID, name: 'Project Manager E2E', role: 'owner',
+          capabilities: ['read', 'comment', 'develop', 'review', 'manage'], memberCount: 1,
+          revision: 1, verificationRevision: 1, executionEnabled: false, verification: null },
+        members: [], tasks: [], events: [],
+      }) });
+      return;
+    }
+
     if (url.pathname === "/api/v1/notifications" && method === "GET") {
       await route.fulfill({ json: envelope({ notifications: [] }) });
       return;
@@ -118,6 +139,11 @@ export async function mockProjectDetailApis(
 
     if (url.pathname === "/api/v1/model-providers" && method === "GET") {
       await route.fulfill({ json: envelope({ providers: [], models: [], credentials: [] }) });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/adapters/order' && method === 'GET') {
+      await route.fulfill({ json: envelope({ order: ['claude', 'opencode', 'codex', 'kimi', 'pi', 'mcode'] }) });
       return;
     }
 

@@ -23,10 +23,31 @@ export type OutboundHostResolver = (
 
 export async function validateOutboundHost(
   hostname: string,
-  resolveHost: OutboundHostResolver
+  resolveHost: OutboundHostResolver,
+  options: PublicEndpointOptions = {}
 ): Promise<string | undefined> {
   const normalized = hostname.toLowerCase().replace(/\.$/, "");
-  const blockedByName = isBlockedMetadataHost(normalized);
+
+  // Cloud metadata stays blocked even for providers that explicitly trust
+  // private networks.
+  const blockedByMetadata = isBlockedCloudMetadataHost(normalized);
+  if (blockedByMetadata) {
+    return blockedByMetadata;
+  }
+
+  if (options.allowPrivateNetworks === true) {
+    // Trusted local model servers (Ollama, vLLM, ...): the private/loopback
+    // IP blocklist and the loopback hostname check are relaxed, including the
+    // DNS re-resolution pivot guard. `.internal` names stay blocked: they are
+    // a cloud-metadata naming convention (see assertPublicHttpsEndpoint) and
+    // are never a legitimate local model server address.
+    if (normalized.endsWith(".internal")) {
+      return "Internal hostnames are not allowed";
+    }
+    return undefined;
+  }
+
+  const blockedByName = isLoopbackHostname(normalized);
   if (blockedByName) {
     return blockedByName;
   }
@@ -57,15 +78,21 @@ export async function validateOutboundHost(
 }
 
 /**
- * Optional per-provider trust switch. When `allowPlaintextHttp` is true, a
- * plain `http:` endpoint is accepted INSTEAD OF `https:`. This relaxes ONLY the
- * protocol requirement — every other SSRF check (metadata host, private/
+ * Optional per-provider trust switches. When `allowPlaintextHttp` is true,
+ * a plain `http:` endpoint is accepted INSTEAD OF `https:`. This relaxes ONLY
+ * the protocol requirement — every other SSRF check (metadata host, private/
  * loopback/link-local IP incl. DNS-resolved, `.local`/`.internal`, embedded
  * IPv4, and credentials-in-URL) is still enforced, so the switch can never be
  * abused to point a managed secret at cloud metadata or the local network.
+ *
+ * When `allowPrivateNetworks` is true, the private/loopback/link-local IP
+ * blocklist and the `localhost` hostname check are relaxed so a provider can
+ * point at a local model server (e.g. Ollama on 127.0.0.1). Cloud metadata
+ * hosts, `.internal` names, and credentials-in-URL remain blocked.
  */
 export interface PublicEndpointOptions {
   allowPlaintextHttp?: boolean | undefined;
+  allowPrivateNetworks?: boolean | undefined;
 }
 
 /** Synchronous fail-closed guard used before persisting or decrypting managed credentials. */
@@ -84,9 +111,13 @@ export function assertPublicHttpsEndpoint(
     throw new Error("Managed credentials require a public HTTPS endpoint");
   }
   const hostname = url.hostname.toLowerCase().replace(/\.$/u, "");
-  const blocked = isBlockedMetadataHost(hostname) ?? isBlockedIpAddress(hostname);
-  if (blocked || hostname.endsWith(".local") || hostname.endsWith(".internal")
-    || (!hostname.includes(".") && isIP(hostname) === 0)) {
+  const trustedPrivateNetworks = options.allowPrivateNetworks === true;
+  const blocked = trustedPrivateNetworks
+    ? isBlockedCloudMetadataHost(hostname)
+    : isBlockedMetadataHost(hostname) ?? isBlockedIpAddress(hostname);
+  if (blocked || hostname.endsWith(".internal")
+    || (!trustedPrivateNetworks && (hostname.endsWith(".local")
+      || (!hostname.includes(".") && isIP(hostname) === 0)))) {
     throw new Error(blocked ?? "Managed credentials require a public DNS endpoint");
   }
 }
@@ -99,7 +130,7 @@ export async function assertResolvedPublicHttpsEndpoint(
 ): Promise<void> {
   assertPublicHttpsEndpoint(endpoint, options);
   const url = new URL(endpoint as string);
-  const rejection = await validateOutboundHost(url.hostname, resolveHost);
+  const rejection = await validateOutboundHost(url.hostname, resolveHost, options);
   if (rejection) throw new Error(`Managed credential endpoint rejected: ${rejection}`);
 }
 
@@ -132,15 +163,27 @@ export function isBlockedIpAddress(hostname: string): string | undefined {
 }
 
 export function isBlockedMetadataHost(hostname: string): string | undefined {
+  return isBlockedCloudMetadataHost(hostname) ?? isLoopbackHostname(hostname);
+}
+
+export function isBlockedCloudMetadataHost(hostname: string): string | undefined {
   const value = hostname.toLowerCase();
   if (value === "metadata.google.internal" || value.endsWith(".metadata.google.internal")) {
     return "Metadata hostnames are not allowed";
   }
+  // 169.254.169.254: AWS/GCP/Azure IMDS. 100.100.100.200: Alibaba Cloud.
+  // These stay blocked even when allowPrivateNetworks relaxes the rest of
+  // the private-IP blocklist (100.64.0.0/10 would otherwise cover Alibaba).
+  if (value === "169.254.169.254" || value === "100.100.100.200") {
+    return "Cloud metadata service is not allowed";
+  }
+  return undefined;
+}
+
+export function isLoopbackHostname(hostname: string): string | undefined {
+  const value = hostname.toLowerCase();
   if (value === "localhost" || value === "localhost.localdomain") {
     return "Loopback addresses are not allowed";
-  }
-  if (value === "169.254.169.254") {
-    return "Cloud metadata service is not allowed";
   }
   return undefined;
 }

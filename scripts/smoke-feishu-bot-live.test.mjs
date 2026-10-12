@@ -35,14 +35,14 @@ describe("Feishu bot live long-connection smoke helper", () => {
   it("uses only ForgeBadger smoke variables", () => {
     const config = resolveFeishuBotLiveConfig({
       FORGEBADGER_TOKEN: "current-token",
-      FORGEBADGER_GATEWAY_URL: "http://current.example:48731",
+      FORGEBADGER_GATEWAY_URL: "http://current.example:18332",
       FEISHU_APP_ID: "cli_a_live_app",
       FEISHU_APP_SECRET: "live-app-secret"
     });
 
     assert.equal(config.ok, true);
     assert.equal(config.config.token, "current-token");
-    assert.equal(config.config.gatewayUrl, "http://current.example:48731");
+    assert.equal(config.config.gatewayUrl, "http://current.example:18332");
   });
 
   it("writes the redacted live report to a 0600 JSON file and creates parent directories", () => {
@@ -89,7 +89,7 @@ describe("Feishu bot live long-connection smoke helper", () => {
     });
 
     const report = await runFeishuBotLiveSmoke({
-      gatewayUrl: "http://127.0.0.1:48731",
+      gatewayUrl: "http://127.0.0.1:18332",
       token: "Bearer live-token-secret",
       appId: "cli_a_live_app",
       appSecret: "live-app-secret",
@@ -194,7 +194,7 @@ describe("Feishu bot live long-connection smoke helper", () => {
     });
 
     const report = await runFeishuBotLiveSmoke({
-      gatewayUrl: "http://127.0.0.1:48731",
+      gatewayUrl: "http://127.0.0.1:18332",
       token: "token",
       appId: "cli_a_live_app",
       appSecret: "live-app-secret",

@@ -57,3 +57,16 @@ it("does not split UTF-16 surrogate pairs across output frames", () => {
   assert.deepEqual(chunks, ["abc", "😀de", "f"]);
   flow.dispose();
 });
+
+it("delivers the terminal_history_end marker as its own frame after every history chunk", () => {
+  const frames: Array<{ type: string; payload: { data: string; sequence: number } }> = [];
+  const flow = new TerminalOutputFlow({ send: (frame) => frames.push(frame), pause() {}, fail() { assert.fail("unexpected failure"); }, chunkSize: 4 });
+  flow.enqueue("terminal_history", "abcdef");
+  flow.enqueue("terminal_history_end", "");
+  flow.enqueue("terminal_output", "live");
+  assert.deepEqual(frames.map((f) => f.type), ["terminal_history", "terminal_output", "terminal_history_end", "terminal_output"]);
+  assert.deepEqual(frames[2], { type: "terminal_history_end", payload: { data: "", sequence: 3 } });
+  flow.acknowledge(3);
+  flow.acknowledge(4);
+  flow.dispose();
+});

@@ -31,6 +31,7 @@ import {
 import type { Session } from "@/lib/api";
 import {
   deleteSession,
+  GatewayApiError,
   getDependencies,
   getSessionBoard,
   startSession,
@@ -52,6 +53,7 @@ export default function SessionsPage() {
   const [selectedCliTools, setSelectedCliTools] = useState<ReadonlySet<string>>(new Set());
   const [showEmptyProjects, setShowEmptyProjects] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [forceDeleteId, setForceDeleteId] = useState<string | null>(null);
   const { data, isLoading, isFetching, isError } = useQuery({
     queryKey: ["sessions-board"],
     queryFn: getSessionBoard,
@@ -61,6 +63,21 @@ export default function SessionsPage() {
     queryFn: getDependencies,
   });
   const prefs = useSessionBoardPrefs();
+  // The kanban board uses fixed pixel column widths with horizontal scrolling,
+  // which degrades on small screens: below md always render the list view
+  // (the desktop preference is preserved and re-applies at md and up).
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      return;
+    }
+    const media = window.matchMedia("(min-width: 768px)");
+    const update = () => setIsDesktop(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  const boardView = isDesktop ? prefs.view : "list";
 
   const refreshSessions = () => {
     queryClient.invalidateQueries({ queryKey: ["sessions-board"] });
@@ -80,7 +97,10 @@ export default function SessionsPage() {
   });
   const stopMutation = useMutation({
     mutationFn: (id: string) => stopSession(id),
-    onSuccess: refreshSessions,
+    onSuccess: (result) => {
+      if (result?.session?.warning) toast.warning(t("copilot.stopExternalWarning"));
+      refreshSessions();
+    },
     onError: (error) => {
       toast.error(
         error instanceof Error && error.message
@@ -90,9 +110,23 @@ export default function SessionsPage() {
     },
   });
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteSession(id),
-    onSuccess: refreshSessions,
-    onError: (error) => {
+    mutationFn: (input: { id: string; force?: boolean }) => deleteSession(input.id, { force: input.force }),
+    onSuccess: () => {
+      setForceDeleteId(null);
+      refreshSessions();
+    },
+    onError: (error, input) => {
+      // The CLI exited but a confirmed stop receipt could not be obtained
+      // (lingering background processes or an unavailable runtime): offer the
+      // operator-gated force delete instead of a dead-end toast.
+      if (
+        !input.force &&
+        error instanceof GatewayApiError &&
+        error.details?.code === "SESSION_RUNTIME_STOP_UNCONFIRMED"
+      ) {
+        setForceDeleteId(input.id);
+        return;
+      }
       toast.error(
         error instanceof Error && error.message
           ? `${t("sessions.deleteFailed")}: ${error.message}`
@@ -118,19 +152,25 @@ export default function SessionsPage() {
   // isFetching back to false — in either case pruning to that snapshot would
   // permanently drop tabs for sessions created since.
   //
-  // The board's allowlist is additionally widened with locally-running tabs: a
-  // session that was started while a fetch was in flight is not in that
-  // fetch's snapshot, and a running tab must never be dropped by a settle. A
-  // running session is always in the next settled board (creation is committed
-  // before its tab is written), so this cannot mask a genuinely dead session.
+  // The board's allowlist is additionally widened with locally-tracked tabs
+  // that are either still running or were created very recently: a session
+  // started while a fetch was in flight is not in that fetch's snapshot, and
+  // its tab may have already flipped to `exited`/`error` via a gateway event
+  // before the next board settle observes it. A short grace window keeps
+  // such tabs alive until a settled board that actually contains the row can
+  // authoritatively keep or drop them. A running or just-created session is
+  // always in the next settled board (creation is committed before its tab
+  // is written), so this cannot mask a genuinely dead session indefinitely.
   useEffect(() => {
     if (!board || isFetching || isError) {
       return;
     }
-    const runningTabIds = readSessionTabs()
-      .filter((tab) => tab.status === "running")
+    const now = Date.now();
+    const RECENT_TAB_GRACE_MS = 30_000;
+    const protectedTabIds = readSessionTabs()
+      .filter((tab) => tab.status === "running" || now - tab.updatedAt < RECENT_TAB_GRACE_MS)
       .map((tab) => tab.id);
-    pruneSessionTabs(new Set([...sessions.map((session) => session.id), ...runningTabIds]));
+    pruneSessionTabs(new Set([...sessions.map((session) => session.id), ...protectedTabIds]));
     notifySessionTabsChanged();
   }, [board, sessions, isFetching, isError]);
 
@@ -164,7 +204,15 @@ export default function SessionsPage() {
     return merged;
   }, [sessions, localPrompts]);
 
-  const now = Date.now();
+  // Relative times must not participate in SSR/hydration rendering (server
+  // clock vs client clock diverge); render a placeholder until mounted, then
+  // keep the clock fresh so relative labels tick over.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const actionPending = startMutation.isPending || stopMutation.isPending || deleteMutation.isPending;
 
   const toggleCliTool = (tool: string) => {
@@ -189,7 +237,7 @@ export default function SessionsPage() {
     onOpenSession: openSession,
     onStartSession: (session: Session) => startMutation.mutate(session.id),
     onStopSession: (session: Session) => stopMutation.mutate(session.id),
-    onDeleteSession: (session: Session) => deleteMutation.mutate(session.id),
+    onDeleteSession: (session: Session) => deleteMutation.mutate({ id: session.id }),
   };
 
   return (
@@ -204,14 +252,14 @@ export default function SessionsPage() {
         {hasProjects ? (
           <Button
             size="sm"
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            variant="brand"
             onClick={() => setProjectPickerOpen(true)}
           >
             <Plus className="size-4" />
             {t("projects.newSession")}
           </Button>
         ) : (
-          <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+          <Button asChild size="sm" variant="brand">
             <Link href="/projects/new">
               <Plus className="size-4" />
               {t("sessions.createProject")}
@@ -224,7 +272,7 @@ export default function SessionsPage() {
         <SessionBoardSkeleton />
       ) : sessions.length === 0 ? (
         <Card>
-          <CardContent className="flex flex-col items-center justify-center gap-4 py-12 text-center">
+          <CardContent className="flex min-h-[50vh] flex-col items-center justify-center gap-4 py-12 text-center">
             <div
               className={cn(
                 "flex size-10 items-center justify-center rounded-md",
@@ -269,34 +317,20 @@ export default function SessionsPage() {
               {hasProjects ? (
                 <Button
                   size="sm"
-                  className="bg-brand text-brand-foreground hover:bg-brand/90"
+                  variant="brand"
                   onClick={() => setProjectPickerOpen(true)}
                 >
                   <FolderOpen className="size-4" />
                   {t("sessions.createFromProject")}
                 </Button>
               ) : (
-                <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+                <Button asChild size="sm" variant="brand">
                   <Link href="/projects/new">
                     <Plus className="size-4" />
                     {t("sessions.createProject")}
                   </Link>
                 </Button>
               )}
-            </div>
-          </CardContent>
-        </Card>
-      ) : filteredSessions.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center gap-3 py-10 text-center">
-            <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-              <TerminalSquare className="size-5" />
-            </div>
-            <div>
-              <div className="text-sm font-medium">{t("sessions.noMatchesTitle")}</div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {t("sessions.noMatchesDescription")}
-              </p>
             </div>
           </CardContent>
         </Card>
@@ -314,10 +348,24 @@ export default function SessionsPage() {
             onShowEmptyProjectsChange={setShowEmptyProjects}
             hasCustomColumnOrder={prefs.columnOrder.length > 0}
             onResetColumnOrder={prefs.resetColumnOrder}
-            view={prefs.view}
+            view={boardView}
             onViewChange={prefs.setView}
           />
-          {prefs.view === "list" ? (
+          {filteredSessions.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center gap-3 py-10 text-center">
+                <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                  <TerminalSquare className="size-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-medium">{t("sessions.noMatchesTitle")}</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("sessions.noMatchesDescription")}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : boardView === "list" ? (
             <SessionBoardListView
               columns={orderedColumns}
               prompts={prompts}
@@ -378,7 +426,7 @@ export default function SessionsPage() {
                 <p className="text-sm text-muted-foreground">
                   {t("sessions.chooseProjectEmpty")}
                 </p>
-                <Button asChild size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90">
+                <Button asChild size="sm" variant="brand">
                   <Link href="/projects/new">
                     <Plus className="size-4" />
                     {t("sessions.createProject")}
@@ -386,6 +434,32 @@ export default function SessionsPage() {
                 </Button>
               </div>
             ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={forceDeleteId !== null} onOpenChange={(open) => { if (!open) setForceDeleteId(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("sessions.forceDeleteTitle")}</DialogTitle>
+            <DialogDescription>{t("sessions.forceDeleteDescription")}</DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setForceDeleteId(null)}>
+              {t("sessions.forceDeleteCancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleteMutation.isPending}
+              onClick={() => {
+                if (forceDeleteId) {
+                  deleteMutation.mutate({ id: forceDeleteId, force: true });
+                }
+              }}
+            >
+              {t("sessions.forceDeleteConfirm")}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

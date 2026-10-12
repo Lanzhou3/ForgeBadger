@@ -16,7 +16,7 @@ export default function MembersPage() {
   const requested = search.get("project") ? "projects" : search.get("team") ? "collaboration" : search.get("view");
   const view = requested === "projects" || requested === "collaboration" ? requested : isAdmin ? "accounts" : "collaboration";
   const tabs = [...(isAdmin ? ["accounts"] as const : []), "collaboration", "projects"] as const;
-  return <main className="mx-auto max-w-6xl space-y-5 p-4 pt-16 md:p-6">
+  return <main className="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
     <header>
       <h1 className="text-xl font-semibold">{t("members.title")}</h1>
       <p className="mt-1 text-sm text-muted-foreground">{t("membersHub.intro")}</p>

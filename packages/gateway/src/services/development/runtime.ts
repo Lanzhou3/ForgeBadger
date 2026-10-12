@@ -1,24 +1,18 @@
-import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import type { Database } from '../../db/types.js';
 import { DevelopmentTaskRepository } from '../../db/repositories/development-task-repository.js';
 import type { ForgeBadgerEventBus } from '../event-bus.js';
 import { redactAgentErrorMessage,redactAgentValue } from '../agent/redaction.js';
-import { assertDevelopmentAuthority } from './authority.js';
+import { assertDevelopmentAuthority,assertDevelopmentAuthorityCheap } from './authority.js';
 import { prepareSource,writeWorkspace,assertWorkspace,sourceDiff,hashText } from './workspace.js';
 import { runSandboxChecks } from './sandbox.js';
 import type { DevelopmentTaskRow,DevelopmentEvidence } from './contracts.js';
+import { workspaceBase } from './state-directory.js';
+import { executionReservation } from './execution-identity.js';
 
 interface Dependencies {db:Database;eventBus:ForgeBadgerEventBus;}
 const liveWorkers=new WeakMap<Database,Map<string,{controller:AbortController;promise:Promise<void>}>>();
-const bases=new WeakMap<Database,string>();
-function workspaceBase(db:Database) {
- let base=bases.get(db);if(base)return base;
- base=db.name&&db.name!==':memory:'?path.join(fs.realpathSync(path.dirname(path.resolve(db.name))),'development-workspaces'):fs.mkdtempSync(path.join(os.tmpdir(),'forgebadger-development-'));
- fs.mkdirSync(base,{recursive:true,mode:0o700});if(fs.lstatSync(base).isSymbolicLink())throw new Error('DEVELOPMENT_ROOT_SYMLINK');fs.chmodSync(base,0o700);bases.set(db,base);return base;
-}
 export function startDevelopmentRuntime(deps:Dependencies) {
  const workers=liveWorkers.get(deps.db)??new Map();liveWorkers.set(deps.db,workers);let stopped=false;
  function pump() {
@@ -48,7 +42,9 @@ function reportFailure(action:string,error:unknown,row?:DevelopmentTaskRow) {
 async function executeTask(deps:Dependencies,row:DevelopmentTaskRow,controller:AbortController) {
  const repo=new DevelopmentTaskRepository(deps.db,row.user_id);const owner=row.owner!;let error:string|undefined;
  const authorize=()=>{if(!deps.db.open||!repo.owns(row.id,owner))throw new Error('DEVELOPMENT_EXECUTION_CANCELLED');assertDevelopmentAuthority(deps.db,row,false);};
- const timer=setInterval(()=>{try {authorize();if(!repo.renew(row.id,owner))throw new Error('DEVELOPMENT_LEASE_LOST');}catch(e){error=redactAgentErrorMessage(e instanceof Error?e.message:'Development authority unavailable');controller.abort();}},500);timer.unref();
+ // The 500ms tick probes only cheap liveness/revocation; full authority validation runs at the
+ // check boundaries (authorize) and before finish/acceptance, where a false result has consequences.
+ const timer=setInterval(()=>{try {if(!deps.db.open||!repo.owns(row.id,owner))throw new Error('DEVELOPMENT_EXECUTION_CANCELLED');assertDevelopmentAuthorityCheap(deps.db,row);if(!repo.renew(row.id,owner))throw new Error('DEVELOPMENT_LEASE_LOST');}catch(e){error=redactAgentErrorMessage(e instanceof Error?e.message:'Development authority unavailable');controller.abort();}},500);timer.unref();
  try {
   authorize();assertDevelopmentAuthority(deps.db,row);const prepared=prepareSource(row.project_root,JSON.parse(row.plan_json));
   const directory=path.join(workspaceBase(deps.db),hashText(row.user_id).slice(0,16)+'-'+row.id);
@@ -57,7 +53,10 @@ async function executeTask(deps:Dependencies,row:DevelopmentTaskRow,controller:A
   for(const check of prepared.plan.checks) {
    authorize();if(controller.signal.aborted)throw new Error('DEVELOPMENT_EXECUTION_CANCELLED');
    const remaining=60000-(Date.now()-evidence.startedAt);if(remaining<=0)throw new Error('DEVELOPMENT_DEADLINE');
-   const result=await runSandboxChecks({workspace:directory,checks:[check.path],signal:controller.signal,timeoutMs:remaining});
+   const reservation=executionReservation(deps.db,row.user_id,row.id,owner);repo.setExecutionIdentity(row.id,owner,reservation);
+   const result=await runSandboxChecks({workspace:directory,checks:[check.path],signal:controller.signal,timeoutMs:remaining,
+    execution:{reservation,onReady(identity){authorize();repo.setExecutionIdentity(row.id,owner,identity);}}});
+   if(result.executionUncertain){repo.interrupt(row.id,owner);return;}
    evidence.checks.push({path:check.path,...result});if(result.exitCode!==0||result.cancelled||result.timedOut)break;
   }
   authorize();assertDevelopmentAuthority(deps.db,row);assertWorkspace(directory,prepared);evidence.finishedAt=Date.now();

@@ -114,6 +114,21 @@ async function mockCopilotApis(page: Page) {
       return;
     }
 
+    const emptyReads: Record<string, unknown> = {
+      "/api/v1/copilot/preferences": { modelId: null, thinkingEffort: "medium" },
+      "/api/v1/projects": { projects: [] },
+      "/api/v1/copilot/skills": { skills: [] },
+      "/api/v1/copilot/connections": { connections: [] },
+      "/api/v1/copilot/memory/entries": { entries: [] },
+      "/api/v1/runtime-settings": { readonly: true, settings: [] },
+      "/api/v1/adapters/discovery": { adapters: [] },
+      [`/api/v1/copilot/conversations/${CONVERSATION_ID}/runs`]: { runs: [], activeRun: null },
+      [`/api/v1/copilot/conversations/${CONVERSATION_ID}/followups`]: { followups: [] },
+    };
+    if (url.pathname in emptyReads) {
+      await route.fulfill({ json: envelope(emptyReads[url.pathname]) });
+      return;
+    }
     await route.fulfill({
       status: 404,
       json: { code: 1, message: `Unhandled mocked API route: ${method} ${url.pathname}` },
@@ -135,6 +150,7 @@ test.beforeEach(async ({ page }) => {
       })
     );
   });
+  await page.routeWebSocket("**/ws/**", () => {});
   await mockCopilotApis(page);
 });
 
@@ -157,6 +173,9 @@ test("shows only Gateway-native Copilot settings and tool capabilities", async (
   await expect(page.getByRole("heading", { name: "Copilot Settings" })).toBeVisible();
   await expect(page.getByText("Gateway native")).toBeVisible();
   await expect(page.getByText(/no external Harness service/u)).toBeVisible();
+  await page.goto("/copilot/extensions");
+  await page.getByRole("tab", { name: "Connections", exact: true }).click();
+  await page.getByRole("button", { name: "Manage tools", exact: true }).click();
   await expect(page.getByTestId("tool-row-list_projects")).toBeVisible();
 });
 

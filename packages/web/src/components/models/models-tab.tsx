@@ -17,6 +17,7 @@ import type { ModelProfile } from "@/lib/api";
 import {
   COMMON_MODEL_CAPABILITIES,
   EmptyLine,
+  THINKING_EFFORT_LEVELS,
   type ModelForm,
   type Translate,
 } from "./shared";
@@ -67,6 +68,17 @@ export function ModelsTab({
       ? modelForm.capabilities.filter((item) => item !== capability)
       : [...modelForm.capabilities, capability];
     onModelFormChange({ ...modelForm, capabilities: next });
+  }
+
+  function toggleEffort(effort: string) {
+    const active = modelForm.supportEfforts.includes(effort);
+    onModelFormChange({
+      ...modelForm,
+      supportEfforts: active
+        ? modelForm.supportEfforts.filter((item) => item !== effort)
+        : [...modelForm.supportEfforts, effort],
+      defaultEffort: active && modelForm.defaultEffort === effort ? "" : modelForm.defaultEffort,
+    });
   }
 
   return (
@@ -225,6 +237,39 @@ export function ModelsTab({
                 onChange={(event) => onModelFormChange({ ...modelForm, contextWindow: event.target.value })}
               />
               <p className="text-xs text-muted-foreground">{t("models.contextWindowHint")}</p>
+            </div>
+            <div className="space-y-2">
+              <Label>{t("models.thinkingEfforts")}</Label>
+              <div className="flex flex-wrap gap-3">
+                {THINKING_EFFORT_LEVELS.map((effort) => (
+                  <label key={effort} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-brand"
+                      checked={modelForm.supportEfforts.includes(effort)}
+                      onChange={() => toggleEffort(effort)}
+                    />
+                    {effort}
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">{t("models.thinkingEffortsHint")}</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="model-form-default-effort">{t("models.defaultEffort")}</Label>
+              <select
+                id="model-form-default-effort"
+                className="h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                value={modelForm.defaultEffort}
+                onChange={(event) => onModelFormChange({ ...modelForm, defaultEffort: event.target.value })}
+              >
+                <option value="">{t("models.defaultEffortUnset")}</option>
+                {modelForm.supportEfforts.map((effort) => (
+                  <option key={effort} value={effort}>
+                    {effort}
+                  </option>
+                ))}
+              </select>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" disabled={isSaving} onClick={() => onDialogOpenChange(false)}>

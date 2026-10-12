@@ -8,7 +8,17 @@ afterEach(() => vi.restoreAllMocks());
 
 it("returns the default pet when browser storage cannot be read", () => {
   vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage unavailable"); });
+  expect(readPetPreference()).toBe("honey-badger");
+});
+
+it("defaults to the honey badger, preserves the robot preference, and rejects unknown ids", () => {
+  expect(readPetPreference()).toBe("honey-badger");
+  expect(writePetPreference("robot")).toBe(true);
   expect(readPetPreference()).toBe("robot");
+  expect(writePetPreference("honey-badger")).toBe(true);
+  expect(readPetPreference()).toBe("honey-badger");
+  window.localStorage.setItem(PET_STORAGE_KEY, "unknown");
+  expect(readPetPreference()).toBe("honey-badger");
 });
 
 it("notifies local and other-tab consumers, ignores unrelated preferences, and cleans up", () => {

@@ -10,9 +10,11 @@ import {migrate} from 'drizzle-orm/better-sqlite3/migrator';
 import {UserRepository} from '../src/db/repositories/user-repository.js';
 import {ProjectRepository} from '../src/db/repositories/project-repository.js';
 import {DevelopmentTaskRepository} from '../src/db/repositories/development-task-repository.js';
-import {PlatformActions} from '../src/services/platform-commands/actions.js';
+import {PlatformActionRepository} from '../src/db/repositories/platform-action-repository.js';
+import {PlatformActions,canonical} from '../src/services/platform-commands/actions.js';
 import {createPlatformCommands} from '../src/services/platform-commands/catalog.js';
 import {startDevelopmentRuntime} from '../src/services/development/runtime.js';
+import {sandboxCapability} from '../src/services/development/sandbox.js';
 import {prepareSource,readSource,sourcePath,hashText,writeWorkspace,assertWorkspace} from '../src/services/development/workspace.js';
 import {assertDevelopmentAuthority} from '../src/services/development/authority.js';
 import {ForgeBadgerEventBus} from '../src/services/event-bus.js';
@@ -24,7 +26,7 @@ import {createAgentToolRegistry} from '../src/services/agent/tool-registry.js';
 import {createPlatformTools} from '../src/services/agent/tools/index.js';
 import type {DevelopmentEvidence} from '../src/services/development/contracts.js';
 const migrations=fileURLToPath(new URL('../src/db/migrations',import.meta.url));
-const mac=process.platform==='darwin';
+const sandboxAvailable=sandboxCapability().available;
 function fixture(testContent="const {test}=require('node:test');const a=require('node:assert/strict');test('sum',()=>a.equal(require('./sum.cjs')(2,3),5));") {
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'development-runtime-')),root=path.join(dir,'project');fs.mkdirSync(root);
  const db=new Database(path.join(dir,'test.db'));db.pragma('foreign_keys=ON');migrate(drizzle(db),{migrationsFolder:migrations});
@@ -33,15 +35,24 @@ function fixture(testContent="const {test}=require('node:test');const a=require(
  fs.writeFileSync(path.join(root,'sum.cjs'),'module.exports=(a,b)=>a-b;');fs.writeFileSync(path.join(root,'sum.test.cjs'),testContent);
  const plan={projectId:project.id,goal:'Fix sum using the approved check',sourceFiles:['sum.cjs','sum.test.cjs'],changes:[{path:'sum.cjs',beforeSha256:hashText('module.exports=(a,b)=>a-b;'),content:'module.exports=(a,b)=>a+b;'}],checks:[{path:'sum.test.cjs',sha256:hashText(testContent)}]};
  const actions=new PlatformActions({db,userId:user.id,actionOrigin:{kind:'owner_api'}},createPlatformCommands()),repo=new DevelopmentTaskRepository(db,user.id),eventBus=new ForgeBadgerEventBus();
- const submit=async()=>await actions.executeOwner('development.task.submit',plan,crypto.randomUUID()) as {taskId:string;recipeDigest:string};
+ // On hosts without a sandbox the submit API now fails fast; seed the exact post-submit
+ // state so platform-independent lifecycle logic stays covered on every platform.
+ const seedSubmit=()=>{const p=prepareSource(root,plan),key=crypto.randomUUID();
+  const resources={projectIds:[plan.projectId],rootPaths:[p.root],revision:hashText(JSON.stringify([p.root,p.sourceDigest,p.outputDigest,p.recipeDigest]))};
+  const intent=actions.intents.create({actor_user_id:user.id,grant_id:null,grant_revision:null,authority:'owner_action',command_id:'development.task.submit',input_json:canonical(plan),digest:hashText(canonical({commandId:'development.task.submit',input:plan,resources,policyVersion:1})),resources_json:canonical(resources),policy_version:1,expires_at:Date.now()+15*60000,idempotency_key:key,status:'approved'},{kind:'owner_api'});
+  actions.intents.start(intent.id,crypto.randomUUID(),Date.now()+30000);
+  const task=repo.create({project_id:plan.projectId,goal:plan.goal,plan_json:JSON.stringify(plan),recipe_digest:p.recipeDigest,source_digest:p.sourceDigest,output_digest:p.outputDigest,intent_id:intent.id,origin_run_id:null,origin_step_id:null,project_root:p.root});
+  actions.intents.finish(intent.id,'confirmed',{taskId:task.id,recipeDigest:task.recipe_digest});
+  return {taskId:task.id,recipeDigest:task.recipe_digest};};
+ const submit=async()=>sandboxCapability().available?await actions.executeOwner('development.task.submit',plan,crypto.randomUUID()) as {taskId:string;recipeDigest:string}:seedSubmit();
  return {dir,root,db,user,other,project,plan,actions,repo,eventBus,submit,close(){db.close();fs.rmSync(dir,{recursive:true,force:true});}};
 }
 async function until(predicate:()=>boolean,timeout=10000){const start=Date.now();while(!predicate()){if(Date.now()-start>timeout)throw new Error('Fixture deadline exceeded');await new Promise(r=>setTimeout(r,20));}}
 it('strict code payload permits relative imports but preserves path and nested validation',()=>{const f=fixture();try{
  const policy=createSecurityPolicy();const input={...f.plan,changes:[{...f.plan.changes[0],content:"const a=require('../sum.cjs')"}]};
  assert.equal(policy.evaluate({userId:f.user.id,toolName:'submit_development_task',toolRisk:'operate',requiresApproval:true,input}).action,'require_approval');
- assert.throws(()=>f.actions.preview({commandId:'development.task.submit',input:{...input,changes:[{...input.changes[0],path:'../outside'}]},authority:'owner_action',idempotencyKey:'bad'}));
- assert.throws(()=>f.actions.preview({commandId:'development.task.submit',input:{...input,changes:[{...input.changes[0],execute:'rm -rf /'}]},authority:'owner_action',idempotencyKey:'nested'}));
+ assert.throws(()=>f.actions.preview({commandId:'development.task.submit',input:{...input,changes:[{...input.changes[0],path:'../outside'}]},idempotencyKey:'bad'}));
+ assert.throws(()=>f.actions.preview({commandId:'development.task.submit',input:{...input,changes:[{...input.changes[0],execute:'rm -rf /'}]},idempotencyKey:'nested'}));
 }finally{f.close();}});
 it('rejects symlink, hidden, secret, binary and oversized reads without changing source',()=>{const f=fixture();try{
  fs.symlinkSync(path.join(f.root,'sum.cjs'),path.join(f.root,'link.cjs'));assert.throws(()=>readSource(f.root,'link.cjs'),/SYMLINK/);
@@ -50,12 +61,20 @@ it('rejects symlink, hidden, secret, binary and oversized reads without changing
  fs.writeFileSync(path.join(f.root,'binary.js'),Buffer.from([0,1]));assert.throws(()=>readSource(f.root,'binary.js'),/NOT_TEXT/);
  fs.writeFileSync(path.join(f.root,'large.js'),'x'.repeat(65537));assert.throws(()=>readSource(f.root,'large.js'),/TOO_LARGE/);
 }finally{f.close();}});
-it('binds source revision and immutable checks to exact owner approval; rejects grants and tenant escape',async()=>{const f=fixture();try{
- const intent=f.actions.preview({commandId:'development.task.submit',input:f.plan,authority:'owner_action',idempotencyKey:'preview'});
+it('submit preview fails fast with the host capability reason and creates no task or intent',()=>{const f=fixture();try{
+ const capability=sandboxCapability();
+ if(capability.available){assert.ok(f.actions.preview({commandId:'development.task.submit',input:f.plan,idempotencyKey:'cap-pass'}).id);return;}
+ assert.throws(()=>f.actions.preview({commandId:'development.task.submit',input:f.plan,idempotencyKey:'cap-block'}),new RegExp(capability.reason!));
+ assert.equal(f.db.prepare('SELECT COUNT(*) n FROM copilot_development_tasks').get().n,0);
+ assert.equal(f.db.prepare('SELECT COUNT(*) n FROM platform_action_intents').get().n,0);
+}finally{f.close();}});
+it('binds source revision and immutable checks to an approved intent and tenant',async()=>{const f=fixture();try{
+ const p=prepareSource(f.root,f.plan);
+ const intent=f.actions.intents.create({actor_user_id:f.user.id,grant_id:null,grant_revision:null,authority:'owner_action',command_id:'development.task.submit',input_json:canonical(f.plan),digest:'b'.repeat(64),resources_json:canonical({projectIds:[f.plan.projectId],rootPaths:[p.root],revision:hashText(JSON.stringify([p.root,p.sourceDigest,p.outputDigest,p.recipeDigest]))}),policy_version:1,expires_at:Date.now()+15*60000,idempotency_key:'preview',status:'pending'},{kind:'owner_api'});
  await assert.rejects(f.actions.execute(intent.id),/approved/);
- fs.writeFileSync(path.join(f.root,'sum.cjs'),'changed');assert.throws(()=>f.actions.decide(intent.id,intent.digest,true),/DRIFT/);
- assert.throws(()=>new PlatformActions({db:f.db,userId:f.other.id,actionOrigin:{kind:'owner_api'}},createPlatformCommands()).preview({commandId:'development.task.submit',input:f.plan,authority:'owner_action',idempotencyKey:'escape'}),/PROJECT_NOT_FOUND/);
- assert.throws(()=>f.actions.createGrant({name:'no',projectIds:[f.project.id],capabilities:['development.task.submit'],expiresAt:null,maxActions:null}),/Unsupported/);
+ assert.equal(f.actions.intents.transition(intent.id,'pending','approved'),true);
+ fs.writeFileSync(path.join(f.root,'sum.cjs'),'changed');await assert.rejects(f.actions.execute(intent.id),/DRIFT|Stale resource/);
+ assert.throws(()=>new PlatformActions({db:f.db,userId:f.other.id,actionOrigin:{kind:'owner_api'}},createPlatformCommands()).preview({commandId:'development.task.submit',input:f.plan,idempotencyKey:'escape'}),/PROJECT_NOT_FOUND/);
 }finally{f.close();}});
 it('queued task/receipt survive database reopen and admission deduplicates',async()=>{const f=fixture();try{
  const first=await f.submit();const row=f.repo.get(first.taskId)!;assert.equal(row.status,'queued');assertDevelopmentAuthority(f.db,row);
@@ -63,12 +82,12 @@ it('queued task/receipt survive database reopen and admission deduplicates',asyn
  const reopened=new Database(path.join(f.dir,'test.db'));try{assert.equal(new DevelopmentTaskRepository(reopened,f.user.id).get(row.id)?.status,'queued');}finally{reopened.close();}
  assert.equal(new DevelopmentTaskRepository(f.db,f.other.id).get(row.id),undefined);
 }finally{f.close();}});
-it('revoked actor, disabled tool, expired approval and tampered receipt cannot execute a queued job',async()=>{const f=fixture();try{
+it('revoked actor, disabled tool and tampered receipt cannot execute a queued job after admission TTL',async()=>{const f=fixture();try{
  const {taskId}=await f.submit(),row=f.repo.get(taskId)!;
  new CopilotToolPreferenceRepository(f.db,f.user.id).setEnabled('submit_development_task',false);assert.throws(()=>assertDevelopmentAuthority(f.db,row),/DISABLED/);
  new CopilotToolPreferenceRepository(f.db,f.user.id).setEnabled('submit_development_task',true);
  f.db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(f.user.id);assert.throws(()=>assertDevelopmentAuthority(f.db,row),/ACTOR/);f.db.prepare("UPDATE users SET status='active' WHERE id=?").run(f.user.id);
- f.db.prepare('UPDATE platform_action_intents SET expires_at=0 WHERE id=?').run(row.intent_id);assert.throws(()=>assertDevelopmentAuthority(f.db,row),/EXPIRED/);
+ f.db.prepare('UPDATE platform_action_intents SET expires_at=0 WHERE id=?').run(row.intent_id);assertDevelopmentAuthority(f.db,row);f.db.prepare("UPDATE platform_action_receipts SET outcome='unknown' WHERE intent_id=?").run(row.intent_id);assert.throws(()=>assertDevelopmentAuthority(f.db,row),/RECEIPT/);
 }finally{f.close();}});
 it('lease recovery never repeats uncertain execution or releases its concurrency slot',async()=>{const f=fixture();try{
  const {taskId}=await f.submit();assert.equal(f.repo.claim('first')?.id,taskId);assert.equal(f.repo.claim('second'),undefined);
@@ -83,7 +102,7 @@ it('rejects mutated artifact and extra hidden files during acceptance checks',()
  const p=prepareSource(f.root,f.plan),output=path.join(f.dir,'output');writeWorkspace(output,p);assertWorkspace(output,p);
  fs.writeFileSync(path.join(output,'.env'),'bad');assert.throws(()=>assertWorkspace(output,p));
 }finally{f.close();}});
-it('real isolated fix produces checked diff and requires explicit immutable artifact acceptance',{skip:!mac},async()=>{const f=fixture();const events:string[]=[];f.eventBus.on('event',e=>events.push(e.status));let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
+it('real isolated fix produces checked diff and requires explicit immutable artifact acceptance',{skip:!sandboxAvailable},async()=>{const f=fixture();const events:string[]=[];f.eventBus.on('event',e=>events.push(e.status));let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
  const {taskId}=await f.submit();runtime=startDevelopmentRuntime({db:f.db,eventBus:f.eventBus});await runtime.ready;
  await until(()=>!['queued','running'].includes(f.repo.get(taskId)!.status));const row=f.repo.get(taskId)!;assert.equal(row.status,'checks_passed',row.error??'');
  const evidence=JSON.parse(row.evidence_json!) as DevelopmentEvidence;assert.equal(evidence.checks[0]?.exitCode,0);assert.match(evidence.diff,/a\+b/);assert.equal(fs.readFileSync(path.join(f.root,'sum.cjs'),'utf8'),'module.exports=(a,b)=>a-b;');
@@ -91,29 +110,29 @@ it('real isolated fix produces checked diff and requires explicit immutable arti
  runtime.tick();assert.ok(events.includes('accepted'));assert.equal(f.repo.pendingEvents().length,0);
  assert.equal(f.db.pragma('foreign_key_check').length,0);
 }finally{await runtime?.stop();f.close();}});
-it('real failed checks never enable acceptance',{skip:!mac},async()=>{const f=fixture("const {test}=require('node:test');test('fail',()=>{throw Error('expected failure')});");let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
+it('real failed checks never enable acceptance',{skip:!sandboxAvailable},async()=>{const f=fixture("const {test}=require('node:test');test('fail',()=>{throw Error('expected failure')});");let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
  const {taskId}=await f.submit();runtime=startDevelopmentRuntime({db:f.db,eventBus:f.eventBus});await runtime.ready;await until(()=>!['queued','running'].includes(f.repo.get(taskId)!.status));const row=f.repo.get(taskId)!;assert.equal(row.status,'checks_failed',row.error??'');
- assert.throws(()=>f.actions.preview({commandId:'development.task.accept',input:{projectId:f.project.id,taskId,artifactDigest:row.artifact_digest},authority:'owner_action',idempotencyKey:'bad-accept'}),/STALE/);
+ assert.throws(()=>f.actions.preview({commandId:'development.task.accept',input:{projectId:f.project.id,taskId,artifactDigest:row.artifact_digest},idempotencyKey:'bad-accept'}),/STALE/);
 }finally{await runtime?.stop();f.close();}});
-it('real Copilot approval creates durable task whose completed origin remains valid',{skip:!mac},async()=>{const f=fixture();let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
+it('real Copilot approval creates durable task whose completed origin remains valid',{skip:!sandboxAvailable},async()=>{const f=fixture();let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
  const log=new CopilotConversationLog(f.db,f.user.id),conversation=log.createConversation('fixture');let models=0;
  const orchestrator=createCopilotOrchestrator({db:f.db,masterKey:'x'.repeat(32),eventBus:f.eventBus,toolRegistry:createAgentToolRegistry(createPlatformTools()),llm:{async stream(req){models++;if(models===1)req.onEvent({type:'tool_call',toolCall:{id:'submit-one',name:'submit_development_task',arguments:JSON.stringify(f.plan)}});else req.onEvent({type:'text_delta',text:'Task queued, not accepted.'});return {message:''};},async summarize(){return '';},async generateTitle(){return '';},async proposeMemory(){return [];}}});
  const runId=await orchestrator.runTurn({userId:f.user.id,conversationId:conversation.id,userText:'Create the reviewed task'});assert.equal(log.getRun(runId)?.status,'awaiting_approval');const pending=log.listPendingActions(runId)[0]!;
  await orchestrator.resumeAfterApproval({userId:f.user.id,runId,actionId:pending.id,approved:true});assert.equal(log.getRun(runId)?.status,'completed');const row=f.repo.list(f.project.id)[0]!;assert.ok(row);assert.equal(row.origin_run_id,runId);assertDevelopmentAuthority(f.db,row);
  runtime=startDevelopmentRuntime({db:f.db,eventBus:f.eventBus});await runtime.ready;await until(()=>f.repo.get(row.id)?.status!=='running');assert.equal(f.repo.get(row.id)?.status,'checks_passed',f.repo.get(row.id)?.error??'');
 }finally{await runtime?.stop();f.close();}});
-it('revocation during a real running check cancels the process and cannot publish passed evidence',{skip:!mac},async()=>{const f=fixture("const {test}=require('node:test');test('wait',async()=>{await new Promise(r=>setTimeout(r,20000));});");let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
+it('revocation during a real running check cancels the process and cannot publish passed evidence',{skip:!sandboxAvailable},async()=>{const f=fixture("const {test}=require('node:test');test('wait',async()=>{await new Promise(r=>setTimeout(r,20000));});");let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
  const {taskId}=await f.submit();runtime=startDevelopmentRuntime({db:f.db,eventBus:f.eventBus});await runtime.ready;await until(()=>!!f.repo.get(taskId)?.workspace_path);
  new CopilotToolPreferenceRepository(f.db,f.user.id).setEnabled('submit_development_task',false);await until(()=>f.repo.get(taskId)?.status!=='running');const row=f.repo.get(taskId)!;assert.equal(row.status,'failed');assert.equal(row.evidence_json,null);assert.match(row.error!,/DISABLED/);
 }finally{await runtime?.stop();f.close();}});
-it('cancel request during running check records cancellation and never accepts late success',{skip:!mac},async()=>{const f=fixture("const {test}=require('node:test');test('wait',async()=>{await new Promise(r=>setTimeout(r,20000));});");let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
+it('cancel request during running check records cancellation and never accepts late success',{skip:!sandboxAvailable},async()=>{const f=fixture("const {test}=require('node:test');test('wait',async()=>{await new Promise(r=>setTimeout(r,20000));});");let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
  const {taskId}=await f.submit();runtime=startDevelopmentRuntime({db:f.db,eventBus:f.eventBus});await runtime.ready;await until(()=>!!f.repo.get(taskId)?.workspace_path);
  await f.actions.executeOwner('development.task.cancel',{taskId,projectId:f.project.id},'cancel-live');await until(()=>f.repo.get(taskId)?.status!=='running');assert.equal(f.repo.get(taskId)?.status,'cancelled');
 }finally{await runtime?.stop();f.close();}});
-it('completed task cannot be accepted after source or persisted workspace tampering',{skip:!mac},async()=>{const f=fixture();let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
+it('completed task cannot be accepted after source or persisted workspace tampering',{skip:!sandboxAvailable},async()=>{const f=fixture();let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;try{
  const {taskId}=await f.submit();runtime=startDevelopmentRuntime({db:f.db,eventBus:f.eventBus});await runtime.ready;await until(()=>!['running','queued'].includes(f.repo.get(taskId)!.status));const row=f.repo.get(taskId)!;assert.equal(row.status,'checks_passed');
- const input={taskId,projectId:f.project.id,artifactDigest:row.artifact_digest};fs.writeFileSync(path.join(f.root,'sum.cjs'),'new source');assert.throws(()=>f.actions.preview({commandId:'development.task.accept',input,authority:'owner_action',idempotencyKey:'drift'}),/DRIFT/);
- fs.writeFileSync(path.join(f.root,'sum.cjs'),'module.exports=(a,b)=>a-b;');fs.chmodSync(path.join(row.workspace_path!,'sum.cjs'),0o600);fs.writeFileSync(path.join(row.workspace_path!,'sum.cjs'),'tampered');assert.throws(()=>f.actions.preview({commandId:'development.task.accept',input,authority:'owner_action',idempotencyKey:'artifact'}),/DRIFT/);
+ const input={taskId,projectId:f.project.id,artifactDigest:row.artifact_digest};fs.writeFileSync(path.join(f.root,'sum.cjs'),'new source');assert.throws(()=>f.actions.preview({commandId:'development.task.accept',input,idempotencyKey:'drift'}),/DRIFT/);
+ fs.writeFileSync(path.join(f.root,'sum.cjs'),'module.exports=(a,b)=>a-b;');fs.chmodSync(path.join(row.workspace_path!,'sum.cjs'),0o600);fs.writeFileSync(path.join(row.workspace_path!,'sum.cjs'),'tampered');assert.throws(()=>f.actions.preview({commandId:'development.task.accept',input,idempotencyKey:'artifact'}),/DRIFT/);
 }finally{await runtime?.stop();f.close();}});
 it('confirmed task provenance fails closed when its Copilot origin disappears',async()=>{const f=fixture();try{
  const {taskId}=await f.submit();const row=f.repo.get(taskId)!;
@@ -122,7 +141,9 @@ it('confirmed task provenance fails closed when its Copilot origin disappears',a
  assert.throws(()=>assertDevelopmentAuthority(f.db,f.repo.get(taskId)!),/ORIGIN_REVOKED/);
 }finally{f.close();}});
 it('global host slot serializes two tenants without exposing or replaying another tenant task',async()=>{const f=fixture();try{
- const first=await f.submit();const project=new ProjectRepository(f.db,f.other.id).create({name:'other',path:f.root,aiTool:'codex'});const actions=new PlatformActions({db:f.db,userId:f.other.id,actionOrigin:{kind:'owner_api'}},createPlatformCommands());await actions.executeOwner('development.task.submit',{...f.plan,projectId:project.id},'other');
+ const first=await f.submit();const project=new ProjectRepository(f.db,f.other.id).create({name:'other',path:f.root,aiTool:'codex'});const otherPlan={...f.plan,projectId:project.id},p2=prepareSource(f.root,otherPlan);
+ const otherIntent=new PlatformActionRepository(f.db,f.other.id).create({actor_user_id:f.other.id,grant_id:null,grant_revision:null,authority:'owner_action',command_id:'development.task.submit',input_json:canonical(otherPlan),digest:'d'.repeat(64),resources_json:canonical({projectIds:[project.id],rootPaths:[p2.root],revision:hashText(JSON.stringify([p2.root,p2.sourceDigest,p2.outputDigest,p2.recipeDigest]))}),policy_version:1,expires_at:Date.now()+15*60000,idempotency_key:'other-seed',status:'pending'},{kind:'owner_api'});
+ new DevelopmentTaskRepository(f.db,f.other.id).create({project_id:project.id,goal:otherPlan.goal,plan_json:JSON.stringify(otherPlan),recipe_digest:p2.recipeDigest,source_digest:p2.sourceDigest,output_digest:p2.outputDigest,intent_id:otherIntent.id,origin_run_id:null,origin_step_id:null,project_root:p2.root});
  assert.equal(f.repo.claim('first')?.id,first.taskId);assert.equal(new DevelopmentTaskRepository(f.db,f.other.id).claim('second'),undefined);
  assert.equal(new DevelopmentTaskRepository(f.db,f.other.id).get(first.taskId),undefined);
 }finally{f.close();}});
@@ -133,7 +154,9 @@ it('source pagination uses fully redacted text before every arbitrary offset',as
 }finally{f.close();}});
 it('explicit Copilot origin with missing step cannot become owner API authority',()=>{const f=fixture();try{
  const actions=new PlatformActions({db:f.db,userId:f.user.id,actionOrigin:{kind:'copilot',runId:'missing',stepId:'missing'}},createPlatformCommands());
- assert.throws(()=>actions.preview({commandId:'development.task.submit',input:f.plan,authority:'owner_action',idempotencyKey:'missing'}),/origin missing/);
+ const capability=sandboxCapability();
+ if(capability.available)assert.throws(()=>actions.preview({commandId:'development.task.submit',input:f.plan,idempotencyKey:'missing'}),/origin missing/);
+ else assert.throws(()=>actions.preview({commandId:'development.task.submit',input:f.plan,idempotencyKey:'missing'}),new RegExp(capability.reason!));
  assert.equal(f.db.prepare('SELECT count(*) n FROM platform_action_intents').get().n,0);
 }finally{f.close();}});
 it('nonregular FIFO input is rejected without blocking a subprocess',async()=>{const {execFileSync,spawnSync}=await import('node:child_process');const f=fixture();try{
@@ -145,13 +168,17 @@ it('nonregular FIFO input is rejected without blocking a subprocess',async()=>{c
 it('queue persistence faults are contained and retry only unclaimed queued work',async()=>{const f=fixture();let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;const errors:unknown[]=[];const original=console.error;console.error=(...args)=>errors.push(args);try{
  const {taskId}=await f.submit();f.db.pragma('query_only=ON');runtime=startDevelopmentRuntime({db:f.db,eventBus:f.eventBus});await runtime.ready;assert.doesNotThrow(()=>runtime!.tick());assert.equal(f.repo.get(taskId)?.status,'queued');assert.ok(errors.length>0);
 }finally{await runtime?.stop();console.error=original;f.db.pragma('query_only=OFF');f.close();}});
-it('running persistence failure aborts the real worker without publishing success or replay',{skip:!mac},async()=>{const f=fixture("const {test}=require('node:test');test('wait',async()=>{await new Promise(r=>setTimeout(r,20000));});");let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;const errors:unknown[]=[];const original=console.error;console.error=(...args)=>errors.push(args);try{
+it('running persistence failure aborts the real worker without publishing success or replay',{skip:!sandboxAvailable},async()=>{const f=fixture("const {test}=require('node:test');test('wait',async()=>{await new Promise(r=>setTimeout(r,20000));});");let runtime:ReturnType<typeof startDevelopmentRuntime>|undefined;const errors:unknown[]=[];const original=console.error;console.error=(...args)=>errors.push(args);try{
  const {taskId}=await f.submit();runtime=startDevelopmentRuntime({db:f.db,eventBus:f.eventBus});await runtime.ready;await until(()=>!!f.repo.get(taskId)?.workspace_path);f.db.pragma('query_only=ON');await until(()=>errors.length>0);await runtime.stop();assert.equal(f.repo.get(taskId)?.status,'running');assert.equal(f.repo.get(taskId)?.evidence_json,null);
  f.db.pragma('query_only=OFF');f.repo.recover(Date.now()+30000);assert.equal(f.repo.get(taskId)?.status,'indeterminate');assert.equal(f.repo.claim('retry'),undefined);
 }finally{await runtime?.stop();console.error=original;f.db.pragma('query_only=OFF');f.close();}});
 
-it('source hashes and snapshots preserve original UTF-8 BOM bytes and reject BOM-only drift',async()=>{const f=fixture();try{
+it('source hashes and snapshots preserve original UTF-8 BOM bytes',()=>{const f=fixture();try{
  const bytes=Buffer.from('\ufeffmodule.exports=(a,b)=>a-b;');fs.writeFileSync(path.join(f.root,'sum.cjs'),bytes);const source=readSource(f.root,'sum.cjs');assert.equal(source.content.charCodeAt(0),0xfeff);assert.equal(source.sha256,hashText(bytes.toString('utf8')));assert.deepEqual(Buffer.from(source.content),bytes);
  f.plan.changes[0]!.beforeSha256=source.sha256;f.plan.changes[0]!.content='\ufeffmodule.exports=(a,b)=>a+b;';const prepared=prepareSource(f.root,f.plan),workspace=path.join(f.dir,'bom-output');writeWorkspace(workspace,prepared);assert.deepEqual(fs.readFileSync(path.join(workspace,'sum.cjs')),Buffer.from(f.plan.changes[0]!.content));
- const intent=f.actions.preview({commandId:'development.task.submit',input:f.plan,authority:'owner_action',idempotencyKey:'bom'});f.actions.decide(intent.id,intent.digest,true);fs.writeFileSync(path.join(f.root,'sum.cjs'),'module.exports=(a,b)=>a-b;');await assert.rejects(f.actions.execute(intent.id),/DRIFT/);
+}finally{f.close();}});
+it('rejects BOM-only drift after approval on a capable host',{skip:!sandboxAvailable},async()=>{const f=fixture();try{
+ const bytes=Buffer.from('\ufeffmodule.exports=(a,b)=>a-b;');fs.writeFileSync(path.join(f.root,'sum.cjs'),bytes);const source=readSource(f.root,'sum.cjs');
+ f.plan.changes[0]!.beforeSha256=source.sha256;f.plan.changes[0]!.content='\ufeffmodule.exports=(a,b)=>a+b;';
+ const intent=f.actions.preview({commandId:'development.task.submit',input:f.plan,idempotencyKey:'bom'});fs.writeFileSync(path.join(f.root,'sum.cjs'),'module.exports=(a,b)=>a-b;');await assert.rejects(f.actions.execute(intent.id),/DRIFT/);
 }finally{f.close();}});

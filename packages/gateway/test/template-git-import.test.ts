@@ -225,4 +225,30 @@ describe("importTemplateFromGit", () => {
       }
     }
   );
+
+  it(
+    "rejects repositories whose files identify no CLI adapter",
+    { skip: !gitAvailable },
+    async () => {
+      const fixture = await createGitFixture({
+        "README.md": "# Notes only\n"
+      });
+      const db = createTestDb();
+      try {
+        const repo = new TemplateRepository(db, "git-import-user");
+        await assert.rejects(
+          importTemplateFromGit(repo, { url: fixture }),
+          (error: unknown) => {
+            assert.ok(error instanceof TemplateGitImportError);
+            assert.equal(error.status, 400);
+            assert.match(error.message, /infer the template CLI adapter/);
+            return true;
+          }
+        );
+      } finally {
+        db.close();
+        await rm(fixture, { recursive: true, force: true });
+      }
+    }
+  );
 });

@@ -8,7 +8,6 @@ import {
   CalendarClock,
   Puzzle,
   Radio,
-  ShieldCheck,
   SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
@@ -16,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useSettingsCopy } from "./settings-copy";
 
-export type CopilotSettingsSection = "general" | "access" | "extensions" | "channels" | "automations";
+export type CopilotSettingsSection = "general" | "extensions" | "channels" | "automations";
 
 interface NavItem {
   key: CopilotSettingsSection;
@@ -29,7 +28,6 @@ function useNavItems(): NavItem[] {
   const copy = useSettingsCopy();
   return [
     { key: "general", href: "/copilot/settings", icon: SlidersHorizontal, label: copy.navGeneral },
-    { key: "access", href: "/copilot/settings/access", icon: ShieldCheck, label: copy.navAccess },
     { key: "extensions", href: "/copilot/extensions", icon: Puzzle, label: copy.navExtensions },
     { key: "channels", href: "/copilot/channels", icon: Radio, label: copy.navChannels },
     { key: "automations", href: "/copilot/automations", icon: CalendarClock, label: copy.navAutomations },
@@ -39,7 +37,7 @@ function useNavItems(): NavItem[] {
 /**
  * Shared shell for every Copilot settings surface: a back-to-chat header plus
  * a persistent section nav (sidebar on desktop, scrollable chips on mobile),
- * so 常规 / 授权 / 扩展 / 渠道 / 自动化 read as one coherent settings center.
+ * so 常规 / 扩展 / 渠道 / 自动化 read as one coherent settings center.
  */
 export function CopilotSettingsShell({
   active,
@@ -56,8 +54,11 @@ export function CopilotSettingsShell({
   const router = useRouter();
   const items = useNavItems();
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-5 overflow-y-auto p-4 md:p-6">
-      <header className="forgebadger-animate-in flex items-start gap-2 pl-12 md:pl-0">
+    // p-4 keeps the gutters; pt-16 reserves the mobile top band for the fixed
+    // hamburger trigger (same pattern as the members page), md:p-6 restores
+    // desktop padding.
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-5 overflow-y-auto p-4 pt-16 md:p-6">
+      <header className="forgebadger-animate-in flex items-start gap-2">
         <Button
           variant="ghost"
           size="icon"
@@ -72,12 +73,15 @@ export function CopilotSettingsShell({
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         </div>
       </header>
-      <div className="flex min-h-0 flex-col gap-5 md:flex-row md:gap-8">
-        <nav
-          aria-label={copy.navAriaLabel}
-          className="forgebadger-animate-in flex shrink-0 gap-1 overflow-x-auto pb-1 md:w-44 md:flex-col md:overflow-visible md:pb-0"
-          style={{ animationDelay: "60ms" }}
-        >
+      <div className="flex min-h-0 flex-col gap-5 lg:flex-row lg:gap-8">
+        <div className="relative min-w-0 lg:w-[200px] lg:shrink-0">
+          {/* Right-edge fade hints that the chip row scrolls horizontally on
+              small screens (removed on desktop where the nav is a column). */}
+          <nav
+            aria-label={copy.navAriaLabel}
+            className="forgebadger-animate-in flex shrink-0 gap-1 overflow-x-auto pb-1 [mask-image:linear-gradient(to_right,black_80%,transparent)] lg:flex-col lg:overflow-visible lg:pb-0 lg:[mask-image:none]"
+            style={{ animationDelay: "60ms" }}
+          >
           {items.map((item) => {
             const Icon = item.icon;
             const isActive = item.key === active;
@@ -97,8 +101,9 @@ export function CopilotSettingsShell({
               </Link>
             );
           })}
-        </nav>
-        <div className="min-w-0 flex-1">{children}</div>
+          </nav>
+        </div>
+        <div className="min-w-0 max-w-3xl flex-1">{children}</div>
       </div>
     </div>
   );

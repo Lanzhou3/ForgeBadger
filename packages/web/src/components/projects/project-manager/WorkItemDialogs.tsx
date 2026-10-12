@@ -106,7 +106,7 @@ export function CreateWorkItemDialog({
             {t("projects.projectManagerCancel")}
           </Button>
           <Button
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            variant="brand"
             onClick={onSave}
             disabled={isSaving}
           >
@@ -207,7 +207,7 @@ export function EditWorkItemDialog({
             {t("projects.projectManagerCancel")}
           </Button>
           <Button
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            variant="brand"
             onClick={onSave}
             disabled={isSaving}
           >
@@ -317,7 +317,7 @@ export function DoneReasonDialog({
             {t("projects.projectManagerCancel")}
           </Button>
           <Button
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            variant="brand"
             onClick={onConfirm}
             disabled={isSaving}
           >

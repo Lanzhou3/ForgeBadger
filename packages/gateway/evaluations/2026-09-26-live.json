@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-09-26T09:26:49.483Z",
+  "revision": "05e094c97fb68821a5e30418af64c9de2ccd882d",
+  "dirtyWorktree": true,
+  "model": "MiniMax-M3",
+  "protocol": "openai-compatible",
+  "fixtureHash": "455436639b02b4dab479aad7424f856e6438224d7fb3dcbbc1c5689218a0bb2a",
+  "limits": {
+    "maxDurationMsPerArm": 90000,
+    "maxModelInvocationsPerArm": 4,
+    "requestedMaxOutputTokensPerCall": 1024,
+    "reportedTokenStopThresholdPerArm": 40000
+  },
+  "pricing": "No live invoice/rate configured; monetary cost unknown. Model invocations/time bounded; output limit requested from provider.",
+  "methodology": "Same model, task and limits. Baseline receives source directly; harness reads the same source through native project tools. Independent fixed checks run in macOS sandbox. Two fixtures only; not a product ranking.",
+  "results": [
+    {
+      "fixture": "sum",
+      "arm": "baseline",
+      "passed": true,
+      "check": {
+        "exitCode": 0,
+        "stdout": "TAP version 13\n# Subtest: /private/var/folders/12/clm348sn173_v501mq7_qwhw0000gn/T/fb-live-eval-7CQF9K/sum-baseline/subject.test.cjs\nok 1 - /private/var/folders/12/clm348sn173_v501mq7_qwhw0000gn/T/fb-live-eval-7CQF9K/sum-baseline/subject.test.cjs\n  ---\n  duration_ms: 0.45475\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 5.06875\n",
+        "stderr": "",
+        "timedOut": false,
+        "cancelled": false,
+        "durationMs": 99
+      },
+      "calls": 1,
+      "reportedTokens": 948,
+      "durationMs": 2433,
+      "firstTextMs": 2018,
+      "response": "{\"content\":\"module.exports=(a,b)=>{if(typeof a!=='number'||!Number.isFinite(a))throw new TypeError('a must be a finite number');if(typeof b!=='number'||!Number.isFinite(b))throw new TypeError('b must be a finite number');return a+b;};\"}",
+      "outputHash": "83467f4e6cd38c609f0264b052167f0eb325c27eef81f53592734a4a1a09cbe2",
+      "knownReportedTokens": 948,
+      "unknownUsageCalls": 0
+    },
+    {
+      "fixture": "sum",
+      "arm": "harness",
+      "passed": true,
+      "check": {
+        "exitCode": 0,
+        "stdout": "TAP version 13\n# Subtest: /private/var/folders/12/clm348sn173_v501mq7_qwhw0000gn/T/fb-live-eval-7CQF9K/sum-harness/subject.test.cjs\nok 1 - /private/var/folders/12/clm348sn173_v501mq7_qwhw0000gn/T/fb-live-eval-7CQF9K/sum-harness/subject.test.cjs\n  ---\n  duration_ms: 0.530584\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 5.186292\n",
+        "stderr": "",
+        "timedOut": false,
+        "cancelled": false,
+        "durationMs": 107
+      },
+      "calls": 3,
+      "reportedTokens": 4941,
+      "durationMs": 4881,
+      "firstTextMs": 4607,
+      "response": "{\"content\":\"module.exports=(a,b)=>a+b;\"}",
+      "usage": {
+        "chargedTokens": 4941,
+        "reportedTokens": 4941,
+        "estimatedCalls": 0,
+        "calls": 3,
+        "costUsd": null,
+        "knownCostUsd": 0,
+        "unpricedCalls": 3
+      },
+      "outputHash": "0c4b01c622c69d561ad8e97428f28b89fbb0e7596f809ff59ac2c1420577c610",
+      "knownReportedTokens": 4941,
+      "unknownUsageCalls": 0
+    },
+    {
+      "fixture": "clamp",
+      "arm": "baseline",
+      "passed": true,
+      "check": {
+        "exitCode": 0,
+        "stdout": "TAP version 13\n# Subtest: /private/var/folders/12/clm348sn173_v501mq7_qwhw0000gn/T/fb-live-eval-7CQF9K/clamp-baseline/subject.test.cjs\nok 1 - /private/var/folders/12/clm348sn173_v501mq7_qwhw0000gn/T/fb-live-eval-7CQF9K/clamp-baseline/subject.test.cjs\n  ---\n  duration_ms: 0.549375\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 5.265208\n",
+        "stderr": "",
+        "timedOut": false,
+        "cancelled": false,
+        "durationMs": 112
+      },
+      "calls": 1,
+      "reportedTokens": 1157,
+      "durationMs": 2684,
+      "firstTextMs": 2291,
+      "response": "{\"content\":\"module.exports=(n,a,b)=>Math.min(Math.max(a,b),Math.max(Math.min(a,b),n));\"}",
+      "outputHash": "1298bbcd9ee13807f04773ffa2bdcaefe2d099c2ebec979078af2ebc0cf8fe1f",
+      "knownReportedTokens": 1157,
+      "unknownUsageCalls": 0
+    },
+    {
+      "fixture": "clamp",
+      "arm": "harness",
+      "passed": false,
+      "calls": 4,
+      "reportedTokens": 5671,
+      "durationMs": 3983,
+      "firstTextMs": null,
+      "response": "",
+      "error": "Evaluation run did not complete: stopped",
+      "knownReportedTokens": 5671,
+      "unknownUsageCalls": 0
+    }
+  ],
+  "tokenPolicy": "Recorded limits describe the model invocation limit, requested provider output cap and token stop threshold, not an exact preflight token cap. A final response may exceed the threshold. Transport retries may add HTTP requests."
+}

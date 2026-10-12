@@ -6,7 +6,6 @@ import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 export type ActivationStepId =
   | "runtime"
   | "adapter"
-  | "model"
   | "project"
   | "session"
   | "delivery";
@@ -37,9 +36,6 @@ export interface ActivationReadinessInput {
   adapters?: readonly LaunchableAdapterLike[];
   adaptersLoading?: boolean;
   adaptersError?: boolean;
-  modelsHealthy?: boolean;
-  modelsLoading?: boolean;
-  modelsError?: boolean;
   projectCount: number;
   sessionCount: number;
   acceptedDeliveries?: number;
@@ -66,7 +62,6 @@ export function buildActivationReadiness(
     !input.adaptersLoading &&
     !input.adaptersError &&
     (input.adapters ?? []).some(isAdapterLaunchable);
-  // Host CLI settings are optional guidance, never a platform catalog gate.
   const projectReady = input.projectCount > 0;
   const sessionReady = input.sessionCount > 0;
   const firstProjectHref = input.firstProjectId
@@ -93,14 +88,6 @@ export function buildActivationReadiness(
         href: "/settings",
         labelKey: "dashboard.activationOpenSettings",
       },
-    },
-    {
-      id: "model",
-      labelKey: "dashboard.activationModel",
-      detailKey: "dashboard.activationModelReady",
-      done: false,
-      optional: true,
-      action: { href: "/models", labelKey: "dashboard.activationOpenModels" },
     },
     {
       id: "project",
@@ -132,6 +119,7 @@ export function buildActivationReadiness(
           ? "dashboard.activationDeliveryReady"
           : "dashboard.activationDeliveryMissing",
       done: (input.acceptedDeliveries ?? 0) > 0,
+      optional: true,
       action: {
         href: "/projects",
         labelKey: "dashboard.activationStartDelivery",

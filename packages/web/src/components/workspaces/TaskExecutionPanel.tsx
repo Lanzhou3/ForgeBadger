@@ -10,6 +10,7 @@ import {
   type AiTool,
   type WorkspaceDetail,
 } from "@/lib/collaboration-api";
+import { runtimeAdapterIds } from "@/lib/api";
 import {
   ErrorNotice,
   Field,
@@ -65,7 +66,7 @@ export function TaskExecutionPanel({ detail, taskId, actorId }: Props) {
                   setKey(crypto.randomUUID());
                 }}
               >
-                {(["claude", "opencode", "codex", "kimi"] as const).map(
+                {runtimeAdapterIds.map(
                   (tool) => (
                     <option key={tool} value={tool}>
                       {tool}

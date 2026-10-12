@@ -1,6 +1,7 @@
 import { randomUUID,createHash } from 'node:crypto';
 import type { Database } from '../types.js';
-import type { DevelopmentTaskRow, DevelopmentStatus, DevelopmentEvidence } from '../../services/development/contracts.js';
+import type { DevelopmentTaskRow, DevelopmentStatus, DevelopmentEvidence, DevelopmentReconciliation } from '../../services/development/contracts.js';
+import type { ExecutionReservation,ExecutionIdentity } from '../../services/development/execution-identity.js';
 const hashText=(value:string)=>createHash('sha256').update(value).digest('hex');
 
 export class DevelopmentTaskRepository {
@@ -27,6 +28,24 @@ export class DevelopmentTaskRepository {
  owns(id:string,owner:string){const r=this.get(id);return !!r&&r.status==='running'&&r.owner===owner&&(r.lease_expires_at??0)>Date.now()&&!r.cancel_requested;}
  renew(id:string,owner:string,leaseMs=15000){return this.db.prepare("UPDATE copilot_development_tasks SET lease_expires_at=? WHERE user_id=? AND id=? AND owner=? AND status='running' AND cancel_requested=0 AND lease_expires_at>?").run(Date.now()+leaseMs,this.userId,id,owner,Date.now()).changes===1;}
  setWorkspace(id:string,owner:string,directory:string){if(!this.owns(id,owner))throw new Error('DEVELOPMENT_LEASE_LOST');this.db.prepare('UPDATE copilot_development_tasks SET workspace_path=? WHERE user_id=? AND id=? AND owner=?').run(directory,this.userId,id,owner);}
+ setExecutionIdentity(id:string,owner:string,identity:ExecutionReservation|ExecutionIdentity) {
+  if(identity.userId!==this.userId||identity.taskId!==id||identity.owner!==owner)throw new Error('DEVELOPMENT_EXECUTION_IDENTITY_MISMATCH');
+  if(!this.db.prepare("UPDATE copilot_development_tasks SET execution_identity_json=?,reconciliation_json=NULL,revision=revision+1,updated_at=? WHERE user_id=? AND id=? AND owner=? AND status='running' AND cancel_requested=0 AND lease_expires_at>?").run(JSON.stringify(identity),Date.now(),this.userId,id,owner,Date.now()).changes)throw new Error('DEVELOPMENT_LEASE_LOST');
+ }
+ reconcile(row:DevelopmentTaskRow,evidence:DevelopmentReconciliation) {
+  return this.db.transaction(()=>{
+   const changed=this.db.prepare("UPDATE copilot_development_tasks SET status='failed',reconciliation_json=?,error='Execution ended; final task outcome unknown. Automatic replay prohibited',owner=NULL,lease_expires_at=NULL,revision=revision+1,updated_at=? WHERE user_id=? AND id=? AND project_id=? AND status='indeterminate' AND revision=? AND owner IS ? AND execution_identity_json IS ? AND reconciliation_json IS NULL")
+    .run(JSON.stringify(evidence),Date.now(),this.userId,row.id,row.project_id,row.revision,row.owner,row.execution_identity_json).changes;
+   if(changed!==1)throw new Error('DEVELOPMENT_RECONCILIATION_STALE');
+   const next=this.get(row.id)!;this.event(next);return next;
+  }).immediate();
+ }
+ interrupt(id:string,owner:string) {
+  return this.db.transaction(()=>{
+   const changed=this.db.prepare("UPDATE copilot_development_tasks SET status='indeterminate',error='Execution stop was not independently confirmed; automatic replay prohibited',revision=revision+1,updated_at=? WHERE user_id=? AND id=? AND owner=? AND status='running'").run(Date.now(),this.userId,id,owner).changes;
+   if(changed)this.event(this.get(id)!);return changed===1;
+  }).immediate();
+ }
  finish(id:string,owner:string,status:DevelopmentStatus,evidence?:DevelopmentEvidence,error?:string) {
   return this.db.transaction(()=>{
    const row=this.get(id);if(!row||row.status!=='running'||row.owner!==owner||(row.lease_expires_at??0)<=Date.now())return false;
