@@ -349,6 +349,45 @@ for (const fixture of [
   });
 }
 
+test(
+  "resolves shims when a plain env object uses the OS env block's exact key casing",
+  () => {
+    // Sanitized/derived env objects (adapter update probes, the Session
+    // Server allowlist filter) are plain JS objects that keep the OS
+    // environment block's exact key casing. On machines whose registry
+    // stores PATH under a non-conventional spelling (e.g. lowercase `path`
+    // in the HKLM Session Manager Environment key), `env.Path ?? env.PATH`
+    // misses it and the probe reports the CLI as missing while the same CLI
+    // launches fine from a pty (which goes through the case-insensitive
+    // process.env / OS resolution). The lookup must be case-insensitive.
+    const directory = mkdtempSync(join(tmpdir(), "forgebadger-env-casing-"));
+    try {
+      const cliDir = join(directory, "node_modules", "acme");
+      mkdirSync(cliDir, { recursive: true });
+      writeFileSync(join(cliDir, "cli.js"), "");
+      writeFileSync(
+        join(directory, "acme.cmd"),
+        "node \"%~dp0node_modules\\acme\\cli.js\" %*"
+      );
+
+      const lowerCasedEnv = { path: directory, pathext: ".CMD" } as NodeJS.ProcessEnv;
+      const resolved = resolveWindowsShimCommand("acme", lowerCasedEnv, "win32");
+
+      assert.ok(resolved, "lowercase-cased plain env object must still resolve the shim");
+      assert.equal(resolved.command, process.execPath);
+      assert.deepEqual(resolved.args, [join(cliDir, "cli.js")]);
+
+      const pathOnlyUpperEnv = { PATH: directory, pathext: ".CMD" } as NodeJS.ProcessEnv;
+      assert.ok(
+        resolveWindowsShimCommand("acme", pathOnlyUpperEnv, "win32"),
+        "mixed casing (uppercase PATH, lowercase pathext) must still resolve"
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+);
+
 });
 
 test("stays inert on POSIX so execvp resolution is unchanged", () => {

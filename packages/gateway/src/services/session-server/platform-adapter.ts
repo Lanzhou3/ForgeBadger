@@ -327,9 +327,28 @@ function lookupBatchVar(scope: NodeJS.ProcessEnv, name: string): string | undefi
   return undefined;
 }
 
+/**
+ * Windows environment variable names are case-insensitive, but a plain JS
+ * object is not. `process.env` happens to answer `env.Path` case-insensitively
+ * on Windows, which masks the issue while it is the direct argument — yet
+ * sanitized/derived env objects (adapter update probes, the Session Server's
+ * allowlist filter) are plain objects that keep the OS environment block's
+ * exact key casing. On machines whose registry stores PATH under a
+ * non-conventional spelling (e.g. lowercase `path` in the HKLM Session
+ * Manager Environment key), `env.Path ?? env.PATH` misses it and every
+ * PATH-based resolution silently degrades to "not found".
+ */
+function getEnvValueCaseInsensitive(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const wanted = name.toUpperCase();
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined && key.toUpperCase() === wanted) return value;
+  }
+  return undefined;
+}
+
 function findWindowsExecutable(command: string, env: NodeJS.ProcessEnv): string | undefined {
-  const pathValue = env.Path ?? env.PATH ?? "";
-  const pathExt = env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD";
+  const pathValue = getEnvValueCaseInsensitive(env, "PATH") ?? "";
+  const pathExt = getEnvValueCaseInsensitive(env, "PATHEXT") ?? ".COM;.EXE;.BAT;.CMD";
   const extensions = pathExt.split(";").filter(Boolean);
   for (const dir of pathValue.split(";").filter(Boolean)) {
     for (const extension of extensions) {
