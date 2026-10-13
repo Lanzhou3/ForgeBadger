@@ -49,6 +49,14 @@ const capabilities: readonly ProviderAdapterCapability[] = Object.freeze([
     adapter: "mcode", apiFormats: ["anthropic", "openai-responses", "openai-compatible"],
     authModes: ["managed_credential", "host_environment", "none"], scopes: ["global"],
     projectionScope: "user-global", modelSelection: "native-config", remoteModelList: false
+  },
+  {
+    // Grok Build's `[model.*]` table accepts chat_completions, responses, and
+    // messages. Google has no backend. Models live only in the user config;
+    // project `.grok/config.toml` cannot carry them.
+    adapter: "grok", apiFormats: ["anthropic", "openai-responses", "openai-compatible"],
+    authModes: ["managed_credential", "host_environment", "none"], scopes: ["global"],
+    projectionScope: "user-global", modelSelection: "native-config", remoteModelList: false
   }
 ]);
 

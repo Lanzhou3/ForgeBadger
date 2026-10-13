@@ -3,7 +3,7 @@ import { redactAgentText } from '../agent/redaction.js';
 import { adapterIds } from '../../lib/adapter-ids.js';
 
 export const cliAdapterLabels: Record<typeof adapterIds[number], string> = {
-  claude: 'Claude Code', codex: 'Codex', kimi: 'Kimi Code', opencode: 'OpenCode', pi: 'PI', mcode: 'MiniMax Code',
+  claude: 'Claude Code', codex: 'Codex', kimi: 'Kimi Code', opencode: 'OpenCode', pi: 'PI', mcode: 'MiniMax Code', grok: 'Grok',
 };
 const excerpt = (max: number) => z.object({ text: z.string().max(max * 2),
   source: z.enum(['native_final_message', 'native_tool_event', 'native_error', 'managed_verification']) });

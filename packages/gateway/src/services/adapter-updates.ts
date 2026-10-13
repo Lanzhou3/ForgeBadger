@@ -88,6 +88,14 @@ const updateConfig: Record<AdapterId, AdapterUpdateConfig> = {
     ],
     minNode: "22.19.0",
     nodeRange: ">=22.19.0 <23 || >=24.2.0 <27"
+  },
+  // Grok Build publishes `@xai-official/grok`. `grok update` is the documented
+  // in-place updater for the official installer; npm install covers the
+  // package path.
+  grok: {
+    npmPackage: "@xai-official/grok",
+    args: ["update"],
+    installArgs: ["install", "-g", "@xai-official/grok"]
   }
 };
 

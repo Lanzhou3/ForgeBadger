@@ -11,6 +11,8 @@ import {
 } from "./cli-notification-settings.js";
 import { ensureForgeBadgerOpenCodePlugin } from "./opencode-notification-settings.js";
 import { ensureMcodeNotificationPreference } from "./mcode-notification-preference.js";
+import { ensureGrokNotificationSettings } from "./grok-notification-settings.js";
+import { globalConfigRoot } from "./cli-config-target.js";
 import {
   ensureClaudeTerminalNotificationSettings,
   ensureKimiTerminalNotificationSettings,
@@ -34,6 +36,11 @@ export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
     FORGEBADGER_SESSION_ID: input.sessionId,
     FORGEBADGER_GATEWAY_URL: getGatewayUrl()
   };
+  if (input.adapter === "grok") {
+    // Pin the Gateway's current config root even when an existing daemon
+    // was started with a different GROK_HOME (or no override).
+    env.GROK_HOME = globalConfigRoot("grok");
+  }
   if (input.adapter === "kimi") {
     // Kimi Code upgrades its bare BEL notifications to rich OSC 9 text only
     // when TERM_PROGRAM hits its allowlist (iTerm.app/WezTerm/ghostty/
@@ -92,6 +99,14 @@ export async function prepareAdapterLaunchExtras(
     ensureMcodeNotificationPreference();
     return [];
   }
+  if (adapter === "grok") {
+    // Global command hook. Project hooks need folder trust, which would also
+    // trust repo MCP servers, so this stays in $GROK_HOME/hooks.
+    if (!hooksDisabled.has("grok")) {
+      await ensureGrokNotificationSettings();
+    }
+    return [];
+  }
   await ensureClaudeTerminalNotificationSettings();
   if (!hooksDisabled.has("claude")) {
     await ensureClaudeNotificationSettings(projectRoot, getGatewayUrl());
@@ -100,18 +115,18 @@ export async function prepareAdapterLaunchExtras(
 }
 
 /**
- * FORGEBADGER_DISABLE_CLI_HOOKS: skip hook injection for claude/kimi/opencode.
+ * FORGEBADGER_DISABLE_CLI_HOOKS: skip hook injection for claude/kimi/opencode/grok.
  * Disabling hooks removes structured lifecycle notifications; generic terminal
  * bells cannot safely recover them. Codex/pi are silently ignored because
  * those adapters require their managed hooks/extensions.
  */
 export function disabledCliHookAdapters(
   value: string | undefined = process.env.FORGEBADGER_DISABLE_CLI_HOOKS
-): Set<"claude" | "kimi" | "opencode"> {
-  const disabled = new Set<"claude" | "kimi" | "opencode">();
+): Set<"claude" | "kimi" | "opencode" | "grok"> {
+  const disabled = new Set<"claude" | "kimi" | "opencode" | "grok">();
   for (const entry of value?.split(",") ?? []) {
     const name = entry.trim();
-    if (name === "claude" || name === "kimi" || name === "opencode") {
+    if (name === "claude" || name === "kimi" || name === "opencode" || name === "grok") {
       disabled.add(name);
     }
   }

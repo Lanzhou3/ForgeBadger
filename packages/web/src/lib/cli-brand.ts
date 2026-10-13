@@ -1,7 +1,7 @@
 import type { AdapterDiscovery as RuntimeAdapter } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
 
-export type CliBrandId = "claude" | "codex" | "kimi" | "opencode" | "pi" | "mcode" | "terminal";
+export type CliBrandId = "claude" | "codex" | "kimi" | "opencode" | "pi" | "mcode" | "grok" | "terminal";
 
 export interface CliBrand {
   id: CliBrandId | "unknown";
@@ -33,6 +33,8 @@ const CLI_BRANDS: Record<CliBrandId, CliBrand> = {
   opencode: { id: "opencode", label: "OpenCode", shortLabel: "OpenCode", color: "#b7b1b1" },
   pi: { id: "pi", label: "PI", shortLabel: "PI", color: "#4d9abf" },
   mcode: { id: "mcode", label: "MiniMax Code", shortLabel: "MiniMax", color: "#68c0ff" },
+  // Near-white mark for the dark-first UI. The icon itself uses currentColor.
+  grok: { id: "grok", label: "Grok", shortLabel: "Grok", color: "#f5f5f5" },
   terminal: { id: "terminal", label: "Terminal", shortLabel: "Terminal", color: "#71717a" },
 };
 

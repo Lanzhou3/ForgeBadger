@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { buildSanitizedEnv } from "../src/services/session-server/env-policy.js";
+import { createLaunchPlan } from "../src/services/session-launch-plan.js";
 import {
   generateSessionServerToken,
   readSessionServerTokenFile,
@@ -97,6 +98,15 @@ function helloLine(token: string, protocolVersion: number = PROTOCOL_VERSION): s
 }
 
 describe("buildSanitizedEnv", () => {
+  it("keeps GROK_HOME while stripping unrelated credential variables", () => {
+    const env = buildSanitizedEnv({
+      GROK_HOME: "/custom/grok",
+      GROK_API_KEY: "must-not-inherit",
+      FORGEBADGER_MASTER_KEY: "must-not-inherit"
+    });
+    assert.deepStrictEqual(env, { GROK_HOME: "/custom/grok" });
+  });
+
   it("keeps allowlisted base variables", () => {
     const env = buildSanitizedEnv({
       PATH: "/usr/bin",
@@ -311,6 +321,38 @@ describe("inbound size limits", () => {
 });
 
 describe("session env sanitization", () => {
+  it("uses the Grok launch directory in a real pty despite an older daemon environment", async () => {
+    const previous = process.env.GROK_HOME;
+    const cwd = mkdtempSync(join(tmpdir(), "fb-grok-pty-"));
+    tempDirs.push(cwd);
+    const server = new SessionServer();
+    try {
+      process.env.GROK_HOME = cwd;
+      const launchPlan = createLaunchPlan({ adapter: "grok", projectRoot: cwd, sessionId: "grok-env-check" });
+      process.env.GROK_HOME = join(cwd, "old-daemon");
+      await server.createSession({
+        sessionId: "grok-env-check", userId: "u", attachToken: "t",
+        launchPlan: {
+          ...launchPlan,
+          command: process.execPath,
+          args: ["-e", "console.log('grok-root=' + process.env.GROK_HOME)"]
+        }
+      });
+      let content = "";
+      const start = Date.now();
+      while (!content.includes("grok-root=") && Date.now() - start < 10_000) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        content = await server.capturePane("grok-env-check");
+      }
+      assert.ok(content.includes(`grok-root=${cwd}`));
+      assert.ok(!content.includes("old-daemon"));
+    } finally {
+      if (previous === undefined) delete process.env.GROK_HOME;
+      else process.env.GROK_HOME = previous;
+      await server.destroy();
+    }
+  });
+
   it("does not leak Gateway secrets into the pty process environment", async () => {
     const masterKey = "abcdef0123456789".repeat(4);
     const jwtSecret = "y".repeat(32);

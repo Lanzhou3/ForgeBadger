@@ -20,7 +20,10 @@ const mainFiles: Record<ProviderAdapter, string> = {
   // MiniMax Code keeps third-party providers in `custom_provider` inside a
   // single YAML file. The auth tree under the same root is owned by the CLI's
   // own OAuth flow and is never a managed target.
-  mcode: "config.yaml"
+  mcode: "config.yaml",
+  // Grok Build user config. Project `.grok/config.toml` cannot hold models
+  // (only MCP, plugins, and permission), so apply always targets this file.
+  grok: "config.toml"
 };
 
 export function cliConfigMainFile(adapter: ProviderAdapter): string {
@@ -49,6 +52,11 @@ export function cliConfigTargetPath(input: {
       // which carry no provider selection.
       throw new Error("MiniMax Code config is global-only; project scope is not supported");
     }
+    if (input.adapter === "grok") {
+      // Project `.grok/config.toml` only contributes MCP servers, plugins, and
+      // permission rules. Model tables belong in the user config.
+      throw new Error("Grok config is global-only ($GROK_HOME/config.toml); project scope is not supported");
+    }
     return path.join(root, mainFiles[input.adapter]);
   }
   return path.join(globalConfigRoot(input.adapter), mainFiles[input.adapter]);
@@ -64,6 +72,10 @@ export function globalConfigRoot(
   if (adapter === "codex") return resolveUserRoot(env.CODEX_HOME, path.join(homeDir, ".codex"), homeDir);
   if (adapter === "kimi") return resolveUserRoot(env.KIMI_CODE_HOME, path.join(homeDir, ".kimi-code"), homeDir);
   if (adapter === "pi") return resolveUserRoot(env.PI_CODING_AGENT_DIR, path.join(homeDir, ".pi", "agent"), homeDir);
+  if (adapter === "grok") {
+    // Grok Build reads $GROK_HOME, then ~/.grok. There is no second fallback.
+    return resolveUserRoot(env.GROK_HOME, path.join(homeDir, ".grok"), homeDir);
+  }
   if (adapter === "mcode") {
     // MiniMax Code's data directory. Verified against @minimax-ai/code
     // 0.4.12: it reads MINIMAX_DATA_DIR, then MAVIS_DATA_DIR, then the default.

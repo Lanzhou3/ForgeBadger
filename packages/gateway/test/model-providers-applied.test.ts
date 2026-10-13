@@ -18,7 +18,7 @@ import type { CliConfigSnapshot } from "../src/services/cli-config.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
-const ADAPTERS: AdapterId[] = ["claude", "opencode", "codex", "kimi", "pi"];
+const ADAPTERS: AdapterId[] = ["claude", "opencode", "codex", "kimi", "pi", "grok"];
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
@@ -99,7 +99,7 @@ describe("model providers applied overview route", () => {
     db.prepare("UPDATE users SET role = ? WHERE id = ?").run("admin", id);
   }
 
-  it("returns all five adapters with null applied when no pointers exist", async () => {
+  it("returns every applied-status adapter with null applied when no pointers exist", async () => {
     const res = await getOverview();
 
     assert.equal(res.status, 200);
@@ -219,6 +219,61 @@ describe("model providers applied overview route", () => {
     });
     const piDrift = drifted.body.data.adapters.find((entry: any) => entry.adapter === "pi");
     assert.equal(piDrift.stale, true);
+  });
+
+  it("resolves the Grok default catalog entry and detects model drift or a missing entry", async () => {
+    promoteToAdmin(userId);
+    const { providerId, modelProfileId } = createProviderAndModel("Example", "Grok Model", "grok-model");
+    new CliConfigAppliedProviderRepository(db, userId).upsert("grok", providerId, modelProfileId);
+
+    for (const [modelId, stale] of [["grok-model", false], ["other-model", true], [null, true]] as const) {
+      const res = await getOverview(token, {
+        readCliConfigSnapshot: async (adapter) => ({
+          ...snapshotWith(adapter === "grok" ? "example" : ""),
+          adapter,
+          models: modelId ? [{ alias: "example", provider: "example", modelId }] : []
+        })
+      });
+      assert.equal(res.status, 200);
+      const grok = res.body.data.adapters.find((entry: { adapter: string }) => entry.adapter === "grok");
+      assert.equal(grok.configDefaultModel, "example");
+      assert.equal(grok.stale, stale, `catalog entry model=${modelId}`);
+    }
+  });
+
+  it("does not treat a Grok catalog key that matches the applied model ID as a model match", async () => {
+    promoteToAdmin(userId);
+    const { providerId, modelProfileId } = createProviderAndModel("Example", "Grok Model", "grok-model");
+    new CliConfigAppliedProviderRepository(db, userId).upsert("grok", providerId, modelProfileId);
+    const res = await getOverview(token, {
+      readCliConfigSnapshot: async (adapter) => ({
+        ...snapshotWith(adapter === "grok" ? "grok-model" : ""),
+        adapter,
+        models: [{ alias: "grok-model", provider: "example", modelId: "other-model" }]
+      })
+    });
+    const grok = res.body.data.adapters.find((entry: { adapter: string }) => entry.adapter === "grok");
+    assert.equal(grok.stale, true);
+  });
+
+  it("keeps Grok snapshot failures and non-admin reads conservative", async () => {
+    const { providerId, modelProfileId } = createProviderAndModel("Example", "Grok Model", "grok-model");
+    new CliConfigAppliedProviderRepository(db, userId).upsert("grok", providerId, modelProfileId);
+    let reads = 0;
+    const options = { readCliConfigSnapshot: async (): Promise<CliConfigSnapshot> => {
+      reads += 1;
+      throw new Error("unreadable");
+    } };
+    const member = await getOverview(token, options);
+    assert.equal(reads, 0);
+    promoteToAdmin(userId);
+    const admin = await getOverview(token, options);
+    assert.ok(reads > 0);
+    for (const res of [member, admin]) {
+      const grok = res.body.data.adapters.find((entry: { adapter: string }) => entry.adapter === "grok");
+      assert.equal(grok.configDefaultModel, null);
+      assert.equal(grok.stale, false);
+    }
   });
 
   it("keeps stale=false when the snapshot cannot be read", async () => {

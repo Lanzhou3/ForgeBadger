@@ -109,6 +109,14 @@ const CLI_ICON_MARKS: Record<Exclude<CliBrandId, "codex">, ReactNode> = {
       </g>
     </>
   ),
+  // Original spark mark. Not the Grok wordmark. currentColor keeps it
+  // legible on both the dark UI and a light chip.
+  grok: (
+    <g fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
+      <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" />
+      <path d="M12 2.8v3.4M12 17.8v3.4M2.8 12h3.4M17.8 12h3.4M5.4 5.4l2.5 2.5M16.1 16.1l2.5 2.5M18.6 5.4l-2.5 2.5M7.9 16.1l-2.5 2.5" />
+    </g>
+  ),
   // ForgeBadger's CLI-agnostic terminal session. Original mark: the classic
   // shell prompt glyph (">" + underscore cursor), monochrome — it follows the
   // surrounding text color like the OpenCode mark so it stays legible in both
@@ -122,7 +130,7 @@ const CLI_ICON_MARKS: Record<Exclude<CliBrandId, "codex">, ReactNode> = {
 };
 
 /** Marks that follow the surrounding text color instead of a fixed brand color. */
-const CURRENT_COLOR_MARKS: ReadonlySet<string> = new Set(["opencode", "terminal"]);
+const CURRENT_COLOR_MARKS: ReadonlySet<string> = new Set(["opencode", "terminal", "grok"]);
 
 export function CliBrandIcon({ aiTool, className }: Props) {
   const brand = getCliBrand(aiTool);

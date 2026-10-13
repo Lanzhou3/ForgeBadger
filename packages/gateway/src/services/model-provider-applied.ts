@@ -31,7 +31,7 @@ export interface AppliedProvidersOverviewOptions {
   readSnapshot?: ((adapter: AdapterId) => Promise<CliConfigSnapshot>) | undefined;
 }
 
-const ADAPTER_IDS: AdapterId[] = ["claude", "opencode", "codex", "kimi", "pi"];
+const ADAPTER_IDS: AdapterId[] = ["claude", "opencode", "codex", "kimi", "pi", "grok"];
 
 export async function buildAppliedProvidersOverview(
   db: Database,
@@ -46,12 +46,13 @@ export async function buildAppliedProvidersOverview(
     ADAPTER_IDS.map(async (adapter) => {
       const pointer = appliedRepo.get(adapter);
       const resolved = pointer ? resolvePointer(pointer, providerRepo) : null;
-      const configDefaultModel = options.isAdmin ? await readDefaultModel(readSnapshot, adapter) : null;
+      const snapshot = options.isAdmin ? await readConfigSnapshot(readSnapshot, adapter) : null;
+      const configDefaultModel = snapshot?.defaultModel.trim() || null;
       return {
         adapter,
         applied: resolved?.summary ?? null,
         configDefaultModel,
-        stale: isStale(adapter, resolved, configDefaultModel)
+        stale: isStale(adapter, resolved, snapshot)
       };
     })
   );
@@ -79,14 +80,12 @@ function resolvePointer(
   };
 }
 
-async function readDefaultModel(
+async function readConfigSnapshot(
   readSnapshot: (adapter: AdapterId) => Promise<CliConfigSnapshot>,
   adapter: AdapterId
-): Promise<string | null> {
+): Promise<CliConfigSnapshot | null> {
   try {
-    const snapshot = await readSnapshot(adapter);
-    const value = snapshot.defaultModel.trim();
-    return value || null;
+    return await readSnapshot(adapter);
   } catch {
     return null;
   }
@@ -95,16 +94,22 @@ async function readDefaultModel(
 function isStale(
   adapter: AdapterId,
   resolved: { summary: AppliedProviderSummary; dangling: boolean } | null,
-  configDefaultModel: string | null
+  snapshot: CliConfigSnapshot | null
 ): boolean {
   if (!resolved) return false;
   if (resolved.dangling) return true;
   // A missing/unparseable snapshot cannot prove drift; stay conservative.
-  if (configDefaultModel === null) return false;
-  return configModelId(adapter, configDefaultModel) !== resolved.summary.modelId;
+  if (!snapshot?.defaultModel.trim()) return false;
+  return configModelId(adapter, snapshot) !== resolved.summary.modelId;
 }
 
-function configModelId(adapter: AdapterId, configDefaultModel: string): string {
+function configModelId(adapter: AdapterId, snapshot: CliConfigSnapshot): string | null {
+  const configDefaultModel = snapshot.defaultModel.trim();
+  if (adapter === "grok") {
+    // [models].default selects a catalog entry, not a wire model ID.
+    // A readable config with no matching entry proves the selection drifted.
+    return snapshot.models.find((model) => model.alias === configDefaultModel)?.modelId ?? null;
+  }
   if (adapter !== "kimi") return configDefaultModel;
   const slash = configDefaultModel.lastIndexOf("/");
   return slash === -1 ? configDefaultModel : configDefaultModel.slice(slash + 1);

@@ -12,6 +12,7 @@ const SAFE_BASE_ENV_KEYS = new Set([
   "COMSPEC",
   "CLAUDE_CONFIG_DIR",
   "CODEX_HOME",
+  "GROK_HOME",
   "HOMEDRIVE",
   "HOME",
   "HOMEPATH",

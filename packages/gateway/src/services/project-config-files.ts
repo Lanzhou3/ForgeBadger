@@ -104,7 +104,7 @@ function skillConfigPath(name: string, adapter: AdapterId): string {
   return `${adapterConfigRoot(adapter)}/skills/${slug}/SKILL.md`;
 }
 
-export function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" | ".kimi-code" | ".pi" | ".mcode" {
+export function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" | ".codex" | ".kimi-code" | ".pi" | ".mcode" | ".grok" {
   if (adapter === "opencode") return ".opencode";
   if (adapter === "codex") return ".codex";
   if (adapter === "kimi") return ".kimi-code";
@@ -113,6 +113,9 @@ export function adapterConfigRoot(adapter: AdapterId): ".claude" | ".opencode" |
   // commands and agents. ForgeBadger writes neither, so this root is only
   // used by the skill path helper, which stays consistent with .claude/.
   if (adapter === "mcode") return ".mcode";
+  // Grok discovers project skills from `.grok/skills/` and reads AGENTS.md
+  // from the repo root. Project `.grok/config.toml` is not a model file.
+  if (adapter === "grok") return ".grok";
   return ".claude";
 }
 
@@ -122,6 +125,7 @@ function adaptInstructionContent(content: string, adapter: AdapterId): string {
       : adapter === "kimi" ? "Kimi Code"
       : adapter === "pi" ? "PI"
       : adapter === "mcode" ? "MiniMax Code"
+      : adapter === "grok" ? "Grok"
       : "Codex";
   return content
     .replaceAll("CLAUDE.md", "AGENTS.md")

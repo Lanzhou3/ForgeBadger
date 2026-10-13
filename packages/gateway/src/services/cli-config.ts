@@ -109,6 +109,14 @@ const cliConfigMeta: Record<AdapterId, CliConfigMeta> = {
     editableFiles: ["config.yaml"],
     fileType: "yaml",
     configRoot: () => globalConfigRoot("mcode")
+  },
+  grok: {
+    mainFile: "config.toml",
+    // auth.json and mcp_credentials.json belong to `grok login`. sessions/,
+    // plugins/, and skills/ are runtime state and are not edited here.
+    editableFiles: ["config.toml"],
+    fileType: "toml",
+    configRoot: () => globalConfigRoot("grok")
   }
 };
 
@@ -266,6 +274,18 @@ export async function upsertCliProvider(
           models
         };
       });
+    case "grok":
+      return mutateMainConfig("grok", (doc) => {
+        const models = ensureRecord(doc, "model");
+        const existing = asRecord(models[providerId]);
+        const next: Record<string, unknown> = { ...existing };
+        if (input.name !== undefined) next.name = input.name;
+        if (input.baseUrl !== undefined) next.base_url = input.baseUrl;
+        if (input.protocol !== undefined) {
+          next.api_backend = grokApiBackendForProtocol(input.protocol);
+        }
+        models[providerId] = next;
+      });
   }
 }
 
@@ -327,6 +347,13 @@ export async function removeCliProvider(adapter: AdapterId, providerId: string):
           && doc.defaultModel.startsWith(`custom_provider:${providerId}/`)) {
           delete doc.defaultModel;
         }
+      });
+    case "grok":
+      return mutateMainConfig("grok", (doc) => {
+        const models = asRecord(doc.model);
+        if (models) delete models[providerId];
+        const defaults = asRecord(doc.models);
+        if (defaults?.default === providerId) delete defaults.default;
       });
   }
 }
@@ -490,6 +517,10 @@ export async function setCliDefaultModel(
         }
         doc.defaultModel = next;
       });
+    case "grok":
+      return mutateMainConfig("grok", (doc) => {
+        ensureRecord(doc, "models").default = model;
+      });
   }
 }
 
@@ -601,6 +632,7 @@ async function parseMainConfig(adapter: AdapterId): Promise<{
   if (adapter === "opencode") return describeOpenCode(doc);
   if (adapter === "codex") return describeCodex(doc);
   if (adapter === "mcode") return describeMcode(doc);
+  if (adapter === "grok") return describeGrok(doc);
   return describeKimi(doc);
 }
 
@@ -689,6 +721,29 @@ function describeCodex(doc: ConfigDoc) {
     };
   });
   return { providers, models: [], defaultModel: stringValue(doc.model) };
+}
+
+function describeGrok(doc: ConfigDoc) {
+  const defaults = asRecord(doc.models) ?? {};
+  const defaultModel = stringValue(defaults.default);
+  const providers: CliProviderEntry[] = [];
+  const models: CliModelEntry[] = [];
+  for (const [key, value] of Object.entries(asRecord(doc.model) ?? {})) {
+    const entry = asRecord(value) ?? {};
+    const headers = asRecord(entry.extra_headers) ?? {};
+    const hasApiKey = Boolean(stringValue(entry.api_key) || stringValue(headers["x-api-key"]));
+    providers.push({
+      id: key,
+      name: stringValue(entry.name) || key,
+      protocol: stringValue(entry.api_backend) || "chat_completions",
+      baseUrl: stringValue(entry.base_url),
+      hasApiKey,
+      isActive: key === defaultModel
+    });
+    const modelId = stringValue(entry.model);
+    if (modelId) models.push({ alias: key, provider: key, modelId });
+  }
+  return { providers, models, defaultModel };
 }
 
 function describeKimi(doc: ConfigDoc) {
@@ -878,6 +933,15 @@ async function mutateMcodeConfig(mutate: (doc: ConfigDoc) => void): Promise<CliC
  * Unknown protocols fall back to the Anthropic Messages shape, which is what
  * the CLI itself defaults to when `api` is absent.
  */
+function grokApiBackendForProtocol(protocol: string | undefined): "chat_completions" | "responses" | "messages" {
+  if (protocol?.includes("google")) {
+    throw new Error("Grok config.toml has no API backend for the google protocol");
+  }
+  if (protocol?.includes("responses")) return "responses";
+  if (protocol?.includes("anthropic") || protocol?.includes("messages")) return "messages";
+  return "chat_completions";
+}
+
 function mcodeApiNameForProtocol(
   protocol: string | undefined
 ): "anthropic-messages" | "openai-responses" | "openai-completions" {

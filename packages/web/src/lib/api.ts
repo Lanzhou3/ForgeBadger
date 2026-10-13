@@ -128,7 +128,7 @@ export interface ProjectManagerStarterPack {
   id: string;
   name: string;
   description: string;
-  recommendedAdapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
+  recommendedAdapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | "grok";
   promptFrame: string;
   acceptanceChecklist: string[];
   verificationGuidance: string[];
@@ -640,7 +640,7 @@ export interface ProjectSkill {
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 /** Wire protocol the provider endpoint speaks (not the vendor). */
 export type ProviderApiFormat = "anthropic" | "openai-responses" | "openai-compatible" | "google";
-export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
+export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | "grok";
 
 /**
  * Canonical adapter id list for the web surface.
@@ -657,7 +657,8 @@ export const runtimeAdapterIds = [
   "codex",
   "kimi",
   "pi",
-  "mcode"
+  "mcode",
+  "grok"
 ] as const satisfies readonly ProviderSupportedAdapter[];
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 
@@ -725,14 +726,14 @@ export interface ProviderBalanceResult {
  * Read-only view of a CLI's native login state / subscription quota, as
  * reported by GET /cli-accounts. Mirrors the gateway cli-account types.
  */
-export type CliAccountAdapter = "claude" | "codex" | "kimi" | "mcode";
+export type CliAccountAdapter = "claude" | "codex" | "kimi" | "mcode" | "grok";
 
 /**
  * Adapters the gateway can observe a native login/quota for. Narrower than
  * {@link runtimeAdapterIds}: opencode and pi ship no account surface, so the
  * gateway answers 400 for them and the quota panel must not probe them.
  */
-export const CLI_ACCOUNT_ADAPTERS = ["claude", "codex", "kimi", "mcode"] as const satisfies
+export const CLI_ACCOUNT_ADAPTERS = ["claude", "codex", "kimi", "mcode", "grok"] as const satisfies
   readonly CliAccountAdapter[];
 
 export type CliLoginState = "ready" | "custom_endpoint" | "not_authenticated" | "cli_missing" | "unknown";
@@ -823,7 +824,7 @@ export interface ProviderCredentialSummary {
   label: string | null;
   status: string;
   secretPreview: string;
-  generation?: number;
+  generation: number;
 }
 
 export interface SessionActivity {
@@ -969,7 +970,7 @@ export interface TokenDailyPoint {
 }
 
 export interface UsageSyncResultItem {
-  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
+  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | "grok";
   scanned: number;
   inserted: number;
 }
@@ -980,7 +981,7 @@ export interface UsageSyncResult {
 }
 
 export interface AdapterDiscovery {
-  id: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
+  id: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | "grok";
   label: string;
   command: string;
   supportLevel: "supported" | "prototype";
@@ -3173,7 +3174,7 @@ export interface GitTemplateImportResult {
   name: string;
   // `pi` was missing from this union even though the gateway can return it, so
   // consumers had to cast. Kept in sync with the other adapter unions.
-  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | null;
+  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | "grok" | null;
   fileCount: number;
   skippedFiles: string[];
 }

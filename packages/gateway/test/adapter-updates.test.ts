@@ -10,7 +10,7 @@ const publicResolver = async () => [{ address: "8.8.8.8", family: 4 }];
 const versionFetcher: typeof fetch = async () => new Response(JSON.stringify({ version: "2.0.0" }));
 
 describe("adapter updates", () => {
-  it("checks all five local versions against the official npm packages", async () => {
+  it("checks every local version against the official npm packages", async () => {
     const urls: string[] = [];
     const fetcher: typeof fetch = async (url) => {
       urls.push(String(url));
@@ -24,12 +24,13 @@ describe("adapter updates", () => {
 
     const results = await checkAdapterUpdates({ runner, fetcher, resolveHost: publicResolver });
 
-    assert.deepEqual(results.map((result) => result.id), ["claude", "opencode", "codex", "kimi", "pi"]);
+    assert.deepEqual(results.map((result) => result.id), ["claude", "opencode", "codex", "kimi", "pi", "mcode", "grok"]);
     assert.deepEqual(results.map((result) => result.state), [
-      "update_available", "update_available", "update_available", "missing", "update_available"
+      "update_available", "update_available", "update_available", "missing", "update_available", "update_available", "update_available"
     ]);
-    assert.equal(urls.length, 4);
+    assert.equal(urls.length, 6);
     assert.ok(urls.includes("https://registry.npmjs.org/@earendil-works%2Fpi-coding-agent/latest"));
+    assert.ok(urls.includes("https://registry.npmjs.org/@xai-official%2Fgrok/latest"));
     assert.equal(results.find((result) => result.id === "pi")?.command, "pi update --self");
   });
 

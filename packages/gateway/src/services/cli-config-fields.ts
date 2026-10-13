@@ -82,6 +82,19 @@ const kimiFields: CliConfigFieldSpec[] = [
 // card is omitted; the provider + model views cover the real content.
 const piFields: CliConfigFieldSpec[] = [];
 
+// Grok's config.toml model table is owned by apply-provider. The only scalar
+// surfaced here is the catalog key of the default model. api_key and
+// extra_headers stay out of the generic field editor.
+const grokFields: CliConfigFieldSpec[] = [
+  {
+    key: "defaultModel",
+    path: "models.default",
+    type: "string",
+    label: "Default model",
+    description: "Catalog key of the model used for new sessions."
+  }
+];
+
 /**
  * MiniMax Code scalar knobs that are safe to surface. The provider/model
  * entries under `custom_provider` are managed by the apply engine, so they are
@@ -117,7 +130,8 @@ export const cliConfigFieldCatalog: Record<AdapterId, CliConfigFieldSpec[]> = {
   codex: codexFields,
   kimi: kimiFields,
   pi: piFields,
-  mcode: mcodeFields
+  mcode: mcodeFields,
+  grok: grokFields
 };
 
 const maxFieldValueChars = 512;

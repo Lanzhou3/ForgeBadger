@@ -26,7 +26,7 @@ vi.mock("@/lib/api", () => ({
   refreshCliAccountQuota: vi.fn(),
   // The component enumerates adapters from this list rather than a local copy,
   // so the mock has to provide it or the module fails to load.
-  runtimeAdapterIds: ["claude", "opencode", "codex", "kimi", "pi", "mcode"] as const,
+  runtimeAdapterIds: ["claude", "opencode", "codex", "kimi", "pi", "mcode", "grok"] as const,
 }));
 
 const provider: ProviderProfile = {
@@ -173,6 +173,82 @@ describe("cli-status-section quota summary", () => {
     fireEvent.click(button);
     await waitFor(() => expect(refreshCliAccountQuota).toHaveBeenCalledWith("codex"));
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["cli-accounts"] }));
+  });
+});
+
+describe("cli-status-section grok row", () => {
+  it("shows the Grok card without a login hint, and the applied provider when one exists", async () => {    vi.mocked(getAppliedProviders).mockResolvedValue({
+      adapters: [{
+        adapter: "grok",
+        applied: {
+          providerProfileId: "provider-1",
+          providerName: "Custom",
+          providerStatus: "active",
+          modelProfileId: "model-1",
+          modelName: "Grok Model",
+          modelId: "grok-model",
+          appliedAt: "2026-10-11T00:00:00.000Z",
+        },
+        configDefaultModel: "grok-model",
+        stale: false,
+      }],
+    });
+    const onApply = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(ADAPTER_DISCOVERY_QUERY_KEY, {
+      adapters: [{ id: "grok", available: true, status: "available" }],
+    });
+    vi.mocked(getCliAccounts).mockResolvedValue({ accounts: [] });
+    render(
+      <QueryClientProvider client={client}>
+        <CliStatusSection
+          provider={{ ...provider, supportedAdapters: ["claude", "codex", "kimi", "grok"] }}
+          onApply={onApply}
+          onViewConfig={vi.fn()}
+        />
+      </QueryClientProvider>
+    );
+    const card = await screen.findByTestId("cli-status-grok");
+    expect(card.textContent).toContain("Grok");
+    expect(card.textContent).toContain("models.sdkInstalled");
+    expect(card.textContent).toContain("Custom");
+    expect(card.textContent).toContain("Grok Model");
+    expect(card.textContent).not.toContain("models.cliAccount");
+    const grokApply = card.querySelector("button");
+    expect(grokApply).toBeTruthy();
+    fireEvent.click(grokApply!);
+    expect(onApply).toHaveBeenCalledWith("grok");
+  });
+
+  it("renders the Grok native login badge, plan label and quota bars once the gateway reports them", async () => {
+    setup([{
+      login: { adapter: "grok", state: "ready", method: "oauth", accountLabel: "dev@example.com" },
+      quota: {
+        supported: true,
+        planLabel: "SuperGrok",
+        entries: [
+          { label: "Billing period credits", unit: "percent", usedPercent: 42, resetsAt: "2026-11-01T00:00:00Z" },
+          { label: "On-demand credits", unit: "percent", usedPercent: 10 },
+        ],
+        fetchedAt: FETCHED_AT,
+      },
+    }]);
+    await waitFor(() => expect(cardText("grok")).toContain("models.cliAccountLoggedIn · models.authTypeOauth"));
+    expect((await screen.findByRole("progressbar", { name: /Billing period credits/ })).getAttribute("aria-valuenow")).toBe("42");
+    expect(screen.getByRole("progressbar", { name: /On-demand credits/ }).getAttribute("aria-valuenow")).toBe("10");
+    const grokText = cardText("grok");
+    expect(grokText).toContain("SuperGrok");
+    expect(grokText).toContain("models.cliAccountQuotaResets");
+  });
+
+  it("shows the Grok login hint and the expired-token quota hint when the stored token is stale", async () => {
+    setup([{
+      login: { adapter: "grok", state: "not_authenticated", method: "oauth", detailCode: "token_expired" },
+      quota: unsupportedQuota("token_expired"),
+    }]);
+    await waitFor(() => expect(cardText("grok")).toContain("models.cliAccountNotLoggedIn"));
+    expect(cardText("grok")).toContain("models.cliAccountLoginHintGrok");
+    expect(cardText("grok")).toContain("models.cliAccountQuotaTokenExpired");
   });
 });
 

@@ -162,6 +162,12 @@ interface ApplyContext {
   previousContextWindow: number | null;
   /** Codex wire API resolved from the profile's apiFormat (explicit apply input wins). */
   codexWireApi: CodexWireApi;
+  /**
+   * Catalog key the previous Grok apply wrote under `[model.*]`. Null when
+   * this apply is not for Grok or the previous provider can no longer be
+   * resolved. Only that key is removed when the selection changes.
+   */
+  previousGrokCatalogKey: string | null;
 }
 
 /**
@@ -527,7 +533,10 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
     routeMode,
     routeToken,
     previousContextWindow,
-    codexWireApi: resolveCodexWireApi(input, provider)
+    codexWireApi: resolveCodexWireApi(input, provider),
+    previousGrokCatalogKey: input.adapter === "grok" && previousProvider
+      ? grokCatalogKey(normalizeProviderKey(previousProvider.providerKey))
+      : null
   };
 }
 
@@ -624,6 +633,10 @@ function applyTargets(adapter: AdapterId): ApplyTarget[] {
       { targetPath: main, fileType: "json", role: "config" },
       { targetPath: path.join(globalConfigRoot("pi"), "settings.json"), fileType: "json", role: "settings" }
     ];
+  }
+  if (adapter === "grok") {
+    // Single user-level TOML file. auth.json is owned by `grok login`.
+    return [{ targetPath: main, fileType: "toml", role: "config" }];
   }
   return [{
     targetPath: main,
@@ -862,6 +875,10 @@ function buildApplyDocument(
     // prefix; the bare `<provider>/<model>` form only resolves inside the
     // bundled registry.
     doc.defaultModel = `custom_provider:${context.providerKey}/${context.model.modelId}`;
+    return;
+  }
+  if (context.adapter === "grok") {
+    applyGrokModel(doc, context, secret);
     return;
   }
   const providers = record(doc.providers);
@@ -1181,12 +1198,82 @@ function normalizeProviderKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "") || "provider";
 }
 
+/**
+ * Grok `[model.<key>]` catalog key. Normalized provider keys are usually
+ * already bare TOML keys; a key that starts with a digit is prefixed so
+ * smol-toml does not have to quote it.
+ */
+function grokCatalogKey(providerKey: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_-]*$/u.test(providerKey) ? providerKey : `fb-${providerKey}`;
+}
+
+function grokApiBackend(apiFormat: ProviderApiFormat): "chat_completions" | "responses" | "messages" {
+  if (apiFormat === "openai-responses") return "responses";
+  if (apiFormat === "anthropic") return "messages";
+  if (apiFormat === "openai-compatible") return "chat_completions";
+  throw new CliConfigApplyError(
+    "CLI_CONFIG_APPLY_FIELD_UNSUPPORTED",
+    "Grok config.toml has no API backend for the google protocol; supported backends are chat_completions, responses, and messages"
+  );
+}
+
+/**
+ * Writes one managed `[model.<key>]` block and points `[models].default` at
+ * it. Every other table (`[ui]`, user `[model.*]`, `[mcp_servers]`) is left
+ * in place. Switching providers deletes only the previous managed key.
+ */
+function applyGrokModel(
+  doc: Record<string, unknown>,
+  context: ApplyContext,
+  secret: string
+): void {
+  if (!context.baseUrl) {
+    throw new CliConfigApplyError("CLI_CONFIG_APPLY_ENDPOINT_UNSAFE", "Grok providers require a base URL");
+  }
+  const backend = grokApiBackend(context.provider.apiFormat);
+  const key = grokCatalogKey(context.providerKey);
+  const models = record(doc.model);
+  if (context.previousGrokCatalogKey && context.previousGrokCatalogKey !== key) {
+    delete models[context.previousGrokCatalogKey];
+  }
+  const existing = record(models[key]);
+  const next: Record<string, unknown> = {
+    ...existing,
+    model: context.model.modelId,
+    base_url: context.baseUrl,
+    name: context.model.name,
+    api_backend: backend
+  };
+  if (context.model.contextWindow && context.model.contextWindow > 0) {
+    next.context_window = context.model.contextWindow;
+  }
+  if (backend === "messages") {
+    delete next.api_key;
+    const headers = record(existing.extra_headers);
+    headers["x-api-key"] = secret;
+    headers["anthropic-version"] = "2023-06-01";
+    next.extra_headers = headers;
+  } else {
+    next.api_key = secret;
+    const headers = record(existing.extra_headers);
+    delete headers["x-api-key"];
+    delete headers["anthropic-version"];
+    if (Object.keys(headers).length === 0) delete next.extra_headers;
+    else next.extra_headers = headers;
+  }
+  models[key] = next;
+  doc.model = models;
+  const defaults = record(doc.models);
+  defaults.default = key;
+  doc.models = defaults;
+}
+
 export function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId): string | null {
   if (adapter === "claude") {
     return provider.anthropicBaseUrl
       ?? (provider.apiFormat === "anthropic" ? provider.baseUrl : provider.openaiBaseUrl ?? provider.baseUrl);
   }
-  if ((adapter === "opencode" || adapter === "kimi" || adapter === "pi" || adapter === "mcode")
+  if ((adapter === "opencode" || adapter === "kimi" || adapter === "pi" || adapter === "mcode" || adapter === "grok")
     && provider.apiFormat === "anthropic") {
     return provider.anthropicBaseUrl ?? provider.baseUrl;
   }

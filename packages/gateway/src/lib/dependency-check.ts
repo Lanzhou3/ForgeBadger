@@ -99,6 +99,13 @@ const ADAPTER_DEPENDENCY_CHECKS: DependencyCheck[] = [
     args: ["--version"],
     required: false,
     timeoutMs: 10_000
+  },
+  {
+    // Grok Build is a native binary (`~/.grok/bin/grok` or the npm shim
+    // `@xai-official/grok`). `--version` returns immediately.
+    command: "grok",
+    args: ["--version"],
+    required: false
   }
 ];
 

@@ -776,7 +776,11 @@ live 代码不再读写。Provider 只保存服务商元数据、模型与加密
 （及 `/apply-provider/preview`、`/apply-provider/rollback`）把选中的
 `providerProfileId`、`modelProfileId?`、`credentialId?` 按各 CLI 原生格式写入全局
 配置文件（claude `~/.claude/settings.json`、codex `~/.codex/config.toml`、
-opencode `opencode.json`、kimi `~/.kimi-code/config.toml`）。
+opencode `opencode.json`、kimi `~/.kimi-code/config.toml`、
+grok `$GROK_HOME/config.toml`，默认 `~/.grok/config.toml`）。
+Grok 启动计划显式传递 Gateway 解析后的 `GROK_HOME`，保证已运行的 Session
+Server daemon 与模型中心使用同一配置目录；已应用状态通过 catalog key
+解析实际模型 ID 后再判断是否过期。
 
 凭据明文写入 CLI 配置文件：写前对现有配置做 AES-256-GCM 加密
 备份，使用原子 `0600` 写入，失败可 rollback；preview 掩码密钥且不落盘。
@@ -786,7 +790,11 @@ opencode `opencode.json`、kimi `~/.kimi-code/config.toml`）。
 并删除官方已废弃的 `ANTHROPIC_SMALL_FAST_MODEL`）；codex 支持
 `reasoningEffort`（写入 `model_reasoning_effort`，未传则清理）；opencode 为
 additive 语义，apply 把供应商全部 active 模型写入 models map 且不触碰用户自有的
-顶层 `model`；kimi 仍为单一 `default_model`。
+顶层 `model`；kimi 仍为单一 `default_model`；grok 写入 `[models].default`
+与一个托管的 `[model.<key>]`（`chat_completions` / `responses` 用 `api_key`，
+`messages` 只用 `extra_headers` 的 `x-api-key` 与 `anthropic-version`），保留
+`[ui]`、`[mcp_servers]` 和用户自己的 `[model.*]`，切换 provider 时只删除上一次
+托管的 catalog key，不读写 `auth.json`。
 具体到各 CLI 的写入语义：claude 写入 `ANTHROPIC_AUTH_TOKEN` 时同步删除残留的
 `ANTHROPIC_API_KEY`，并对目录外模型 id 注入上下文窗口覆盖
 （`CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 两个键

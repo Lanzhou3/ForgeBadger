@@ -59,7 +59,7 @@ async function writeAuthFixture(
         }
       }
     }),
-    "utf8"
+    { mode: 0o600 }
   );
   await writeFile(
     path.join(dir, "auth-state.json"),
@@ -75,7 +75,7 @@ async function writeAuthFixture(
       generation: 1,
       expiresAtMs
     }),
-    "utf8"
+    { mode: 0o600 }
   );
 }
 
