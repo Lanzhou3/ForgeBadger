@@ -8,6 +8,7 @@ import type { AgentLlmRequest } from '../src/services/agent/llm-client.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { SessionServer } from '../src/services/session-server/session-server.js';
 import { IpcServer } from '../src/services/session-server/ipc-server.js';
 import { SessionServerClient } from '../src/services/session-server-client.js';
@@ -22,7 +23,7 @@ import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { publishCompletion } from '../src/services/agent/llm-response.js';
 it('run cancellation stops a real Shell before later file effects', {skip: process.platform === 'win32', timeout: 15_000}, async () => {
-  const root = mkdtempSync('/private/tmp/fb-overall-shell-');
+  const root = mkdtempSync(join(tmpdir(), 'fb-overall-shell-'));
   const db = new Database(':memory:');
   migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
   const server = new SessionServer();

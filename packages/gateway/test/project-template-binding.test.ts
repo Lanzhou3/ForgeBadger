@@ -140,6 +140,7 @@ describe("project <-> template binding lifecycle", () => {
       },
       body: JSON.stringify({
         name,
+        adapter: "claude",
         files: [{ filePath: "CLAUDE.md", content: `# ${name}\n` }]
       })
     });

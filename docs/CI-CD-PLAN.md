@@ -37,6 +37,11 @@ Acceptance:
 - CLI, Gateway `node:test`, and Web Vitest suites pass.
 - Real Session Server/node-pty integration tests pass. This job runs on
   Linux/Ubuntu and does not exercise native Windows Session Server/ConPTY.
+- A separate `Windows CLI Shim Contracts` job runs the real Windows npm-shim
+  fixtures and Session Server platform contracts on `windows-latest` / Node 22.
+  Windows filesystem fixtures are skipped on POSIX; the POSIX no-op contract
+  still runs there. This job does not clear physical Windows/ConPTY or WSL
+  lifecycle acceptance gates.
 - Provider/cli-config-apply SSOT, Codex native-auth
   boundary, and session adapter-decoupling gates pass.
 - `git diff --check` reports no whitespace errors.
@@ -164,6 +169,10 @@ Known skip:
 ### Phase 1 Terminal Gate Boundary
 
 CI requires `e2e/mvp1-smoke.spec.ts` as the stable control-plane happy path.
+Playwright starts Next through `packages/web/e2e/start-web-server.mjs`, which
+loads the root environment and invokes the Next CLI directly through Node.
+This keeps hostname/port overrides and lets Playwright terminate the server
+process group without an intermediate pnpm native process blocking cleanup.
 `e2e/gate-d-smoke.spec.ts` remains release/manual evidence unless the host
 supplies Gateway/Web loopback listeners, Session Server/node-pty, and the real CLI prerequisites
 needed for terminal behavior.

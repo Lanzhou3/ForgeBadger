@@ -81,7 +81,7 @@ function stagedGitlinks(data: Buffer, status: Buffer): Buffer {
 function safeEnvironment(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, LANG: 'C', LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0',
     GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1', GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: '', GIT_PROTOCOL_FROM_USER: '0' };
-  for (const key of ['HOME', 'XDG_CONFIG_HOME', 'USERPROFILE', 'SYSTEMROOT', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM']) {
+  for (const key of ['HOME', 'XDG_CONFIG_HOME', 'USERPROFILE', 'SYSTEMROOT', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_NOSYSTEM']) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
   return env;
@@ -109,7 +109,7 @@ function snapshotConfig(data: Buffer): string {
   return `[core]\n${core.join('\n')}\n\tbare = false\n` + (format ? `[extensions]\n\tobjectFormat = ${quoted(format)}\n` : '');
 }
 
-function copyMetadata(source: string, destination: string, maxBytes: number): number {
+function copyMetadata(source: string, destination: string, maxBytes: number, preserveIndexTime = false): number {
   let fd: number;
   try { fd = fs.openSync(source, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw new Error('COPILOT_GIT_ROOT_UNSUPPORTED'); }
@@ -121,6 +121,9 @@ function copyMetadata(source: string, destination: string, maxBytes: number): nu
     while (size < data.length) { const n = fs.readSync(fd, data, size, data.length - size, null); if (!n) break; size += n; }
     if (size !== stat.size) throw new Error('COPILOT_GIT_STATUS_CHANGED');
     fs.writeFileSync(destination, data.subarray(0, size), { mode: 0o600, flag: 'wx' });
+    // A newer index timestamp can hide same-size racy-clean edits. Round down
+    // conservatively so Git keeps verifying entries as it would in the source.
+    if (preserveIndexTime) fs.utimesSync(destination, stat.atime, Math.floor(stat.mtimeMs / 1000));
     return size;
   } finally { fs.closeSync(fd); }
 }
@@ -162,7 +165,7 @@ export async function readProjectGitStatus(root: string, signal?: AbortSignal) {
     fs.writeFileSync(path.join(temporary, 'config'), config, { mode: 0o600 });
     let remaining = 64 * 1024 * 1024;
     for (const file of ['index', ...fs.readdirSync(sourceGit).filter(name => /^sharedindex\.[0-9a-f]+$/.test(name))]) {
-      remaining -= copyMetadata(path.join(sourceGit, file), path.join(temporary, file), remaining);
+      remaining -= copyMetadata(path.join(sourceGit, file), path.join(temporary, file), remaining, true);
     }
     for (const file of ['attributes', 'exclude']) copyMetadata(path.join(sourceGit, 'info', file), path.join(temporary, 'info', file), 1024 * 1024);
     const isolatedEnv = { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',

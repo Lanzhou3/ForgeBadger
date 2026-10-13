@@ -28,7 +28,8 @@ const NOTIFICATION_TITLE_ADAPTERS: ReadonlySet<string> = new Set([
   "codex",
   "kimi",
   "pi",
-  "mcode"
+  "mcode",
+  "grok"
 ]);
 
 type PersistableNotificationEvent = SessionNotificationEvent | AppActionNotificationEvent;

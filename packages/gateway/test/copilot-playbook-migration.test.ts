@@ -10,6 +10,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { SkillRepository } from '../src/db/repositories/skill-repository.js';
 import { ProjectSkillRepository } from '../src/db/repositories/project-skill-repository.js';
+import { BUILTIN_COPILOT_SKILLS } from '../src/services/agent/skills/copilot-skills.js';
 import { LEGACY_COPILOT_SKILLS } from '../src/services/agent/skills/legacy-copilot-skills.js';
 import { listCopilotPlaybooks } from '../src/services/agent/skills/skill-queries.js';
 const migrationsFolder = new URL('../src/db/migrations/',import.meta.url).pathname;
@@ -52,7 +53,7 @@ it('upgrades populated 0081 preserving identities, overrides, disable state, cus
   assert.equal((db.prepare('SELECT count(*) n FROM project_skills').get() as {n:number}).n,2);
   const catalog=listCopilotPlaybooks(db,user.id,{availableToolNames:[]});
   assert.equal(catalog.find(s=>s.id==='legacy-0')?.isEnabled,false);
-  assert.equal(catalog.find(s=>s.id==='legacy-0')?.version,'4.0.1');
+  assert.equal(catalog.find(s=>s.id==='legacy-0')?.version,BUILTIN_COPILOT_SKILLS.find(s=>s.name===LEGACY_COPILOT_SKILLS[0]!.name)!.version);
   const custom=catalog.find(s=>s.id==='legacy-1')!;assert.equal(custom.reviewRequired,true);
   assert.equal(custom.content,LEGACY_COPILOT_SKILLS[1]!.body+'\nUser edited');
   for(const name of ['list_playbooks','load_playbook','pm_prepare_task_packet'])assert.equal((db.prepare('SELECT enabled FROM copilot_tool_preferences WHERE user_id=? AND tool_name=?').get(user.id,name) as {enabled:number}).enabled,0);

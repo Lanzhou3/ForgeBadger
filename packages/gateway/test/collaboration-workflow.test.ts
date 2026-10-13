@@ -298,3 +298,44 @@ test('retired verification and policy endpoints cannot change configuration or c
   assert.equal((await f.request(f.outsider,'GET',f.base+`/runs/${run.id}`)).status,404);
  }finally{await f.close();}
 });
+
+
+test('provisioning session creation returns project metadata while public reads remain guarded', async () => {
+ const f = await fixture();
+ try {
+  const task = await f.task(), run = await f.run(f.owner, task.id);
+  assert.ok(run.sessionId);
+  const row = f.db.prepare('SELECT workspace_project_id, authority_epoch FROM delivery_runs WHERE id=?').get(run.id) as {workspace_project_id:string;authority_epoch:string};
+  const repo = new SessionRepository(f.db, f.owner.id);
+  f.db.prepare("UPDATE delivery_runs SET state='provisioning', session_id=NULL WHERE id=?").run(run.id);
+  f.db.prepare('DELETE FROM sessions WHERE id=?').run(run.sessionId);
+  const input = {projectId:row.workspace_project_id, name:'Provisioning', aiTool:'codex', workingDir:f.workspace(run.id)};
+  const count = () => (f.db.prepare('SELECT count(*) AS n FROM sessions').get() as {n:number}).n;
+  assert.throws(() => repo.create(input, randomUUID()), /MANAGED_WORKSPACE_REQUIRES_TASK_WORKFLOW/);
+  assert.throws(() => new SessionRepository(f.db, f.outsider.id).create(input, run.id), /MANAGED_PROJECT_ACCESS_DENIED/);
+  assert.throws(() => repo.create({...input, workingDir:path.join(input.workingDir, 'nested')}, run.id), /MANAGED_WORKSPACE_REQUIRES_TASK_WORKFLOW/);
+  f.db.prepare("UPDATE delivery_runs SET authority_epoch='stale' WHERE id=?").run(run.id);
+  assert.throws(() => repo.create(input, run.id), /MANAGED_PROJECT_ACCESS_DENIED/);
+  f.db.prepare('UPDATE delivery_runs SET authority_epoch=? WHERE id=?').run(row.authority_epoch, run.id);
+  assert.equal(count(), 0, 'denied creation must not insert a session');
+
+  const session = repo.create(input, run.id);
+  assert.ok(session?.id);
+  assert.equal(session.projectName, `Shared project · A real change`);
+  assert.equal(repo.getById(session.id), undefined);
+  assert.deepEqual(repo.list(), []);
+  assert.deepEqual(repo.listByProject(input.projectId), []);
+  assert.deepEqual(repo.listByIds(input.projectId, [session.id]), []);
+  f.db.prepare("UPDATE delivery_runs SET state='ready', session_id=? WHERE id=?").run(session.id, run.id);
+  assert.equal(repo.getById(session.id)?.projectName, session.projectName);
+  assert.equal(repo.listByProject(input.projectId).length, 1);
+  assert.equal(new SessionRepository(f.db, f.outsider.id).getById(session.id), undefined);
+  assert.throws(() => repo.create(input, run.id), /MANAGED_WORKSPACE_REQUIRES_TASK_WORKFLOW/);
+  f.db.prepare("UPDATE delivery_runs SET state='provisioning' WHERE id=?").run(run.id);
+  f.db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(f.owner.id);
+  assert.throws(() => repo.create(input, run.id), /MANAGED_PROJECT_ACCESS_DENIED/);
+  f.db.prepare("UPDATE users SET status='active' WHERE id=?").run(f.owner.id);
+  assert.throws(() => repo.create(input, run.id), /MANAGED_PROJECT_ACCESS_DENIED/, 'reenabling a user must not revive an old execution epoch');
+  assert.equal(count(), 1);
+ } finally { await f.close(); }
+});

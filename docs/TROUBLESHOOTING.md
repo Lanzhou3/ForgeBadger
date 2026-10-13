@@ -29,6 +29,16 @@ cause before applying the smallest fix or workaround.
 | Health checks fail only when normal `curl` is used, or they appear to go through an unrelated proxy. | Proxy environment variables are intercepting loopback requests. | Run `env | rg -i 'proxy'` and compare normal `curl` with `curl --noproxy '*'`. | Use `curl --noproxy '*'` for local ForgeBadger checks. If needed, add `127.0.0.1,localhost` to `NO_PROXY` for the shell that starts ForgeBadger. |
 | Chrome/Playwright fails to launch or Next/Turbopack fails with `Operation not permitted`. | Sandbox limits prevent browser launch, worker process creation, socket operations, or Turbopack internals. | Read the first failing log line and confirm whether it mentions Chrome, Playwright, Next, Turbopack, or `Operation not permitted`. | Treat this as an environment limitation first. Re-run in a less restricted shell or CI profile. For local Web startup, try the documented Next command from the runbook and capture the full error if it still fails. |
 
+## Copilot Git Status
+
+`COPILOT_GIT_STATUS_FILTER_UNSUPPORTED` means Git config defines an executable
+clean/process filter or a required filter. Copilot refuses these configurations
+to avoid running filter commands while counting changes. Check repository,
+global, and system config for filters, including Git LFS. Do not disable filters
+on a working project just to clear this diagnostic. Use native Git status for
+such repositories; isolated test fixtures must explicitly exclude unrelated
+host config. An intentional `GIT_CONFIG_NOSYSTEM=1` is honored by the Gateway.
+
 ## Automation Boundary
 
 If automated tests pass but the user still sees a terminal failure, prefer the

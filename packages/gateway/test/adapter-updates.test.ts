@@ -31,6 +31,7 @@ describe("adapter updates", () => {
     assert.equal(urls.length, 6);
     assert.ok(urls.includes("https://registry.npmjs.org/@earendil-works%2Fpi-coding-agent/latest"));
     assert.ok(urls.includes("https://registry.npmjs.org/@xai-official%2Fgrok/latest"));
+    assert.ok(urls.includes("https://registry.npmjs.org/@minimax-ai%2Fcode/latest"));
     assert.equal(results.find((result) => result.id === "pi")?.command, "pi update --self");
   });
 

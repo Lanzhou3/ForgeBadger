@@ -2,10 +2,36 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
-import { test } from "node:test";
+import { describe, test } from "node:test";
 
 import { resolveWindowsShimCommand } from "../src/services/session-server/platform-adapter.js";
 
+function createMiniMaxStyleLauncher(root: string, release = "0.4.12"): void {
+  const cliDir = join(root, "releases", release, "node_modules", "@minimax-ai", "code");
+  mkdirSync(cliDir, { recursive: true });
+  writeFileSync(join(cliDir, "cli.js"), "");
+
+  const releaseDir = join(root, "releases", release);
+  writeFileSync(join(releaseDir, ".mcode-launcher.cmd"), [
+    "@ECHO off",
+    "\"%~dp0runtime\\node.exe\" \"%~dp0node_modules\\@minimax-ai\\code\\cli.js\" %*",
+    "EXIT /B %ERRORLEVEL%"
+  ].join("\r\n"));
+
+  writeFileSync(join(root, "current"), `${release}\n`);
+  writeFileSync(join(root, "mcode.cmd"), [
+    "@ECHO off",
+    "SETLOCAL",
+    "SET /P MCODE_RELEASE=<\"%~dp0current\"",
+    "ECHO(%MCODE_RELEASE%| %SystemRoot%\\System32\\findstr.exe /R /X \"[0-9A-Za-z][0-9A-Za-z._-]*\" >NUL || EXIT /B 1",
+    "CALL \"%~dp0releases\\%MCODE_RELEASE%\\.mcode-launcher.cmd\" %*",
+    "EXIT /B %ERRORLEVEL%"
+  ].join("\r\n"));
+}
+
+// These fixtures use real Windows paths and filesystem lookups, not POSIX emulation.
+// The Windows CLI Shim Contracts CI job runs every case on Windows/Node 22.
+describe("Windows npm shim resolution", { skip: process.platform !== "win32" }, () => {
 test("keeps official npm.cmd prefix and Node selection inside its own shim", () => {
   const directory = mkdtempSync(join(tmpdir(), "forgebadger-npm-shim-"));
   try {
@@ -32,28 +58,6 @@ test("keeps official npm.cmd prefix and Node selection inside its own shim", () 
  * `mcode.cmd` that resolves a version pointer file and CALLs a versioned inner
  * launcher, which is the real `node .../cli.js` payload.
  */
-function createMiniMaxStyleLauncher(root: string, release = "0.4.12"): void {
-  const cliDir = join(root, "releases", release, "node_modules", "@minimax-ai", "code");
-  mkdirSync(cliDir, { recursive: true });
-  writeFileSync(join(cliDir, "cli.js"), "");
-
-  const releaseDir = join(root, "releases", release);
-  writeFileSync(join(releaseDir, ".mcode-launcher.cmd"), [
-    "@ECHO off",
-    "\"%~dp0runtime\\node.exe\" \"%~dp0node_modules\\@minimax-ai\\code\\cli.js\" %*",
-    "EXIT /B %ERRORLEVEL%"
-  ].join("\r\n"));
-
-  writeFileSync(join(root, "current"), `${release}\n`);
-  writeFileSync(join(root, "mcode.cmd"), [
-    "@ECHO off",
-    "SETLOCAL",
-    "SET /P MCODE_RELEASE=<\"%~dp0current\"",
-    "ECHO(%MCODE_RELEASE%| %SystemRoot%\\System32\\findstr.exe /R /X \"[0-9A-Za-z][0-9A-Za-z._-]*\" >NUL || EXIT /B 1",
-    "CALL \"%~dp0releases\\%MCODE_RELEASE%\\.mcode-launcher.cmd\" %*",
-    "EXIT /B %ERRORLEVEL%"
-  ].join("\r\n"));
-}
 
 test("follows a vendor launcher that only CALLs a versioned inner shim", () => {
   const directory = mkdtempSync(join(tmpdir(), "forgebadger-indirect-shim-"));
@@ -223,19 +227,7 @@ test("falls back to the host Node when the shim declares none", () => {
   }
 });
 
-test("stays inert on POSIX so execvp resolution is unchanged", () => {
-  const directory = mkdtempSync(join(tmpdir(), "forgebadger-posix-shim-"));
-  try {
-    createMiniMaxStyleLauncher(directory);
 
-    assert.equal(
-      resolveWindowsShimCommand("mcode", { PATH: directory, PATHEXT: ".CMD" }, "linux"),
-      undefined
-    );
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
 
 /**
  * Real-host check: a CLI installed by a vendor launcher on this machine must
@@ -356,3 +348,58 @@ for (const fixture of [
     }
   });
 }
+
+test(
+  "resolves shims when a plain env object uses the OS env block's exact key casing",
+  () => {
+    // Sanitized/derived env objects (adapter update probes, the Session
+    // Server allowlist filter) are plain JS objects that keep the OS
+    // environment block's exact key casing. On machines whose registry
+    // stores PATH under a non-conventional spelling (e.g. lowercase `path`
+    // in the HKLM Session Manager Environment key), `env.Path ?? env.PATH`
+    // misses it and the probe reports the CLI as missing while the same CLI
+    // launches fine from a pty (which goes through the case-insensitive
+    // process.env / OS resolution). The lookup must be case-insensitive.
+    const directory = mkdtempSync(join(tmpdir(), "forgebadger-env-casing-"));
+    try {
+      const cliDir = join(directory, "node_modules", "acme");
+      mkdirSync(cliDir, { recursive: true });
+      writeFileSync(join(cliDir, "cli.js"), "");
+      writeFileSync(
+        join(directory, "acme.cmd"),
+        "node \"%~dp0node_modules\\acme\\cli.js\" %*"
+      );
+
+      const lowerCasedEnv = { path: directory, pathext: ".CMD" } as NodeJS.ProcessEnv;
+      const resolved = resolveWindowsShimCommand("acme", lowerCasedEnv, "win32");
+
+      assert.ok(resolved, "lowercase-cased plain env object must still resolve the shim");
+      assert.equal(resolved.command, process.execPath);
+      assert.deepEqual(resolved.args, [join(cliDir, "cli.js")]);
+
+      const pathOnlyUpperEnv = { PATH: directory, pathext: ".CMD" } as NodeJS.ProcessEnv;
+      assert.ok(
+        resolveWindowsShimCommand("acme", pathOnlyUpperEnv, "win32"),
+        "mixed casing (uppercase PATH, lowercase pathext) must still resolve"
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+});
+
+test("stays inert on POSIX so execvp resolution is unchanged", () => {
+  const directory = mkdtempSync(join(tmpdir(), "forgebadger-posix-shim-"));
+  try {
+    createMiniMaxStyleLauncher(directory);
+
+    assert.equal(
+      resolveWindowsShimCommand("mcode", { PATH: directory, PATHEXT: ".CMD" }, "linux"),
+      undefined
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

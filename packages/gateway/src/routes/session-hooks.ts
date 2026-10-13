@@ -206,7 +206,7 @@ export function handleSessionNotificationHook(
   }
   const originalToolName = parsed.event.tool_name ?? inferPermissionToolName(parsed.event.message);
   const toolName = originalToolName ? redactAgentText(originalToolName) : undefined;
-  const message = redactAgentText(notificationMessage(parsed.event, hookEventName, notificationType, toolName));
+  const message = redactAgentText(notificationMessage(parsed.event, hookEventName, notificationType, adapter, toolName));
   const activityType = notificationType;
 
   eventBus.emitEvent({
@@ -310,13 +310,14 @@ function notificationMessage(
   event: z.infer<typeof cliHookEventSchema>,
   hookEventName: string,
   notificationType: string,
+  fallbackAdapter: string,
   toolName?: string | undefined
 ): string {
   const explicitMessage = event.message?.trim() || event.body?.trim();
   if (explicitMessage) {
     return explicitMessage;
   }
-  const adapter = typeof event.adapter === "string" ? event.adapter : "claude";
+  const adapter = typeof event.adapter === "string" ? event.adapter : fallbackAdapter;
   const label = adapterLabel(adapter);
   if (hookEventName === "PermissionRequest" && toolName) {
     return `${label} needs permission to use ${toolName}`;
@@ -347,6 +348,7 @@ function adapterLabel(adapter: string): string {
   if (adapter === "kimi") return "Kimi Code";
   if (adapter === "pi") return "PI";
   if (adapter === "mcode") return "MiniMax Code";
+  if (adapter === "grok") return "Grok";
   return "Claude Code";
 }
 

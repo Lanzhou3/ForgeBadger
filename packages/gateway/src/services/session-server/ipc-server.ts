@@ -138,6 +138,15 @@ export class IpcServer {
       this.writeSocket(socket, msg);
     };
 
+    // PTY idle transitions share the management connection — same delivery
+    // semantics as terminal notifications (dropped when no gateway is attached).
+    this.sessionServer.onSessionIdle = (sessionId) => {
+      const socket = this.managementSocket;
+      if (!socket?.writable) return;
+      const msg: IoStreamResponse = { type: "session_idle", sessionId };
+      this.writeSocket(socket, msg);
+    };
+
     // Set up session exit relay — targeted: only clients attached to the
     // exiting session are notified (broadcasting would leak session names
     // across sessions sharing the daemon).

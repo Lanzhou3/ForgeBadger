@@ -38,11 +38,11 @@ it('real Gateway processes reuse the default daemon and PTY; cold restart marks 
   }
   async function attach(ready:Ready) {
     const ws=new WebSocket(`ws://127.0.0.1:${ready.port}/ws/terminal/s1`,['forgebadger-terminal',ready.token,'attach-test']);
-    sockets.push(ws);let output='';let acknowledge=true;let lastSequence=0;
-    ws.on('message',raw=>{const msg=JSON.parse(String(raw));if(msg.type==='terminal_history'||msg.type==='terminal_output'){output+=msg.payload.data;lastSequence=msg.payload.sequence;if(acknowledge)ws.send(JSON.stringify({type:'terminal_ack',payload:{sequence:lastSequence}}));}});
+    sockets.push(ws);let output='';let acknowledge=true;let lastSequence=0;let unacknowledgedFrames=0;
+    ws.on('message',raw=>{const msg=JSON.parse(String(raw));if(msg.type==='terminal_history'||msg.type==='terminal_output'){output+=msg.payload.data;lastSequence=msg.payload.sequence;if(acknowledge)ws.send(JSON.stringify({type:'terminal_ack',payload:{sequence:lastSequence}}));else unacknowledgedFrames++;}});
     await waitUntil(()=>ws.readyState===WebSocket.OPEN);
     await waitUntil(()=>output.includes('PTY_PID='));
-    return {ws,output:()=>output,pause:()=>{acknowledge=false;},resume:()=>{acknowledge=true;ws.send(JSON.stringify({type:'terminal_ack',payload:{sequence:lastSequence}}));}};
+    return {ws,output:()=>output,pause:()=>{acknowledge=false;unacknowledgedFrames=0;},unacknowledgedFrames:()=>unacknowledgedFrames,resume:()=>{acknowledge=true;ws.send(JSON.stringify({type:'terminal_ack',payload:{sequence:lastSequence}}));}};
   }
   try {
     const first=await gateway(true);
@@ -62,7 +62,8 @@ it('real Gateway processes reuse the default daemon and PTY; cold restart marks 
     assert.deepEqual(client.getServerIdentity(),identity);
     b.pause();const before=b.output().length;
     b.ws.send(JSON.stringify({type:'terminal_input',payload:{data:'flood\r'}}));
-    await waitUntil(()=>b.output().length-before>=1024);
+    // Wait for the actual render window (bytes or frames), not a host-speed delay.
+    await waitUntil(()=>b.output().length-before>=256*1024||b.unacknowledgedFrames()>=128);
     await delay(200);const bounded=b.output().length;
     await delay(200);assert.equal(b.output().length,bounded,'no ACK must stop downstream delivery');
     assert.ok(bounded-before<512*1024,'render backlog remains bounded');

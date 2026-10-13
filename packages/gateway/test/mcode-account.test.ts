@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -59,7 +59,7 @@ async function writeAuthFixture(
         }
       }
     }),
-    { mode: 0o600 }
+    { encoding: "utf8", mode: 0o600 }
   );
   await writeFile(
     path.join(dir, "auth-state.json"),
@@ -75,7 +75,7 @@ async function writeAuthFixture(
       generation: 1,
       expiresAtMs
     }),
-    { mode: 0o600 }
+    { encoding: "utf8", mode: 0o600 }
   );
 }
 
@@ -136,6 +136,18 @@ describe("mcode account adapter", () => {
     assert.equal(login.state, "ready");
     assert.equal(login.method, "oauth");
     assert.equal(login.accountLabel, "mcode-public");
+  });
+
+  it("refuses a credential file readable by other users", { skip: process.platform === "win32" }, async () => {
+    const dir = await tempDir();
+    resetMcodeAccountProbeCache();
+    await writeAuthFixture(dir);
+    await chmod(path.join(dir, "auth", "prod", "cn", "mcode-public", "auth.json"), 0o644);
+    let fetched = false;
+    const options = probeOptions(dir, async () => { fetched = true; return jsonResponse({}); });
+    assert.equal((await observeMcodeLogin(options)).state, "not_authenticated");
+    assert.equal((await observeMcodeQuota(options)).supported, false);
+    assert.equal(fetched, false, "unsafe credentials must not be sent to quota services");
   });
 
   it("reports an expired session token without refreshing it", async () => {

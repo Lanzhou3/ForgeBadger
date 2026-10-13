@@ -88,12 +88,12 @@ describe("adapter update routes", () => {
       const list = await request(app, "GET", "/api/v1/adapters/updates", userToken);
       assert.equal(list.status, 200);
       assert.equal(list.body.data.canUpdate, false);
-      assert.equal(list.body.data.updates.length, 5);
-      assert.equal(registryChecks, 5);
+      assert.equal(list.body.data.updates.length, 7);
+      assert.equal(registryChecks, 7);
       await request(app, "GET", "/api/v1/adapters/updates?refresh=true", userToken);
-      assert.equal(registryChecks, 5);
+      assert.equal(registryChecks, 7);
       await request(app, "GET", "/api/v1/adapters/updates?refresh=true", adminToken);
-      assert.equal(registryChecks, 10);
+      assert.equal(registryChecks, 14);
       assert.equal((await request(app, "POST", "/api/v1/adapters/codex/update", userToken)).status, 403);
       assert.equal((await request(app, "POST", "/api/v1/adapters/codex/update", undefined, {
         Cookie: `forgebadger_session=${adminToken}`

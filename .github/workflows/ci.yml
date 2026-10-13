@@ -134,6 +134,31 @@ jobs:
       - name: Smoke installed npm package
         run: pnpm smoke:npm
 
+  windows-shim:
+    name: Windows CLI Shim Contracts
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.6.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Native Windows npm shim and Session Server contracts
+        run: pnpm --dir packages/gateway test test/windows-npm-shim.test.ts test/session-server.test.ts
+
   environment-gates:
     name: Environment-Gated Release Notes
     runs-on: ubuntu-latest
