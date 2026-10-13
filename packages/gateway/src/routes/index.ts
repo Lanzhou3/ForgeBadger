@@ -44,6 +44,7 @@ import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
 import { createTelegramIntegrationRoutes } from "./integrations-telegram.js";
 import { createCopilotRoutes } from "./copilot.js";
+import { createCopilotGoalRoutes } from "./copilot-goals.js";
 import { createAutomationRoutes } from "./automations.js";
 import { createMcpRoutes } from "./mcp.js";
 import { createMcpStatusRoutes } from "./mcp-status.js";
@@ -147,6 +148,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1", createProjectManagementRoutes(deps.db, (userId,commandId,input) => new PlatformActions({db:deps.db,userId},createPlatformCommands()).executeOwner(commandId,input,randomUUID())));
   if (deps.copilotAgent) {
     app.use("/api/v1/copilot", createCopilotRoutes(deps.copilotAgent));
+    app.use("/api/v1/copilot", createCopilotGoalRoutes(deps.copilotAgent));
     app.use("/api/v1/copilot", createAutomationRoutes(deps.copilotAgent));
   }
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({

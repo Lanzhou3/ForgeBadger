@@ -6,9 +6,21 @@ import type { LlmUsage } from './llm-response.js';
 import { AgentError } from './types.js';
 import { runDuration } from './approval-clock.js';
 import { traceRunEvent } from './run-trace.js';
+import { CopilotGoalStore, goalBudgetExhausted, type GoalRow } from './goal-store.js';
 
 export type RunPhase = 'queued' | 'context' | 'summarizing' | 'model' | 'tool' | 'awaiting_approval' | 'finished';
 export interface RunUsage { chargedTokens: number; reportedTokens: number; estimatedCalls: number; calls: number; costUsd: number | null; knownCostUsd: number; unpricedCalls: number }
+
+// Migration-tolerant column probe: the goal column arrives in migration 0137,
+// and durable evidence tests run the current code against pre-0137 schemas.
+const goalColumnCache = new WeakMap<Database, boolean>();
+function hasGoalColumn(db: Database): boolean {
+  const cached = goalColumnCache.get(db);
+  if (cached !== undefined) return cached;
+  const has = (db.prepare("PRAGMA table_info(copilot_runs)").all() as { name: string }[]).some(column => column.name === 'goal_id');
+  goalColumnCache.set(db, has);
+  return has;
+}
 
 /** Conservative reservations survive crashes; missing usage is never counted as zero. */
 export class RunGovernance {
@@ -40,6 +52,10 @@ export class RunGovernance {
     const run = this.db.prepare('SELECT token_budget FROM copilot_runs WHERE user_id=? AND id=?')
       .get(this.userId, this.runId) as { token_budget: number } | undefined;
     if (!run) throw new AgentError('COPILOT_NOT_FOUND', 'Run not found');
+    // Goal-level ceilings gate every model step of a goal run; per-run budgets
+    // below are unchanged. Databases mid-migration (pre-goal column) and
+    // dangling goal references keep per-run behavior.
+    if (hasGoalColumn(this.db)) this.checkGoalBudget(this.runId);
     if (includeTime && this.remainingDurationMs() <= 0)
       throw new AgentError('COPILOT_TIME_BUDGET', 'Run elapsed-time budget exhausted');
     const parent = includeParent ? this.db.prepare('SELECT origin_run_id FROM copilot_research_jobs WHERE user_id=? AND child_run_id=?').get(this.userId, this.runId) as { origin_run_id: string } | undefined : undefined;
@@ -54,6 +70,19 @@ export class RunGovernance {
   phase(phase: RunPhase): void {
     this.db.prepare('UPDATE copilot_runs SET execution_phase=?,phase_started_at=?,revision=revision+1 WHERE user_id=? AND id=? AND status=\'running\'')
       .run(phase, Date.now(), this.userId, this.runId);
+  }
+
+  /** Aggregates the whole goal chain (all its runs) against the triple ceiling. */
+  private checkGoalBudget(runId: string, now = Date.now()): void {
+    const goalId = (this.db.prepare('SELECT goal_id FROM copilot_runs WHERE user_id=? AND id=?')
+      .get(this.userId, runId) as { goal_id: string | null } | undefined)?.goal_id;
+    if (!goalId) return;
+    const goal = this.db.prepare('SELECT * FROM copilot_goals WHERE user_id=? AND id=?')
+      .get(this.userId, goalId) as GoalRow | undefined;
+    if (!goal) return;
+    const usage = new CopilotGoalStore(this.db, this.userId).usage(goalId, now);
+    if (goalBudgetExhausted(goal, usage, now))
+      throw new AgentError('COPILOT_GOAL_BUDGET_EXHAUSTED', 'Goal-level budget exhausted (tokens, duration, or run count)');
   }
 
   async measure<T>(kind: string, input: unknown, invoke: () => Promise<T>, resultUsage?: (result: T) => LlmUsage | undefined, model?: {modelProfileId:string;modelId:string;apiFormat:string}): Promise<T> {

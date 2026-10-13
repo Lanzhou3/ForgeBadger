@@ -3,6 +3,13 @@ import { ProviderHttpError } from './provider-error.js';
 import { notificationContext } from './notification-context.js';
 import { streamWithContextRecovery } from './context-recovery.js';
 import { hasNoProgress } from './no-progress.js';
+import { goalContextMessage } from './goal-context.js';
+import { CopilotGoalStore, GOAL_BUDGET_EXHAUSTED_REASON } from './goal-store.js';
+import { notifyGoalStatus } from './goal-notify.js';
+import { evaluateGoalContinuation } from './goal-driver.js';
+import { goalGrantForTool } from './goal-grants.js';
+import { clearGoalFailureCooldown } from './goal-driver.js';
+import { bindGoalCommand, resolveLocalCommandReply, type SlashCommandContext } from "./slash-commands.js";
 import { reserveRepairSubmission } from '../development/repair-scope.js';
 import { CopilotToolArtifactRepository } from '../../db/repositories/copilot-tool-artifact-repository.js';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -24,7 +31,6 @@ import type { AgentLlmClient, AgentToolCall } from "./orchestrator-types.js";
 import { CopilotConversationLog } from "./conversation-log.js";
 import { buildCompressedContext } from "./context.js";
 import { AgentMemoryRepository } from "./memory.js";
-import { resolveLocalCommandReply } from "./slash-commands.js";
 import { listEnabledCopilotPlaybookSummaries } from "./skills/skill-queries.js";
 import { containsSensitiveAgentValue, redactAgentValue, redactAgentText, redactAgentErrorMessage } from "./redaction.js";
 import { createSecurityPolicy, logSecurityDecision } from "./security-policy.js";
@@ -159,9 +165,20 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 ledger.commit(claim, () => new CopilotModelResponseRepository(deps.db, userId, deps.masterKey)
                     .recordInvalidResponse(runId, error.message));
             }
+            if (error instanceof AgentError && error.code === 'COPILOT_GOAL_BUDGET_EXHAUSTED') {
+                ledger.commit(claim, () => {
+                    const goalId = ledger.get(runId)?.goal_id;
+                    if (!goalId) return;
+                    const store = new CopilotGoalStore(deps.db, userId);
+                    if (store.getGoal(goalId)?.status !== 'active') return;
+                    store.setStatus(goalId, 'blocked', GOAL_BUDGET_EXHAUSTED_REASON);
+                    store.appendJournal(goalId, runId, 'Goal-level budget exhausted during this run; goal blocked.');
+                    notifyGoalStatus(deps.db, userId, store.getGoal(goalId)!);
+                });
+            }
             ledger.commit(claim, () => deps.db.prepare("UPDATE copilot_run_steps SET status='failed',result_json=COALESCE(result_json,?),completed_at=? WHERE user_id=? AND run_id=? AND kind='model' AND status='running' AND fence=?")
                 .run(error instanceof ProviderHttpError ? JSON.stringify(error.diagnostic()) : error instanceof AgentError ? error.code : null, Date.now(), userId, runId, claim.fence));
-            ledger.finish(claim, error instanceof AgentError && ["COPILOT_TIME_BUDGET", "COPILOT_TOKEN_BUDGET"].includes(error.code) ? "stopped" : "failed", error instanceof AgentError ? error.code : redactAgentErrorMessage(error instanceof Error ? error.message : "Copilot failed"));
+            ledger.finish(claim, error instanceof AgentError && ["COPILOT_TIME_BUDGET", "COPILOT_TOKEN_BUDGET", "COPILOT_GOAL_BUDGET_EXHAUSTED"].includes(error.code) ? "stopped" : "failed", error instanceof AgentError ? error.code : redactAgentErrorMessage(error instanceof Error ? error.message : "Copilot failed"));
             emit(ledger, runId);
         }).finally(() => {
             clearInterval(timer); clearTimeout(deadline); control.active.delete(runId);
@@ -173,8 +190,52 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         control.active.set(runId, { controller, promise, stopLease: () => clearInterval(timer) });
         return promise;
     }
+    /**
+     * Slash command resolution for the first model step of a run. `/goal
+     * <spec>` binds the freshly created goal to THIS run (goal_id column +
+     * input_json) so the spec drives the initializer model turn with full
+     * goal context; it never short-circuits. Every other command resolves
+     * through the registry and short-circuits with a local reply.
+     */
+    async function resolveSlashCommand(ledger: CopilotRunLedger, c: Claim, input: TurnInput): Promise<{ command: string | null; input: TurnInput }> {
+        if (ledger.get(c.runId)!.steps !== 1) return { command: null, input };
+        const listPlaybooks = () => {
+            const availableToolNames = allVisibleTools(input).map(tool => tool.name);
+            if (!availableToolNames.includes("list_playbooks")) return [];
+            return listEnabledCopilotPlaybookSummaries(deps.db, input.userId, { availableToolNames });
+        };
+        const context: SlashCommandContext = {
+            db: deps.db,
+            masterKey: deps.masterKey,
+            userId: input.userId,
+            conversationId: input.conversationId,
+            runId: c.runId,
+            ...(input.projectId ? { projectId: input.projectId } : {}),
+            args: "",
+            listPlaybooks,
+            continueGoal: (goalId, userText) => { clearGoalFailureCooldown(goalId); evaluateGoalContinuation(deps, input.userId, goalId, undefined, userText === undefined ? undefined : { userText }); }
+        };
+        if (!input.goalId) {
+            const bind = bindGoalCommand(input.userText, context);
+            if (bind?.reply) return { command: bind.reply, input };
+            if (bind?.goalId) {
+                const bound = ledger.commit(c, () => {
+                    deps.db.prepare("UPDATE copilot_runs SET goal_id=?, input_json=? WHERE user_id=? AND id=?")
+                        .run(bind.goalId!, JSON.stringify({ ...input, goalId: bind.goalId, userText: redactAgentText(input.userText) }), ledger.userId, c.runId);
+                    traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'goal_bound', { goalId: bind.goalId! });
+                });
+                if (!bound) {
+                    // The claim was lost mid-bind: leave no orphaned active goal behind.
+                    new CopilotGoalStore(deps.db, input.userId).setStatus(bind.goalId!, 'cancelled');
+                    return { command: null, input };
+                }
+                input = { ...input, goalId: bind.goalId };
+            }
+        }
+        return { command: await resolveLocalCommandReply(input.userText, listPlaybooks, context), input };
+    }
     async function drive(ledger: CopilotRunLedger, c: Claim, signal: AbortSignal): Promise<void> {
-        const input = loadRunFacts(deps.db, ledger.userId, c.runId)!.input;
+        let input = loadRunFacts(deps.db, ledger.userId, c.runId)!.input;
         const meter = new RunGovernance(deps.db, input.userId, c.runId);
         const llm = meteredLlm(deps.llm, meter, phase => {
             if (ledger.commit(c, () => meter.phase(phase))) emit(ledger, c.runId);
@@ -188,6 +249,17 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             return true;
         };
         while (live()) {
+            // Goal lifecycle gate: if the run's goal left the active state
+            // (paused / cancelled / blocked / completed — e.g. goal_ask_user
+            // paused it mid-run), stop this run gracefully instead of doing
+            // more work under a stale authority.
+            if (input.goalId) {
+                const goalStatus = (deps.db.prepare('SELECT status FROM copilot_goals WHERE user_id=? AND id=?').get(input.userId, input.goalId) as { status: string } | undefined)?.status;
+                if (goalStatus && goalStatus !== 'active') {
+                    ledger.finish(c, 'stopped', `goal_${goalStatus}`);
+                    emit(ledger, c.runId); return;
+                }
+            }
             ledger.validateScope(input);
             const pending = nextReadBatch(ledger.steps(c.runId), deps.toolRegistry);
             if (pending.length) {
@@ -196,7 +268,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 if (failed?.status === 'rejected') throw failed.reason;
                 continue;
             }
-            if (hasNoProgress(ledger.steps(c.runId))) {
+            if (!input.goalId && hasNoProgress(ledger.steps(c.runId))) {
                 ledger.finish(c, 'stopped', 'COPILOT_NO_PROGRESS');
                 emit(ledger, c.runId); return;
             }
@@ -211,13 +283,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             if (!ledger.startStep(c, step))
                 break;
             traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'step_started', { kind: 'model', phase: 'model' }, step.id);
-            const command = ledger.get(c.runId)!.steps === 1 ? resolveLocalCommandReply(input.userText, () => {
-                const availableToolNames = allVisibleTools(input).map(tool => tool.name);
-                if (!availableToolNames.includes("list_playbooks")) return [];
-                return listEnabledCopilotPlaybookSummaries(deps.db, input.userId, {
-                    availableToolNames
-                });
-            }) : null;
+            const slash = await resolveSlashCommand(ledger, c, input);
+            input = slash.input;
+            const command = slash.command;
             const calls: AgentToolCall[] = [];
             let text = "";
             let response: LlmResult | undefined;
@@ -238,9 +306,17 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 const skillCatalog = availableToolNames.includes("load_playbook")
                     ? listAvailableCopilotSkillSummaries(deps.db, input.userId, { availableToolNames }) : [];
                 const prefixMessages: import("./orchestrator-types.js").AgentLlmMessage[] = [];
-                if (input.executionMode && input.executionMode !== 'repair') prefixMessages.push({ role: 'user', content: 'This is a bounded read-only investigation. Inspect evidence, cite paths and IDs, and report uncertainty. Never claim tests passed from a CLI completion notice. Do not perform writes or delegate.' });
+                if (input.executionMode && input.executionMode !== 'repair' && input.executionMode !== 'coding') prefixMessages.push({ role: 'user', content: 'This is a bounded read-only investigation. Inspect evidence, cite paths and IDs, and report uncertainty. Never claim tests passed from a CLI completion notice. Do not perform writes or delegate.' });
+                if (input.executionMode === 'coding') prefixMessages.push({ role: 'user', content:
+                    'This is a delegated coding sub-run. Edit files ONLY through the goal sandbox tools (goal_file_write, goal_file_edit, goal_run_checks); the real project is untouched until the owner merges. '
+                    + 'Update only the delegated task. Keep changes minimal and focused on the instructions. '
+                    + 'Verify with goal_run_checks before reporting success, and end with a short report: what changed, how it was verified, and any remaining risks.' });
                 if (input.toolDiscovery) prefixMessages.push({ role: 'user', content:
                     'Tool discovery mode is enabled. Use discover_tools to find additional current platform capabilities. Successful selections become available on the next model round; discovery does not change permissions or approvals.' });
+                if (input.goalId) {
+                    const goalMessage = goalContextMessage(deps.db, input.userId, input.goalId);
+                    if (goalMessage) prefixMessages.push({ role: 'user', content: goalMessage });
+                }
                 if (input.projectId) {
                     const project = new ProjectRepository(deps.db, input.userId).getById(input.projectId);
                     if (!project) throw new AgentError("PROJECT_NOT_FOUND", "Selected project no longer exists");
@@ -371,9 +447,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         else if (action?.status === "rejected")
             rejection = "Action rejected by owner";
         const availableToolSchemas = surface.visible;
-        const context: AgentToolContext = { signal: control.active.get(c.runId)?.controller.signal, executionMode: input.executionMode, runResearch: (research: { projectId: string; goal: string }) => runResearch(ledger, c, step, research), source: input.source ?? "user", runId: c.runId, stepId: step.id, externalActionId: action?.id, checkExecutionAuthority: live, userId: input.userId, db: deps.db, masterKey: deps.masterKey, conversationId: input.conversationId,
+        const context: AgentToolContext = { signal: control.active.get(c.runId)?.controller.signal, executionMode: input.executionMode, runResearch: (research: { projectId: string; goal: string }) => runResearch(ledger, c, step, research), runCodingDelegate: (delegate: { goalId: string; projectId: string; taskId: string; instructions: string }) => runCodingDelegate(ledger, c, step, delegate), source: input.source ?? "user", runId: c.runId, stepId: step.id, externalActionId: action?.id, checkExecutionAuthority: live, userId: input.userId, db: deps.db, masterKey: deps.masterKey, conversationId: input.conversationId,
             availableToolNames: availableToolSchemas.map(tool => tool.name), availableToolSchemas,
-            ...(input.projectId ? { projectId: input.projectId } : {}), ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}), ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}), ...(deps.eventBus ? { eventBus: deps.eventBus } : {}) };
+            ...(input.projectId ? { projectId: input.projectId } : {}), ...(input.delegateTaskId ? { delegateTaskId: input.delegateTaskId } : {}), ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}), ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}), ...(deps.eventBus ? { eventBus: deps.eventBus } : {}) };
         let policyReason: string | null = null;
         if (!rejection && tool) {
             try { checkAgentScope(context, tool.name, raw); } catch (error) { rejection = error instanceof Error ? error.message : "Tool scope rejected"; }
@@ -383,6 +459,12 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             const decision = policy.evaluate({ userId: input.userId, toolName: tool.name, toolRisk: tool.risk, requiresApproval: tool.requiresApproval, input: raw });
             policyReason = decision.reason;
             const autoApproved = (input.source ?? "user") === "user" && decision.action === "auto_approve";
+            // Goal authorization package (M3): an owner-created grant covering
+            // this tool's category auto-approves operate calls inside the
+            // goal run. User-sourced runs only; scheduled/reactive write
+            // restrictions above are unchanged.
+            const goalGrant = input.goalId && (input.source ?? "user") === "user"
+                ? goalGrantForTool(deps.db, input.userId, input.goalId, tool.name) : null;
             logSecurityDecision({ db: deps.db, userId: input.userId, operation: tool.name, input: raw, action: decision.action, reason: decision.reason });
             if (decision.action === "deny") rejection = `Denied by security policy: ${decision.reason}`;
             if (!rejection && tool.risk === "operate" && TOOL_COMMANDS[tool.name]) {
@@ -391,7 +473,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     let intent = actions.intents.byKey(step.id);
                     if (!intent) intent = actions.preview({ commandId: TOOL_COMMANDS[tool.name], input: agentActionInput(tool.name, raw, context), idempotencyKey: step.id });
                     context.platformIntentId = intent.id;
-                    if (intent.status === "pending" || (!autoApproved && action?.status !== "approved")) {
+                    if (intent.status === "pending" || (!autoApproved && !goalGrant && action?.status !== "approved")) {
                         ledger.waitApproval(c, step);
                         traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'tool_gate', { toolName: tool.name, decision: 'approval_required', reason: policyReason }, step.id);
                         const pending = ledger.log.listPendingActions(c.runId).find(a => a.stepId === step.id);
@@ -400,10 +482,16 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     }
                     if (intent.status === "rejected") rejection = "Action rejected";
                 } catch (error) { rejection = error instanceof Error ? error.message : "Platform action rejected"; }
-            } else if (!rejection && tool.risk === "operate" && action?.status !== "approved") {
+            } else if (!rejection && tool.risk === "operate" && action?.status !== "approved" && !goalGrant) {
                 ledger.waitApproval(c, step);
                 traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'tool_gate', { toolName: tool.name, decision: 'approval_required', reason: policyReason }, step.id);
                 return;
+            }
+            if (!rejection && goalGrant && tool.risk === "operate") {
+                ledger.commit(c, () => {
+                    new CopilotGoalStore(deps.db, input.userId).appendJournal(input.goalId!, c.runId, `自动执行 ${tool.name}（授权 ${goalGrant}）`);
+                });
+                traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'tool_gate', { toolName: tool.name, decision: 'auto_approved', reason: `goal_grant:${goalGrant}` }, step.id);
             }
         }
         ledger.commit(c, () => new RunGovernance(deps.db, input.userId, c.runId).phase('tool'));
@@ -470,6 +558,62 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         const child = ledger.get(childId);
         const report = child ? ledger.log.listMessages(child.conversation_id).filter(row => row.role === 'assistant' && row.kind === 'text').at(-1)?.content : undefined;
         return { runId: childId, status: child?.status, report: report ?? 'Research has no final report yet.', evidence: 'Read-only analysis; not owner acceptance or independent test execution.' };
+    }
+    /**
+     * Coding delegate sub-run: a write-capable child (executionMode 'coding')
+     * whose tool surface is the goal sandbox tools + read-only platform
+     * tools, budgeted from the parent run's remaining token/time ceilings.
+     * The child is linked to the parent via copilot_research_jobs (parent
+     * budget recursion) and carries the goal id on its run row so the
+     * sandbox tools resolve their context; its steps and trace make the
+     * parent/child relationship auditable.
+     */
+    async function runCodingDelegate(ledger: CopilotRunLedger, claim: Claim, step: RunStep, delegate: { goalId: string; projectId: string; taskId: string; instructions: string }) {
+        const key = `coding:${claim.runId}:${step.id}`;
+        const childId = deps.db.transaction(() => {
+            if (!ledger.owns(claim)) throw new Error('Delegate parent no longer active');
+            const existing = deps.db.prepare('SELECT child_run_id FROM copilot_research_jobs WHERE user_id=? AND source_key=?')
+                .get(ledger.userId, key) as { child_run_id: string } | undefined;
+            if (existing) return existing.child_run_id;
+            const origin = JSON.parse(ledger.get(claim.runId)!.input_json) as TurnInput;
+            const conversation = ledger.log.createConversation(`Goal coding: ${delegate.taskId.slice(0, 24)}`);
+            const child = ledger.admit({ userId: ledger.userId, conversationId: conversation.id, userText: delegate.instructions,
+                projectId: delegate.projectId, executionMode: 'coding', parentRunId: claim.runId, delegateTaskId: delegate.taskId,
+                ...(origin.modelId ? { modelId: origin.modelId } : {}) }, 24);
+            const parentBudget = (deps.db.prepare('SELECT token_budget FROM copilot_runs WHERE user_id=? AND id=?').get(ledger.userId, claim.runId) as { token_budget: number }).token_budget;
+            const parentRemainingTokens = Math.max(1, parentBudget - new RunGovernance(deps.db, ledger.userId, claim.runId).usage().chargedTokens);
+            deps.db.prepare(`UPDATE copilot_runs SET goal_id=?, max_duration_ms=MIN(max_duration_ms,?),
+                token_budget=MIN(token_budget,?) WHERE user_id=? AND id=?`)
+                .run(delegate.goalId, Math.max(1, new RunGovernance(deps.db, ledger.userId, claim.runId).remainingDurationMs()),
+                    parentRemainingTokens, ledger.userId, child);
+            deps.db.prepare('INSERT INTO copilot_research_jobs(id,user_id,origin_run_id,source_key,conversation_id,child_run_id,created_at) VALUES(?,?,?,?,?,?,?)')
+                .run(randomUUID(), ledger.userId, claim.runId, key, conversation.id, child, Date.now());
+            return child;
+        }).immediate();
+        const parentSignal = control.active.get(claim.runId)?.controller.signal;
+        const abortChild = () => control.active.get(childId)?.controller.abort(parentSignal?.reason);
+        parentSignal?.addEventListener('abort', abortChild, { once: true });
+        try {
+            const execution = executeRun(ledger.userId, childId);
+            if (parentSignal?.aborted) abortChild();
+            await execution;
+            while (['pending', 'running', 'awaiting_approval'].includes(ledger.get(childId)?.status ?? '')) {
+                parentSignal?.throwIfAborted();
+                if (control.stopped || !ledger.owns(claim)) throw new Error('Delegate parent lost execution authority');
+                ledger.validateScope(JSON.parse(ledger.get(claim.runId)!.input_json) as TurnInput);
+                new RunGovernance(deps.db, ledger.userId, claim.runId).check();
+                await delay(200, undefined, { signal: parentSignal });
+                await executeRun(ledger.userId, childId);
+            }
+        } catch (error) {
+            // Never leave an orphaned delegate running under a lost parent.
+            ledger.cancel(childId);
+            control.active.get(childId)?.controller.abort();
+            throw error;
+        } finally { parentSignal?.removeEventListener('abort', abortChild); }
+        const child = ledger.get(childId);
+        const report = child ? ledger.log.listMessages(child.conversation_id).filter(row => row.role === 'assistant' && row.kind === 'text').at(-1)?.content : undefined;
+        return { runId: childId, status: child?.status, report: report ?? 'The delegate produced no final report.' };
     }
     function revalidateApproval(ledger: CopilotRunLedger, runId: string, actionId: string, decisionOrigin: 'web' | 'channel') {
         const facts = loadRunFacts(deps.db, ledger.userId, runId);

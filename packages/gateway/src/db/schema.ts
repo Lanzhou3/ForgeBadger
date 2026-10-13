@@ -579,7 +579,7 @@ export const modelProviderBindings = sqliteTable(
     idxBindingActiveRealpath: uniqueIndex("idx_model_provider_bindings_active_realpath")
       .on(table.targetRealpathHash)
       .where(sql`${table.status} = 'active' AND ${table.targetRealpathHash} IS NOT NULL`),
-    adapterCheck: check("model_provider_bindings_adapter_check", sql`${table.adapter} IN ('claude','opencode','codex','kimi','pi','mcode')`),
+    adapterCheck: check("model_provider_bindings_adapter_check", sql`${table.adapter} IN ('claude','opencode','codex','kimi','pi','mcode','grok')`),
     authModeCheck: check("model_provider_bindings_auth_mode_check", sql`${table.authMode} IN ('managed_credential','native_cli_login','host_environment','none')`),
     statusCheck: check("model_provider_bindings_status_check", sql`${table.status} IN ('active','revoked')`),
     revisionCheck: check("model_provider_bindings_revision_check", sql`${table.desiredRevision} >= 1`),
@@ -1541,11 +1541,62 @@ export const copilotRuns = sqliteTable("copilot_runs", {
   model: text("model"),
   steps: integer("steps").notNull().default(0),
   error: text("error"),
+  goalId: text("goal_id"),
   startedAt: integer("started_at", { mode: "timestamp" }),
   completedAt: integer("completed_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-}, (table) => ({ requestIdentity: uniqueIndex("idx_copilot_request_identity").on(table.userId,table.conversationId,table.clientRequestId).where(sql`${table.clientRequestId} IS NOT NULL`), tenantIdentity: uniqueIndex("idx_copilot_run_tenant").on(table.userId,table.id), activeConversation: uniqueIndex("idx_copilot_active_conversation").on(table.userId,table.conversationId).where(sql`${table.runtimeVersion} = 1 AND ${table.status} IN ('pending','running','awaiting_approval')`), conversationLookup: index("idx_copilot_runs_conversation_created").on(table.conversationId, table.createdAt), userLookup: index("idx_copilot_runs_user_created").on(table.userId, table.createdAt) }));
+}, (table) => ({ requestIdentity: uniqueIndex("idx_copilot_request_identity").on(table.userId,table.conversationId,table.clientRequestId).where(sql`${table.clientRequestId} IS NOT NULL`), tenantIdentity: uniqueIndex("idx_copilot_run_tenant").on(table.userId,table.id), activeConversation: uniqueIndex("idx_copilot_active_conversation").on(table.userId,table.conversationId).where(sql`${table.runtimeVersion} = 1 AND ${table.status} IN ('pending','running','awaiting_approval')`), conversationLookup: index("idx_copilot_runs_conversation_created").on(table.conversationId, table.createdAt), userLookup: index("idx_copilot_runs_user_created").on(table.userId, table.createdAt), goalLookup: index("idx_copilot_runs_goal").on(table.goalId) }));
+
+// ---------------------------------------------------------------------------
+// Copilot Goal mode (live): goal-driven multi-run execution. The goal store
+// service owns these tables through parameterized raw SQL; the declarations
+// exist for migration generation, exactly like the historical Copilot tables.
+// ---------------------------------------------------------------------------
+
+export const copilotGoals = sqliteTable("copilot_goals", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  conversationId: text("conversation_id").notNull().references(() => copilotConversations.id, { onDelete: "cascade" }),
+  projectId: text("project_id"),
+  title: text("title").notNull(),
+  spec: text("spec").notNull(),
+  status: text("status").notNull().default("active"), // active | paused | completed | blocked | cancelled
+  tokenBudget: integer("token_budget").notNull().default(5000000),
+  maxDurationMs: integer("max_duration_ms").notNull().default(28800000),
+  maxRuns: integer("max_runs").notNull().default(50),
+  blockedReason: text("blocked_reason"),
+  pendingQuestion: text("pending_question"),
+  grantsJson: text("grants_json").notNull().default("[]"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
+  completedAt: integer("completed_at", { mode: "timestamp" })
+}, (table) => ({ tenant: uniqueIndex("idx_copilot_goal_tenant").on(table.userId, table.id), conversationLookup: index("idx_copilot_goals_conversation").on(table.userId, table.conversationId) }));
+
+export const copilotGoalTasks = sqliteTable("copilot_goal_tasks", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  goalId: text("goal_id").notNull(),
+  seq: integer("seq").notNull(),
+  description: text("description").notNull(),
+  status: text("status").notNull().default("pending"), // pending | in_progress | passes | failed
+  evidence: text("evidence"),
+  verifyCommand: text("verify_command"),
+  verifiedAt: integer("verified_at"),
+  verifyExitCode: integer("verify_exit_code"),
+  dispatchedSessionId: text("dispatched_session_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
+}, (table) => ({ goalSeq: uniqueIndex("idx_copilot_goal_tasks_goal_seq").on(table.goalId, table.seq), goalParent: foreignKey({ columns: [table.userId, table.goalId], foreignColumns: [copilotGoals.userId, copilotGoals.id] }).onDelete("cascade") }));
+
+export const copilotGoalJournal = sqliteTable("copilot_goal_journal", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  goalId: text("goal_id").notNull(),
+  runId: text("run_id"),
+  note: text("note").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date())
+}, (table) => ({ goalCreated: index("idx_copilot_goal_journal_goal_created").on(table.goalId, table.createdAt), goalParent: foreignKey({ columns: [table.userId, table.goalId], foreignColumns: [copilotGoals.userId, copilotGoals.id] }).onDelete("cascade") }));
 
 export const copilotPendingActions = sqliteTable("copilot_pending_actions", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),

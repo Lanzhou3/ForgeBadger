@@ -4,7 +4,7 @@ import type { Database } from '../../db/types.js';
 export const RUN_TRACE_EVENTS = [
   'admitted', 'claimed', 'step_started', 'step_completed', 'llm_call_completed',
   'tool_gate', 'approval_parked', 'approval_decided', 'subrun_admitted',
-  'followup_promoted', 'run_finished', 'run_recovered',
+  'followup_promoted', 'run_finished', 'run_recovered', 'goal_bound',
 ] as const;
 export type RunTraceEvent = (typeof RUN_TRACE_EVENTS)[number];
 

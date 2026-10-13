@@ -65,7 +65,7 @@ it('upgrades populated 0124 conservatively, preserving wall-clock budgets and al
     migrate(drizzle(db), { migrationsFolder: root });
     const upgraded = db.prepare('SELECT * FROM copilot_runs ORDER BY id').all() as Record<string, unknown>[];
     for (let i = 0; i < originalRuns.length; i++) {
-      const { approval_wait_ms, approval_wait_started_at, ...unchanged } = upgraded[i];
+      const { approval_wait_ms, approval_wait_started_at, goal_id, ...unchanged } = upgraded[i];
       assert.deepEqual(unchanged, originalRuns[i]);
       assert.equal(approval_wait_ms, 0);
       if (originalRuns[i].id === valid.id) assert.equal(approval_wait_started_at, waitAt);

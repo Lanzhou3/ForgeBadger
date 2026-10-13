@@ -11,6 +11,7 @@ import { executionControl } from "./execution-control.js";
 import { clearAllProvisionalText } from './provisional-text.js';
 import { publishTaskReports } from './task-reports.js';
 import { attachDispatchSupervisor } from './dispatch-supervisor.js';
+import { attachGoalDriver, sweepStaleGoals } from './goal-driver.js';
 /** Gateway-owned recovery pump. Scans users, then uses tenant repositories. */
 export function startCopilotRuntime(deps: AgentStackDeps) {
     // Migration fencing precedes both development recovery and native run recovery.
@@ -19,6 +20,7 @@ export function startCopilotRuntime(deps: AgentStackDeps) {
     }
     const development = startDevelopmentRuntime(deps);
     const taskTracking = attachDispatchSupervisor(deps);
+    const goalDriver = attachGoalDriver(deps);
     const control = executionControl(deps.db);
     control.stopped = false;
     const failures = new Map<string, { count: number; retryAt: number }>();
@@ -61,6 +63,9 @@ export function startCopilotRuntime(deps: AgentStackDeps) {
                 });
             });
         }
+        // Goal continuation covers restart gaps where a terminal-state event
+        // was missed; evaluation is idempotent under the sweep.
+        isolated('goals', '', () => sweepStaleGoals(deps));
     }
     const sweep = () => isolated('sweep', '', recover);
     const timer = setInterval(sweep, 5000);
@@ -71,6 +76,7 @@ export function startCopilotRuntime(deps: AgentStackDeps) {
         clearAllProvisionalText(deps.db);
         clearInterval(timer);
         taskTracking.stop();
+        goalDriver.stop();
         await development.stop();
         for (const { controller, stopLease } of control.active.values()) {
             stopLease();
