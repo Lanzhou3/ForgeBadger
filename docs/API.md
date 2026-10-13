@@ -636,7 +636,7 @@ and `forgebadger doctor` remain read-only and install no system software.
 - `GET /api/v1/adapters/discovery`
 
 Returns local AI CLI command discovery for Claude Code, OpenCode, Codex, Kimi
-Code, and Pi. All five adapters are launch-supported when the corresponding local
+Code, Pi, MiniMax Code, and Grok. All seven adapters are launch-supported when the corresponding local
 command is available. `launchEnabled` is false when the command check fails, and
 session creation/start returns `409` before Session Server launch in that case. Every
 adapter reports the `terminal` runtime mode; the former Codex
@@ -658,8 +658,8 @@ adapter reports the `terminal` runtime mode; the former Codex
 - `POST /api/v1/adapters/:adapterId/update` requires an active instance admin
   with a Bearer credential; cookie-only requests are rejected.
   It rechecks availability, executes only the adapter's fixed official command
-  (`claude update`, `opencode upgrade`, `codex update`, `kimi upgrade --yes`, or
-  `pi update --self`), then probes the installed version again. For a Homebrew
+  (`claude update`, `opencode upgrade`, `codex update`, `kimi upgrade --yes`,
+  `pi update --self`, `mcode update`, or `grok update`), then probes the installed version again. For a Homebrew
   OpenCode install, the command specifies the published formula version and
   `--method brew` so the CLI refreshes its tap before upgrading. Only one update
   may run at a time; the response reports whether the installed version is
@@ -673,7 +673,8 @@ adapter reports the `terminal` runtime mode; the former Codex
   may run at a time. Existing terminal sessions are not restarted. npm uses
   the Gateway host's npm registry configuration; version checks use
   `registry.npmjs.org`. The OpenCode adapter currently tracks the `opencode-ai`
-  package documented under OpenCode's `/docs` channel.
+  package documented under OpenCode's `/docs` channel. Grok tracks
+  `@xai-official/grok`.
 
 ### Projects
 
@@ -1068,9 +1069,13 @@ returned, and work items with unparseable details are skipped.
 Management of each code CLI's global config files
 (Kimi `~/.kimi-code/config.toml`, Claude `~/.claude/settings.json`,
 Codex `~/.codex/config.toml` + `~/.codex/auth.json`,
-OpenCode `$XDG_CONFIG_HOME/opencode/opencode.json`;
-`KIMI_CODE_HOME` / `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `OPENCODE_CONFIG_DIR`
-overrides are honored):
+OpenCode `$XDG_CONFIG_HOME/opencode/opencode.json`,
+Grok `$GROK_HOME/config.toml`, default `~/.grok/config.toml`;
+`KIMI_CODE_HOME` / `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `OPENCODE_CONFIG_DIR` /
+`GROK_HOME` overrides are honored):
+
+Grok apply writes `[models].default` and one managed `[model.<key>]`.
+`auth.json` and `mcp_credentials.json` are not managed targets.
 
 - `GET /api/v1/cli-config/adapters`
 - `GET /api/v1/cli-config/:adapter`
@@ -2616,6 +2621,193 @@ nested Git metadata links are unsupported. Lazy fetch and all remote transports
 are disabled; no external diff, textconv, fsmonitor or hooks run. Concurrent
 filesystem changes may invalidate the snapshot; skipped paths are not clean-file
 evidence. This tool shares existing tenant/project and restricted-research checks.
+
+### Copilot goals (goal mode)
+
+`POST /api/v1/copilot/goals` body `{conversationId, projectId?, title (1..200),
+spec (1..20000), budgets?{tokenBudget<=50M, maxDurationMs<=24h, maxRuns<=200}}`
+creates a goal bound to the conversation and enqueues the first (initializer)
+run, whose user message is the spec verbatim. Success is `201` with
+`{goalId, runId}` in the standard envelope. The conversation must belong to
+the caller (otherwise `404`); a conversation that already has an active run
+maps to `409 COPILOT_CONVERSATION_BUSY`, and a goal whose initializer cannot
+be enqueued is cancelled instead of left active. Budget defaults are 5M
+charged tokens, 8 wall-clock hours and 50 runs per goal; per-run budgets are
+unchanged.
+
+`GET /api/v1/copilot/goals?conversationId=` lists the caller's goals newest
+first as `{goals:[{id,title,status,projectId,conversationId,createdAt,
+taskTotal,taskPasses}]}`. `GET /api/v1/copilot/goals/:id` returns
+`{goal,tasks,journal,usage,pendingQuestion}`: the full goal row (including
+`spec`, `tokenBudget`, `maxDurationMs`, `maxRuns`, `blockedReason`,
+`pendingQuestion` and `completedAt`), the task checklist ordered by `seq`,
+the 20 most recent journal entries, `usage:{chargedTokens,runCount,elapsedMs}`
+aggregated over every run carrying the goal id, and the outstanding
+`goal_ask_user` question (null when none). Foreign goals `404`.
+
+`POST /api/v1/copilot/goals/:id/pause|resume|cancel` returns `{goal}` with the
+updated row. `pause`/`resume` only transition `active`<->`paused`; `cancel`
+is an idempotent terminal from `active`/`paused` (repeat cancels return the
+row unchanged). Any other transition is `409 COPILOT_GOAL_STATE`. Resuming a
+paused goal immediately re-evaluates continuation: if the latest run is
+settled and the conversation is idle, the next run is enqueued.
+
+Task rows carry machine-verification fields:
+`{verifyCommand,verifiedAt,verifyExitCode}` (all nullable). `goal_add_tasks`
+accepts plain description strings or `{description, verifyCommand}` objects.
+A task with `verifyCommand` can only be marked `passes` after
+`goal_run_checks` recorded an exit-code-0 run for that taskId whose command
+is exactly the declared verify_command (whitespace-trimmed;
+`COPILOT_GOAL_VERIFY_MISMATCH` otherwise, `COPILOT_GOAL_INPUT_INVALID` for a
+taskId on a task without verify_command); the check output summary is
+appended to the task's machine evidence.
+Tasks without `verifyCommand` keep the evidence-text rule.
+
+Continuation is owned by the GoalDriver, not the client: when a run carrying
+`goal_id` reaches `completed`/`stopped`/`failed`, the goal is re-evaluated.
+All tasks `passes` sets the goal `completed`; exceeding the token, lifetime
+or run-count ceiling blocks it (`blockedReason: goal_budget_exhausted`,
+surfaced mid-run as `COPILOT_GOAL_BUDGET_EXHAUSTED`, which stops the run);
+three settled runs without a task status change block it with
+`no_task_progress` (delegate/research child runs never count); a last run
+failed with a non-retryable code (`COPILOT_CONTEXT_TOO_LARGE`,
+`COPILOT_USER_INACTIVE`, `COPILOT_NOT_FOUND`) blocks with
+`unrecoverable_error:<code>`; repeated same-cause failures enter an
+exponential cooldown (15 s base, 5 min cap, journaled) instead of a retry
+loop; otherwise the next run is enqueued automatically with an
+audit-visible continuation message. Goal runs are exempt from the per-run
+no-progress stop (the task-level stagnation rule replaces it) and receive a
+prefix message with the goal spec, checklist, recent journal and remaining
+budget. The injected state is a bounded projection: the
+spec is clipped to 2000 chars, per-task evidence to 500, and the checklist
+shows at most 30 entries (the remainder is summarised as a count). Goal
+transitions into `completed`/`blocked` (including `awaiting_user`) emit one
+platform notification per `(goal,status,blockedReason,question,cycle)`
+linking to `/copilot/goals/<id>` — every awaiting_user cycle notifies again,
+even with an identical question; owner `cancel` is not notified. The model-maintained tools `goal_add_tasks`,
+`goal_update_task` and `goal_write_journal` mutate only Copilot-owned goal
+state, execute without owner approval, and fail with
+`COPILOT_GOAL_CONTEXT_REQUIRED` outside a goal run.
+
+Goal runs with a project edit inside an isolated sandbox copy of the project
+root (`<FORGEBADGER_STATE_DIR>/goal-sandboxes/<goalId>/`, lazily created on
+first write, reused afterwards, kept after cancel and merge; `.git`,
+`node_modules`, build output and vendored directories are never copied,
+diffed or merged). The sandbox tools `goal_file_read` (offset/limit in
+lines), `goal_file_write`, `goal_file_edit` (exactly-one-match replacement)
+and `goal_run_checks` (shell command with the sandbox as cwd, default
+5-minute / maximum 10-minute timeout, 48 KiB truncated output; `taskId` +
+exit 0 refreshes the task verify record) take sandbox-relative paths only —
+absolute paths, `..` traversal and symlink escapes are refused. v1 runs
+commands with the host environment; the isolation boundary is the copy
+convention, not an
+OS sandbox. Commands run with a minimal secret-free environment: a small
+name allowlist (PATH/HOME/LANG/TZ/TERM/USER/TMPDIR and friends) with every
+`FORGEBADGER_*` or KEY/SECRET/TOKEN/PASSWORD-named variable stripped. `goal_ask_user {question}` blocks the goal
+with `blockedReason: awaiting_user`, stores the question (exposed as
+`pendingQuestion` on the goal detail response), journals it, notifies the
+owner and lets the current run settle as `stopped` (`stop_reason:
+goal_blocked`); any later run of a non-active goal stops the same way at the
+next loop tick. Only the owner's answer resumes it.
+
+`POST /api/v1/copilot/goals/:id/answer` body `{answer (1..4000)}` is accepted
+only while the goal is `blocked/awaiting_user` (else `409
+COPILOT_GOAL_STATE`): the answer is journaled, the question cleared, the goal
+set `active`, and a continuation run enqueued whose user message is
+`[Goal 用户答复] <answer>`; returns `{goal}`.
+`GET /api/v1/copilot/goals/:id/diff` returns `{files, truncated}` —
+`files:[{path,status: added|modified|deleted,diff,truncated}]` is a per-file
+unified diff of sandbox vs project root, capped at 512 KiB per response
+(oversized files and the cut boundary are flagged `truncated`; binary files
+appear as `(binary file omitted)` placeholders); no sandbox yields
+`{files:[],truncated:false}`. `POST /api/v1/copilot/goals/:id/merge`
+overwrites the project root with the sandbox tree and returns
+`{merged, deleted, kept}`: `merged` lists added/modified paths, `deleted`
+lists only files recorded in the sandbox creation-time manifest that the
+sandbox removed, and `kept` lists project-side files added after sandbox
+creation (they are never deleted). Merge is refused with `409
+COPILOT_GOAL_STATE` while the goal has an active run or is not
+`completed`/`blocked`, and with `409 COPILOT_GOAL_MERGE_CONFLICT` (listing
+the paths) when a dry run detects type conflicts (e.g. sandbox file vs
+project directory) — the project is left untouched in both cases. A missing
+sandbox maps to `409 COPILOT_GOAL_SANDBOX_MISSING`. Both are owner-HTTP
+operations (HTTP authorization is the merge authority — no in-run approval)
+and both record the outcome in the goal journal.
+
+### Copilot slash commands
+
+`GET /api/v1/copilot/commands` (authenticated) returns the slash command
+registry as `{commands:[{name,usage,description,category}]}` with category in
+`goal | session | model | info`; the registry is the single source of truth
+for both the console command palette and the in-chat handlers. Commands are
+matched case-insensitively at line start (`/name args...` — everything after
+the name is passed as args). A bare `/` or an unknown command replies locally
+with the closest suggestions (edit distance / subsequence) and a `/help`
+hint instead of calling the model. Handlers short-circuit the run before any
+model call and the reply is persisted as an ordinary assistant turn; the
+exception is `/goal <spec>`, which creates the goal, binds it to the current
+run (`goal_id` + `input_json`), and continues the normal model flow so the
+spec drives the initializer turn.
+
+| command | category | behavior |
+| --- | --- | --- |
+| `/help` | info | all commands grouped by category |
+| `/goal <spec>` | goal | create goal bound to the current run (title = first 50 chars of spec; project = run's project when set); `/goal pause\|resume\|cancel` manages the latest non-terminal goal of the conversation |
+| `/goals` | goal | conversation goal list with status, task progress and detail links |
+| `/diff` | goal | summary (counts + sample hunks) of the latest sandbox goal, linking the detail page |
+| `/merge` | goal | merge the latest sandbox goal into the project (only when the goal is `completed`/`blocked`; journaled; owner chat auth is the authority) |
+| `/answer <内容>` | goal | answer an `awaiting_user` goal: journal, clear question, resume, enqueue the answer run |
+| `/model [list\|<id>]` | model | show the current model, list provider/model profiles, or switch by persisting the server-side model preference |
+| `/status` | info | active run, current model, conversation token usage, active goal count |
+| `/stop` | session | cancel queued follow-ups (the single-active-run invariant leaves no other run to stop) |
+| `/new` | session | guidance for starting a new conversation (a console action) |
+| `/playbook <name>` | info | load a playbook's full text into the transcript (exact, case-insensitive name; lists candidates on miss) |
+| `/playbooks`, `/skills`, `/usage` | info | playbook listing, Skills page pointer, conversation token + goal usage |
+
+### Copilot goal grants, delegation and dispatch (M3)
+
+`POST /api/v1/copilot/goals` accepts an optional `grants` array created once
+with the goal: `operate_sessions` (start/stop/takeover session),
+`terminal_run` (terminal_run/open/close), `pm_dispatch`
+(dispatch_task_to_session, pm_execute/prepare_task_packet,
+goal_dispatch_task). Inside a user-sourced run of an ACTIVE goal, a covered
+operate tool skips the per-call pending-action approval and executes
+directly; every auto-execution is journaled (`自动执行 <tool>（授权 <grant>）`)
+and traced as `tool_gate: auto_approved`. Grants of non-active goals cover
+nothing; operate tools outside the grant keep per-call approval;
+scheduled/reactive write restrictions are unchanged. The goal DTO carries
+`grants: string[]`.
+
+`goal_delegate {taskId, instructions}` (goal runs, no approval) spawns a
+write-capable coding sub-run: executionMode `coding`, 24 steps, own
+conversation, tool surface limited to the goal sandbox tools
+(goal_file_*/goal_run_checks, goal_update_task restricted to the delegated
+taskId, goal_write_journal) plus read-only platform tools, and goal_delegate
+itself (a nested delegate is refused at admission — the parent-chain depth
+rule). Token/time budgets inherit the parent run's remaining ceilings via the
+existing parent/child budget recursion (copilot_research_jobs link). The
+sub-run writes only inside the goal sandbox; its report returns as the
+delegating tool's result and a failed delegate does not block the goal. A
+cancelled or de-authorised parent cancels the delegate child (no orphaned
+runs), and the driver's busy/sweep checks treat the child run as goal-owned
+activity. Stagnation counters never count delegate/research child runs.
+
+`goal_dispatch_task {taskId, aiTool, instructions}` (operate risk) hands a
+task to a real CLI session: it creates or reuses a running session for the
+goal's project + adapter and submits the instructions through the existing
+programmatic-terminal-submit path with delivery confirmation. The adapter
+must be listed in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` (else
+`COPILOT_ADAPTER_AUTONOMY_DENIED`); without the `pm_dispatch` grant it goes
+through normal owner approval. On success the session id is stored on the
+task (`dispatchedSessionId`) and journaled — dispatch is not completion, the
+task's verify gate still applies. CLI completion notifications reuse the
+existing session-hooks mechanism.
+
+Goal detail `usage` adds `costUsd` (number|null): the sum of
+`copilot_model_calls.cost_nanousd` across the goal's runs (computed from
+provider token rates at metering time). Any call without pricing (missing
+usage or rates) makes the aggregate `null`; a goal with no calls aggregates
+to `0`.
 
 ### Historical reference: retired Copilot grants
 
