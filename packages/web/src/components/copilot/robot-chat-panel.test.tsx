@@ -202,7 +202,8 @@ async function pickOption(name: string, option: string) {
 describe("RobotChatPanel", () => {
   it("focuses the quick-chat input and lets keyboard users close with Escape", () => {
     const { onClose } = renderPanel();
-    const input = screen.getByRole("textbox");
+    // The chat input is a combobox bridged to the slash-command palette.
+    const input = screen.getByRole("combobox", { name: "输入消息……" });
     expect(document.activeElement).toBe(input);
     fireEvent.keyDown(input, { key: "Escape" });
     expect(onClose).toHaveBeenCalledOnce();

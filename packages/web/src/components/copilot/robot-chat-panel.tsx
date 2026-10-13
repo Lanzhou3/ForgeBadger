@@ -22,6 +22,7 @@ import {
 import { CopilotWelcomeState } from "@/components/copilot/copilot-empty-state";
 import { CopilotRunOptions } from "@/components/copilot/CopilotRunOptions";
 import { CopilotFollowupChips } from "@/components/copilot/CopilotFollowupChips";
+import { CommandPalettePopup, useCommandPalette } from "@/components/copilot/command-palette-popup";
 import { CopilotStatusBar } from "@/components/copilot/copilot-runtime-panel";
 import { CopilotApproval } from "@/components/copilot/CopilotApproval";
 import { useLanguage } from "@/hooks/use-language";
@@ -342,6 +343,15 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
   // approval is pending the composer stays inert, as it did before.
   const runningRef = useRef(Boolean(isRunning));
   runningRef.current = Boolean(isRunning);
+
+  // Slash-command palette above the composer (same contract as the console:
+  // selection fills "/name "; submission queues behind a running turn).
+  const applySlashCommand = useCallback((text: string) => {
+    controller.setInput(text);
+    inputRef.current?.focus();
+  }, [controller]);
+  const palette = useCommandPalette(controller.input, applySlashCommand);
+
   const toolResultById = useMemo(() => indexToolResults(messages), [messages]);
   const showEmpty = !loadError && !restoring && messages.length === 0 && !active;
 
@@ -528,20 +538,32 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
         {conversationId && (
           <CopilotFollowupChips items={followups.items} onCancel={(id) => void followups.cancel(id)} />
         )}
-        <div
-          data-testid="robot-chat-composer"
-          className="flex items-end gap-1.5 rounded-xl border border-border/70 bg-card/90 px-2 py-1.5 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
-        >
-          <Textarea
-            ref={inputRef}
-            value={controller.input}
-            onChange={(event) => controller.setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                void send();
-              }
-            }}
+        <div className="relative">
+          <CommandPalettePopup
+            view={palette.view}
+            onHoverItem={palette.hoverItem}
+            onPickItem={palette.pickItem}
+          />
+          <div
+            data-testid="robot-chat-composer"
+            className="flex items-end gap-1.5 rounded-xl border border-border/70 bg-card/90 px-2 py-1.5 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
+          >
+            <Textarea
+              ref={inputRef}
+              value={controller.input}
+              onChange={(event) => controller.setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (palette.handleTextareaKeyDown(event)) return;
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  void send();
+                }
+              }}
+              role="combobox"
+              aria-expanded={palette.view.open}
+              aria-controls="command-palette"
+              aria-activedescendant={palette.view.open && palette.view.highlighted ? `command-option-${palette.view.highlighted}` : undefined}
+              aria-autocomplete="list"
             placeholder={isRunning ? t("copilot.followups.placeholder") : t("copilot.placeholder")}
             aria-label={t("copilot.placeholder")}
             className="min-h-[32px] max-h-32 flex-1 resize-none rounded-none border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0"
@@ -570,6 +592,7 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
           >
             <ArrowUp className="size-4" />
           </Button>
+          </div>
         </div>
       </div>
     </div>

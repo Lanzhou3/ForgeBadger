@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, ListTodo, MessageSquare, PanelLeft, Square } from "lucide-react";
+import { ArrowDown, ArrowUp, ListTodo, MessageSquare, PanelLeft, Square, Target } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,9 @@ import { CopilotWelcomeState } from "@/components/copilot/copilot-empty-state";
 import { CopilotSettings } from "@/components/copilot/copilot-settings";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
 import { CopilotApproval } from "@/components/copilot/CopilotApproval";
+import { GoalCreateDialog } from "@/components/copilot/goal-create-dialog";
+import { useGoalsCopy } from "@/components/copilot/goals-copy";
+import { CommandPalettePopup, useCommandPalette } from "@/components/copilot/command-palette-popup";
 import { GatewayApiError, listProjects, type Project } from "@/lib/api";
 import { readLastCopilotConversation, writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
 import { useLanguage } from "@/hooks/use-language";
@@ -68,6 +71,7 @@ const NO_PROJECT_VALUE = "__no_project__";
  */
 export function CopilotChat() {
   const { t } = useLanguage();
+  const goalsCopy = useGoalsCopy();
   const searchParams = useSearchParams();
   // Deep link: /copilot?c=<conversationId> (e.g. "expand to full console" from
   // the robot chat panel) selects that conversation.
@@ -86,6 +90,7 @@ export function CopilotChat() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarSheetOpen, setSidebarSheetOpen] = useState(false);
+  const [goalDialogOpen, setGoalDialogOpen] = useState(false);
   // null = follow the server-side preference / platform default; the status
   // bar back-fills this mirror whenever the effective preference changes.
   const [modelId, setModelId] = useState<string | null>(null);
@@ -437,6 +442,16 @@ export function CopilotChat() {
   const inputRef = useRef(controller.input);
   inputRef.current = controller.input;
 
+  // Slash-command palette above the composer: selecting an entry fills
+  // "/name " back into the input (focus included); the next Enter submits
+  // through the normal send path, which queues behind a running turn.
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const applySlashCommand = useCallback((text: string) => {
+    controller.setInput(text);
+    composerRef.current?.focus();
+  }, [controller]);
+  const palette = useCommandPalette(controller.input, applySlashCommand);
+
   // Index tool_result rows by their provider toolCallId so MessageRow can pair
   // them with the corresponding tool_call row and render a single status
   // icon (running / ok / error / denied) instead of two loose <details>.
@@ -496,6 +511,23 @@ export function CopilotChat() {
               <ListTodo className="size-4 sm:hidden" />
               <span className="hidden sm:inline">{t("copilot.devTasks")}</span>
             </Link>
+            <Link href="/copilot/goals" aria-label={goalsCopy.title} title={goalsCopy.title} className="shrink-0 whitespace-nowrap rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+              <Target className="size-4 sm:hidden" />
+              <span className="hidden sm:inline">{goalsCopy.title}</span>
+            </Link>
+            {conversationId ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0 text-xs"
+                onClick={() => setGoalDialogOpen(true)}
+                aria-label={goalsCopy.create}
+                title={goalsCopy.create}
+              >
+                <Target className="size-4 sm:hidden" />
+                <span className="hidden sm:inline">{goalsCopy.create}</span>
+              </Button>
+            ) : null}
             <CopilotSettings />
           </div>
         </div>
@@ -659,19 +691,32 @@ export function CopilotChat() {
               <CopilotFollowupChips items={followups.items} onCancel={(id) => void followups.cancel(id)} />
             </div>
           )}
-          <div
-            data-testid="copilot-composer"
-            className="flex items-end gap-2 rounded-xl border border-border/70 bg-card/90 px-2.5 py-2 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
-          >
-            <Textarea
-              value={controller.input}
-              onChange={(event) => controller.setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault();
-                  void submit();
-                }
-              }}
+          <div className="relative">
+            <CommandPalettePopup
+              view={palette.view}
+              onHoverItem={palette.hoverItem}
+              onPickItem={palette.pickItem}
+            />
+            <div
+              data-testid="copilot-composer"
+              className="flex items-end gap-2 rounded-xl border border-border/70 bg-card/90 px-2.5 py-2 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
+            >
+              <Textarea
+                ref={composerRef}
+                value={controller.input}
+                onChange={(event) => controller.setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (palette.handleTextareaKeyDown(event)) return;
+                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    void submit();
+                  }
+                }}
+                role="combobox"
+                aria-expanded={palette.view.open}
+                aria-controls="command-palette"
+                aria-activedescendant={palette.view.open && palette.view.highlighted ? `command-option-${palette.view.highlighted}` : undefined}
+                aria-autocomplete="list"
               placeholder={isRunning ? t("copilot.followups.placeholder") : t("copilot.placeholder")}
               aria-label={t("copilot.placeholder")}
               className="min-h-[44px] max-h-40 flex-1 resize-none rounded-none border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0"
@@ -700,6 +745,7 @@ export function CopilotChat() {
             >
               <ArrowUp className="size-4" />
             </Button>
+            </div>
           </div>
         </div>
       </Card>
@@ -728,6 +774,15 @@ export function CopilotChat() {
           />
         </SheetContent>
       </Sheet>
+
+      {conversationId ? (
+        <GoalCreateDialog
+          open={goalDialogOpen}
+          conversationId={conversationId}
+          {...(projectId ? { projectId } : {})}
+          onOpenChange={setGoalDialogOpen}
+        />
+      ) : null}
     </div>
   );
 }
