@@ -65,6 +65,10 @@ export class SessionHandle {
   private _status: "running" | "exited" | "error" = "running";
   private _exitCode: number | undefined;
   private _pauseActivations = 0;
+  /** Last PTY output time; 0 = never produced output. */
+  private lastOutputAt = 0;
+  /** Starts true: a session that never produced output never signals idle. */
+  private idleSignaled = true;
 
   constructor(options: SessionHandleOptions) {
     this.sessionId = options.sessionId;
@@ -141,6 +145,8 @@ export class SessionHandle {
   /** Live output fan-out: buffers while a client attach is in flight. The
    *  scanner observes the same stream first — it never mutates the data. */
   fanOut(data: string, emit: (clientId: string, data: string) => void): void {
+    this.lastOutputAt = Date.now();
+    this.idleSignaled = false;
     for (const notification of this.scanner.push(data)) {
       this.onNotification?.(notification);
     }
@@ -151,6 +157,22 @@ export class SessionHandle {
         emit(clientId, data);
       }
     }
+  }
+
+  /** Edge-triggered quiet detection: true once per active→silent transition
+   *  (running, has produced output, silent for at least idleMs, not yet
+   *  reported). Call markIdleSignaled() when the signal is consumed. */
+  shouldSignalIdle(nowMs: number, idleMs: number): boolean {
+    return (
+      !this.idleSignaled &&
+      this._status === "running" &&
+      this.lastOutputAt > 0 &&
+      nowMs - this.lastOutputAt >= idleMs
+    );
+  }
+
+  markIdleSignaled(): void {
+    this.idleSignaled = true;
   }
 
   pauseSource(source: string): void {
