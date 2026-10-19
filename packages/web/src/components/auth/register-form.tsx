@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
-import { GatewayApiError } from "@/lib/api";
+import { GatewayApiError, gatewayBaseUrl, isGatewayUnreachable } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
 
 interface FormData {
@@ -65,7 +65,11 @@ export function RegisterForm() {
       }
       setError("root", { message: t("auth.registrationFailed") });
     } catch (error) {
-      setError("root", { message: t(registrationErrorKey(error)) });
+      setError("root", {
+        message: isGatewayUnreachable(error)
+          ? t("auth.gatewayUnreachable").replace("{url}", gatewayBaseUrl)
+          : t(registrationErrorKey(error))
+      });
     }
   };
 

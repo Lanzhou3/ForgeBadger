@@ -9,6 +9,7 @@ import Link from "next/link";
 import { safeRedirectTarget } from "@/lib/auth-navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
+import { gatewayBaseUrl, isGatewayUnreachable } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,8 +50,12 @@ export function LoginForm() {
       } else {
         setError("root", { message: t("auth.loginFailed") });
       }
-    } catch {
-      setError("root", { message: t("auth.loginFailed") });
+    } catch (error) {
+      setError("root", {
+        message: isGatewayUnreachable(error)
+          ? t("auth.gatewayUnreachable").replace("{url}", gatewayBaseUrl)
+          : t("auth.loginFailed")
+      });
     }
   };
 

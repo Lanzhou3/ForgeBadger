@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LoginForm } from "./login-form";
 import { LanguageProvider } from "@/hooks/use-language";
+import { GatewayApiError, gatewayBaseUrl } from "@/lib/api";
 
 const { loginMock } = vi.hoisted(() => ({ loginMock: vi.fn() }));
 
@@ -55,5 +56,29 @@ describe("LoginForm", () => {
       expect(screen.getByText("登录失败，请检查邮箱和密码。")).toBeTruthy();
     });
     expect(screen.queryByText("Gateway request failed")).toBeNull();
+  });
+
+  it("shows the unreachable-gateway message with the target address instead of a credential hint", async () => {
+    loginMock.mockRejectedValueOnce(
+      new GatewayApiError(`Cannot reach the Gateway at ${gatewayBaseUrl}.`, undefined, {
+        code: "GATEWAY_UNREACHABLE"
+      })
+    );
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText("电子邮箱"), {
+      target: { value: "owner@example.com" }
+    });
+    fireEvent.change(screen.getByLabelText("密码"), {
+      target: { value: "any-password" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(`无法连接到 Gateway（${gatewayBaseUrl}），请确认 Gateway 已启动且端口配置正确。`)
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText("登录失败，请检查邮箱和密码。")).toBeNull();
   });
 });

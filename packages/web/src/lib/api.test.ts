@@ -152,6 +152,25 @@ describe("api client", () => {
     });
   });
 
+  it("reports unreachable gateways with the resolved base URL", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
+
+    await expect(apiModule.login("user@example.com", "password")).rejects.toMatchObject({
+      name: "GatewayApiError",
+      message: `Cannot reach the Gateway at ${apiModule.gatewayBaseUrl}.`,
+      details: { code: "GATEWAY_UNREACHABLE" }
+    });
+  });
+
+  it("classifies only connection-level failures as unreachable gateways", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
+
+    const caught = await apiModule.login("user@example.com", "password").catch((error: unknown) => error);
+    expect(apiModule.isGatewayUnreachable(caught)).toBe(true);
+    expect(apiModule.isGatewayUnreachable(new Error("boom"))).toBe(false);
+    expect(apiModule.isGatewayUnreachable(new apiModule.GatewayApiError("bad request", 401))).toBe(false);
+  });
+
   it("submits local account recovery credentials without an auth token", async () => {
     await resetPassword({
       email: "owner@example.com",

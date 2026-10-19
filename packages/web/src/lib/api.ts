@@ -1264,6 +1264,11 @@ export class GatewayApiError extends Error {
   }
 }
 
+/** True when the request never reached the Gateway (connection-level failure). */
+export function isGatewayUnreachable(error: unknown): boolean {
+  return error instanceof GatewayApiError && error.details?.code === "GATEWAY_UNREACHABLE";
+}
+
 export function apiUrl(path: string): string {
   const baseUrl = getGatewayBaseUrl().replace(/\/+$/, "");
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
@@ -1381,8 +1386,22 @@ function handleUnauthorized(path: string, hadToken: boolean, status: number): vo
 }
 
 function normalizeFetchError(error: unknown): never {
+  if (error instanceof GatewayApiError) {
+    throw error;
+  }
   if (error instanceof DOMException && error.name === "AbortError") {
     throw new GatewayApiError("Gateway request timed out. Check that the Gateway service is running.");
+  }
+  // Browsers (and Node) reject fetch with TypeError when the gateway is
+  // unreachable at the network level (connection refused, DNS, CORS). Wrap it
+  // with the resolved base URL so a stale port or runtime config shows up in
+  // the UI instead of a generic "check your credentials" hint.
+  if (error instanceof TypeError) {
+    throw new GatewayApiError(
+      `Cannot reach the Gateway at ${getGatewayBaseUrl()}.`,
+      undefined,
+      { code: "GATEWAY_UNREACHABLE" }
+    );
   }
   throw error;
 }

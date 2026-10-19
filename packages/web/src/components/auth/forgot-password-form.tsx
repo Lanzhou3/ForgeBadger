@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLanguage } from "@/hooks/use-language";
-import { GatewayApiError, resetPassword } from "@/lib/api";
+import { GatewayApiError, gatewayBaseUrl, isGatewayUnreachable, resetPassword } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
 
 interface FormData {
@@ -50,7 +50,9 @@ export function ForgotPasswordForm() {
       router.replace("/login?passwordReset=1");
     } catch (error) {
       setError("root", {
-        message: t(resetErrorKey(error))
+        message: isGatewayUnreachable(error)
+          ? t("auth.gatewayUnreachable").replace("{url}", gatewayBaseUrl)
+          : t(resetErrorKey(error))
       });
     }
   };
