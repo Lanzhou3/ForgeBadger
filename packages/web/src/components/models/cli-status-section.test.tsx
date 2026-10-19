@@ -153,6 +153,7 @@ describe("cli-status-section quota summary", () => {
     ["no_native_login", "models.cliAccountQuotaNoNativeLogin"],
     ["api_key_mode", "models.cliAccountQuotaApiKeyMode"],
     ["token_expired", "models.cliAccountQuotaTokenExpired"],
+    ["setup_token_scope", "models.cliAccountQuotaSetupTokenScope"],
     ["upstream_error", "models.cliAccountQuotaUpstreamError"],
   ] as [CliQuotaUnsupportedReason, string][])(
     "shows the %s unsupported hint as %s",

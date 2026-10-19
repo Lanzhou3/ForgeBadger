@@ -754,6 +754,7 @@ export type CliQuotaUnsupportedReason =
   | "no_native_login"
   | "api_key_mode"
   | "token_expired"
+  | "setup_token_scope"
   | "upstream_error";
 
 export interface CliQuotaEntry {
