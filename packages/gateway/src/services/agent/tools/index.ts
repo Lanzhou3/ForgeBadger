@@ -1,3 +1,4 @@
+import { createNativeLifecycleTools } from '../../mcp/lifecycle-tools.js';
 import { createProjectDiffTools } from './project-diff.js';
 import { createResearchTools } from "./research.js";
 import { createSourceSearchTools } from "./source-search.js";
@@ -36,6 +37,7 @@ export function createPlatformTools(): AgentTool[] {
     ...createPlatformCoverageTools(),
     ...createToolResultTools(),
     ...createPlatformManagementTools(),
+    ...createNativeLifecycleTools(),
     ...createSkillTools(),
     ...createProjectTools(),
     ...createSessionTools(),

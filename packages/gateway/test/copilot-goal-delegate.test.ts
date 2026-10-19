@@ -79,7 +79,7 @@ interface DelegateFixture {
 
 interface DelegateIds { taskId: string; otherTaskId: string }
 
-function delegateFixture(steps: ScriptStep[] | ((ids: DelegateIds) => ScriptStep[])): DelegateFixture {
+function delegateFixture(steps: ScriptStep[] | ((ids: DelegateIds) => ScriptStep[]), grants?: string[]): DelegateFixture {
   const db = createTestDb();
   const user = new UserRepository(db).create("goal-delegate@example.com", "hash");
   const log = new CopilotConversationLog(db, user.id);
@@ -90,7 +90,7 @@ function delegateFixture(steps: ScriptStep[] | ((ids: DelegateIds) => ScriptStep
   db.prepare("INSERT INTO projects(id,user_id,name,path,ai_tool,status) VALUES(?,?,?,?,?,?)")
     .run(projectId, user.id, "delegate-project", projectDir, "claude", "active");
   const store = new CopilotGoalStore(db, user.id);
-  const goalId = store.createGoal({ conversationId: conversation.id, projectId, title: "Delegate goal", spec: "delegate the work" }).id;
+  const goalId = store.createGoal({ conversationId: conversation.id, projectId, title: "Delegate goal", spec: "delegate the work", ...(grants ? { grants } : {}) }).id;
   const [task] = store.addTasks(goalId, [{ description: "Delegated task", verifyCommand: "true" }]);
   const [other] = store.addTasks(goalId, ["Other task"]);
   const script = typeof steps === "function" ? steps({ taskId: task.id, otherTaskId: other.id }) : steps;
@@ -110,6 +110,12 @@ function delegateFixture(steps: ScriptStep[] | ((ids: DelegateIds) => ScriptStep
       });
     }
   };
+}
+
+function checkStepResult(fixture: DelegateFixture, runId: string): string {
+  const row = fixture.db.prepare("SELECT result_json FROM copilot_run_steps WHERE user_id=? AND run_id=? AND tool_name='goal_run_checks'")
+    .get(fixture.userId, runId) as { result_json: string | null } | undefined;
+  return row?.result_json ?? "";
 }
 
 describe("goal_delegate coding sub-run", () => {
@@ -151,6 +157,65 @@ describe("goal_delegate coding sub-run", () => {
     // The write landed in the sandbox only.
     assert.equal(fs.readFileSync(path.join(fixture2.sandboxDir, "delegated.txt"), "utf8"), "fixed by delegate\n");
     assert.equal(fs.existsSync(path.join(fixture2.projectDir, "delegated.txt")), false);
+  });
+
+  it("lets a delegate run goal_run_checks under the goal's sandbox_checks grant", async () => {
+    const run = tracked(delegateFixture((ids) => [
+      { tool: { name: "goal_delegate", arguments: { taskId: ids.taskId, instructions: "verify the task" } } },
+      { tool: { name: "goal_run_checks", arguments: { command: "true", taskId: ids.taskId } } },
+      { text: "delegate verified" },
+      { text: "parent done" }
+    ], ["sandbox_checks"]));
+    const parentRunId = await run.driveParent();
+    assert.equal(run.log.getRun(parentRunId)?.status, "completed");
+    const childId = await waitForChild(run.db, run.userId, parentRunId);
+    const child = run.log.getRun(childId!)!;
+    assert.equal(child.status, "completed");
+    assert.match(checkStepResult(run, child.id), /"exitCode":\s*0/);
+    const journal = new CopilotGoalStore(run.db, run.userId).recentJournal(run.goalId);
+    assert.ok(journal.some(entry => entry.note.includes("自动执行 goal_run_checks") && entry.note.includes("sandbox_checks")));
+  });
+
+  it("refuses goal_run_checks in a delegate without the grant instead of parking for approval", async () => {
+    const run = tracked(delegateFixture((ids) => [
+      { tool: { name: "goal_delegate", arguments: { taskId: ids.taskId, instructions: "verify the task" } } },
+      { tool: { name: "goal_run_checks", arguments: { command: "touch should-not-exist.txt" } } },
+      { text: "delegate gave up" },
+      { text: "parent done" }
+    ]));
+    const parentRunId = await run.driveParent();
+    assert.equal(run.log.getRun(parentRunId)?.status, "completed");
+    const childId = await waitForChild(run.db, run.userId, parentRunId);
+    const child = run.log.getRun(childId!)!;
+    assert.equal(child.status, "completed");
+    assert.equal(run.log.listPendingActions(child.id).length, 0);
+    assert.match(checkStepResult(run, child.id), /sandbox_checks/);
+    assert.equal(fs.existsSync(path.join(run.sandboxDir, "should-not-exist.txt")), false);
+  });
+
+  it("parks goal_run_checks for owner approval in an ungranted goal run", async () => {
+    const run = tracked(delegateFixture([
+      { tool: { name: "goal_run_checks", arguments: { command: "touch approved-only.txt" } } },
+      { text: "checked" }
+    ]));
+    const runId = await run.driveParent();
+    assert.equal(run.log.getRun(runId)?.status, "awaiting_approval");
+    assert.equal(run.log.listPendingActions(runId).length, 1);
+    assert.equal(fs.existsSync(path.join(run.sandboxDir, "approved-only.txt")), false);
+    const action = run.log.listPendingActions(runId)[0]!;
+    await run.orchestrator.resumeAfterApproval({ userId: run.userId, runId, actionId: action.id, approved: true });
+    assert.equal(run.log.getRun(runId)?.status, "completed");
+    assert.equal(fs.existsSync(path.join(run.sandboxDir, "approved-only.txt")), true);
+  });
+
+  it("applies the shell denylist to goal_run_checks even under the grant", async () => {
+    const run = tracked(delegateFixture([
+      { tool: { name: "goal_run_checks", arguments: { command: "rm -rf /" } } },
+      { text: "checked" }
+    ], ["sandbox_checks"]));
+    const runId = await run.driveParent();
+    assert.equal(run.log.getRun(runId)?.status, "completed");
+    assert.match(checkStepResult(run, runId), /Denied by security policy/);
   });
 
   it("limits the coding tool surface to sandbox tools plus read-only platform tools", () => {

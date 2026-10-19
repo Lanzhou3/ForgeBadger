@@ -577,7 +577,10 @@ The delegatable commands are `project.create`, `project.metadata.update`,
 `pm.task.execute`, `pm.management.update`, `memory.write`, `session.start`,
 `session.stop`, and `session.dispatch`.
 Task preparation creates/links an idle session and never launches or submits a
-prompt. `pm.task.execute` composes prepare + session start + programmatic
+prompt. Prepare and execute both refuse a work item whose dependency blockers
+are not `done` (or `cancelled`; `pm_review_task` acceptance uses the same rule) with `TASK_DEPENDENCIES_NOT_DONE` naming the
+open blockers; Copilot goal dispatch applies the same gate to board-linked
+tasks (`COPILOT_GOAL_TASK_BLOCKED`). `pm.task.execute` composes prepare + session start + programmatic
 prompt delivery and marks the work item in progress; `session.dispatch`
 delivers a message into a live session. Copilot-origin dispatch is open for
 every owned project; the guardrails are the security policy, the run origin
@@ -2103,6 +2106,21 @@ do not silently upgrade existing credentials.
 | `pm_review_task` | `expectedRevision`; ready-for-review task, `decision=accepted/changes_requested`, note; acceptance covers every current criterion by index and existing evidence reference, with all dependencies done |
 | `pm_delete_work_item` | `expectedRevision`, `confirm=true`; no delivery history, live/unconfirmed execution or raced session binding |
 
+The planning edits `pm_set_goal`, `pm_update_task_plan`, `pm_manage_stage`,
+`pm_manage_dependency` and `pm_attach_evidence` (plus the reads `pm_get_plan`
+/ `pm_get_handoff`) are also native Copilot tools — offered to goal runs and discovery-mode
+runs only, so plain chat keeps its default tool-schema budget: without an MCP token the
+same `mcp.lifecycle.*` commands run only for intents created by a Copilot step
+or the owner API (an intent minted under a token is never executable without
+it), through the Copilot approval gate — `pm_update_task_plan` without
+`acceptanceCriteria` is routine (auto-approved for user-sourced runs); criteria
+edits, `pm_manage_dependency`, `pm_attach_evidence`, `pm_set_goal` and
+`pm_manage_stage` need owner approval because they feed the owner's
+acceptance and dispatch gates.
+`pm_review_task` and `pm_delete_work_item` stay MCP-token-only
+(`PM_LIFECYCLE_OWNER_ONLY` natively): the Copilot never accepts or deletes
+board work.
+
 `pm_review_task` acceptance records `completionSource=operator_declared`; it
 does not create test, integration or deployment receipts. Changes requested
 return the task to `in_progress`. Team-governed/managed-delivery projects must
@@ -2689,15 +2707,30 @@ even with an identical question; owner `cancel` is not notified. The model-maint
 state, execute without owner approval, and fail with
 `COPILOT_GOAL_CONTEXT_REQUIRED` outside a goal run.
 
-Goal runs with a project edit inside an isolated sandbox copy of the project
-root (`<FORGEBADGER_STATE_DIR>/goal-sandboxes/<goalId>/`, lazily created on
-first write, reused afterwards, kept after cancel and merge; `.git`,
-`node_modules`, build output and vendored directories are never copied,
-diffed or merged). The sandbox tools `goal_file_read` (offset/limit in
+Goal runs with a project edit inside an isolated goal workspace, created
+lazily on the first sandbox tool call or CLI dispatch and recorded once on the
+goal (detail DTO `workspace: {kind, branch, baseCommit, targetBranch} | null`;
+filesystem paths stay server-side). Git projects (a `.git` at the project
+root with a commit on a checked-out branch) get a managed git worktree under
+`<FORGEBADGER_STATE_DIR>/goal-worktrees/<goalId>/` on branch
+`forgebadger/goal-<goalId>`, forked from the project HEAD; sandbox tools,
+verify commands and dispatched CLI sessions all work on that tree. Non-git
+projects — and goals that already own a legacy copy — use the copy sandbox
+`<FORGEBADGER_STATE_DIR>/goal-sandboxes/<goalId>/` (`.git`, `node_modules`,
+build output and vendored directories are never copied, diffed or merged).
+Workspaces are kept after cancel and merge. Shared/team projects are refused
+with `403 COPILOT_GOAL_SHARED_PROJECT` (they use the delivery workflow); a
+worktree that cannot be created maps to `409 COPILOT_GOAL_WORKSPACE_FAILED`,
+and a workspace removed from disk to `409 COPILOT_GOAL_SANDBOX_MISSING` (it
+is never silently recreated). Goal file tools refuse any `.git` path component
+and writes to CLI configuration (`.claude/settings.json`,
+`.claude/settings.local.json`, `.mcp.json`, `.codex/`, `.opencode/`). The sandbox tools `goal_file_read` (offset/limit in
 lines), `goal_file_write`, `goal_file_edit` (exactly-one-match replacement)
 and `goal_run_checks` (shell command with the sandbox as cwd, default
 5-minute / maximum 10-minute timeout, 48 KiB truncated output; `taskId` +
-exit 0 refreshes the task verify record) take sandbox-relative paths only —
+exit 0 refreshes the task verify record; operate-class: per-call owner
+approval unless the goal holds the `sandbox_checks` grant, and the shell
+denylist applies) take sandbox-relative paths only —
 absolute paths, `..` traversal and symlink escapes are refused. v1 runs
 commands with the host environment; the isolation boundary is the copy
 convention, not an
@@ -2720,16 +2753,40 @@ set `active`, and a continuation run enqueued whose user message is
 unified diff of sandbox vs project root, capped at 512 KiB per response
 (oversized files and the cut boundary are flagged `truncated`; binary files
 appear as `(binary file omitted)` placeholders); no sandbox yields
-`{files:[],truncated:false}`. `POST /api/v1/copilot/goals/:id/merge`
-overwrites the project root with the sandbox tree and returns
-`{merged, deleted, kept}`: `merged` lists added/modified paths, `deleted`
-lists only files recorded in the sandbox creation-time manifest that the
-sandbox removed, and `kept` lists project-side files added after sandbox
-creation (they are never deleted). Merge is refused with `409
+`{files:[],truncated:false}`. The diff lists only what a merge would act on:
+for a worktree, committed, working-tree and untracked changes against the
+recorded base commit (CLI hook files ForgeBadger materializes —
+`.claude/settings.local.json`, `.codex/hooks.json`,
+`.codex/hooks/forgebadger-notify.mjs`, the OpenCode plugin — are excluded);
+for a copy, files the sandbox left at their creation-time content and
+project-side additions are omitted. `POST /api/v1/copilot/goals/:id/merge`
+on a worktree commits pending edits on the goal branch (author
+`ForgeBadger Goal`, hook files excluded), merges a project branch that moved
+since the base into the goal branch, and fast-forwards the project branch;
+it returns `{merged, deleted, kept: [], commit}` and advances the recorded
+base. It is refused (`409 COPILOT_GOAL_MERGE_CONFLICT`, both trees untouched)
+when the project switched branches, the merge conflicts (paths listed; the
+goal-branch merge is aborted), uncommitted project edits overlap incoming
+paths, or goal-branch commits touch CLI hook files. A goal with no commits of
+its own merges as a no-op (no merge commit; the goal branch fast-forwards to
+the project head). Known v1 limits: git clean/smudge filters are disabled
+for goal commits (LFS-tracked files are committed raw), goal-created files
+matching `.gitignore` are neither diffed nor merged, and a worktree re-adopted
+after a crash targets the project's then-current branch. A dispatch with no
+turn-end report for 60 minutes stops holding the goal (`ended`). On a copy it applies the
+sandbox with three-way semantics against the creation-time manifest
+(`{version:2,files:{path:sha256}}`) and returns `{merged, deleted, kept}`:
+`merged` lists paths the sandbox added/modified while the project kept the
+base content, `deleted` lists manifest files the sandbox removed while the
+project left them unchanged, and `kept` lists project-side files added after
+sandbox creation (never deleted). Project-side edits to files the sandbox
+did not change are preserved. Legacy path-only manifests have no base and
+keep the earlier overwrite semantics. Merge is refused with `409
 COPILOT_GOAL_STATE` while the goal has an active run or is not
 `completed`/`blocked`, and with `409 COPILOT_GOAL_MERGE_CONFLICT` (listing
 the paths) when a dry run detects type conflicts (e.g. sandbox file vs
-project directory) — the project is left untouched in both cases. A missing
+project directory) or content conflicts (both sides modified, added with
+different content, or deleted on one side and modified on the other) — the project is left untouched in both cases. A missing
 sandbox maps to `409 COPILOT_GOAL_SANDBOX_MISSING`. Both are owner-HTTP
 operations (HTTP authorization is the merge authority — no in-run approval)
 and both record the outcome in the goal journal.
@@ -2770,7 +2827,8 @@ spec drives the initializer turn.
 with the goal: `operate_sessions` (start/stop/takeover session),
 `terminal_run` (terminal_run/open/close), `pm_dispatch`
 (dispatch_task_to_session, pm_execute/prepare_task_packet,
-goal_dispatch_task). Inside a user-sourced run of an ACTIVE goal, a covered
+goal_dispatch_task), `sandbox_checks` (goal_run_checks, including inside
+delegated coding sub-runs, which resolve the goal from their run row). Inside a user-sourced run of an ACTIVE goal, a covered
 operate tool skips the per-call pending-action approval and executes
 directly; every auto-execution is journaled (`自动执行 <tool>（授权 <grant>）`)
 and traced as `tool_gate: auto_approved`. Grants of non-active goals cover
@@ -2792,16 +2850,46 @@ cancelled or de-authorised parent cancels the delegate child (no orphaned
 runs), and the driver's busy/sweep checks treat the child run as goal-owned
 activity. Stagnation counters never count delegate/research child runs.
 
+Goals on a personal project keep their checklist on the project board:
+`goal_add_tasks` creates one work item per new task (title, description with
+the verify command, one acceptance criterion, `details.copilotGoal.goalId`) or
+adopts an existing open item via `{workItemId, description?, verifyCommand?}`
+(a work item belongs to at most one open goal; the whole batch is atomic, and
+adoption without a board is `COPILOT_GOAL_BOARD_UNAVAILABLE`). Goal task
+progress is mirrored onto the item along legal board transitions (pending →
+todo, in_progress → in_progress, failed → blocked, passes → ready_for_review
+with a `copilot_goal` evidence reference); the Copilot never moves an item to
+`done`, items owned by a live board dispatch are left alone, and board
+conflicts are journaled instead of failing the goal. The owner's board
+decisions flow back on every driver evaluation and goal detail read: a `done`
+item passes its task (owner acceptance supersedes the verify gate) and a
+`cancelled` item sets the task `cancelled` (owner-final, refused by
+`goal_update_task` with `COPILOT_GOAL_TASK_CANCELLED`); a `passes` task whose
+item the board moves back to todo/in_progress/blocked afterwards (changes
+requested) reopens as `in_progress`, and a completed goal is set `paused`;
+items whose board dispatch is in flight or uncertain are not mirrored; a goal completes when
+every task is `passes` or `cancelled`. Task DTOs add `workItemId` and
+`boardStatus`. Shared/team projects are not linked. The model-facing goal
+context lists task `id`, `verifyCommand`, `workItemId`, `boardStatus` and
+`dispatchStatus`.
+
 `goal_dispatch_task {taskId, aiTool, instructions}` (operate risk) hands a
-task to a real CLI session: it creates or reuses a running session for the
-goal's project + adapter and submits the instructions through the existing
+task to a real CLI session working inside the goal workspace: it reuses the
+task's previous goal session while that session still runs there with the
+same adapter, otherwise it creates a dedicated session (`workingDir` = the
+workspace) and starts it through the shared session runtime (adapter launch
+gating and CLI lifecycle hooks), then submits the instructions through the
 programmatic-terminal-submit path with delivery confirmation. The adapter
 must be listed in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` (else
 `COPILOT_ADAPTER_AUTONOMY_DENIED`); without the `pm_dispatch` grant it goes
 through normal owner approval. On success the session id is stored on the
-task (`dispatchedSessionId`) and journaled — dispatch is not completion, the
-task's verify gate still applies. CLI completion notifications reuse the
-existing session-hooks mechanism.
+task (`dispatchedSessionId`, `dispatchStatus: running`) and journaled. While
+any dispatch is `running` the goal driver does not enqueue continuation runs
+(`busy`/`awaiting_cli`); the session's turn-end hook (`task_completed` /
+`task_failed`, child-agent turns ignored) settles it as `completed`/`failed`,
+journals that the turn ended (not verification) and re-evaluates the goal; a
+session that stops without a report settles as `ended`. Dispatch and a
+finished turn are never completion — the task's verify gate still applies.
 
 Goal detail `usage` adds `costUsd` (number|null): the sum of
 `copilot_model_calls.cost_nanousd` across the goal's runs (computed from

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,7 +18,10 @@ import type { Database } from '../../db/types.js';
  */
 
 export const GOAL_SANDBOX_EXCLUDES = ['.git', 'node_modules', 'dist', 'build', 'coverage', '.next', 'vendor'] as const;
-/** Original-file manifest written at sandbox creation; merge deletions are limited to it. */
+/**
+ * Creation-time manifest: every copied path with its sha256 (the merge base).
+ * Merge deletions are limited to it, and the hashes drive the three-way merge.
+ */
 export const GOAL_MANIFEST_NAME = '.goal-manifest.json';
 const MAX_FILE_BYTES = 512 * 1024;
 const MAX_READ_BYTES = 512 * 1024;
@@ -86,6 +90,10 @@ function copyTree(source: string, destination: string): void {
   }
 }
 
+function hashFile(file: string): string {
+  return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
 function listTree(root: string): string[] {
   const files: string[] = [];
   (function walk(directory: string): void {
@@ -115,7 +123,8 @@ export function ensureGoalSandbox(projectRoot: string, sandboxDir: string): stri
   const staging = path.join(parent, `.staging-${process.pid}-${Date.now()}`);
   try {
     copyTree(project, staging);
-    fs.writeFileSync(path.join(staging, GOAL_MANIFEST_NAME), JSON.stringify(listTree(staging)), { mode: 0o600 });
+    const files = Object.fromEntries(listTree(staging).map(relative => [relative, hashFile(path.join(staging, relative))]));
+    fs.writeFileSync(path.join(staging, GOAL_MANIFEST_NAME), JSON.stringify({ version: 2, files }), { mode: 0o600 });
     fs.renameSync(staging, sandboxDir);
   } catch (error) {
     fs.rmSync(staging, { recursive: true, force: true });
@@ -124,7 +133,25 @@ export function ensureGoalSandbox(projectRoot: string, sandboxDir: string): stri
   return fs.realpathSync(sandboxDir);
 }
 
+/**
+ * Paths goal file tools must never touch. Git metadata (`.git` is a gitdir
+ * pointer inside a worktree) and CLI configuration that a dispatched CLI
+ * would execute from (hooks, MCP servers, plugins) are owner territory.
+ */
+const PROTECTED_CLI_CONFIG = new Set(['.claude/settings.json', '.claude/settings.local.json', '.mcp.json', 'opencode.json', 'opencode.jsonc']);
+const PROTECTED_CLI_DIRECTORIES = ['.claude/hooks/', '.codex/', '.opencode/', '.grok/', '.kimi/', '.pi/'];
+
+function assertGoalToolPath(relative: string, write: boolean): void {
+  const normalized = relative.replace(/\\/gu, '/').split('/').filter(part => part && part !== '.').join('/');
+  if (normalized.split('/').some(part => part.toLowerCase() === '.git'))
+    throw new AgentError('COPILOT_GOAL_PATH_INVALID', `Git metadata is not accessible to goal file tools: ${relative}`);
+  const lower = normalized.toLowerCase();
+  if (write && (PROTECTED_CLI_CONFIG.has(lower) || PROTECTED_CLI_DIRECTORIES.some(prefix => lower.startsWith(prefix))))
+    throw new AgentError('COPILOT_GOAL_PATH_INVALID', `CLI configuration cannot be written by goal file tools: ${relative}`);
+}
+
 export function readSandboxFile(sandboxDir: string, relative: string, offset = 0, limit?: number): { path: string; content: string; totalLines: number; truncated: boolean } {
+  assertGoalToolPath(relative, false);
   const target = sandboxPath(sandboxDir, relative);
   const fd = fs.openSync(target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
@@ -145,6 +172,7 @@ export function readSandboxFile(sandboxDir: string, relative: string, offset = 0
 
 export function writeSandboxFile(sandboxDir: string, relative: string, content: string): { path: string; bytes: number } {
   if (Buffer.byteLength(content) > MAX_FILE_BYTES) throw new AgentError('COPILOT_GOAL_FILE_TOO_LARGE', `Sandbox file writes are limited to ${MAX_FILE_BYTES} bytes`);
+  assertGoalToolPath(relative, true);
   const target = sandboxPath(sandboxDir, relative);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   if (fs.existsSync(target) && !fs.lstatSync(target).isFile()) throw new AgentError('COPILOT_GOAL_PATH_INVALID', 'Target exists and is not a regular file');
@@ -156,6 +184,7 @@ export function editSandboxFile(sandboxDir: string, relative: string, oldString:
   if (!oldString) throw new AgentError('COPILOT_GOAL_INPUT_INVALID', 'old_string must be non-empty');
   if (Buffer.byteLength(oldString) > MAX_FILE_BYTES || Buffer.byteLength(newString) > MAX_FILE_BYTES)
     throw new AgentError('COPILOT_GOAL_FILE_TOO_LARGE', `Edit strings are limited to ${MAX_FILE_BYTES} bytes`);
+  assertGoalToolPath(relative, true);
   if (oldString === newString) return { path: relative, replacements: 0 };
   const { content } = readSandboxFile(sandboxDir, relative);
   const occurrences = content.split(oldString).length - 1;
@@ -168,9 +197,9 @@ export function editSandboxFile(sandboxDir: string, relative: string, oldString:
 // Diff generation (minimal unified LCS diff, line based)
 // ---------------------------------------------------------------------------
 
-function isBinary(buffer: Buffer): boolean { return buffer.subarray(0, 8192).includes(0); }
+export function isBinary(buffer: Buffer): boolean { return buffer.subarray(0, 8192).includes(0); }
 
-function unifiedDiff(before: string, after: string, filePath: string): { diff: string; truncated: boolean } {
+export function unifiedDiff(before: string, after: string, filePath: string): { diff: string; truncated: boolean } {
   const a = before === '' ? [] : before.replace(/\n$/u, '').split('\n');
   const b = after === '' ? [] : after.replace(/\n$/u, '').split('\n');
   if (a.length > MAX_DIFF_LINES || b.length > MAX_DIFF_LINES) {
@@ -197,11 +226,22 @@ function unifiedDiff(before: string, after: string, filePath: string): { diff: s
 
 export interface GoalFileChange { path: string; status: 'added' | 'modified' | 'deleted'; diff: string; truncated: boolean }
 
-/** Sandbox vs project root, file by file. Response is capped; the cut file is flagged truncated. */
+/**
+ * Sandbox vs project root, file by file, limited to what a merge would act
+ * on: files the sandbox left at their base content and project-only files
+ * added after sandbox creation are skipped. Response is capped; the cut file
+ * is flagged truncated.
+ */
 export function diffGoalSandbox(sandboxDir: string, projectRoot: string): { files: GoalFileChange[]; truncated: boolean } {
   if (!fs.existsSync(sandboxDir)) return { files: [], truncated: false };
   const project = fs.realpathSync(projectRoot);
-  const sandboxFiles = new Set(listTree(sandboxDir));
+  const sandboxList = listTree(sandboxDir);
+  const manifest = readManifest(sandboxDir, sandboxList);
+  const sandboxAll = new Set(sandboxList);
+  const sandboxFiles = new Set(sandboxList.filter(relative => {
+    const base = manifest.hashes?.get(relative);
+    return base === undefined || base !== hashFile(path.join(sandboxDir, relative));
+  }));
   const projectFiles = new Set(listTree(project));
   const files: GoalFileChange[] = [];
   let bytes = 0;
@@ -240,7 +280,7 @@ export function diffGoalSandbox(sandboxDir: string, projectRoot: string): { file
   }
   if (!truncated) {
     for (const relative of projectFiles) {
-      if (sandboxFiles.has(relative)) continue;
+      if (sandboxAll.has(relative) || !manifest.paths.has(relative)) continue;
       const projectBuffer = fs.readFileSync(sandboxPath(project, relative));
       if (isBinary(projectBuffer)) {
         if (!emit({ path: relative, status: 'deleted', diff: '(binary file omitted)\n', truncated: false })) break;
@@ -257,90 +297,129 @@ export function diffGoalSandbox(sandboxDir: string, projectRoot: string): { file
 // Merge (dry-run conflicts, manifest-bounded deletions, external-file keep)
 // ---------------------------------------------------------------------------
 
-function readManifest(sandboxDir: string, sandboxFiles: string[]): Set<string> {
+interface GoalManifest {
+  paths: Set<string>;
+  /** Creation-time sha256 per path; null for legacy (v1, path-only) manifests. */
+  hashes: Map<string, string> | null;
+}
+
+function readManifest(sandboxDir: string, sandboxFiles: string[]): GoalManifest {
   try {
     const parsed = JSON.parse(fs.readFileSync(path.join(sandboxDir, GOAL_MANIFEST_NAME), 'utf8')) as unknown;
-    if (Array.isArray(parsed)) return new Set(parsed.filter((entry): entry is string => typeof entry === 'string'));
+    if (Array.isArray(parsed)) {
+      return { paths: new Set(parsed.filter((entry): entry is string => typeof entry === 'string')), hashes: null };
+    }
+    const files = (parsed as { files?: unknown } | null)?.files;
+    if (files && typeof files === 'object' && !Array.isArray(files)) {
+      const hashes = new Map<string, string>();
+      for (const [relative, hash] of Object.entries(files)) if (typeof hash === 'string') hashes.set(relative, hash);
+      return { paths: new Set(hashes.keys()), hashes };
+    }
   } catch { /* missing or malformed manifest: fall through */ }
-  return new Set(sandboxFiles);
+  return { paths: new Set(sandboxFiles), hashes: null };
+}
+
+interface GoalMergePlan { copy: string[]; remove: string[]; kept: string[]; conflicts: string[] }
+
+function hashIfFile(target: string): string | undefined {
+  return fs.existsSync(target) && fs.lstatSync(target).isFile() ? hashFile(target) : undefined;
+}
+
+function mergePathTypeConflict(project: string, relative: string, deletion = false): string | undefined {
+  if (!deletion) {
+    const parts = relative.split('/');
+    for (let index = 1; index < parts.length; index += 1) {
+      const ancestor = parts.slice(0, index).join('/');
+      const ancestorTarget = path.join(project, ancestor);
+      if (fs.existsSync(ancestorTarget) && !fs.lstatSync(ancestorTarget).isDirectory())
+        return `${relative} (parent path '${ancestor}' is a file in the project)`;
+    }
+  }
+  const target = path.join(project, relative);
+  if (fs.existsSync(target) && fs.lstatSync(target).isDirectory()) {
+    return deletion
+      ? `${relative} (deletion target became a directory in the project)`
+      : `${relative} (a directory exists in the project)`;
+  }
+  return undefined;
 }
 
 /**
- * Pre-merge dry run: type conflicts that would make the merge half-applied
- * (sandbox file vs project directory, or a deletion whose target became a
- * directory). Returns the conflicting paths (empty = safe to merge).
+ * Three-way merge plan (base = manifest hash, ours = sandbox, theirs =
+ * project). A path is copied only when the sandbox changed it and the
+ * project did not (or changed it identically); deletions likewise require an
+ * unchanged project file. Divergent edits are conflicts, never overwrites.
+ * Legacy path-only manifests have no base, so they keep the v1 overwrite
+ * semantics. Type conflicts only apply to paths the sandbox actually changed.
  */
-export function detectMergeConflicts(sandboxDir: string, projectRoot: string): string[] {
-  if (!fs.existsSync(sandboxDir)) return [];
-  const project = fs.realpathSync(projectRoot);
+function planGoalMerge(sandboxDir: string, project: string): GoalMergePlan {
   const sandboxFiles = listTree(sandboxDir);
   const sandboxSet = new Set(sandboxFiles);
   const manifest = readManifest(sandboxDir, sandboxFiles);
-  const conflicts = new Set<string>();
-  const relativeAncestors = (relative: string): string[] => {
-    const parts = relative.split('/');
-    const ancestors: string[] = [];
-    for (let index = 1; index < parts.length; index += 1) ancestors.push(parts.slice(0, index).join('/'));
-    return ancestors;
-  };
+  const plan: GoalMergePlan = { copy: [], remove: [], kept: [], conflicts: [] };
   for (const relative of sandboxFiles) {
-    for (const ancestor of relativeAncestors(relative)) {
-      const ancestorTarget = path.join(project, ancestor);
-      if (fs.existsSync(ancestorTarget) && !fs.lstatSync(ancestorTarget).isDirectory()) {
-        conflicts.add(`${relative} (parent path '${ancestor}' is a file in the project)`);
-      }
-    }
+    const ours = hashFile(sandboxPath(sandboxDir, relative));
+    const base = manifest.hashes?.get(relative);
+    if (base === ours) continue; // sandbox left it alone: keep any project-side edit or type change
+    const typeConflict = mergePathTypeConflict(project, relative);
+    if (typeConflict) { plan.conflicts.push(typeConflict); continue; }
     const target = path.join(project, relative);
-    if (fs.existsSync(target) && fs.lstatSync(target).isDirectory())
-      conflicts.add(`${relative} (a directory exists in the project)`);
+    const theirs = hashIfFile(target);
+    if (theirs === ours) continue; // already identical
+    if (!manifest.hashes) { plan.copy.push(relative); continue; }
+    if (theirs === base) plan.copy.push(relative); // only the sandbox changed it (or added it)
+    else if (base === undefined) plan.conflicts.push(`${relative} (added in both sandbox and project with different content)`);
+    else if (theirs === undefined) plan.conflicts.push(`${relative} (modified in the sandbox but deleted in the project)`);
+    else plan.conflicts.push(`${relative} (modified in both sandbox and project)`);
   }
-  for (const relative of manifest) {
+  for (const relative of manifest.paths) {
     if (sandboxSet.has(relative) || isExcluded(relative)) continue;
+    const typeConflict = mergePathTypeConflict(project, relative, true);
+    if (typeConflict) { plan.conflicts.push(typeConflict); continue; }
     const target = path.join(project, relative);
-    if (fs.existsSync(target) && fs.lstatSync(target).isDirectory())
-      conflicts.add(`${relative} (deletion target became a directory in the project)`);
+    if (!fs.existsSync(target)) continue;
+    const base = manifest.hashes?.get(relative);
+    if (base !== undefined && hashFile(target) !== base) {
+      plan.conflicts.push(`${relative} (deleted in the sandbox but modified in the project)`);
+    } else {
+      plan.remove.push(relative);
+    }
   }
-  return [...conflicts].sort();
+  // Files that appeared on the project side after sandbox creation survive.
+  for (const relative of listTree(project)) {
+    if (!sandboxSet.has(relative) && !manifest.paths.has(relative)) plan.kept.push(relative);
+  }
+  return plan;
+}
+
+/** Return all content and type conflicts in one merge plan, without writing. */
+export function detectMergeConflicts(sandboxDir: string, projectRoot: string): string[] {
+  if (!fs.existsSync(sandboxDir)) return [];
+  const project = fs.realpathSync(projectRoot);
+  return [...new Set(planGoalMerge(sandboxDir, project).conflicts)].sort();
 }
 
 export interface GoalMergeResult { merged: string[]; deleted: string[]; kept: string[] }
 
 /**
- * Overwrite the project root with the sandbox tree. Deletions are limited to
- * files recorded in the creation-time manifest; files added on the project
- * side after sandbox creation are kept. Returns the three path classes.
+ * Apply the sandbox to the project root with three-way semantics: only
+ * sandbox-side changes are written, project-side edits made after sandbox
+ * creation are preserved, and any divergence aborts the whole merge before
+ * the first write. Returns the three path classes.
  */
 export function mergeGoalSandbox(sandboxDir: string, projectRoot: string): GoalMergeResult {
   if (!fs.existsSync(sandboxDir)) throw new AgentError('COPILOT_GOAL_SANDBOX_MISSING', 'Goal sandbox does not exist; nothing to merge');
-  const conflicts = detectMergeConflicts(sandboxDir, projectRoot);
-  if (conflicts.length) throw new AgentError('COPILOT_GOAL_MERGE_CONFLICT', `Merge conflicts: ${conflicts.join('; ')}`);
   const project = fs.realpathSync(projectRoot);
-  const sandboxFiles = listTree(sandboxDir);
-  const sandboxSet = new Set(sandboxFiles);
-  const manifest = readManifest(sandboxDir, sandboxFiles);
-  const merged: string[] = [];
-  const deleted: string[] = [];
-  const kept: string[] = [];
-  for (const relative of sandboxFiles) {
-    const from = sandboxPath(sandboxDir, relative);
+  const plan = planGoalMerge(sandboxDir, project);
+  const conflicts = [...new Set(plan.conflicts)].sort();
+  if (conflicts.length) throw new AgentError('COPILOT_GOAL_MERGE_CONFLICT', `Merge conflicts: ${conflicts.join('; ')}`);
+  for (const relative of plan.copy) {
     const to = sandboxPath(project, relative);
-    if (fs.existsSync(to) && fs.lstatSync(to).isFile()
-      && fs.readFileSync(from).equals(fs.readFileSync(to))) continue; // unchanged
     fs.mkdirSync(path.dirname(to), { recursive: true });
-    fs.copyFileSync(from, to);
-    merged.push(relative);
+    fs.copyFileSync(sandboxPath(sandboxDir, relative), to);
   }
-  for (const relative of manifest) {
-    if (sandboxSet.has(relative) || isExcluded(relative)) continue;
-    const target = sandboxPath(project, relative);
-    if (fs.existsSync(target)) { fs.rmSync(target); deleted.push(relative); }
-  }
-  // Files that appeared on the project side after sandbox creation survive.
-  for (const relative of listTree(project)) {
-    if (sandboxSet.has(relative) || manifest.has(relative)) continue;
-    kept.push(relative);
-  }
-  return { merged: merged.sort(), deleted: deleted.sort(), kept: kept.sort() };
+  for (const relative of plan.remove) fs.rmSync(sandboxPath(project, relative));
+  return { merged: plan.copy.sort(), deleted: plan.remove.sort(), kept: plan.kept.sort() };
 }
 
 // ---------------------------------------------------------------------------

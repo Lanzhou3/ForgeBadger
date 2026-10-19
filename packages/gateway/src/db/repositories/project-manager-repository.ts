@@ -911,6 +911,14 @@ export class ProjectManagerRepository {
     return this.listStages(projectId);
   }
 
+  /** Blockers of a work item that are neither done nor cancelled (a cancelled blocker no longer gates). */
+  unresolvedBlockers(projectId: string, workItemId: string): ProjectManagerWorkItem[] {
+    return this.listWorkItemLinks(projectId)
+      .filter(link => link.blockedWorkItemId === workItemId)
+      .map(link => this.getWorkItem(projectId, link.blockerWorkItemId))
+      .filter((item): item is ProjectManagerWorkItem => !!item && item.status !== "done" && item.status !== "cancelled");
+  }
+
   listWorkItemLinks(projectId: string): ProjectManagerWorkItemLink[] {
     return (this.db.prepare(`
       SELECT *

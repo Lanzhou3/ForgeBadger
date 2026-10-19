@@ -1,11 +1,16 @@
 import { z } from 'zod';
-import { randomUUID } from 'node:crypto';
 import type { Database } from '../../../db/types.js';
 import { ProjectRepository } from '../../../db/repositories/project-repository.js';
-import { SessionRepository } from '../../../db/repositories/session-repository.js';
-import { isAdapterId, type AdapterId } from '../../adapter-discovery.js';
-import { createLaunchPlan, normalizeAdapter } from '../../session-launch-plan.js';
+import { SessionRepository, type Session } from '../../../db/repositories/session-repository.js';
+import { isAdapterId } from '../../adapter-discovery.js';
+import type { CommandRunner } from '../../../lib/dependency-check.js';
+import type { ForgeBadgerEventBus } from '../../event-bus.js';
+import { normalizeAdapter } from '../../session-launch-plan.js';
 import type { InMemorySessionManager } from '../../session-manager.js';
+import { recordStartFailure, startSessionRuntime, type SessionRuntimeDeps } from '../../session-runtime.js';
+import { ensureGoalWorkspace, type GoalWorkspace } from '../goal-workspace.js';
+import { linkedWorkItem } from '../goal-board.js';
+import { assertTaskDependenciesResolved } from '../../project-manager/task-execution.js';
 import { dispatchSessionInput } from '../platform-access.js';
 import { assertAdapterAutonomy } from '../goal-grants.js';
 import { CopilotGoalStore } from '../goal-store.js';
@@ -21,12 +26,15 @@ import type { AgentTool, AgentToolContext } from '../tool-registry.js';
  *   the parent run. The sub-run is orchestration-owned (context
  *   `runCodingDelegate`), so it executes on the real ReAct loop with durable
  *   steps and trace, and its report returns as this tool's result.
- * - `goal_dispatch_task` hands a task to a real CLI session: create-or-reuse
- *   a session for the goal's project + adapter and submit the instructions
- *   through the existing programmatic-terminal-submit path with delivery
- *   confirmation. It is operate-risk: without the `pm_dispatch` grant it goes
- *   through the normal pending-action approval; the adapter must also be
- *   listed in FORGEBADGER_CLI_AUTONOMY_ADAPTERS.
+ * - `goal_dispatch_task` hands a task to a real CLI session working inside the
+ *   goal workspace (the same tree the sandbox tools and verify commands use).
+ *   The session is launched through the shared session runtime (adapter
+ *   gating + CLI lifecycle hooks), reused while the task's previous session
+ *   still runs there, and fed through the programmatic-terminal-submit path
+ *   with delivery confirmation. The CLI's turn-end hook settles the task's
+ *   dispatch status for the goal driver. It is operate-risk: without the
+ *   `pm_dispatch` grant it goes through the normal pending-action approval;
+ *   the adapter must also be listed in FORGEBADGER_CLI_AUTONOMY_ADAPTERS.
  */
 
 const delegateInput = z.object({
@@ -58,6 +66,20 @@ function taskOf(store: CopilotGoalStore, goalId: string, taskId: string) {
 
 export interface CodingDelegateResult { runId: string; status: string; report: string }
 
+function workspaceNote(workspace: GoalWorkspace): string {
+  return workspace.kind === 'worktree'
+    ? `\n\n[ForgeBadger] You are in an isolated git worktree of the project on branch ${workspace.branch}. Keep all changes in this directory; do not switch branches, rebase or push. The owner reviews and merges the result.`
+    : '\n\n[ForgeBadger] You are in an isolated copy of the project. Keep all changes in this directory; the owner reviews and merges the result.';
+}
+
+/** The task's previous session, when it still runs in this workspace with this adapter. */
+function reusableSession(repository: SessionRepository, sessionManager: InMemorySessionManager, sessionId: string | null, aiTool: string, workspace: GoalWorkspace): Session | undefined {
+  if (!sessionId) return undefined;
+  const session = repository.getById(sessionId);
+  if (!session || session.status !== 'running' || session.aiTool !== aiTool || session.workingDir !== workspace.path) return undefined;
+  return sessionManager.getSession(session.id)?.status === 'running' ? session : undefined;
+}
+
 export function createGoalDelegateTools(): AgentTool[] {
   return [
     {
@@ -80,7 +102,7 @@ export function createGoalDelegateTools(): AgentTool[] {
     },
     {
       name: 'goal_dispatch_task',
-      description: 'Dispatch one goal task to a real CLI session: creates a dedicated session for the goal project + adapter and submit the instructions with delivery confirmation. Requires the pm_dispatch grant (otherwise owner approval) and the adapter listed in FORGEBADGER_CLI_AUTONOMY_ADAPTERS. Dispatch is not completion: the task still needs its verify_command to pass. 把任务派发给真实 CLI 会话执行。',
+      description: 'Dispatch one goal task to a real CLI session working inside the goal workspace (the same tree goal_file_*/goal_run_checks use): reuses the task\'s running goal session or starts a dedicated one, and submits the instructions with delivery confirmation. The goal waits for the CLI to report its turn finished before continuing. Requires the pm_dispatch grant (otherwise owner approval) and the adapter listed in FORGEBADGER_CLI_AUTONOMY_ADAPTERS. Dispatch is not completion: the task still needs its verify_command to pass. 把任务派发给真实 CLI 会话执行。',
       risk: 'operate',
       requiresApproval: true,
       inputSchema: dispatchInput,
@@ -90,33 +112,47 @@ export function createGoalDelegateTools(): AgentTool[] {
         const { taskId, aiTool, instructions } = dispatchInput.parse(input);
         if (!isAdapterId(aiTool)) throw new AgentError('COPILOT_GOAL_INPUT_INVALID', `Unknown adapter '${aiTool}'`);
         assertAdapterAutonomy(aiTool);
-        taskOf(store, goalId, taskId);
+        const task = taskOf(store, goalId, taskId);
+        // The board's dependency graph gates CLI work exactly like PM dispatch.
+        const board = linkedWorkItem(db, context.userId, store.getGoal(goalId)!, task);
+        if (board) {
+          try { assertTaskDependenciesResolved(board.repo, board.item); }
+          catch (error) { throw new AgentError('COPILOT_GOAL_TASK_BLOCKED', error instanceof Error ? error.message : 'Task dependencies are not done'); }
+        }
         const sessionManager = context.sessionManager as InMemorySessionManager | undefined;
         if (!sessionManager) throw new AgentError('SESSION_RUNTIME_UNAVAILABLE', 'Session runtime unavailable');
         const project = new ProjectRepository(db, context.userId).getById(projectId);
         if (!project) throw new AgentError('COPILOT_PROJECT_NOT_FOUND', 'Goal project no longer exists');
+        const workspace = await ensureGoalWorkspace(db, context.userId, store.getGoal(goalId)!, project);
         const repository = new SessionRepository(db, context.userId);
-        // Always a fresh, dedicated session: reusing an owner-interactive
-        // running session would interleave goal instructions with the user's
-        // own composer state.
-        const row = repository.create({
-          projectId: project.id, name: `Goal task: ${taskId.slice(0, 24)}`, aiTool,
-          workingDir: project.path, credentialMode: 'host_environment'
-        });
-        const launchPlan = createLaunchPlan({ adapter: aiTool as AdapterId, projectRoot: project.path, sessionId: row.id });
-        const attachToken = randomUUID();
-        repository.update(row.id, { attachToken });
-        const started = await sessionManager.createSession({ userId: context.userId, sessionId: row.id, launchPlan, attachToken });
-        repository.update(row.id, { status: 'running', runtimeSessionName: started.runtimeSessionName, attachToken: started.attachToken });
-        const session = repository.getById(row.id)!;
-        const created = true;
+        // Never an owner-interactive session: either this task's own goal
+        // session (still running in the workspace) or a fresh dedicated one.
+        let session = reusableSession(repository, sessionManager, task.dispatched_session_id, aiTool, workspace);
+        const created = !session;
+        if (!session) {
+          const row = repository.create({
+            projectId: project.id, name: `Goal task: ${taskId.slice(0, 24)}`, aiTool,
+            workingDir: workspace.path, credentialMode: 'host_environment'
+          });
+          const runtime: SessionRuntimeDeps = {
+            db, userId: context.userId, masterKey: context.masterKey as string, sessionManager,
+            eventBus: context.eventBus as ForgeBadgerEventBus | undefined,
+            adapterCommandRunner: context.adapterCommandRunner as CommandRunner | undefined
+          };
+          try { session = await startSessionRuntime(runtime, row.id); }
+          catch (error) { recordStartFailure(runtime, row, error); throw error; }
+        }
         const adapter = normalizeAdapter(session.aiTool);
         if (!adapter) throw new AgentError('COPILOT_GOAL_INPUT_INVALID', `Unsupported session adapter '${session.aiTool}'`);
-        const result = await dispatchSessionInput(sessionManager, session.id, adapter, instructions, {});
+        // Mark the turn running before submitting: a fast turn-end hook must
+        // find the dispatch to settle. A failed submit releases the goal.
         store.setTaskDispatched(goalId, taskId, session.id);
+        let result: Awaited<ReturnType<typeof dispatchSessionInput>>;
+        try { result = await dispatchSessionInput(sessionManager, session.id, adapter, `${instructions}${workspaceNote(workspace)}`, {}); }
+        catch (error) { store.settleDispatch(taskId, 'failed'); throw error; }
         store.appendJournal(goalId, typeof context.runId === 'string' ? context.runId : null,
-          `Dispatched task '${taskId}' to CLI session ${session.id} (adapter ${aiTool}, ${created ? 'created' : 'reused'}).`);
-        return { ...result, adapter: aiTool, sessionCreated: created };
+          `Dispatched task '${taskId}' to CLI session ${session.id} (adapter ${aiTool}, ${created ? 'created' : 'reused'}, ${workspace.kind} workspace).`);
+        return { ...result, adapter: aiTool, sessionCreated: created, workspace: workspace.kind };
       }
     }
   ];

@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { Database } from '../../db/types.js';
+import { SessionRepository } from '../../db/repositories/session-repository.js';
 import type { ForgeBadgerEvent } from '../event-bus.js';
 import { buildAgentStack, type AgentStackDeps } from './agent-stack.js';
 import { notifyGoalStatus } from './goal-notify.js';
-import { CopilotGoalStore, goalBudgetExhausted, type GoalRow } from './goal-store.js';
+import { CopilotGoalStore, goalBudgetExhausted, RESOLVED_TASK_STATUSES, type GoalRow } from './goal-store.js';
+import { syncGoalFromBoard } from './goal-board.js';
 import type { TurnInput } from './run-ledger.js';
 
 /**
@@ -25,6 +27,8 @@ export const GOAL_BUDGET_EXHAUSTED_REASON = 'goal_budget_exhausted';
 const NON_RETRYABLE_RUN_ERRORS = new Set(['COPILOT_CONTEXT_TOO_LARGE', 'COPILOT_USER_INACTIVE', 'COPILOT_NOT_FOUND']);
 const FAILURE_COOLDOWN_INITIAL_MS = 15_000;
 const FAILURE_COOLDOWN_MAX_MS = 300_000;
+/** A running dispatch with no turn-end report this long stops holding the goal (adapters without hooks, lost reports). */
+export const DISPATCH_REPORT_TIMEOUT_MS = 60 * 60_000;
 
 /** Per-goal consecutive-failure cooldown (in-memory; a settled success clears it). */
 const failureCooldowns = new Map<string, { code: string; count: number; retryAt: number }>();
@@ -50,8 +54,10 @@ export function evaluateGoalContinuation(
   const store = new CopilotGoalStore(deps.db, userId);
   const goal = store.getGoal(goalId);
   if (!goal || goal.status !== 'active') return { action: 'inactive' };
+  // The owner's board decisions (accept / cancel) settle linked tasks first.
+  syncGoalFromBoard(deps.db, userId, goal);
   const tasks = store.listTasks(goalId);
-  if (tasks.length > 0 && tasks.every(task => task.status === 'passes')) {
+  if (tasks.length > 0 && tasks.every(task => RESOLVED_TASK_STATUSES.includes(task.status))) {
     failureCooldowns.delete(goalId);
     store.setStatus(goalId, 'completed');
     store.appendJournal(goalId, null, 'All tasks passed; goal completed.');
@@ -70,6 +76,9 @@ export function evaluateGoalContinuation(
   // goal: never enqueue a competing run, regardless of stagnation or
   // failure counters.
   if (store.hasActiveGoalRun(goalId) || store.hasActiveRun(goal.conversation_id)) return { action: 'busy' };
+  // A dispatched CLI still working on its turn owns the next step: waiting
+  // for it is not stagnation, and a continuation run would only re-poll it.
+  if (awaitingDispatchedCli(deps.db, store, userId, goalId, now)) return { action: 'busy', reason: 'awaiting_cli' };
   // Failure classification of the most recent settled run: unrecoverable
   // codes block immediately; repeated failures cool down exponentially
   // instead of spinning a retry loop.
@@ -111,6 +120,47 @@ export function evaluateGoalContinuation(
     clientRequestId: randomUUID()
   });
   return { action: 'enqueued', runId };
+}
+
+/**
+ * True while a dispatched task's CLI turn is still running. A dispatch whose
+ * session stopped (or vanished) without a turn-end report settles as `ended`
+ * so the goal never waits on a dead terminal.
+ */
+function awaitingDispatchedCli(db: Database, store: CopilotGoalStore, userId: string, goalId: string, now: number): boolean {
+  const sessions = new SessionRepository(db, userId);
+  let waiting = false;
+  for (const task of store.listTasks(goalId)) {
+    if (task.dispatch_status !== 'running' || !task.dispatched_session_id) continue;
+    const running = sessions.getById(task.dispatched_session_id)?.status === 'running';
+    const stale = now - (task.dispatch_updated_at ?? 0) >= DISPATCH_REPORT_TIMEOUT_MS;
+    if (running && !stale) { waiting = true; continue; }
+    if (store.settleDispatch(task.id, 'ended'))
+      store.appendJournal(goalId, null, running
+        ? `CLI session ${task.dispatched_session_id} for task '${task.id}' sent no turn-end report within ${DISPATCH_REPORT_TIMEOUT_MS / 60_000} minutes; no longer waiting on it.`
+        : `CLI session ${task.dispatched_session_id} for task '${task.id}' ended without reporting a finished turn.`);
+  }
+  return waiting;
+}
+
+/**
+ * CLI turn-end hook for a goal-dispatched session: settle the running
+ * dispatch (completed/failed — a finished turn, never acceptance) and return
+ * the goals to re-evaluate. Child-agent turns never settle the parent task.
+ */
+export function settleGoalDispatchFromHook(db: Database, event: ForgeBadgerEvent): Array<{ userId: string; goalId: string }> {
+  if (event.type !== 'session_notification' || event.nativeSubagent) return [];
+  if (event.notificationType !== 'task_completed' && event.notificationType !== 'task_failed') return [];
+  const store = new CopilotGoalStore(db, event.userId);
+  const settled: Array<{ userId: string; goalId: string }> = [];
+  for (const task of store.runningDispatchesForSession(event.sessionId)) {
+    const status = event.notificationType === 'task_completed' ? 'completed' : 'failed';
+    if (!store.settleDispatch(task.id, status)) continue;
+    store.appendJournal(task.goal_id, null, `CLI session ${event.sessionId} reported ${event.notificationType} for task '${task.id}' `
+      + '(the CLI turn ended; this is not verification — run the task verify_command before marking it passes).');
+    settled.push({ userId: event.userId, goalId: task.goal_id });
+  }
+  return settled;
 }
 
 /** Active goals whose conversation has no active run (restart-gap recovery). Idempotent. */
@@ -176,8 +226,13 @@ export function attachGoalDriver(deps: AgentStackDeps, options?: GoalDriverOptio
       pending.set(key, timer);
     };
     const onEvent = (event: ForgeBadgerEvent): void => {
-      if (event.type !== 'copilot_run_updated' || !TERMINAL_RUN_STATES.includes(event.status)) return;
       if (!deps.db.open) return;
+      if (event.type === 'session_notification') {
+        try { for (const target of settleGoalDispatchFromHook(deps.db, event)) evaluate(target.userId, target.goalId); }
+        catch (error) { logGoalDriverError('dispatch-hook', event.userId, error); }
+        return;
+      }
+      if (event.type !== 'copilot_run_updated' || !TERMINAL_RUN_STATES.includes(event.status)) return;
       const run = deps.db.prepare('SELECT goal_id FROM copilot_runs WHERE user_id=? AND id=?')
         .get(event.userId, event.runId) as { goal_id: string | null } | undefined;
       if (run?.goal_id) evaluate(event.userId, run.goal_id);

@@ -3,6 +3,7 @@ import type { Database } from '../../../db/types.js';
 import { AgentError } from '../types.js';
 import { notifyGoalStatus } from '../goal-notify.js';
 import { CopilotGoalStore } from '../goal-store.js';
+import { linkGoalTasksToBoard, mirrorGoalTaskToBoard } from '../goal-board.js';
 import type { AgentTool, AgentToolContext } from '../tool-registry.js';
 
 /**
@@ -15,7 +16,10 @@ import type { AgentTool, AgentToolContext } from '../tool-registry.js';
 
 const taskInput = z.union([
   z.string().trim().min(1).max(500),
-  z.object({ description: z.string().trim().min(1).max(500), verifyCommand: z.string().trim().min(1).max(1024).optional() }).strict()
+  z.object({ description: z.string().trim().min(1).max(500), verifyCommand: z.string().trim().min(1).max(1024).optional() }).strict(),
+  // Adopt an existing work item from the goal's project board.
+  z.object({ workItemId: z.string().trim().min(1).max(128), description: z.string().trim().min(1).max(500).optional(),
+    verifyCommand: z.string().trim().min(1).max(1024).optional() }).strict()
 ]);
 
 const addTasksInput = z.object({
@@ -56,13 +60,19 @@ export function createGoalTools(): AgentTool[] {
   return [
     {
       name: 'goal_add_tasks',
-      description: 'Add tasks to the current goal checklist during initialization or replanning. Each task gets the next sequence number; a task may carry verifyCommand, which must exit 0 via goal_run_checks before the task can pass. 向当前 Goal 添加任务清单（可带校验命令）。',
+      description: 'Add tasks to the current goal checklist during initialization or replanning. Each task gets the next sequence number; a task may carry verifyCommand, which must exit 0 via goal_run_checks before the task can pass. On a personal project every task is backed by a project board work item: new tasks create one, and {workItemId} adopts an existing open item (read it with pm_get_plan). 向当前 Goal 添加任务清单（可带校验命令；个人项目自动关联看板任务）。',
       risk: 'read',
       requiresApproval: false,
       inputSchema: addTasksInput,
       async execute(input, context) {
+        const db = context.db as Database;
         const goalId = goalIdForRun(context);
-        const tasks = goalStore(context).addTasks(goalId, addTasksInput.parse(input).descriptions);
+        const store = goalStore(context);
+        const goal = store.getGoal(goalId);
+        if (!goal) throw new AgentError('COPILOT_NOT_FOUND', 'Goal not found');
+        const drafts = addTasksInput.parse(input).descriptions.map(entry => typeof entry === 'string' ? { description: entry } : entry);
+        // Board items and goal tasks are created together or not at all.
+        const tasks = db.transaction(() => store.addTasks(goalId, linkGoalTasksToBoard(db, context.userId, goal, drafts))).immediate();
         return { tasks };
       }
     },
@@ -77,7 +87,9 @@ export function createGoalTools(): AgentTool[] {
         const { taskId, status, evidence } = updateTaskInput.parse(input);
         if (typeof context.delegateTaskId === 'string' && context.delegateTaskId !== taskId)
           throw new AgentError('COPILOT_GOAL_TASK_SCOPE', `This delegated sub-run may only update task ${context.delegateTaskId}`);
-        const task = goalStore(context).updateTask(goalId, taskId, status, evidence);
+        const store = goalStore(context);
+        const task = store.updateTask(goalId, taskId, status, evidence);
+        if (task) mirrorGoalTaskToBoard(context.db as Database, context.userId, store.getGoal(goalId)!, task);
         return { task };
       }
     },

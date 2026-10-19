@@ -46,8 +46,12 @@ export function domainError(res: Response, error: unknown): void {
     res.status(400).json({ code: 1, message: error.message, details: { code: error.code } });
     return;
   }
-  if (error instanceof AgentError && ["COPILOT_RUN_BUSY","COPILOT_CONVERSATION_BUSY","COPILOT_REQUEST_CONFLICT","COPILOT_GOAL_STATE","COPILOT_GOAL_SANDBOX_MISSING","COPILOT_GOAL_MERGE_CONFLICT"].includes(error.code)) {
+  if (error instanceof AgentError && ["COPILOT_RUN_BUSY","COPILOT_CONVERSATION_BUSY","COPILOT_REQUEST_CONFLICT","COPILOT_GOAL_STATE","COPILOT_GOAL_SANDBOX_MISSING","COPILOT_GOAL_MERGE_CONFLICT","COPILOT_GOAL_WORKSPACE_FAILED"].includes(error.code)) {
     res.status(409).json({ code: 1, message: error.message, details: { code: error.code } });
+    return;
+  }
+  if (error instanceof AgentError && error.code === "COPILOT_GOAL_SHARED_PROJECT") {
+    res.status(403).json({ code: 1, message: error.message, details: { code: error.code } });
     return;
   }
   if(error instanceof AgentError && error.code === "COPILOT_NOT_FOUND")return notFound(res);

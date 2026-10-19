@@ -463,10 +463,16 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             // this tool's category auto-approves operate calls inside the
             // goal run. User-sourced runs only; scheduled/reactive write
             // restrictions above are unchanged.
-            const goalGrant = input.goalId && (input.source ?? "user") === "user"
-                ? goalGrantForTool(deps.db, input.userId, input.goalId, tool.name) : null;
+            // Delegated coding sub-runs carry the goal only on the run row.
+            const grantGoalId = input.goalId ?? ledger.get(c.runId)?.goal_id ?? undefined;
+            const goalGrant = grantGoalId && (input.source ?? "user") === "user"
+                ? goalGrantForTool(deps.db, input.userId, grantGoalId, tool.name) : null;
             logSecurityDecision({ db: deps.db, userId: input.userId, operation: tool.name, input: raw, action: decision.action, reason: decision.reason });
             if (decision.action === "deny") rejection = `Denied by security policy: ${decision.reason}`;
+            // Coding delegates run unattended inside a waiting parent: an
+            // approval parked there would stall the parent until its deadline.
+            if (!rejection && input.executionMode === "coding" && tool.risk === "operate" && !goalGrant && action?.status !== "approved")
+                rejection = `${tool.name} needs owner approval, which delegated sub-runs cannot wait for; grant the goal ${tool.name === 'goal_run_checks' ? 'sandbox_checks' : 'the matching grant'} or run it from the parent goal run`;
             if (!rejection && tool.risk === "operate" && TOOL_COMMANDS[tool.name]) {
                 try {
                     const actions = agentActions(context);
@@ -489,7 +495,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             }
             if (!rejection && goalGrant && tool.risk === "operate") {
                 ledger.commit(c, () => {
-                    new CopilotGoalStore(deps.db, input.userId).appendJournal(input.goalId!, c.runId, `自动执行 ${tool.name}（授权 ${goalGrant}）`);
+                    new CopilotGoalStore(deps.db, input.userId).appendJournal(grantGoalId!, c.runId, `自动执行 ${tool.name}（授权 ${goalGrant}）`);
                 });
                 traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'tool_gate', { toolName: tool.name, decision: 'auto_approved', reason: `goal_grant:${goalGrant}` }, step.id);
             }

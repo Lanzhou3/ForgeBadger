@@ -1568,6 +1568,11 @@ export const copilotGoals = sqliteTable("copilot_goals", {
   blockedReason: text("blocked_reason"),
   pendingQuestion: text("pending_question"),
   grantsJson: text("grants_json").notNull().default("[]"),
+  workspaceKind: text("workspace_kind"), // copy | worktree
+  workspacePath: text("workspace_path"),
+  workspaceBranch: text("workspace_branch"),
+  workspaceBaseCommit: text("workspace_base_commit"),
+  workspaceTargetBranch: text("workspace_target_branch"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
   completedAt: integer("completed_at", { mode: "timestamp" })
@@ -1579,15 +1584,18 @@ export const copilotGoalTasks = sqliteTable("copilot_goal_tasks", {
   goalId: text("goal_id").notNull(),
   seq: integer("seq").notNull(),
   description: text("description").notNull(),
-  status: text("status").notNull().default("pending"), // pending | in_progress | passes | failed
+  status: text("status").notNull().default("pending"), // pending | in_progress | passes | failed | cancelled
   evidence: text("evidence"),
   verifyCommand: text("verify_command"),
   verifiedAt: integer("verified_at"),
   verifyExitCode: integer("verify_exit_code"),
   dispatchedSessionId: text("dispatched_session_id"),
+  dispatchStatus: text("dispatch_status"), // running | completed | failed | ended
+  dispatchUpdatedAt: integer("dispatch_updated_at"),
+  workItemId: text("work_item_id"), // linked project board work item
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-}, (table) => ({ goalSeq: uniqueIndex("idx_copilot_goal_tasks_goal_seq").on(table.goalId, table.seq), goalParent: foreignKey({ columns: [table.userId, table.goalId], foreignColumns: [copilotGoals.userId, copilotGoals.id] }).onDelete("cascade") }));
+}, (table) => ({ goalSeq: uniqueIndex("idx_copilot_goal_tasks_goal_seq").on(table.goalId, table.seq), workItem: uniqueIndex("idx_copilot_goal_tasks_work_item").on(table.userId, table.goalId, table.workItemId).where(sql`${table.workItemId} IS NOT NULL`), goalParent: foreignKey({ columns: [table.userId, table.goalId], foreignColumns: [copilotGoals.userId, copilotGoals.id] }).onDelete("cascade") }));
 
 export const copilotGoalJournal = sqliteTable("copilot_goal_journal", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),

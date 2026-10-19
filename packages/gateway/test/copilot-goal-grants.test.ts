@@ -172,8 +172,9 @@ describe("goal authorization grants in the approval gate", () => {
   });
 
   it("maps every grant to an auditable tool set", () => {
-    assert.deepEqual(Object.keys(GOAL_GRANT_TOOLS).sort(), ["operate_sessions", "pm_dispatch", "terminal_run"]);
+    assert.deepEqual(Object.keys(GOAL_GRANT_TOOLS).sort(), ["operate_sessions", "pm_dispatch", "sandbox_checks", "terminal_run"]);
     assert.ok(GOAL_GRANT_TOOLS.pm_dispatch!.includes("goal_dispatch_task"));
+    assert.deepEqual(GOAL_GRANT_TOOLS.sandbox_checks, ["goal_run_checks"]);
   });
 });
 

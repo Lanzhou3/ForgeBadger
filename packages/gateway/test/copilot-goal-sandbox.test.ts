@@ -12,7 +12,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { CopilotConversationLog } from "../src/services/agent/conversation-log.js";
 import { CopilotGoalStore } from "../src/services/agent/goal-store.js";
-import { diffGoalSandbox, ensureGoalSandbox, goalSandboxDir, editSandboxFile, readSandboxFile, runSandboxCommand, sandboxCommandEnv, writeSandboxFile } from "../src/services/agent/goal-sandbox.js";
+import { detectMergeConflicts, diffGoalSandbox, ensureGoalSandbox, GOAL_MANIFEST_NAME, goalSandboxDir, editSandboxFile, mergeGoalSandbox, readSandboxFile, runSandboxCommand, sandboxCommandEnv, writeSandboxFile } from "../src/services/agent/goal-sandbox.js";
 import { createGoalSandboxTools } from "../src/services/agent/tools/goal-sandbox.js";
 import type { AgentToolContext } from "../src/services/agent/tool-registry.js";
 import { AgentError } from "../src/services/agent/types.js";
@@ -129,6 +129,96 @@ describe("goal sandbox", () => {
     assert.match(byPath.get("README.md")?.diff ?? "", /\+line3 changed/);
     assert.equal(byPath.get("src/app.txt")?.status, "deleted");
     assert.match(byPath.get("src/app.txt")?.diff ?? "", /-original app/);
+  });
+
+  it("merge preserves project-side edits to files the sandbox left untouched", () => {
+    const fixture = tracked();
+    ensureGoalSandbox(fixture.projectDir, fixture.sandboxDir);
+    fs.writeFileSync(path.join(fixture.sandboxDir, "README.md"), "# Demo\nsandbox edit\n");
+    // The owner (or a dispatched CLI) edits a different file after sandbox creation.
+    fs.writeFileSync(path.join(fixture.projectDir, "src", "app.txt"), "owner edit\n");
+    assert.deepEqual(detectMergeConflicts(fixture.sandboxDir, fixture.projectDir), []);
+    const paths = diffGoalSandbox(fixture.sandboxDir, fixture.projectDir).files.map(file => file.path);
+    assert.deepEqual(paths, ["README.md"]);
+    const result = mergeGoalSandbox(fixture.sandboxDir, fixture.projectDir);
+    assert.deepEqual(result.merged, ["README.md"]);
+    assert.equal(fs.readFileSync(path.join(fixture.projectDir, "README.md"), "utf8"), "# Demo\nsandbox edit\n");
+    assert.equal(fs.readFileSync(path.join(fixture.projectDir, "src", "app.txt"), "utf8"), "owner edit\n");
+  });
+
+  it("merge preserves project-side type changes to files the sandbox left untouched", () => {
+    const fixture = tracked();
+    ensureGoalSandbox(fixture.projectDir, fixture.sandboxDir);
+    fs.rmSync(path.join(fixture.projectDir, "README.md"));
+    fs.mkdirSync(path.join(fixture.projectDir, "README.md"));
+    fs.writeFileSync(path.join(fixture.projectDir, "README.md", "owner.txt"), "owner\n");
+    fs.rmSync(path.join(fixture.projectDir, "src"), { recursive: true });
+    fs.writeFileSync(path.join(fixture.projectDir, "src"), "owner file\n");
+
+    assert.deepEqual(detectMergeConflicts(fixture.sandboxDir, fixture.projectDir), []);
+    assert.deepEqual(mergeGoalSandbox(fixture.sandboxDir, fixture.projectDir).merged, []);
+    assert.equal(fs.readFileSync(path.join(fixture.projectDir, "README.md", "owner.txt"), "utf8"), "owner\n");
+    assert.equal(fs.readFileSync(path.join(fixture.projectDir, "src"), "utf8"), "owner file\n");
+  });
+
+  it("merge rejects type conflicts only on paths the sandbox changed", () => {
+    const fixture = tracked();
+    ensureGoalSandbox(fixture.projectDir, fixture.sandboxDir);
+    fs.writeFileSync(path.join(fixture.sandboxDir, "README.md"), "sandbox edit\n");
+    fs.writeFileSync(path.join(fixture.sandboxDir, "src", "app.txt"), "sandbox app\n");
+    fs.rmSync(path.join(fixture.projectDir, "README.md"));
+    fs.mkdirSync(path.join(fixture.projectDir, "README.md"));
+    fs.rmSync(path.join(fixture.projectDir, "src"), { recursive: true });
+    fs.writeFileSync(path.join(fixture.projectDir, "src"), "owner file\n");
+
+    assert.deepEqual(detectMergeConflicts(fixture.sandboxDir, fixture.projectDir), [
+      "README.md (a directory exists in the project)",
+      "src/app.txt (parent path 'src' is a file in the project)"
+    ]);
+    assert.throws(() => mergeGoalSandbox(fixture.sandboxDir, fixture.projectDir),
+      (error: unknown) => error instanceof AgentError && error.code === "COPILOT_GOAL_MERGE_CONFLICT");
+    assert.equal(fs.readFileSync(path.join(fixture.projectDir, "src"), "utf8"), "owner file\n");
+  });
+
+  it("merge refuses divergent edits on both sides without writing anything", () => {
+    const fixture = tracked();
+    ensureGoalSandbox(fixture.projectDir, fixture.sandboxDir);
+    fs.writeFileSync(path.join(fixture.sandboxDir, "README.md"), "# Demo\nsandbox edit\n");
+    fs.writeFileSync(path.join(fixture.sandboxDir, "new.txt"), "sandbox new\n");
+    fs.writeFileSync(path.join(fixture.projectDir, "README.md"), "# Demo\nowner edit\n");
+    fs.rmSync(path.join(fixture.sandboxDir, "src", "app.txt"));
+    fs.writeFileSync(path.join(fixture.projectDir, "src", "app.txt"), "owner edit\n");
+    const conflicts = detectMergeConflicts(fixture.sandboxDir, fixture.projectDir);
+    assert.deepEqual(conflicts, [
+      "README.md (modified in both sandbox and project)",
+      "src/app.txt (deleted in the sandbox but modified in the project)"
+    ]);
+    assert.throws(() => mergeGoalSandbox(fixture.sandboxDir, fixture.projectDir),
+      (error: unknown) => error instanceof AgentError && error.code === "COPILOT_GOAL_MERGE_CONFLICT");
+    assert.equal(fs.readFileSync(path.join(fixture.projectDir, "README.md"), "utf8"), "# Demo\nowner edit\n");
+    assert.equal(fs.existsSync(path.join(fixture.projectDir, "new.txt")), false);
+  });
+
+  it("merge accepts identical edits on both sides and flags conflicting additions", () => {
+    const fixture = tracked();
+    ensureGoalSandbox(fixture.projectDir, fixture.sandboxDir);
+    fs.writeFileSync(path.join(fixture.sandboxDir, "README.md"), "same\n");
+    fs.writeFileSync(path.join(fixture.projectDir, "README.md"), "same\n");
+    assert.deepEqual(detectMergeConflicts(fixture.sandboxDir, fixture.projectDir), []);
+    fs.writeFileSync(path.join(fixture.sandboxDir, "both.txt"), "sandbox\n");
+    fs.writeFileSync(path.join(fixture.projectDir, "both.txt"), "project\n");
+    assert.deepEqual(detectMergeConflicts(fixture.sandboxDir, fixture.projectDir),
+      ["both.txt (added in both sandbox and project with different content)"]);
+  });
+
+  it("keeps v1 overwrite semantics for legacy path-only manifests", () => {
+    const fixture = tracked();
+    ensureGoalSandbox(fixture.projectDir, fixture.sandboxDir);
+    fs.writeFileSync(path.join(fixture.sandboxDir, GOAL_MANIFEST_NAME), JSON.stringify(["README.md", "src/app.txt"]));
+    fs.writeFileSync(path.join(fixture.sandboxDir, "README.md"), "sandbox\n");
+    fs.writeFileSync(path.join(fixture.projectDir, "README.md"), "owner\n");
+    assert.deepEqual(mergeGoalSandbox(fixture.sandboxDir, fixture.projectDir).merged, ["README.md"]);
+    assert.equal(fs.readFileSync(path.join(fixture.projectDir, "README.md"), "utf8"), "sandbox\n");
   });
 
   it("runs commands with a minimal secret-free environment (P0)", async () => {

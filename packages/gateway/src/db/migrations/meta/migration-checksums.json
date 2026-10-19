@@ -137,5 +137,7 @@
   "0136_grok_supported_adapters_backfill.sql": "ecd085ad71b612b1e2f274f5f86a95d8c765e4c8904e4e14f7e236cbb0d1bdd2",
   "0137_copilot_goals.sql": "72cfdf9d59033b1447347e8b5a575dc76426429ea75e6258bc7e7f279f4b4dbc",
   "0138_copilot_goal_verify.sql": "0ffc69568bd03d73d8985c755a65df550db7671067561290397a44692eb78692",
-  "0139_copilot_goal_grants.sql": "a3c530aebbf5a7cc2b84d05ca01a35c9e8381c22bb3a67fc280b65d12217f299"
+  "0139_copilot_goal_grants.sql": "a3c530aebbf5a7cc2b84d05ca01a35c9e8381c22bb3a67fc280b65d12217f299",
+  "0140_copilot_goal_workspaces.sql": "dad635dc2963973376b185b53ef4860f3a1cff0d43e91b4c5e267d0720ac74bb",
+  "0141_copilot_goal_board_links.sql": "d32a5beea5b465f93b57f5fd9dacad9a3b33e723d3b6fd620d6f2907c9dbd729"
 }

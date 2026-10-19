@@ -38,6 +38,12 @@ export function assertTaskDispatchable(item: ProjectManagerWorkItem): void {
   if (attempt && attempt.status !== 'not_sent') throw new PlatformNoEffectError(attempt.status === 'dispatched' ? 'TASK_ALREADY_DISPATCHED: follow progress or close the current attempt' : 'TASK_DISPATCH_UNCERTAIN: inspect the current attempt; automatic replay prohibited');
 }
 
+/** Dependency gate: every blocker must be done (or cancelled) before the task reaches a CLI. */
+export function assertTaskDependenciesResolved(repo: ProjectManagerRepository, item: ProjectManagerWorkItem): void {
+  const open = repo.unresolvedBlockers(item.projectId, item.id);
+  if (open.length) throw new PlatformNoEffectError(`TASK_DEPENDENCIES_NOT_DONE: finish ${open.map(blocker => `"${blocker.title.slice(0, 80)}" (${blocker.status})`).join(', ')} first`);
+}
+
 export function patchTaskAttempt(ctx: Pick<CommandContext, 'db' | 'userId'>, projectId: string, workItemId: string, attempt: TaskDispatchAttempt) {
   const repo = new ProjectManagerRepository(ctx.db, ctx.userId);
   const item = repo.getWorkItem(projectId, workItemId)!;
@@ -55,6 +61,7 @@ export async function executeTaskPacket(ctx: CommandContext, input: { projectId:
   const project = new ProjectRepository(ctx.db, ctx.userId).getById(input.projectId)!;
   let item = repo.getWorkItem(project.id, input.workItemId)!;
   assertTaskDispatchable(item);
+  assertTaskDependenciesResolved(repo, item);
   const manager = ctx.sessionManager;
   if (!manager) throw new PlatformNoEffectError('Session runtime unavailable');
   const origin = ctx.actionIntentId && new PlatformActionRepository(ctx.db, ctx.userId).get(ctx.actionIntentId);

@@ -6,6 +6,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { safeResolve, validateProjectRoot } from "../../lib/safe-resolve.js";
 import { CollaborationError } from "./types.js";
 import type { InspectedWorktree, IntegrateWorktreeInput, ProvisionedWorktree, ProvisionWorktreeInput } from "./runtime-types.js";
+import { WORKTREE_BRANCH_PREFIXES } from "./worktree-branches.js";
 
 interface GitLease { path:string; token:string; ownerPid:number; childPid:number|null; phase:'idle'|'spawning'|'running' }
 const gitLease=new AsyncLocalStorage<GitLease>();
@@ -140,7 +141,9 @@ export async function provisionWorktree(input: ProvisionWorktreeInput): Promise<
     fail("Managed workspaces must be outside the source repository");
   }
   const path = safeResolve(workspacesRoot, input.runId);
-  const branch = `codex/task-${input.runId}`;
+  const prefix = input.branchPrefix ?? "codex/task-";
+  if (!WORKTREE_BRANCH_PREFIXES.includes(prefix)) fail("Invalid managed workspace branch prefix");
+  const branch = `${prefix}${input.runId}`;
   return locked(input.sourcePath, async () => {
     try { lstatSync(path); fail("Workspace target already exists"); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
@@ -243,4 +246,162 @@ export async function reconcileIntegration(input: IntegrateWorktreeInput):Promis
 export async function isRepositoryGitIdle(sourcePath: string): Promise<boolean> {
   try { return await locked(sourcePath, async () => true); }
   catch { return false; }
+}
+
+// ---------------------------------------------------------------------------
+// Goal worktrees: Copilot goal workspaces merged by the owner over HTTP. Same
+// safety envelope as delivery (hooks/filters disabled, repository lock, exact
+// SHAs). Unlike delivery, the owner merge commits pending worktree edits and
+// fast-forwards the source branch, merging a moved source head into the goal
+// branch first; conflicts abort that merge and leave both trees untouched.
+// ---------------------------------------------------------------------------
+
+const GOAL_BRANCH = /^forgebadger\/goal-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const GOAL_IDENTITY = ["-c", "user.name=ForgeBadger Goal", "-c", "user.email=forgebadger@localhost"];
+
+export interface GoalWorktreeChange { status: "added" | "modified" | "deleted"; path: string }
+
+function goalBranch(value: string): string {
+  if (!GOAL_BRANCH.test(value)) fail("Invalid goal workspace branch");
+  return value;
+}
+
+function excludePathspecs(paths: readonly string[]): string[] {
+  return ["--", ".", ...paths.map((entry) => `:(exclude,literal)${entry}`)];
+}
+
+function parseNameStatus(output: string): GoalWorktreeChange[] {
+  const fields = output.split("\0");
+  const changes: GoalWorktreeChange[] = [];
+  for (let index = 0; index + 1 < fields.length; index += 2) {
+    const code = fields[index], path = fields[index + 1];
+    if (!code || !path) continue;
+    changes.push({ status: code.startsWith("A") ? "added" : code.startsWith("D") ? "deleted" : "modified", path });
+  }
+  return changes;
+}
+
+function porcelainPaths(output: string): string[] {
+  return output.split("\0").filter((entry) => entry.length > 3).map((entry) => entry.slice(3));
+}
+
+async function isAncestor(cwd: string, ancestor: string, descendant: string): Promise<boolean> {
+  try { await git(cwd, ["merge-base", "--is-ancestor", ancestor, descendant]); return true; }
+  catch (error) { if (error instanceof GitOperationError && error.ordinaryConflict) return false; throw error; }
+}
+
+/**
+ * Tracked CLI hook files rewritten in the worktree by hook materialization
+ * would make `git merge` refuse ("commit or stash"). They are never part of
+ * the goal's work, so reset them; the next session launch rewrites them.
+ */
+async function restoreManagedPaths(cwd: string, paths: readonly string[]): Promise<void> {
+  if (!paths.length) return;
+  const dirty = (await git(cwd, ["--literal-pathspecs", "diff", "--name-only", "-z", "HEAD", "--", ...paths])).split("\0").filter(Boolean);
+  if (dirty.length) await git(cwd, ["--literal-pathspecs", "checkout", "HEAD", "--", ...dirty]);
+}
+
+async function currentBranch(cwd: string): Promise<string> {
+  return (await git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
+}
+
+/** Worktree vs base commit: committed and working-tree edits plus untracked files, managed paths excluded. */
+export async function listGoalWorktreeChanges(input: { path: string; baseCommit: string; excludePaths: readonly string[] }): Promise<GoalWorktreeChange[]> {
+  await repository(input.path);
+  const tracked = parseNameStatus(await git(input.path, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-status", "-z",
+    commitArgument(input.baseCommit), ...excludePathspecs(input.excludePaths)]));
+  const untracked = (await git(input.path, ["ls-files", "--others", "--exclude-standard", "-z", ...excludePathspecs(input.excludePaths)]))
+    .split("\0").filter(Boolean).map((path) => ({ status: "added" as const, path }));
+  return [...tracked, ...untracked].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** Unified diff of one tracked path, base commit vs working tree. */
+export async function readGoalWorktreeDiff(input: { path: string; baseCommit: string; filePath: string }): Promise<string> {
+  await repository(input.path);
+  if (!input.filePath || input.filePath.includes("\0")) fail("Invalid goal workspace file path");
+  safeResolve(input.path, input.filePath);
+  return git(input.path, ["--literal-pathspecs", "diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+    commitArgument(input.baseCommit), "--", input.filePath]);
+}
+
+/** Commit every pending worktree edit except managed paths; returns the new HEAD, or undefined when nothing was staged. */
+export async function commitGoalWorktree(input: { path: string; branch: string; message: string; excludePaths: readonly string[] }): Promise<string | undefined> {
+  const branch = goalBranch(input.branch);
+  await repository(input.path);
+  if (await currentBranch(input.path) !== branch) fail("Goal workspace branch changed");
+  await git(input.path, ["add", "-A", ...excludePathspecs(input.excludePaths)]);
+  if (!(await git(input.path, ["diff", "--cached", "--name-only", "-z"])).length) return undefined;
+  await git(input.path, [...GOAL_IDENTITY, "commit", "--no-verify", "--no-gpg-sign", "--quiet", "-m", input.message]);
+  return head(input.path);
+}
+
+export interface GoalIntegration { commit: string; previous: string; changes: GoalWorktreeChange[] }
+
+/**
+ * Fast-forward the source branch to the goal branch. A source head that moved
+ * since the fork is merged into the goal branch first (conflicts abort it and
+ * are reported by path). Overlapping uncommitted source edits and committed
+ * managed paths are refused rather than overwritten.
+ */
+export async function integrateGoalWorktree(input: { sourcePath: string; path: string; branch: string; targetBranch: string; excludePaths: readonly string[] }): Promise<GoalIntegration> {
+  const branch = goalBranch(input.branch);
+  return locked(input.sourcePath, async (common) => {
+    if ((await repository(input.path)).common !== common) fail("Goal workspace belongs to another repository");
+    const sourceBranch = await currentBranch(input.sourcePath);
+    if (sourceBranch !== input.targetBranch) fail(`Project is on branch '${sourceBranch}', not '${input.targetBranch}'; switch back before merging`);
+    if (await currentBranch(input.path) !== branch) fail("Goal workspace branch changed");
+    if ((await git(input.path, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", ...excludePathspecs(input.excludePaths)])).length) {
+      fail("Goal workspace has uncommitted changes");
+    }
+    const previous = await head(input.sourcePath);
+    let tip = await head(input.path);
+    // Nothing of the goal's own to bring over (the project may have moved on):
+    // never manufacture an empty merge commit on the owner's branch.
+    if (tip === previous || await isAncestor(input.path, tip, previous)) {
+      // Keep the goal branch on the advanced merge base so later diffs stay forward-only.
+      if (tip !== previous) {
+        await restoreManagedPaths(input.path, input.excludePaths);
+        await git(input.path, ["merge", "--ff-only", "--no-overwrite-ignore", "--no-edit", "--no-stat", "--", previous]);
+      }
+      return { commit: previous, previous, changes: [] };
+    }
+    if (!(await isAncestor(input.path, previous, tip))) {
+      await restoreManagedPaths(input.path, input.excludePaths);
+      try {
+        await git(input.path, [...GOAL_IDENTITY, "merge", "--no-ff", "--no-edit", "--no-stat", "--no-verify", "--no-gpg-sign", "--no-overwrite-ignore", "--", previous]);
+      } catch (error) {
+        const conflicts = error instanceof GitOperationError && error.ordinaryConflict ? await conflictPaths(input.path) : [];
+        await git(input.path, ["merge", "--abort"]).catch(() => undefined);
+        if (conflicts.length) throw new CollaborationError(409, "GOAL_MERGE_CONFLICT", `Conflicts with project changes: ${conflicts.join(", ")}`);
+        throw error;
+      }
+      tip = await head(input.path);
+    }
+    const changes = parseNameStatus(await git(input.sourcePath, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-status", "-z", previous, tip, "--"]));
+    const managed = changes.filter((change) => input.excludePaths.includes(change.path)).map((change) => change.path);
+    if (managed.length) fail(`Goal branch commits CLI-managed files: ${managed.join(", ")}`);
+    const touched = new Set(changes.map((change) => change.path));
+    const overlap = porcelainPaths(await git(input.sourcePath, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"]))
+      .filter((path) => touched.has(path));
+    if (overlap.length) fail(`Project has uncommitted changes in: ${overlap.join(", ")}`);
+    await git(input.sourcePath, ["merge", "--ff-only", "--no-overwrite-ignore", "--no-edit", "--no-stat", "--", tip]);
+    if (await head(input.sourcePath) !== tip) fail("Project commit changed during merge");
+    return { commit: tip, previous, changes };
+  });
+}
+
+/**
+ * Re-adopt a goal worktree whose provisioning outlived its database record
+ * (crash between `worktree add` and persistence). The base is the fork point
+ * with the source head, never a guess beyond the repository's own history.
+ */
+export async function adoptGoalWorktree(input: { sourcePath: string; path: string; branch: string }): Promise<{ baseCommit: string; targetBranch: string }> {
+  const branch = goalBranch(input.branch);
+  return locked(input.sourcePath, async (common) => {
+    if ((await repository(input.path)).common !== common) fail("Goal workspace belongs to another repository");
+    if (await currentBranch(input.path) !== branch) fail("Goal workspace branch changed");
+    const targetBranch = await currentBranch(input.sourcePath);
+    const baseCommit = commitArgument((await git(input.sourcePath, ["merge-base", await head(input.sourcePath), await head(input.path)])).trim());
+    return { baseCommit, targetBranch };
+  });
 }

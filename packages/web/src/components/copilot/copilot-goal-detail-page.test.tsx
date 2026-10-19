@@ -94,7 +94,7 @@ beforeEach(() => {
   vi.mocked(api.getGoal).mockResolvedValue(goalPayload());
   vi.mocked(api.answerGoal).mockResolvedValue({ goal });
   vi.mocked(api.getGoalDiff).mockResolvedValue({ files: [], truncated: false });
-  vi.mocked(api.mergeGoal).mockResolvedValue({ merged: ["src/a.ts"], deleted: 0, kept: 0 });
+  vi.mocked(api.mergeGoal).mockResolvedValue({ merged: ["src/a.ts"], deleted: [], kept: [] });
   vi.mocked(api.pauseGoal).mockResolvedValue({ goal });
   vi.mocked(api.resumeGoal).mockResolvedValue({ goal });
   vi.mocked(api.cancelGoal).mockResolvedValue({ goal });
@@ -190,7 +190,8 @@ it("merges only for completed/blocked goals behind a confirm and toasts the coun
   mount();
   fireEvent.click(await screen.findByRole("button", { name: /合并到项目/ }));
   const dialog = await screen.findByRole("dialog");
-  expect(dialog.textContent).toContain("覆盖写回");
+  expect(dialog.textContent).toContain("三方合并");
+  expect(dialog.textContent).toContain("不会覆盖");
   fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
   expect(api.mergeGoal).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: /合并到项目/ }));
@@ -301,12 +302,27 @@ it("shows the truncated banner when the diff response is capped", async () => {
 
 it("shows deleted/kept counts in the merge success toast", async () => {
   vi.mocked(api.getGoal).mockResolvedValue(goalPayload({ goal: { status: "completed" } }));
-  vi.mocked(api.mergeGoal).mockResolvedValue({ merged: ["a.ts", "b.ts"], deleted: 3, kept: 1 });
+  // The gateway returns path lists, not counts.
+  vi.mocked(api.mergeGoal).mockResolvedValue({ merged: ["a.ts", "b.ts"], deleted: ["x.ts", "y.ts", "z.ts"], kept: ["k.ts"] });
   mount();
   fireEvent.click(await screen.findByRole("button", { name: /合并到项目/ }));
   fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: /合并到项目/ }));
   await waitFor(() => expect(api.mergeGoal).toHaveBeenCalledWith("g1"));
   await waitFor(() => expect(vi.mocked(toast.success).mock.calls[0]?.[0]).toContain("删除 3，保留 1"));
+});
+
+it("describes a worktree merge as a goal-branch fast-forward and toasts the commit", async () => {
+  vi.mocked(api.getGoal).mockResolvedValue(goalPayload({
+    goal: { status: "completed", workspace: { kind: "worktree", branch: "forgebadger/goal-g1", baseCommit: "a".repeat(40), targetBranch: "main" } }
+  }));
+  vi.mocked(api.mergeGoal).mockResolvedValue({ merged: ["a.ts"], deleted: [], kept: [], commit: "b".repeat(40) });
+  mount();
+  expect(await screen.findByText("工作区：git worktree（forgebadger/goal-g1）")).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: /合并到项目/ }));
+  const dialog = await screen.findByRole("dialog");
+  expect(dialog.textContent).toMatch(/在 forgebadger\/goal-g1 上提交 .*快进合并到 main/);
+  fireEvent.click(within(dialog).getByRole("button", { name: /合并到项目/ }));
+  await waitFor(() => expect(vi.mocked(toast.success).mock.calls[0]?.[0]).toContain(`提交 ${"b".repeat(12)}`));
 });
 
 it("surfaces the backend message when merge is rejected (409)", async () => {
@@ -348,4 +364,19 @@ it("polls the detail page while the goal is active and stops after it settles", 
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("links board-backed tasks to the project board and shows board cancellation", async () => {
+  vi.mocked(api.getGoal).mockResolvedValue(goalPayload({
+    goal: { projectId: "p1" },
+    tasks: [
+      { ...baseTask, id: "t-board", workItemId: "w1", boardStatus: "ready_for_review" },
+      { ...baseTask, id: "t-cancel", seq: 2, description: "Dropped task", status: "cancelled", workItemId: "w2", boardStatus: "cancelled" },
+    ],
+  }));
+  mount();
+  const badge = await screen.findByRole("link", { name: /看板：待验收/ });
+  expect(badge.getAttribute("href")).toBe("/projects/p1");
+  expect(screen.getByText("已取消（看板）")).toBeTruthy();
+  expect(screen.getByRole("link", { name: /看板：已取消/ })).toBeTruthy();
 });

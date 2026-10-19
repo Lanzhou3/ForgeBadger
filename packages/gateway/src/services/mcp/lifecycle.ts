@@ -11,6 +11,7 @@ import { sessionRuntimeRevision } from '../session-stop-target.js';
 import { canonical } from '../platform-commands/actions.js';
 import type { CommandContext, PlatformCommand } from '../platform-commands/types.js';
 import { assertMcpTokenAuthority } from './token-authority.js';
+import { PlatformActionRepository } from '../../db/repositories/platform-action-repository.js';
 import { containsSensitiveAgentValue } from '../agent/redaction.js';
 
 const id = z.string().min(1).max(128);
@@ -54,6 +55,14 @@ export const lifecycleSchemas = {
   pm_delete_work_item: credentialFree(lifecycleInputSchemas.pm_delete_work_item)
 };
 export const MCP_LIFECYCLE_WRITE_TOOLS = new Set(Object.keys(lifecycleSchemas));
+/**
+ * Planning edits the native Copilot (and the owner API) may run without an
+ * MCP token. Acceptance (`pm_review_task` → done) and deletion stay with
+ * external scoped tokens / the owner's own board actions.
+ */
+export const NATIVE_LIFECYCLE_TOOLS: ReadonlySet<string> = new Set([
+  'pm_set_goal', 'pm_update_task_plan', 'pm_manage_stage', 'pm_manage_dependency', 'pm_attach_evidence'
+]);
 
 export function assertLifecycleAuthority(ctx: Pick<CommandContext, 'db' | 'userId' | 'mcpTokenId'>): void {
   if (!ctx.mcpTokenId) throw new Error('MCP_LIFECYCLE_AUTHORITY_REQUIRED');
@@ -108,8 +117,29 @@ export function readLifecycleHandoff(ctx: CommandContext, projectId: string, wor
     deliveryGates: ['Run checks against exact code revision', 'Review exact patch', 'Commit and integrate through authorized Git workflow', 'Approve and verify target-specific release'] };
 }
 
-function resolveLifecycle(ctx: CommandContext, raw: unknown) {
-  assertLifecycleAuthority(ctx);
+/**
+ * Native authority is bound to where the intent was created: only intents
+ * previewed by a Copilot step or the owner API may run without a token. An
+ * intent minted under an MCP token (origin `legacy`) can never be executed
+ * by a token-less context.
+ */
+function assertNativeLifecycleOrigin(ctx: CommandContext): void {
+  const origin = ctx.actionIntentId
+    ? new PlatformActionRepository(ctx.db, ctx.userId).get(ctx.actionIntentId)?.origin_kind
+    : ctx.actionOrigin?.kind;
+  if (origin !== 'copilot' && origin !== 'owner_api') throw new Error('MCP_LIFECYCLE_AUTHORITY_REQUIRED');
+}
+
+function resolveLifecycle(ctx: CommandContext, raw: unknown, name: string) {
+  // External callers prove scoped token authority; native callers (Copilot
+  // pending actions, owner API) are owner-authenticated but limited to
+  // planning edits.
+  const external = Boolean(ctx.mcpTokenId);
+  if (external) assertLifecycleAuthority(ctx);
+  else {
+    if (!NATIVE_LIFECYCLE_TOOLS.has(name)) throw new Error('PM_LIFECYCLE_OWNER_ONLY: acceptance and deletion stay with the owner board');
+    assertNativeLifecycleOrigin(ctx);
+  }
   const input = raw as { projectId: string; workItemId?: string; expectedRevision?: number; expectedPlanDigest?: string };
   const { project, repo } = owned(ctx, input.projectId);
   assertProjectManagerWrite(ctx.db, ctx.userId, project.id, true);
@@ -126,7 +156,7 @@ function resolveLifecycle(ctx: CommandContext, raw: unknown) {
   }
   const resources = { projectIds: [project.id], rootPaths: session ? [project.path, session.workingDir] : [project.path],
     revision: session ? createHash('sha256').update(canonical([revision, session.status, sessionRuntimeRevision(session, ctx.sessionManager)])).digest('hex') : revision };
-  assertMcpTokenAuthority(ctx.db, ctx.userId, ctx.mcpTokenId!, resources);
+  if (external) assertMcpTokenAuthority(ctx.db, ctx.userId, ctx.mcpTokenId!, resources);
   return resources;
 }
 
@@ -140,8 +170,8 @@ function reviewTask(ctx: CommandContext, raw: unknown) {
       new Set(coverage.map(v => v.index)).size !== coverage.length || coverage.some(v =>
         v.index >= item.acceptanceCriteria.length || !item.evidenceRefs.some(ref => ref.ref === v.evidenceRef)))
       throw new Error('TASK_ACCEPTANCE_REQUIRES_COMPLETE_DECLARED_EVIDENCE');
-    const links = repo.listWorkItemLinks(input.projectId).filter(v => v.blockedWorkItemId === item.id);
-    if (links.some(v => repo.getWorkItem(input.projectId, v.blockerWorkItemId)?.status !== 'done')) throw new Error('TASK_DEPENDENCIES_NOT_DONE');
+    // Same rule as dispatch: a cancelled blocker no longer gates.
+    if (repo.unresolvedBlockers(input.projectId, item.id).length) throw new Error('TASK_DEPENDENCIES_NOT_DONE');
   }
   const workItem = repo.updateWorkItemStatus(input.projectId, item.id, {
     expectedRevision: input.expectedRevision, status: input.decision === 'accepted' ? 'done' : 'in_progress',
@@ -198,7 +228,7 @@ export function createMcpLifecycleCommands(): PlatformCommand[] {
       workItem: new ProjectManagerRepository(ctx.db, ctx.userId).deleteWorkItem(v.projectId, v.workItemId, v) }; }
   };
   return Object.entries(lifecycleSchemas).map(([name, schema]) => ({ id: `mcp.lifecycle.${name}`, capability: `mcp.lifecycle.${name}`,
-    effect: 'database', inputSchema: schema, resolve: resolveLifecycle,
+    effect: 'database', inputSchema: schema, resolve: (ctx, input) => resolveLifecycle(ctx, input, name),
     ...(name === 'pm_delete_work_item' ? { prepare: preflightDelete } : {}),
-    execute(ctx, input) { resolveLifecycle(ctx, input); return execute[name]!(ctx, input); } }));
+    execute(ctx, input) { resolveLifecycle(ctx, input, name); return execute[name]!(ctx, input); } }));
 }

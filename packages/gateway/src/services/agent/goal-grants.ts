@@ -9,14 +9,16 @@ import { AgentError } from './types.js';
  * keep their existing write restrictions.
  */
 
-export const GOAL_GRANTS = ['operate_sessions', 'terminal_run', 'pm_dispatch'] as const;
+export const GOAL_GRANTS = ['operate_sessions', 'terminal_run', 'pm_dispatch', 'sandbox_checks'] as const;
 export type GoalGrant = (typeof GOAL_GRANTS)[number];
 
 /** The single grant → tool mapping table. Audit changes here deliberately. */
 export const GOAL_GRANT_TOOLS: Record<GoalGrant, readonly string[]> = {
   operate_sessions: ['start_session', 'stop_session', 'takeover_session'],
   terminal_run: ['terminal_run', 'terminal_open', 'terminal_close'],
-  pm_dispatch: ['dispatch_task_to_session', 'pm_execute_task_packet', 'pm_prepare_task_packet', 'goal_dispatch_task']
+  pm_dispatch: ['dispatch_task_to_session', 'pm_execute_task_packet', 'pm_prepare_task_packet', 'goal_dispatch_task'],
+  // Host shell inside the goal sandbox copy (no OS-level isolation).
+  sandbox_checks: ['goal_run_checks']
 };
 
 export function parseGoalGrants(value: string | null | undefined): GoalGrant[] {

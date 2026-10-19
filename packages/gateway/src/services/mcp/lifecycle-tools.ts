@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { AgentTool } from '../agent/tool-registry.js';
 import { executeAgentAction } from '../platform-commands/agent-actions.js';
-import { lifecycleSchemas, readLifecyclePlan, readLifecycleHandoff } from './lifecycle.js';
+import { lifecycleSchemas, readLifecyclePlan, readLifecycleHandoff, NATIVE_LIFECYCLE_TOOLS } from './lifecycle.js';
 
 const projectInput = z.object({ projectId: z.string().min(1).max(128) }).strict();
 const planReadInput = projectInput.extend({ offset: z.number().int().min(0).max(100000).default(0), limit: z.number().int().min(1).max(50).default(50) });
@@ -15,8 +15,16 @@ const descriptions: Record<string, string> = {
   pm_review_task: 'Request changes or accept a ready_for_review private task with current criterion-by-criterion declared evidence. Acceptance is operator_declared; it does not prove checks, Git merge or release.',
   pm_delete_work_item: 'Delete a private task with no delivery history or live runtime. Requires exact revision and confirm=true. Ledger audit is retained.'
 };
-/** Opt-in external capabilities; native Copilot does not gain standing authorization. */
-export function createMcpLifecycleTools(): AgentTool[] {
+function lifecycleWriteTools(names: (name: string) => boolean): AgentTool[] {
+  return Object.entries(lifecycleSchemas).filter(([name]) => names(name)).map(([name, inputSchema]): AgentTool => ({ name, description: descriptions[name]!,
+    risk: 'operate', requiresApproval: true, inputSchema, async execute(raw, ctx) { return executeAgentAction(name, raw, ctx); } }));
+}
+
+/**
+ * Plan reads plus planning edits for every caller (native Copilot through its
+ * approval gate, MCP through token scopes). Part of createPlatformTools.
+ */
+export function createNativeLifecycleTools(): AgentTool[] {
   return [
     { name: 'pm_get_plan', description: 'Read goal summary, stages, dependency graph, task revisions and a complete planning digest. Labels are abbreviated; arrays are paginated (max 50). Follow nextOffset. The digest covers the entire plan, including unseen pages.',
       risk: 'read', requiresApproval: false, inputSchema: planReadInput,
@@ -24,7 +32,11 @@ export function createMcpLifecycleTools(): AgentTool[] {
     { name: 'pm_get_handoff', description: 'Read task acceptance, declared evidence and outstanding Git/release gates. A handoff is not deployment evidence.',
       risk: 'read', requiresApproval: false, inputSchema: handoffInput,
       async execute(raw, ctx) { const v = handoffInput.parse(raw); return readLifecycleHandoff(ctx, v.projectId, v.workItemId, v.offset, v.limit); } },
-    ...Object.entries(lifecycleSchemas).map(([name, inputSchema]): AgentTool => ({ name, description: descriptions[name]!,
-      risk: 'operate', requiresApproval: true, inputSchema, async execute(raw, ctx) { return executeAgentAction(name, raw, ctx); } }))
+    ...lifecycleWriteTools(name => NATIVE_LIFECYCLE_TOOLS.has(name))
   ];
+}
+
+/** External-only lifecycle authority (acceptance, deletion); native Copilot never gains it. */
+export function createMcpLifecycleTools(): AgentTool[] {
+  return lifecycleWriteTools(name => !NATIVE_LIFECYCLE_TOOLS.has(name));
 }

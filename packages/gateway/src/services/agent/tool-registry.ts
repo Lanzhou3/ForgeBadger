@@ -1,5 +1,6 @@
 import { ARCHIVABLE_TOOLS, MAX_ARTIFACT_BYTES } from './tool-artifact-policy.js';
 import { assertRestrictedTool } from "./restricted-runs.js";
+import { CODING_OPERATES } from "./tool-surface.js";
 import { zodToJsonSchema } from "./tool-schema.js";
 import { redactAgentErrorMessage, redactAgentValue } from "./redaction.js";
 import { checkAgentScope } from "../platform-commands/agent-scope.js";
@@ -90,7 +91,9 @@ export async function executeAgentTool(
   }
   try {
     context = channelToolContext(context);
-    if (context.executionMode && tool.risk !== 'read' && !(context.executionMode === 'repair' && tool.name === 'submit_development_task')) throw new Error('COPILOT_RESTRICTED_TOOL: read-only tools required');
+    if (context.executionMode && tool.risk !== 'read'
+      && !(context.executionMode === 'repair' && tool.name === 'submit_development_task')
+      && !(context.executionMode === 'coding' && CODING_OPERATES.has(tool.name))) throw new Error('COPILOT_RESTRICTED_TOOL: read-only tools required');
     assertRestrictedTool(context, tool.name, parsed.data);
     checkAgentScope(context, tool.name, parsed.data);
     const output = tool.risk === "operate" && TOOL_COMMANDS[tool.name]

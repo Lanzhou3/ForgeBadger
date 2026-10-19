@@ -46,7 +46,7 @@ export function createSecurityPolicy(context?: SecurityPolicyContext) {
 
   function evaluate(input: SecurityPolicyInput): SecurityDecision {
     // Global denylist first: traversal or known-dangerous patterns in any input.
-    const script = input.toolName === 'terminal_run' && input.input && typeof input.input === 'object'
+    const script = (input.toolName === 'terminal_run' || input.toolName === 'goal_run_checks') && input.input && typeof input.input === 'object'
       && 'command' in input.input && typeof input.input.command === 'string' ? input.input.command.trim() : undefined;
     const dangerous = detectDangerousInput(executableInput(input.toolName, input.input))
       ?? (script && containsDangerousShellCommand(script, 0, 'script') ? 'input contains potentially destructive shell pattern' : undefined);
@@ -79,6 +79,9 @@ export function createSecurityPolicy(context?: SecurityPolicyContext) {
     // These commands only mutate scoped planning records or operate an
     // explicitly enabled CLI adapter. Resource/tenant/grant and runtime
     // authorization are still enforced by PlatformActions at execution.
+    if (input.toolName === 'pm_update_task_plan' && input.input && typeof input.input === 'object' && 'acceptanceCriteria' in input.input) {
+      return { action: 'require_approval', reason: 'acceptance criteria feed owner acceptance', riskClass: 'medium' };
+    }
     if (ROUTINE_PLATFORM_TOOLS.has(input.toolName)) {
       return { action: "auto_approve", reason: "routine scoped platform operation", riskClass: "low" };
     }
@@ -102,7 +105,11 @@ export function createSecurityPolicy(context?: SecurityPolicyContext) {
 
 const ROUTINE_PLATFORM_TOOLS = new Set([
   "pm_create_work_item", "pm_update_work_item", "pm_prepare_task_packet",
-  "pm_close_task", "update_project", "pm_update_management"
+  "pm_close_task", "update_project", "pm_update_management",
+  // Revision-checked title/description/priority/stage edits. Changing
+  // acceptance criteria, dependencies or declared evidence feeds the owner's
+  // acceptance and dispatch gates, so those keep approval (see evaluate).
+  "pm_update_task_plan"
 ]);
 const SUPERVISED_CLI_TOOLS = new Set([
   "start_session", "pm_execute_task_packet", "dispatch_task_to_session"

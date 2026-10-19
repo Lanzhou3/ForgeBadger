@@ -28,6 +28,12 @@ export const PROJECT_READS = new Set(['get_project_git_status', 'read_project_di
  */
 export const CODING_READS: ReadonlySet<string> = new Set([...PROJECT_READS,
   'goal_file_read', 'goal_file_write', 'goal_file_edit', 'goal_run_checks', 'goal_update_task', 'goal_write_journal', 'goal_delegate']);
+/**
+ * Operate-class tools a coding sub-run may still call. They keep the normal
+ * approval gate (or the goal's sandbox_checks grant); restricted mode only
+ * decides visibility.
+ */
+export const CODING_OPERATES: ReadonlySet<string> = new Set(['goal_run_checks']);
 /** Explicit channel catalog: global data and new/extension tools remain closed until audited. */
 export const CHANNEL_TOOLS = new Set(['list_projects', 'get_project', 'list_sessions', 'get_session', 'get_session_output', 'get_session_writer',
   'pm_overview', 'pm_get_goal', 'pm_get_work_item', 'pm_list_ledger', 'pm_get_management', 'pm_list_task_packets', 'pm_get_task_packet',
@@ -41,7 +47,15 @@ export const CHANNEL_TOOLS = new Set(['list_projects', 'get_project', 'list_sess
 export const TOOL_SURFACE_LAYERS = ['retired', 'scheduled-readonly', 'channel-catalog', 'restricted-mode', 'session-runtime', 'mcp-source', 'owner-disabled', 'goal-catalog'] as const;
 export type ToolSurfaceLayer = (typeof TOOL_SURFACE_LAYERS)[number];
 
-export interface ToolSurfaceInput { source?: TurnInput['source']; executionMode?: TurnInput['executionMode']; channelScope?: TurnInput['channelScope']; goalId?: TurnInput['goalId'] }
+export interface ToolSurfaceInput { source?: TurnInput['source']; executionMode?: TurnInput['executionMode']; channelScope?: TurnInput['channelScope']; goalId?: TurnInput['goalId']; toolDiscovery?: TurnInput['toolDiscovery'] }
+
+/**
+ * Project board planning tools (~2.4k schema tokens). Offered to goal runs —
+ * where long-lived planning happens — and to discovery-mode runs, which load
+ * them on demand; plain chat keeps its default tool budget.
+ */
+export const BOARD_PLANNING_TOOLS: ReadonlySet<string> = new Set(['pm_get_plan', 'pm_get_handoff', 'pm_set_goal',
+  'pm_update_task_plan', 'pm_manage_stage', 'pm_manage_dependency', 'pm_attach_evidence']);
 export interface ToolSurfaceContext {
   registry: AgentToolRegistry;
   hasSessionManager: boolean;
@@ -70,11 +84,13 @@ function exclusionReasons(input: ToolSurfaceInput, context: ToolSurfaceContext, 
   if (nonUser && (NON_USER_HIDDEN_TOOLS.includes(name) || name.startsWith('mcp_'))) verdicts.push({ layer: 'scheduled-readonly', reason: 'NON_USER_SOURCE_HIDDEN' });
   if (scheduled && risk !== 'read') verdicts.push({ layer: 'scheduled-readonly', reason: 'SCHEDULED_READ_ONLY' });
   if (input.channelScope && !CHANNEL_TOOLS.has(name) && !repairSubmit) verdicts.push({ layer: 'channel-catalog', reason: 'CHANNEL_CATALOG' });
-  if (input.executionMode && !repairSubmit && (!(input.executionMode === 'coding' ? CODING_READS : PROJECT_READS).has(name) || risk !== 'read')) verdicts.push({ layer: 'restricted-mode', reason: 'RESTRICTED_MODE' });
+  const codingOperate = input.executionMode === 'coding' && CODING_OPERATES.has(name);
+  if (input.executionMode && !repairSubmit && (!(input.executionMode === 'coding' ? CODING_READS : PROJECT_READS).has(name) || (risk !== 'read' && !codingOperate))) verdicts.push({ layer: 'restricted-mode', reason: 'RESTRICTED_MODE' });
   if (SESSION_RUNTIME_TOOLS.has(name) && !context.hasSessionManager) verdicts.push({ layer: 'session-runtime', reason: 'SESSION_RUNTIME_UNAVAILABLE' });
   if (name.startsWith('mcp_') && input.source && input.source !== 'user') verdicts.push({ layer: 'mcp-source', reason: 'MCP_SOURCE_AUTHORITY' });
   if (context.isToolDisabled?.(name)) verdicts.push({ layer: 'owner-disabled', reason: 'OWNER_DISABLED' });
   if (GOAL_TOOLS.has(name) && !input.goalId && input.executionMode !== 'coding') verdicts.push({ layer: 'goal-catalog', reason: 'GOAL_CATALOG' });
+  if (BOARD_PLANNING_TOOLS.has(name) && !input.goalId && input.toolDiscovery !== true) verdicts.push({ layer: 'goal-catalog', reason: 'GOAL_CATALOG' });
   return verdicts;
 }
 

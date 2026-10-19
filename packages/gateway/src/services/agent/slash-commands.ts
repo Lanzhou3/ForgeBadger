@@ -12,7 +12,7 @@ import type { Database } from "../../db/types.js";
 import { CopilotPreferencesRepository } from "../../db/repositories/copilot-preferences-repository.js";
 import { ModelProviderRepository } from "../../db/repositories/model-provider-repository.js";
 import { CopilotFollowups } from "./followups.js";
-import { diffGoalSandbox, goalSandboxDir, mergeGoalSandbox } from "./goal-sandbox.js";
+import { diffGoalWorkspace, existingGoalWorkspace, mergeGoalWorkspace, type GoalWorkspace } from "./goal-workspace.js";
 import { CopilotGoalStore, type GoalRow } from "./goal-store.js";
 import type { CopilotPlaybookSummary } from "./skills/skill-queries.js";
 import { listCopilotPlaybooks } from "./skills/skill-queries.js";
@@ -63,18 +63,18 @@ function latestGoal(context: SlashCommandContext, where = ""): GoalRow | undefin
     .get(context.userId, context.conversationId) as GoalRow | undefined;
 }
 
-function goalSandbox(context: SlashCommandContext, goal: GoalRow): string | undefined {
+function goalSandbox(context: SlashCommandContext, goal: GoalRow): GoalWorkspace | undefined {
   if (!goal.project_id) return undefined;
-  const directory = goalSandboxDir(context.db, goal.id);
-  return existsSync(directory) ? directory : undefined;
+  const workspace = existingGoalWorkspace(context.db, goal);
+  return workspace && existsSync(workspace.path) ? workspace : undefined;
 }
 
-function latestSandboxGoal(context: SlashCommandContext): { goal: GoalRow; sandboxDir: string } | undefined {
+function latestSandboxGoal(context: SlashCommandContext): { goal: GoalRow; workspace: GoalWorkspace } | undefined {
   const candidates = context.db.prepare("SELECT * FROM copilot_goals WHERE user_id=? AND conversation_id=? AND project_id IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 5")
     .all(context.userId, context.conversationId) as GoalRow[];
   for (const goal of candidates) {
-    const sandboxDir = goalSandbox(context, goal);
-    if (sandboxDir) return { goal, sandboxDir };
+    const workspace = goalSandbox(context, goal);
+    if (workspace) return { goal, workspace };
   }
   return undefined;
 }
@@ -122,12 +122,12 @@ function switchModel(context: SlashCommandContext, query: string): string {
   return `已切换模型到 ${match.name}（${match.providerName}，id: ${match.id}）。该偏好对该账号所有新会话生效；显式指定模型的运行不受影响。`;
 }
 
-function diffReport(context: SlashCommandContext): string {
+async function diffReport(context: SlashCommandContext): Promise<string> {
   const target = latestSandboxGoal(context);
   if (!target) return "当前对话没有可用的沙箱 diff（Goal 尚无项目沙箱）。Goal 首次写文件后会自动创建沙箱。";
   const project = context.db.prepare("SELECT path FROM projects WHERE user_id=? AND id=?").get(context.userId, target.goal.project_id!) as { path: string } | undefined;
   if (!project) return "Goal 绑定的项目已不存在，无法生成 diff。";
-  const { files } = diffGoalSandbox(target.sandboxDir, project.path);
+  const { files } = await diffGoalWorkspace(target.workspace, project.path);
   if (!files.length) return `Goal「${target.goal.title}」的沙箱与项目一致，没有变更。详情：/copilot/goals/${target.goal.id}`;
   const counts = { added: 0, modified: 0, deleted: 0 };
   for (const file of files) counts[file.status] += 1;
@@ -141,22 +141,22 @@ function diffReport(context: SlashCommandContext): string {
   return lines.join("\n");
 }
 
-function mergeLatestSandbox(context: SlashCommandContext): string {
+async function mergeLatestSandbox(context: SlashCommandContext): Promise<string> {
   const target = latestSandboxGoal(context);
   if (!target) return "没有可合并的沙箱（Goal 尚无项目沙箱或沙箱不存在）。先用 Goal 完成写操作，或在详情页查看。";
   const gate = goalMergeGate(context, target.goal);
   if (gate) return gate;
-  const project = context.db.prepare("SELECT path FROM projects WHERE user_id=? AND id=?").get(context.userId, target.goal.project_id!) as { path: string } | undefined;
+  const project = context.db.prepare("SELECT id,path FROM projects WHERE user_id=? AND id=?").get(context.userId, target.goal.project_id!) as { id: string; path: string } | undefined;
   if (!project) return "Goal 绑定的项目已不存在，无法合并。";
   try {
-    const result = mergeGoalSandbox(target.sandboxDir, project.path);
+    const result = await mergeGoalWorkspace(context.db, context.userId, target.goal, target.workspace, project);
     const store = goalStore(context);
     const listing = [...result.merged, ...result.deleted.map(path => `${path} (deleted)`), ...result.kept.map(path => `${path} (kept)`)]
       .slice(0, 20).join(", ");
     store.appendJournal(target.goal.id, null, `Merged sandbox into project (slash command): ${listing || "(no changes)"}.`);
-    return `已合并 Goal「${target.goal.title}」的沙箱到项目：${listing || "（无变更）"}。`;
+    return `已合并 Goal「${target.goal.title}」的${target.workspace.kind === "worktree" ? `分支 ${target.workspace.branch}` : "沙箱"}到项目${result.commit ? `（提交 ${result.commit.slice(0, 12)}）` : ""}：${listing || "（无变更）"}。`;
   } catch (error) {
-    if (error instanceof AgentError && error.code === "COPILOT_GOAL_MERGE_CONFLICT") return `合并被拒绝：${error.message}`;
+    if (error instanceof AgentError && ["COPILOT_GOAL_MERGE_CONFLICT", "COPILOT_GOAL_SHARED_PROJECT", "COPILOT_GOAL_SANDBOX_MISSING"].includes(error.code)) return `合并被拒绝：${error.message}`;
     throw error;
   }
 }

@@ -13,11 +13,13 @@ import {
   CircleDashed,
   CircleHelp,
   FileDiff,
+  GitBranch,
   GitMerge,
   KeyRound,
   Loader2,
   Pause,
   Play,
+  KanbanSquare,
   Send,
   ShieldCheck,
   Target,
@@ -48,11 +50,12 @@ import { toast } from "@/lib/toast";
 import { formatCostUsd, formatDurationMs, formatTokens } from "@/lib/usage-format";
 import { cn } from "@/lib/utils";
 
-const TASK_META: Record<CopilotGoalTaskStatus, { icon: LucideIcon; className: string; key: "taskPending" | "taskInProgress" | "taskPasses" | "taskFailed" }> = {
+const TASK_META: Record<CopilotGoalTaskStatus, { icon: LucideIcon; className: string; key: "taskPending" | "taskInProgress" | "taskPasses" | "taskFailed" | "taskCancelled" }> = {
   pending: { icon: Circle, className: "text-muted-foreground", key: "taskPending" },
   in_progress: { icon: Loader2, className: "animate-spin text-brand", key: "taskInProgress" },
   passes: { icon: CheckCircle2, className: "text-emerald-500", key: "taskPasses" },
   failed: { icon: XCircle, className: "text-destructive", key: "taskFailed" },
+  cancelled: { icon: Ban, className: "text-muted-foreground", key: "taskCancelled" },
 };
 
 export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
@@ -91,9 +94,10 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
   });
   const mergeMutation = useMutation({
     mutationFn: () => mergeGoal(goalId),
-    onSuccess: ({ merged, deleted, kept }) => {
+    onSuccess: ({ merged, deleted, kept, commit }) => {
       setMergeOpen(false);
-      toast.success(copy.mergeSucceeded(merged.length, deleted ?? 0, kept ?? 0));
+      const summary = copy.mergeSucceeded(merged.length, deleted.length, kept.length);
+      toast.success(commit ? `${summary} ${copy.mergeCommit(commit.slice(0, 12))}` : summary);
       void invalidate();
       // Merge writes back into the project tree; refresh project-scoped data.
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
@@ -157,6 +161,17 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
               <span className="truncate" title={goal.title}>{goal.title}</span>
             </h1>
             <GoalStatusBadge status={goal.status} />
+            {goal.workspace ? (
+              <span
+                title={goal.workspace.baseCommit ?? undefined}
+                className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+              >
+                <GitBranch className="size-3" aria-hidden />
+                {goal.workspace.kind === "worktree" && goal.workspace.branch
+                  ? copy.workspaceWorktree(goal.workspace.branch)
+                  : copy.workspaceCopy}
+              </span>
+            ) : null}
             {goal.grants.map((grant) => (
               <span
                 key={grant}
@@ -243,7 +258,9 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
       <ConfirmDialog
         open={mergeOpen}
         title={copy.mergeConfirmTitle}
-        description={copy.mergeConfirm(diffQuery.data?.files.length ?? 0)}
+        description={goal.workspace?.kind === "worktree" && goal.workspace.branch && goal.workspace.targetBranch
+          ? copy.mergeConfirmWorktree(diffQuery.data?.files.length ?? 0, goal.workspace.branch, goal.workspace.targetBranch)
+          : copy.mergeConfirm(diffQuery.data?.files.length ?? 0)}
         confirmLabel={copy.merge}
         pending={mergeMutation.isPending}
         onOpenChange={setMergeOpen}
@@ -337,6 +354,16 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
                           )}
                         </div>
                       ) : null}
+                      {task.workItemId && goal.projectId ? (
+                        <Link
+                          href={`/projects/${encodeURIComponent(goal.projectId)}`}
+                          className="mt-1 mr-1 inline-flex w-fit items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-brand/10 hover:text-foreground"
+                          title={task.workItemId}
+                        >
+                          <KanbanSquare className="size-3" aria-hidden />
+                          {copy.boardLinked(task.boardStatus ? (copy.boardStatus[task.boardStatus] ?? task.boardStatus) : copy.boardMissing)}
+                        </Link>
+                      ) : null}
                       {task.dispatchedSessionId ? (
                         <Link
                           href={`/sessions/${encodeURIComponent(task.dispatchedSessionId)}`}
@@ -344,7 +371,7 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
                           title={task.dispatchedSessionId}
                         >
                           <Send className="size-3" aria-hidden />
-                          {copy.dispatched}
+                          {task.dispatchStatus ? (copy.dispatchStatus[task.dispatchStatus] ?? copy.dispatched) : copy.dispatched}
                         </Link>
                       ) : null}
                       {task.status === "passes" && task.evidence ? (

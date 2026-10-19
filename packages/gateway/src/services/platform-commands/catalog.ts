@@ -1,4 +1,4 @@
-import { executeTaskPacket, assertTaskDispatchable } from '../project-manager/task-execution.js';
+import { executeTaskPacket, assertTaskDispatchable, assertTaskDependenciesResolved } from '../project-manager/task-execution.js';
 import { taskCloseInput, closeTask } from '../project-manager/task-progress.js';
 import { PlatformNoEffectError } from './errors.js';
 import {mutateAssignedTask} from '../project-manager/tasks.js';
@@ -200,8 +200,10 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
             async prepare(ctx, input) {
                 const v = taskPrepareInput.parse(input);
                 assertLegacyTaskExecution(ctx.db,v.projectId);
-                const item = new ProjectManagerRepository(ctx.db, ctx.userId).getWorkItem(v.projectId, v.workItemId)!;
+                const repo = new ProjectManagerRepository(ctx.db, ctx.userId);
+                const item = repo.getWorkItem(v.projectId, v.workItemId)!;
                 assertTaskDispatchable(item);
+                assertTaskDependenciesResolved(repo, item);
                 const adapter = taskAdapter(ctx, v);
                 const status = await getAdapterLaunchStatus(adapter, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
                 if (!status.launchEnabled)

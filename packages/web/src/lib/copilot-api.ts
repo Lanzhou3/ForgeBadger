@@ -453,7 +453,9 @@ export type CopilotGoalTaskStatus =
   | "pending"
   | "in_progress"
   | "passes"
-  | "failed";
+  | "failed"
+  /** Set only by the owner cancelling the linked board work item. */
+  | "cancelled";
 
 export interface CopilotGoalBudgets {
   tokenBudget?: number;
@@ -463,12 +465,13 @@ export interface CopilotGoalBudgets {
 
 /** One-time authority grants a goal holds for its whole run; granted
  * categories skip per-action owner approval while the goal is active. */
-export type CopilotGoalGrant = "operate_sessions" | "terminal_run" | "pm_dispatch";
+export type CopilotGoalGrant = "operate_sessions" | "terminal_run" | "pm_dispatch" | "sandbox_checks";
 
 export const COPILOT_GOAL_GRANTS: CopilotGoalGrant[] = [
   "operate_sessions",
   "terminal_run",
   "pm_dispatch",
+  "sandbox_checks",
 ];
 
 export interface CopilotGoal {
@@ -483,11 +486,24 @@ export interface CopilotGoal {
   maxRuns?: number | null;
   blockedReason?: string | null;
   grants: CopilotGoalGrant[];
+  /** Where goal edits live until the owner merges; null before the first write or dispatch. */
+  workspace?: CopilotGoalWorkspace | null;
   /** Epoch milliseconds (Date.now() on the server), not an ISO string. */
   createdAt: number;
   updatedAt: number;
   completedAt?: number | null;
 }
+
+export interface CopilotGoalWorkspace {
+  kind: "copy" | "worktree";
+  /** Worktree only: the goal branch, its merge base, and the project branch it merges into. */
+  branch?: string | null;
+  baseCommit?: string | null;
+  targetBranch?: string | null;
+}
+
+/** CLI turn state of a dispatched task; `running` holds the goal until the CLI reports. */
+export type CopilotGoalDispatchStatus = "running" | "completed" | "failed" | "ended";
 
 export interface CopilotGoalTask {
   id: string;
@@ -504,6 +520,10 @@ export interface CopilotGoalTask {
   verifyExitCode?: number | null;
   /** CLI session this task was dispatched to, if any. */
   dispatchedSessionId?: string | null;
+  dispatchStatus?: CopilotGoalDispatchStatus | null;
+  /** Linked project board work item (personal projects) and its board status. */
+  workItemId?: string | null;
+  boardStatus?: string | null;
   /** Epoch milliseconds. */
   createdAt: number;
   /** Epoch milliseconds. */
@@ -600,7 +620,7 @@ export function getGoalDiff(id: string) {
 /** Merge the goal's sandbox changes back into the project root. 409 while a
  * goal run is active or without a sandbox. */
 export function mergeGoal(id: string) {
-  return fetchJson<{ merged: string[]; deleted?: number; kept?: number }>(
+  return fetchJson<{ merged: string[]; deleted: string[]; kept: string[]; commit?: string }>(
     `/api/v1/copilot/goals/${encodeURIComponent(id)}/merge`,
     { method: "POST" }
   );

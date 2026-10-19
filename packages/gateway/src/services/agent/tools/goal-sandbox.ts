@@ -3,16 +3,18 @@ import type { Database } from '../../../db/types.js';
 import { ProjectRepository } from '../../../db/repositories/project-repository.js';
 import { AgentError } from '../types.js';
 import { CopilotGoalStore } from '../goal-store.js';
-import { editSandboxFile, ensureGoalSandbox, goalSandboxDir, readSandboxFile, runSandboxCommand, writeSandboxFile } from '../goal-sandbox.js';
+import { editSandboxFile, readSandboxFile, runSandboxCommand, writeSandboxFile } from '../goal-sandbox.js';
+import { ensureGoalWorkspace } from '../goal-workspace.js';
 import { goalIdForRun } from './goals.js';
 import type { AgentTool, AgentToolContext } from '../tool-registry.js';
 
 /**
  * Goal sandbox tools: file read/write/edit and command checks, all inside the
- * goal's isolated project copy. They never touch the real project (merge back
- * is an owner-only console operation), so they execute without owner approval.
- * Every path is sandbox-relative and guarded against traversal, absolute
- * paths and symlink escapes.
+ * goal workspace (a git worktree for git projects, otherwise a project copy).
+ * They never touch the real project (merge back is an owner-only console
+ * operation), so file tools execute without owner approval. Every path is
+ * workspace-relative and guarded against traversal, absolute paths, symlink
+ * escapes, Git metadata and CLI configuration writes.
  */
 
 const MAX_OUTPUT_CHARS = 2000;
@@ -40,7 +42,7 @@ const runChecksInput = z.object({
   taskId: z.string().trim().min(1).max(128).optional()
 }).strict();
 
-function goalSandboxFor(context: AgentToolContext): { goalId: string; sandboxDir: string } {
+async function goalSandboxFor(context: AgentToolContext): Promise<{ goalId: string; sandboxDir: string }> {
   const db = context.db as Database;
   const goalId = goalIdForRun(context);
   const goal = new CopilotGoalStore(db, context.userId).getGoal(goalId);
@@ -48,9 +50,8 @@ function goalSandboxFor(context: AgentToolContext): { goalId: string; sandboxDir
     throw new AgentError('COPILOT_GOAL_PROJECT_REQUIRED', 'This goal has no project; sandbox file tools are unavailable');
   const project = new ProjectRepository(db, context.userId).getById(goal.project_id);
   if (!project) throw new AgentError('COPILOT_PROJECT_NOT_FOUND', 'Goal project no longer exists');
-  const sandboxDir = goalSandboxDir(db, goalId);
-  ensureGoalSandbox(project.path, sandboxDir);
-  return { goalId, sandboxDir };
+  const workspace = await ensureGoalWorkspace(db, context.userId, goal, project);
+  return { goalId, sandboxDir: workspace.path };
 }
 
 function verifySummary(command: string, result: { stdout: string; stderr: string; durationMs: number }): string {
@@ -67,7 +68,7 @@ export function createGoalSandboxTools(): AgentTool[] {
       requiresApproval: false,
       inputSchema: fileReadInput,
       async execute(input, context) {
-        const { sandboxDir } = goalSandboxFor(context);
+        const { sandboxDir } = await goalSandboxFor(context);
         const { path, offset, limit } = fileReadInput.parse(input);
         return readSandboxFile(sandboxDir, path, offset ?? 0, limit);
       }
@@ -79,7 +80,7 @@ export function createGoalSandboxTools(): AgentTool[] {
       requiresApproval: false,
       inputSchema: fileWriteInput,
       async execute(input, context) {
-        const { sandboxDir } = goalSandboxFor(context);
+        const { sandboxDir } = await goalSandboxFor(context);
         const { path, content } = fileWriteInput.parse(input);
         return writeSandboxFile(sandboxDir, path, content);
       }
@@ -91,19 +92,20 @@ export function createGoalSandboxTools(): AgentTool[] {
       requiresApproval: false,
       inputSchema: fileEditInput,
       async execute(input, context) {
-        const { sandboxDir } = goalSandboxFor(context);
+        const { sandboxDir } = await goalSandboxFor(context);
         const { path, old_string, new_string } = fileEditInput.parse(input);
         return editSandboxFile(sandboxDir, path, old_string, new_string);
       }
     },
     {
       name: 'goal_run_checks',
-      description: 'Run a shell command with the sandbox as working directory; returns exit code, stdout/stderr and timeout status. With taskId and exit code 0, the task verify record is refreshed so the task can be marked passes. 在沙箱内执行校验命令；退出码 0 时刷新对应任务的 verify 记录。',
-      risk: 'read',
-      requiresApproval: false,
+      description: 'Run a shell command with the sandbox as working directory; returns exit code, stdout/stderr and timeout status. With taskId and exit code 0, the task verify record is refreshed so the task can be marked passes. Runs a host shell, so it needs owner approval unless the goal holds the sandbox_checks grant. 在沙箱内执行校验命令；需审批或 sandbox_checks 授权；退出码 0 时刷新对应任务的 verify 记录。',
+      // Arbitrary host shell (no OS sandbox): operate-class, never auto-run as a read.
+      risk: 'operate',
+      requiresApproval: true,
       inputSchema: runChecksInput,
       async execute(input, context) {
-        const { goalId, sandboxDir } = goalSandboxFor(context);
+        const { goalId, sandboxDir } = await goalSandboxFor(context);
         const { command, timeoutMs, taskId } = runChecksInput.parse(input);
         const result = await runSandboxCommand(sandboxDir, command, timeoutMs, typeof context.signal === 'object' ? context.signal as AbortSignal : undefined);
         let verified: unknown;

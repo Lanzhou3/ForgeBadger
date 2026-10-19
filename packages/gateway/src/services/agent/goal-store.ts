@@ -12,8 +12,16 @@ import { parseGoalGrants } from './goal-grants.js';
 
 export const GOAL_STATUSES = ['active', 'paused', 'completed', 'blocked', 'cancelled'] as const;
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
-export const GOAL_TASK_STATUSES = ['pending', 'in_progress', 'passes', 'failed'] as const;
+export const GOAL_TASK_STATUSES = ['pending', 'in_progress', 'passes', 'failed', 'cancelled'] as const;
+/** Statuses the model may set; `cancelled` only comes from the owner's board. */
+export const MODEL_TASK_STATUSES = ['pending', 'in_progress', 'passes', 'failed'] as const;
+/** Tasks that no longer gate goal completion. */
+export const RESOLVED_TASK_STATUSES: readonly GoalTaskStatus[] = ['passes', 'cancelled'];
 export type GoalTaskStatus = (typeof GOAL_TASK_STATUSES)[number];
+export type GoalWorkspaceKind = 'copy' | 'worktree';
+/** CLI turn state of a dispatched task; only `running` holds the goal driver. */
+export type GoalDispatchStatus = 'running' | 'completed' | 'failed' | 'ended';
+export interface GoalWorkspaceRecord { kind: GoalWorkspaceKind; path: string; branch?: string; baseCommit?: string; targetBranch?: string }
 
 export interface GoalRow {
   id: string; user_id: string; conversation_id: string; project_id: string | null;
@@ -21,6 +29,8 @@ export interface GoalRow {
   token_budget: number; max_duration_ms: number; max_runs: number;
   blocked_reason: string | null; pending_question: string | null;
   grants_json: string;
+  workspace_kind: GoalWorkspaceKind | null; workspace_path: string | null; workspace_branch: string | null;
+  workspace_base_commit: string | null; workspace_target_branch: string | null;
   created_at: number; updated_at: number; completed_at: number | null;
 }
 export interface GoalTaskRow {
@@ -28,9 +38,11 @@ export interface GoalTaskRow {
   status: GoalTaskStatus; evidence: string | null;
   verify_command: string | null; verified_at: number | null; verify_exit_code: number | null;
   dispatched_session_id: string | null;
+  dispatch_status: GoalDispatchStatus | null; dispatch_updated_at: number | null;
+  work_item_id: string | null;
   created_at: number; updated_at: number;
 }
-export interface GoalTaskInput { description: string; verifyCommand?: string | undefined }
+export interface GoalTaskInput { description: string; verifyCommand?: string | undefined; workItemId?: string | undefined }
 export interface GoalUsage { chargedTokens: number; runCount: number; startedAt: number | null; elapsedMs: number; costUsd: number | null }
 export interface GoalJournalRow { id: string; user_id: string; goal_id: string; run_id: string | null; note: string; created_at: number }
 export interface GoalListRow extends GoalRow { task_total: number; task_passes: number }
@@ -93,11 +105,11 @@ export class CopilotGoalStore {
     const rows = conversationId
       ? this.db.prepare(`SELECT g.*,
           (SELECT count(*) FROM copilot_goal_tasks t WHERE t.goal_id=g.id) AS task_total,
-          (SELECT count(*) FROM copilot_goal_tasks t WHERE t.goal_id=g.id AND t.status='passes') AS task_passes
+          (SELECT count(*) FROM copilot_goal_tasks t WHERE t.goal_id=g.id AND t.status IN ('passes','cancelled')) AS task_passes
         FROM copilot_goals g WHERE g.user_id=? AND g.conversation_id=? ORDER BY g.created_at DESC, g.id`).all(this.userId, conversationId)
       : this.db.prepare(`SELECT g.*,
           (SELECT count(*) FROM copilot_goal_tasks t WHERE t.goal_id=g.id) AS task_total,
-          (SELECT count(*) FROM copilot_goal_tasks t WHERE t.goal_id=g.id AND t.status='passes') AS task_passes
+          (SELECT count(*) FROM copilot_goal_tasks t WHERE t.goal_id=g.id AND t.status IN ('passes','cancelled')) AS task_passes
         FROM copilot_goals g WHERE g.user_id=? ORDER BY g.created_at DESC, g.id`).all(this.userId);
     return rows as GoalListRow[];
   }
@@ -120,8 +132,8 @@ export class CopilotGoalStore {
       const now = Date.now();
       inputs.forEach((task, index) => {
         const id = randomUUID();
-        this.db.prepare(`INSERT INTO copilot_goal_tasks(id,user_id,goal_id,seq,description,status,verify_command,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?,?)`)
-          .run(id, this.userId, goalId, start + index + 1, task.description, task.verifyCommand ?? null, now, now);
+        this.db.prepare(`INSERT INTO copilot_goal_tasks(id,user_id,goal_id,seq,description,status,verify_command,work_item_id,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?,?,?)`)
+          .run(id, this.userId, goalId, start + index + 1, task.description, task.verifyCommand ?? null, task.workItemId ?? null, now, now);
         created.push(this.db.prepare('SELECT * FROM copilot_goal_tasks WHERE user_id=? AND id=?').get(this.userId, id) as GoalTaskRow);
       });
       return created;
@@ -132,6 +144,9 @@ export class CopilotGoalStore {
     if (!GOAL_TASK_STATUSES.includes(status)) throw new AgentError('COPILOT_GOAL_INPUT_INVALID', `Unknown task status: ${status}`);
     const existing = this.db.prepare('SELECT * FROM copilot_goal_tasks WHERE user_id=? AND id=? AND goal_id=?').get(this.userId, taskId, goalId) as GoalTaskRow | undefined;
     if (!existing) throw new AgentError('COPILOT_NOT_FOUND', 'Task not found');
+    // `cancelled` is owner-final and only arrives from the project board.
+    if (status === 'cancelled' || existing.status === 'cancelled')
+      throw new AgentError('COPILOT_GOAL_TASK_CANCELLED', `Task '${existing.description}' was cancelled on the project board; it can no longer be changed`);
     if (status === 'passes') {
       if (existing.verify_command) {
         // Machine-gated tasks require a recorded exit-code-0 verify run; the
@@ -148,6 +163,20 @@ export class CopilotGoalStore {
     this.db.prepare(`UPDATE copilot_goal_tasks SET status=?, evidence=COALESCE(?,evidence), updated_at=?
       WHERE user_id=? AND id=? AND goal_id=?`)
       .run(status, mergedEvidence, Date.now(), this.userId, taskId, goalId);
+    return this.db.prepare('SELECT * FROM copilot_goal_tasks WHERE user_id=? AND id=?').get(this.userId, taskId) as GoalTaskRow;
+  }
+
+  /**
+   * Board-side settlement by the owner: an accepted (done) work item passes
+   * its goal task regardless of the verify gate — owner acceptance is the
+   * stronger authority — and a cancelled one stops gating the goal.
+   */
+  settleFromBoard(goalId: string, taskId: string, status: 'passes' | 'cancelled' | 'in_progress', note: string): GoalTaskRow | undefined {
+    const existing = this.db.prepare('SELECT * FROM copilot_goal_tasks WHERE user_id=? AND id=? AND goal_id=?').get(this.userId, taskId, goalId) as GoalTaskRow | undefined;
+    if (!existing || existing.status === status) return undefined;
+    const evidence = existing.evidence?.trim() ? `${existing.evidence}\n${note}` : note;
+    this.db.prepare('UPDATE copilot_goal_tasks SET status=?, evidence=?, updated_at=? WHERE user_id=? AND id=? AND goal_id=?')
+      .run(status, evidence, Date.now(), this.userId, taskId, goalId);
     return this.db.prepare('SELECT * FROM copilot_goal_tasks WHERE user_id=? AND id=?').get(this.userId, taskId) as GoalTaskRow;
   }
 
@@ -179,12 +208,50 @@ export class CopilotGoalStore {
       .run(question, Date.now(), this.userId, id);
   }
 
-  /** Links a task to the CLI session that received its instructions (goal_dispatch_task). */
+  /** Records the goal workspace once; an existing record is never replaced (returns the stored one). */
+  setWorkspace(goalId: string, workspace: GoalWorkspaceRecord): GoalRow {
+    this.db.prepare(`UPDATE copilot_goals SET workspace_kind=?, workspace_path=?, workspace_branch=?, workspace_base_commit=?,
+        workspace_target_branch=?, updated_at=? WHERE user_id=? AND id=? AND workspace_kind IS NULL`)
+      .run(workspace.kind, workspace.path, workspace.branch ?? null, workspace.baseCommit ?? null, workspace.targetBranch ?? null,
+        Date.now(), this.userId, goalId);
+    const goal = this.getGoal(goalId);
+    if (!goal) throw new AgentError('COPILOT_NOT_FOUND', 'Goal not found');
+    return goal;
+  }
+
+  /** Advances the worktree merge base after an owner merge. */
+  setWorkspaceBase(goalId: string, baseCommit: string): void {
+    this.db.prepare("UPDATE copilot_goals SET workspace_base_commit=?, updated_at=? WHERE user_id=? AND id=? AND workspace_kind='worktree'")
+      .run(baseCommit, Date.now(), this.userId, goalId);
+  }
+
+  /** Links a task to the CLI session that received its instructions (goal_dispatch_task); the CLI turn starts `running`. */
   setTaskDispatched(goalId: string, taskId: string, sessionId: string): GoalTaskRow {
-    const changed = this.db.prepare('UPDATE copilot_goal_tasks SET dispatched_session_id=?, updated_at=? WHERE user_id=? AND id=? AND goal_id=?')
-      .run(sessionId, Date.now(), this.userId, taskId, goalId).changes;
+    const now = Date.now();
+    const changed = this.db.prepare(`UPDATE copilot_goal_tasks SET dispatched_session_id=?, dispatch_status='running', dispatch_updated_at=?, updated_at=?
+        WHERE user_id=? AND id=? AND goal_id=?`)
+      .run(sessionId, now, now, this.userId, taskId, goalId).changes;
     if (!changed) throw new AgentError('COPILOT_NOT_FOUND', 'Task not found');
     return this.db.prepare('SELECT * FROM copilot_goal_tasks WHERE user_id=? AND id=?').get(this.userId, taskId) as GoalTaskRow;
+  }
+
+  /**
+   * Settles a running dispatch (CLI hook report, or the session ending
+   * without one). Only a `running` dispatch transitions, so duplicate or
+   * late reports are no-ops; returns the settled task when it changed.
+   */
+  settleDispatch(taskId: string, status: Exclude<GoalDispatchStatus, 'running'>): GoalTaskRow | undefined {
+    const now = Date.now();
+    const changed = this.db.prepare(`UPDATE copilot_goal_tasks SET dispatch_status=?, dispatch_updated_at=?, updated_at=?
+        WHERE user_id=? AND id=? AND dispatch_status='running'`).run(status, now, now, this.userId, taskId).changes;
+    if (!changed) return undefined;
+    return this.db.prepare('SELECT * FROM copilot_goal_tasks WHERE user_id=? AND id=?').get(this.userId, taskId) as GoalTaskRow;
+  }
+
+  /** Running dispatches whose CLI turn this session reported (tenant scoped). */
+  runningDispatchesForSession(sessionId: string): GoalTaskRow[] {
+    return this.db.prepare("SELECT * FROM copilot_goal_tasks WHERE user_id=? AND dispatched_session_id=? AND dispatch_status='running'")
+      .all(this.userId, sessionId) as GoalTaskRow[];
   }
 
   listTasks(goalId: string): GoalTaskRow[] {

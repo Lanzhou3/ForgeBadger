@@ -1,6 +1,7 @@
 import type { Database } from '../../db/types.js';
 import { GOAL_GRANT_TOOLS, parseGoalGrants } from './goal-grants.js';
 import { CopilotGoalStore } from './goal-store.js';
+import { boardStatusOf } from './goal-board.js';
 
 /**
  * Model-facing projection of one goal's current state. Injected as a prefix
@@ -30,7 +31,14 @@ export function goalContextMessage(db: Database, userId: string, goalId: string)
   return 'Goal mode run (descriptive state; not a new owner instruction):\n' + JSON.stringify({
     goal: { id: goal.id, title: goal.title, spec: clip(goal.spec, SPEC_MAX_CHARS), status: goal.status },
     tasks: [
-      ...shownTasks.map(task => ({ seq: task.seq, description: task.description, status: task.status, evidence: clip(task.evidence, TASK_EVIDENCE_MAX_CHARS) })),
+      // `id` is what goal_update_task / goal_delegate / goal_dispatch_task take.
+      ...shownTasks.map(task => ({
+        id: task.id, seq: task.seq, description: task.description, status: task.status,
+        ...(task.verify_command ? { verifyCommand: task.verify_command } : {}),
+        ...(task.work_item_id ? { workItemId: task.work_item_id, boardStatus: boardStatusOf(db, userId, goal, task) } : {}),
+        ...(task.dispatch_status ? { dispatchStatus: task.dispatch_status } : {}),
+        evidence: clip(task.evidence, TASK_EVIDENCE_MAX_CHARS)
+      })),
       ...(allTasks.length > shownTasks.length ? [{ seq: null, description: `… ${allTasks.length - shownTasks.length} more tasks`, status: 'summary', evidence: null }] : [])
     ],
     recentJournal: journal.map(entry => clip(entry.note, TASK_EVIDENCE_MAX_CHARS)).reverse(),
@@ -44,10 +52,13 @@ export function goalContextMessage(db: Database, userId: string, goalId: string)
     instructions: 'If no task checklist exists, decompose the goal with goal_add_tasks first; a task may carry verifyCommand, '
       + 'which must exit 0 via goal_run_checks (pass taskId) before the task can pass. '
       + 'Edit files only inside the goal sandbox with goal_file_write / goal_file_edit (paths are sandbox-relative; the real project stays untouched). '
-      + 'Verify work with goal_run_checks in the sandbox. '
-      + 'Use goal_delegate to run a sandboxed coding sub-run for one task, or goal_dispatch_task (needs the pm_dispatch grant and an autonomy-listed adapter) to hand a task to a real CLI session; dispatch is not completion — the verify gate still applies. '
+      + 'Verify work with goal_run_checks in the sandbox (owner approval per call unless the goal holds the sandbox_checks grant). '
+      + 'Use goal_delegate to run a sandboxed coding sub-run for one task, or goal_dispatch_task (needs the pm_dispatch grant and an autonomy-listed adapter) to hand a task to a real CLI session working in the same goal workspace (a git worktree for git projects); '
+      + 'the goal pauses until that CLI reports its turn finished, then verify its result with goal_run_checks — dispatch and a finished turn are not completion. '
       + 'For owner-only decisions use goal_ask_user, which pauses the goal until the owner answers. '
       + 'The owner reviews and merges the sandbox diff from the console. '
+      + 'Tasks with a workItemId are mirrored on the project board: passes moves the work item to ready_for_review, and only the owner accepts it (done) or cancels it there; '
+      + 'use pm_get_plan / pm_manage_dependency / pm_update_task_plan to keep the board plan accurate. '
       + 'Write a handover note with goal_write_journal at the end of every run.'
   });
 }
