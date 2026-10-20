@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, type LucideIcon } from "lucide-react";
+import { Bot, Sparkles, type LucideIcon } from "lucide-react";
 
 import { CopilotSuggestionChips } from "@/components/copilot/copilot-suggestions";
 import { useLanguage } from "@/hooks/use-language";
@@ -43,10 +43,16 @@ export function CopilotWelcomeState({ onSuggestion, compact = false, className }
   const suggestions = [t("copilot.suggestion1"), t("copilot.suggestion2"), t("copilot.suggestion3")];
   if (compact) {
     return (
-      <div className={cn("flex h-full flex-col items-center justify-center gap-3 text-center", className)}>
-        <div>
-          <p className="text-sm font-medium">{t("copilot.welcomeTitle")}</p>
-          <p className="mt-1 max-w-xs text-xs text-muted-foreground">{t("copilot.welcomeSubtitle")}</p>
+      <div className={cn("flex h-full flex-col items-center justify-center gap-4 px-4 text-center", className)}>
+        <div className="relative">
+          <div aria-hidden="true" className="absolute -inset-3 rounded-full bg-brand/15 blur-xl" />
+          <div className="relative flex size-12 items-center justify-center rounded-2xl border border-brand/25 bg-gradient-to-b from-brand/20 to-brand/5 shadow-sm">
+            <Sparkles className="size-5 text-brand" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-semibold tracking-tight">{t("copilot.welcomeTitle")}</p>
+          <p className="mx-auto max-w-[260px] text-xs leading-relaxed text-muted-foreground">{t("copilot.welcomeSubtitle")}</p>
         </div>
         <CopilotSuggestionChips suggestions={suggestions} onPick={onSuggestion} compact />
       </div>
@@ -54,12 +60,15 @@ export function CopilotWelcomeState({ onSuggestion, compact = false, className }
   }
   return (
     <div className={cn("flex h-full flex-col items-center justify-center gap-5 py-10 text-center", className)}>
-      <span className="flex size-12 items-center justify-center rounded-xl border border-border/60 bg-muted/60 shadow-inner">
-        <Bot className="size-6 text-muted-foreground" />
-      </span>
-      <div>
-        <p className="text-base font-semibold">{t("copilot.welcomeTitle")}</p>
-        <p className="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-muted-foreground">
+      <div className="relative">
+        <div aria-hidden="true" className="absolute -inset-4 rounded-full bg-brand/15 blur-2xl" />
+        <span className="relative flex size-14 items-center justify-center rounded-2xl border border-brand/25 bg-gradient-to-b from-brand/20 to-brand/5 shadow-sm">
+          <Bot className="size-7 text-brand" />
+        </span>
+      </div>
+      <div className="space-y-1.5">
+        <p className="text-base font-semibold tracking-tight">{t("copilot.welcomeTitle")}</p>
+        <p className="mx-auto max-w-md text-sm leading-relaxed text-muted-foreground">
           {t("copilot.welcomeSubtitle")}
         </p>
       </div>
