@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Wrench } from "lucide-react";
+import { Brain, Cpu, Search, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -10,12 +10,14 @@ import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { useLanguage } from "@/hooks/use-language";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 import { listModelProviders } from "@/lib/api";
 import {
   getCopilotCapabilities,
@@ -31,6 +33,8 @@ import type { TranslationKey } from "@/lib/i18n";
 export const modelProvidersQueryKey = ["model-providers"] as const;
 export const copilotCapabilitiesQueryKey = ["copilot", "capabilities"] as const;
 export const copilotPreferencesQueryKey = ["copilot", "preferences"] as const;
+
+export const copilotContextTriggerClassName = "data-[size=sm]:h-7 sm:data-[size=sm]:h-6 gap-1.5 rounded-md border-border/70 bg-muted/30 px-2 py-0 text-[11px] font-medium text-muted-foreground shadow-none hover:border-border hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/20 [&_svg]:size-3";
 
 const THINKING_EFFORT_OPTIONS: CopilotThinkingEffort[] = ["off", "low", "medium", "high"];
 
@@ -138,7 +142,7 @@ export function CopilotStatusBar({
     <div
       className={
         compact
-          ? "flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+          ? "contents"
           : "flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/60 px-3 py-1.5 text-xs text-muted-foreground"
       }
       data-testid="copilot-status-bar"
@@ -154,25 +158,32 @@ export function CopilotStatusBar({
         >
           <SelectTrigger
             aria-label={t("copilot.currentModel")}
+            title={modelLabel}
             size="sm"
             className={
               compact
-                ? "h-7 min-w-0 max-w-32 border-0 bg-transparent px-2 text-xs shadow-none hover:bg-muted/60"
+                ? cn(copilotContextTriggerClassName, "min-w-0 max-w-32")
                 : "min-w-0 max-w-64 flex-1 text-xs sm:flex-none"
             }
           >
-            <SelectValue />
+            {compact && <Cpu aria-hidden="true" className="size-3" />}
+            <SelectValue className="min-w-0 truncate">
+              {compact ? (storedModel?.name ?? t("copilot.followSystemDefault")) : undefined}
+            </SelectValue>
           </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={DEFAULT_MODEL_VALUE}>
-              {t("copilot.followSystemDefault")}
-              {defaultLabel ? `（${defaultLabel}）` : ""}
-            </SelectItem>
-            {models.map((model) => (
-              <SelectItem key={model.id} value={model.id}>
-                {model.providerName} / {model.name}
+          <SelectContent side={compact ? "top" : "bottom"} align="start"
+            className={compact ? "max-w-[calc(100vw-1.5rem)]" : undefined}>
+            <SelectGroup>
+              <SelectItem value={DEFAULT_MODEL_VALUE}>
+                {t("copilot.followSystemDefault")}
+                {defaultLabel ? `（${defaultLabel}）` : ""}
               </SelectItem>
-            ))}
+              {models.map((model) => (
+                <SelectItem key={model.id} value={model.id}>
+                  {model.providerName} / {model.name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
       ) : (
@@ -189,20 +200,24 @@ export function CopilotStatusBar({
         <SelectTrigger
           aria-label={t("copilot.thinkingEffort")}
           size="sm"
-          className={compact ? "h-7 border-0 bg-transparent px-2 text-xs shadow-none hover:bg-muted/60" : "text-xs"}
+          title={t("copilot.thinkingEffort")}
+          className={compact ? cn(copilotContextTriggerClassName, "shrink-0") : "text-xs"}
         >
+          {compact && <Brain aria-hidden="true" className="size-3" />}
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
-          {THINKING_EFFORT_OPTIONS.map((effort) => (
-            <SelectItem key={effort} value={effort}>
-              {t(`copilot.thinking${effort.charAt(0).toUpperCase()}${effort.slice(1)}` as TranslationKey)}
-            </SelectItem>
-          ))}
+        <SelectContent side={compact ? "top" : "bottom"} align="start">
+          <SelectGroup>
+            {THINKING_EFFORT_OPTIONS.map((effort) => (
+              <SelectItem key={effort} value={effort}>
+                {t(`copilot.thinking${effort.charAt(0).toUpperCase()}${effort.slice(1)}` as TranslationKey)}
+              </SelectItem>
+            ))}
+          </SelectGroup>
         </SelectContent>
       </Select>
       {compact && !showRuntimeBadge ? null : (
-        <Badge variant="secondary" className={compact ? "hidden gap-1.5 whitespace-nowrap sm:inline-flex" : "ml-auto hidden gap-1.5 whitespace-nowrap sm:inline-flex"}>
+        <Badge variant="secondary" className={compact ? "ml-auto hidden h-6 gap-1.5 whitespace-nowrap border-0 bg-transparent px-1 text-[10px] font-normal text-muted-foreground/70 sm:inline-flex" : "ml-auto hidden gap-1.5 whitespace-nowrap sm:inline-flex"}>
           <span className="size-1.5 rounded-full bg-emerald-500" />
           {t("copilot.nativeRuntime")}
         </Badge>

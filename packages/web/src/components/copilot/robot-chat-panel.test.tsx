@@ -23,6 +23,7 @@ const {
   cancelRunMock,
   getRunMock,
   listRunsMock,
+  revokeRunRepairsMock,
   getCopilotPreferencesMock,
   updateCopilotPreferencesMock,
   listProjectsMock,
@@ -38,6 +39,7 @@ const {
   cancelRunMock: vi.fn(),
   getRunMock: vi.fn(),
   listRunsMock: vi.fn(),
+  revokeRunRepairsMock: vi.fn(),
   getCopilotPreferencesMock: vi.fn(),
   updateCopilotPreferencesMock: vi.fn(),
   listProjectsMock: vi.fn(),
@@ -58,6 +60,7 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     cancelRun: cancelRunMock,
     getRun: getRunMock,
     listConversationRuns: listRunsMock,
+    revokeRunRepairs: revokeRunRepairsMock,
     getCopilotPreferences: getCopilotPreferencesMock,
     updateCopilotPreferences: updateCopilotPreferencesMock,
     listFollowups: vi.fn().mockResolvedValue({ followups: [] }),
@@ -200,6 +203,26 @@ async function pickOption(name: string, option: string) {
 }
 
 describe("RobotChatPanel", () => {
+  it.each(["pending", "running", "awaiting_approval"])("shows only stop while the run is %s, then restores send after cancellation", async (status) => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    const run = { id: "run-1", conversationId: "conv-stored", status, revision: 3 };
+    listRunsMock.mockResolvedValue({ runs: [run], activeRun: run });
+    getRunMock.mockResolvedValue({ run, pendingActions: [] });
+    renderPanel();
+
+    const stop = await screen.findByRole("button", { name: "停止" });
+    fireEvent.change(screen.getByRole("combobox", { name: "输入消息……" }), { target: { value: "下一条消息" } });
+    expect(screen.queryByRole("button", { name: /^(发送|加入队列)$/ })).toBeNull();
+
+    const cancelled = { ...run, status: "cancelled", revision: 4 };
+    getRunMock.mockResolvedValue({ run: cancelled, pendingActions: [] });
+    listRunsMock.mockResolvedValue({ runs: [cancelled], activeRun: null });
+    fireEvent.click(stop);
+    await waitFor(() => expect(cancelRunMock).toHaveBeenCalledWith("run-1"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送" })).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
+  });
+
   it("focuses the quick-chat input and lets keyboard users close with Escape", () => {
     const { onClose } = renderPanel();
     // The chat input is a combobox bridged to the slash-command palette.
@@ -279,6 +302,15 @@ describe("RobotChatPanel", () => {
     expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
     expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the floating panel withdraw a restored repair authorization", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    listRunsMock.mockResolvedValue({ runs: [], activeRun: null, repairRunIds: ["legacy-root"] });
+    revokeRunRepairsMock.mockResolvedValue({ revoked: true });
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "停止此对话的后续修复" }));
+    await waitFor(() => expect(revokeRunRepairsMock).toHaveBeenCalledWith("legacy-root"));
   });
 
   it("offers cancellation for a restored awaiting approval run", async () => {
@@ -654,7 +686,7 @@ describe("RobotChatPanel", () => {
 
     // The run owns the conversation; the composer switches to queue mode and
     // the placeholder tells the user their next message will wait.
-    await waitFor(() => expect(screen.getByPlaceholderText("执行中，发送将加入队列…")).toBeTruthy());
+    await waitFor(() => expect(screen.getByPlaceholderText("执行中，按 Enter 加入队列…")).toBeTruthy());
   });
   it("preserves a newer draft when an earlier enqueue response arrives", async () => {
     const response = deferred<{ followup: { id: string; status: string; runId: null } }>();
@@ -662,7 +694,7 @@ describe("RobotChatPanel", () => {
     renderPanel();
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "start" } });
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
-    const input = await screen.findByPlaceholderText("执行中，发送将加入队列…");
+    const input = await screen.findByPlaceholderText("执行中，按 Enter 加入队列…");
     fireEvent.change(input, { target: { value: "queued A" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(queueFollowupMock).toHaveBeenCalled());
@@ -677,7 +709,7 @@ describe("RobotChatPanel", () => {
     renderPanel();
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "start" } });
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
-    const input = await screen.findByPlaceholderText("执行中，发送将加入队列…");
+    const input = await screen.findByPlaceholderText("执行中，按 Enter 加入队列…");
     fireEvent.change(input, { target: { value: "queued A" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(queueFollowupMock).toHaveBeenCalled());

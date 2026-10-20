@@ -212,6 +212,36 @@ async function pickOption(name: string, option: string) {
 }
 
 describe("CopilotChat console layout", () => {
+  it.each(["pending", "running", "awaiting_approval"])("shows only stop while the run is %s, then restores send after cancellation", async (status) => {
+    const run = { id: "run-1", conversationId: "conv-1", status, revision: 3 };
+    listRunsMock.mockResolvedValue({ runs: [run], activeRun: run });
+    getRunMock.mockResolvedValue({ run, pendingActions: [] });
+    renderChat();
+
+    const stop = await screen.findByRole("button", { name: "停止" });
+    fireEvent.change(screen.getByRole("combobox", { name: "输入消息……" }), { target: { value: "下一条消息" } });
+    expect(screen.queryByRole("button", { name: /^(发送|加入队列)$/ })).toBeNull();
+
+    const cancelled = { ...run, status: "cancelled", revision: 4 };
+    getRunMock.mockResolvedValue({ run: cancelled, pendingActions: [] });
+    listRunsMock.mockResolvedValue({ runs: [cancelled], activeRun: null });
+    fireEvent.click(stop);
+    await waitFor(() => expect(cancelRunMock).toHaveBeenCalledWith("run-1"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送" })).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
+  });
+
+  it("revokes older completed repair authorizations even when the latest run is ordinary", async () => {
+    listRunsMock.mockResolvedValue({ runs: [], activeRun: null, repairRunIds: ["legacy-root-1", "legacy-root-2"] });
+    revokeRunRepairsMock.mockResolvedValue({ revoked: true });
+    renderChat();
+    fireEvent.click(await screen.findByRole("button", { name: "停止此对话的后续修复" }));
+    await waitFor(() => expect(revokeRunRepairsMock).toHaveBeenCalledTimes(2));
+    expect(revokeRunRepairsMock).toHaveBeenCalledWith("legacy-root-1");
+    expect(revokeRunRepairsMock).toHaveBeenCalledWith("legacy-root-2");
+    expect(await screen.findByRole("button", { name: "已停止后续修复" })).toHaveProperty("disabled", true);
+  });
+
   it("renders the conversation title as the page's semantic h1", async () => {
     listConversationsMock.mockResolvedValue({ conversations: [baseConversation] });
     renderChat();
@@ -429,7 +459,9 @@ describe("CopilotChat console layout", () => {
     renderChat();
 
     const statusBar = await screen.findByTestId("copilot-status-bar");
-    await waitFor(() => expect(statusBar.textContent).toContain("OpenAI / gpt-5"));
+    const modelPicker = screen.getByRole("combobox", { name: "当前模型" });
+    await waitFor(() => expect(modelPicker.getAttribute("title")).toBe("OpenAI / gpt-5"));
+    expect(modelPicker.textContent).toContain("跟随系统默认");
     expect(statusBar.textContent).toContain("当前模型");
     expect(statusBar.textContent).toContain("Gateway 原生");
   });
@@ -453,7 +485,9 @@ describe("CopilotChat console layout", () => {
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
     expect(sendMessageMock.mock.calls[0]![2]).toBe("model-2");
     // The invalidation refetch lands and the picker keeps the persisted choice.
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "当前模型" }).textContent).toContain("Anthropic / claude-opus"));
+    const modelPicker = screen.getByRole("combobox", { name: "当前模型" });
+    await waitFor(() => expect(modelPicker.textContent).toContain("claude-opus"));
+    expect(modelPicker.getAttribute("title")).toBe("Anthropic / claude-opus");
   });
 
   it("degrades the preference pickers while loading, then persists the thinking effort", async () => {
@@ -769,7 +803,7 @@ describe("CopilotChat console layout", () => {
     getRunMock.mockResolvedValue({ run: { id: 'run-1', conversationId: 'conv-1', status: 'running' }, pendingActions: [] });
     listRunsMock.mockImplementation(async (id: string) => ({ runs: [], activeRun: id === 'conv-1' ? { id: 'run-1' } : null }));
     renderChat();
-    const input = await screen.findByPlaceholderText("执行中，发送将加入队列…");
+    const input = await screen.findByPlaceholderText("执行中，按 Enter 加入队列…");
     fireEvent.change(input, { target: { value: 'queue A' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(queueFollowupMock).toHaveBeenCalled());
