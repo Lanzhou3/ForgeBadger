@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getGatewayBaseUrl } from "./runtime-config";
@@ -31,6 +33,15 @@ describe("getGatewayBaseUrl", () => {
   });
 
   it("falls back to the default gateway URL", () => {
+    expect(getGatewayBaseUrl()).toBe("http://127.0.0.1:18332");
+  });
+
+  it("routes requests to the default gateway with the shipped browser config", () => {
+    const browserWindow = {};
+    const script = readFileSync(new URL("../../public/forgebadger-runtime.js", import.meta.url), "utf8");
+    runInNewContext(script, { window: browserWindow });
+    vi.stubGlobal("window", browserWindow);
+
     expect(getGatewayBaseUrl()).toBe("http://127.0.0.1:18332");
   });
 
