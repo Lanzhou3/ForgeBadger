@@ -129,12 +129,15 @@ export default function UsagePage() {
 
   const syncMutation = useMutation({
     mutationFn: syncUsageTokens,
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
+      // Invalidation alone reuses a pending first fetch. Discard reads that
+      // may have sampled pre-sync data before requesting the new snapshot.
+      const queries = [["usage-token-summary"], ["usage-project-activity"]];
+      await Promise.all(queries.map((queryKey) => queryClient.cancelQueries({ queryKey })));
+      await Promise.all(queries.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
       const inserted = data.result?.totalInserted ?? 0;
       setNoticeType("ok");
       setNotice(inserted > 0 ? `${t("usage.syncDone")} (+${inserted})` : t("usage.syncDone"));
-      queryClient.invalidateQueries({ queryKey: ["usage-token-summary"] });
-      queryClient.invalidateQueries({ queryKey: ["usage-project-activity"] });
     },
     onError: (error) => {
       setNoticeType("error");

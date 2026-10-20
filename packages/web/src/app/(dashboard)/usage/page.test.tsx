@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
 import UsagePage from "./page";
@@ -53,6 +53,32 @@ describe("UsagePage query state", () => {
 
     await screen.findByText("加载失败");
     expect(syncUsageTokensMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards pending pre-sync reads and shows the synchronized totals", async () => {
+    let resolveOldSummary!: (value: { summary: typeof summary }) => void;
+    let resolveOldActivity!: (value: { series: [] }) => void;
+    let resolveSync!: (value: { result: { totalInserted: number } }) => void;
+    getTokenUsageSummaryMock
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldSummary = resolve; }))
+      .mockResolvedValue({ summary });
+    getProjectActivityMock
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldActivity = resolve; }))
+      .mockResolvedValue({ series: [] });
+    syncUsageTokensMock.mockImplementationOnce(() => new Promise((resolve) => { resolveSync = resolve; }));
+    renderPage();
+    await waitFor(() => expect(syncUsageTokensMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => { resolveSync({ result: { totalInserted: 3 } }); });
+    await act(async () => {
+      resolveOldSummary({ summary: { ...summary, totalTokens: 0 } });
+      resolveOldActivity({ series: [] });
+    });
+
+    await waitFor(() => expect(getTokenUsageSummaryMock).toHaveBeenCalledTimes(2));
+    expect(getProjectActivityMock).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText("6k")).toBeTruthy();
+    expect(await screen.findByText("已同步 (+3)")).toBeTruthy();
   });
 
   it("shows the error state with retry instead of staying on the loading line forever", async () => {
