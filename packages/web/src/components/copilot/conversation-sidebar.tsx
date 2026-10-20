@@ -6,6 +6,7 @@ import { Check, MessageSquare, Pencil, Plus, Search, Trash2, X } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useLanguage } from "@/hooks/use-language";
+import { cn } from "@/lib/utils";
 import type { CopilotConversation } from "@/lib/copilot-api";
 
 export interface ConversationSidebarProps {
@@ -69,7 +70,7 @@ export function ConversationSidebar({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="space-y-2 border-b p-3">
+      <div className="space-y-2 border-b border-border/60 p-3">
         <Button size="sm" className="w-full justify-start gap-2" onClick={onCreate} disabled={creating}>
           <Plus className="size-4" />
           {t("copilot.newConversation")}
@@ -81,19 +82,20 @@ export function ConversationSidebar({
             onChange={(event) => setSearch(event.target.value)}
             placeholder={t("copilot.search")}
             aria-label={t("copilot.search")}
-            className="h-8 pl-8 text-sm"
+            className="h-8 border-border/60 bg-muted/30 pl-8 text-sm"
           />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {visible.map((conversation) => {
           const isActive = conversation.id === activeId;
           return (
             <div
               key={conversation.id}
-              className={`group relative border-b transition-colors ${
-                isActive ? "bg-muted" : "hover:bg-muted/50"
-              }`}
+              className={cn(
+                "group relative rounded-md transition-colors",
+                isActive ? "bg-accent" : "hover:bg-muted/60"
+              )}
             >
               {renamingId === conversation.id ? (
                 <div className="flex items-center gap-1 p-2">
@@ -136,15 +138,15 @@ export function ConversationSidebar({
                 <button
                   onClick={() => onSelect(conversation.id)}
                   aria-current={isActive ? "page" : undefined}
-                  className="block w-full px-3 py-2 pr-16 text-left"
+                  className="block w-full rounded-md px-2.5 py-2 pr-16 text-left"
                 >
-                  <span className="flex items-center gap-1.5 text-sm">
-                    <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">
+                  <span className="flex items-center gap-1.5 text-[13px]">
+                    <MessageSquare className={cn("size-3.5 shrink-0", isActive ? "text-brand" : "text-muted-foreground")} />
+                    <span className={cn("truncate", isActive && "font-medium")}>
                       {conversation.title || t("copilot.untitled")}
                     </span>
                   </span>
-                  <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                  <span className="mt-0.5 block pl-5 text-[11px] text-muted-foreground">
                     {formatConversationTime(conversation.updated_at)}
                   </span>
                 </button>
@@ -175,7 +177,7 @@ export function ConversationSidebar({
           );
         })}
         {visible.length === 0 && (
-          <p className="p-3 text-xs text-muted-foreground">{t("copilot.noConversations")}</p>
+          <p className="p-3 text-center text-xs text-muted-foreground">{t("copilot.noConversations")}</p>
         )}
       </div>
     </div>

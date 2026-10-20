@@ -474,7 +474,7 @@ export function CopilotChat() {
       )}
 
       <Card className="flex min-h-0 min-w-0 flex-1 flex-col gap-0 overflow-hidden py-0">
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b py-2 pr-3 pl-3">
+        <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 pl-2 pr-3">
           <div className="flex min-w-0 items-center gap-1">
             {/* Mobile: opens the conversation Sheet; desktop: toggles the column. */}
             <Button
@@ -534,7 +534,7 @@ export function CopilotChat() {
 
         <CopilotStatusBar onModelChange={onModelChange} onSavingChange={setSavingPreferences} controlsDisabled={isBusy || controller.sending} />
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <div ref={controller.scrollRef} onScroll={controller.onScroll} role="region" aria-label={t("copilot.conversations")} data-testid="copilot-message-history" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4">
+          <div ref={controller.scrollRef} onScroll={controller.onScroll} role="region" aria-label={t("copilot.conversations")} data-testid="copilot-message-history" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
               {loadError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
                 <p>{loadError}</p>
@@ -651,37 +651,13 @@ export function CopilotChat() {
           )}
         </div>
 
-        {/* Floating composer: no docked bottom bar; the upward gradient fades
-            messages out beneath the elevated input card, which lifts on hover
-            and glows brand on focus. */}
+        {/* Floating composer: one elevated card owns every control — the input
+            up top, and a pill toolbar (project context, run options, send /
+            stop) beneath it, aligned with the centered max-w-3xl transcript
+            instead of a full-width docked bar. The upward gradient fades
+            messages out beneath the card, which lifts on hover and glows
+            brand on focus. */}
         <div className="relative shrink-0 px-3 pb-3 pt-1">
-          <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-            <label htmlFor="copilot-project-context" className="shrink-0">{t("copilot.projectContext")}</label>
-            <Select
-              value={projectId || NO_PROJECT_VALUE}
-              disabled={isBusy || controller.sending}
-              onValueChange={(next) => setProjectId(next === NO_PROJECT_VALUE ? "" : next)}
-            >
-              <SelectTrigger
-                id="copilot-project-context"
-                aria-label={t("copilot.projectContext")}
-                size="sm"
-                className="min-w-0 max-w-60 flex-1 text-xs"
-              >
-                <SelectValue placeholder={t("copilot.noProject")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_PROJECT_VALUE}>{t("copilot.noProject")}</SelectItem>
-                {projects.map(project => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <CopilotRunOptions
-              conversationId={conversationId}
-              disabled={isBusy || controller.sending}
-              reviewTaskResults={reviewTaskResults} onReviewChange={setReviewTaskResults}
-              repairFailedChecks={repairFailedChecks} onRepairChange={setRepairFailedChecks}
-            />
-          </div>
           <div
             aria-hidden="true"
             className="pointer-events-none absolute inset-x-0 bottom-full h-10 bg-gradient-to-t from-card via-card/80 to-transparent"
@@ -691,7 +667,7 @@ export function CopilotChat() {
               <CopilotFollowupChips items={followups.items} onCancel={(id) => void followups.cancel(id)} />
             </div>
           )}
-          <div className="relative">
+          <div className="relative mx-auto w-full max-w-3xl">
             <CommandPalettePopup
               view={palette.view}
               onHoverItem={palette.hoverItem}
@@ -699,7 +675,7 @@ export function CopilotChat() {
             />
             <div
               data-testid="copilot-composer"
-              className="flex items-end gap-2 rounded-xl border border-border/70 bg-card/90 px-2.5 py-2 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
+              className="rounded-xl border border-border/70 bg-card/90 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
             >
               <Textarea
                 ref={composerRef}
@@ -719,32 +695,57 @@ export function CopilotChat() {
                 aria-autocomplete="list"
               placeholder={isRunning ? t("copilot.followups.placeholder") : t("copilot.placeholder")}
               aria-label={t("copilot.placeholder")}
-              className="min-h-[44px] max-h-40 flex-1 resize-none rounded-none border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0"
+              className="min-h-[44px] max-h-40 w-full flex-1 resize-none rounded-none border-0 bg-transparent px-3 pb-1 pt-3 shadow-none focus-visible:ring-0"
               rows={2}
             />
-            {isBusy ? (
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-9 shrink-0 rounded-full"
-                onClick={() => void controller.stopRun()}
-                disabled={!active?.runId}
-                aria-label={t("copilot.stop")}
-                title={t("copilot.stop")}
+            <div className="flex flex-wrap items-center gap-1 border-t border-border/50 px-1.5 py-1.5">
+              <Select
+                value={projectId || NO_PROJECT_VALUE}
+                disabled={isBusy || controller.sending}
+                onValueChange={(next) => setProjectId(next === NO_PROJECT_VALUE ? "" : next)}
               >
-                <Square className="size-4" />
+                <SelectTrigger
+                  aria-label={t("copilot.projectContext")}
+                  size="sm"
+                  className="h-7 min-w-0 max-w-44 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted/60 hover:text-foreground"
+                >
+                  <SelectValue placeholder={t("copilot.noProject")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_PROJECT_VALUE}>{t("copilot.noProject")}</SelectItem>
+                  {projects.map(project => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <CopilotRunOptions
+                conversationId={conversationId}
+                disabled={isBusy || controller.sending}
+                reviewTaskResults={reviewTaskResults} onReviewChange={setReviewTaskResults}
+                repairFailedChecks={repairFailedChecks} onRepairChange={setRepairFailedChecks}
+              />
+              {isBusy ? (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="size-8 shrink-0 rounded-full"
+                  onClick={() => void controller.stopRun()}
+                  disabled={!active?.runId}
+                  aria-label={t("copilot.stop")}
+                  title={t("copilot.stop")}
+                >
+                  <Square className="size-3.5" />
+                </Button>
+              ) : null}
+              <Button
+                size="icon"
+                className="size-8 shrink-0 rounded-full"
+                onClick={() => void submit()}
+                disabled={controller.sending || savingPreferences || followups.enqueuing || !controller.input.trim()}
+                aria-label={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
+                title={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
+              >
+                <ArrowUp className="size-4" />
               </Button>
-            ) : null}
-            <Button
-              size="icon"
-              className="size-9 shrink-0 rounded-full"
-              onClick={() => void submit()}
-              disabled={controller.sending || savingPreferences || followups.enqueuing || !controller.input.trim()}
-              aria-label={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
-              title={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
-            >
-              <ArrowUp className="size-4" />
-            </Button>
+            </div>
             </div>
           </div>
         </div>

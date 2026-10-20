@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronRight, GripVertical, MoreHorizontal, Plus, X } from "lucide-react";
+import { ChevronRight, MoreHorizontal, Plus, X } from "lucide-react";
 import {
   DndContext, PointerSensor, closestCenter, useSensor, useSensors,
   type DragEndEvent, type Modifier,
@@ -404,7 +404,7 @@ function SessionTabItem({
         listeners?.onPointerDown?.(event);
       }}
       className={cn(
-        "select-none",
+        "select-none cursor-grab active:cursor-grabbing",
         isDragging && "relative z-10 opacity-80",
         active
           ? "group flex h-8 max-w-60 shrink-0 items-center gap-2 rounded-t-md border border-b-background border-border bg-background px-2.5 text-left text-xs text-foreground transition-colors duration-150"
@@ -420,11 +420,10 @@ function SessionTabItem({
       <button
         ref={setActivatorNodeRef}
         type="button"
-        className="shrink-0 cursor-grab touch-none rounded p-0.5 text-muted-foreground/60 hover:text-foreground active:cursor-grabbing"
+        className="sr-only"
         {...attributes}
         {...listeners}
         aria-label={reorderLabel}
-        title={reorderLabel}
         onKeyDown={(event) => {
           if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
           event.preventDefault();
@@ -435,9 +434,7 @@ function SessionTabItem({
           const target = group?.tabs[index + (event.key === "ArrowLeft" ? -1 : 1)];
           if (target) onReorder(tab.id, target.id);
         }}
-      >
-        <GripVertical className="size-3" />
-      </button>
+      />
       <span className="flex shrink-0 items-center gap-1.5">
         <SessionWorkDot tab={tab} state={workState} />
         {/* Official CLI logo; fall back to the text short label for unknown CLIs.

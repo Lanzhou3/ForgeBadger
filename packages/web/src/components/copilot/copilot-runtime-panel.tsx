@@ -48,12 +48,19 @@ export function CopilotStatusBar({
   onModelChange,
   controlsDisabled,
   onSavingChange,
+  variant = "strip",
 }: {
   /** When provided, the model label becomes a picker. */
   onModelChange?: (modelId: string | null) => void;
   /** Disables both pickers, e.g. while a run is in flight. */
   controlsDisabled?: boolean;
   onSavingChange?: (saving: boolean) => void;
+  /**
+   * "strip" renders the bordered full-width bar (console); "compact" renders
+   * borderless pill triggers for embedding inside another toolbar (robot
+   * panel composer).
+   */
+  variant?: "strip" | "compact";
 }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -122,12 +129,18 @@ export function CopilotStatusBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelProviders.data, storedModelId, onModelChange]);
 
+  const compact = variant === "compact";
+
   return (
     <div
-      className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-1.5 text-xs text-muted-foreground"
+      className={
+        compact
+          ? "flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+          : "flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/60 px-3 py-1.5 text-xs text-muted-foreground"
+      }
       data-testid="copilot-status-bar"
     >
-      <span className="sr-only shrink-0 sm:not-sr-only">{t("copilot.currentModel")}</span>
+      <span className={compact ? "sr-only" : "sr-only shrink-0 sm:not-sr-only"}>{t("copilot.currentModel")}</span>
       {onModelChange ? (
         <Select
           value={storedModelId ?? DEFAULT_MODEL_VALUE}
@@ -139,7 +152,11 @@ export function CopilotStatusBar({
           <SelectTrigger
             aria-label={t("copilot.currentModel")}
             size="sm"
-            className="min-w-0 max-w-64 flex-1 text-xs sm:flex-none"
+            className={
+              compact
+                ? "h-7 min-w-0 max-w-32 border-0 bg-transparent px-2 text-xs shadow-none hover:bg-muted/60"
+                : "min-w-0 max-w-64 flex-1 text-xs sm:flex-none"
+            }
           >
             <SelectValue />
           </SelectTrigger>
@@ -158,7 +175,7 @@ export function CopilotStatusBar({
       ) : (
         <span className="truncate">{modelLabel}</span>
       )}
-      <span className="sr-only shrink-0 sm:not-sr-only">{t("copilot.thinkingEffort")}</span>
+      <span className={compact ? "sr-only" : "sr-only shrink-0 sm:not-sr-only"}>{t("copilot.thinkingEffort")}</span>
       <Select
         value={preferences.data?.thinkingEffort ?? "off"}
         disabled={!preferencesReady || preferencesMutation.isPending || controlsDisabled}
@@ -166,7 +183,11 @@ export function CopilotStatusBar({
           void preferencesMutation.mutate({ thinkingEffort: next as CopilotThinkingEffort });
         }}
       >
-        <SelectTrigger aria-label={t("copilot.thinkingEffort")} size="sm" className="text-xs">
+        <SelectTrigger
+          aria-label={t("copilot.thinkingEffort")}
+          size="sm"
+          className={compact ? "h-7 border-0 bg-transparent px-2 text-xs shadow-none hover:bg-muted/60" : "text-xs"}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -177,10 +198,12 @@ export function CopilotStatusBar({
           ))}
         </SelectContent>
       </Select>
-      <Badge variant="secondary" className="ml-auto hidden gap-1.5 whitespace-nowrap sm:inline-flex">
-        <span className="size-1.5 rounded-full bg-emerald-500" />
-        {t("copilot.nativeRuntime")}
-      </Badge>
+      {compact ? null : (
+        <Badge variant="secondary" className="ml-auto hidden gap-1.5 whitespace-nowrap sm:inline-flex">
+          <span className="size-1.5 rounded-full bg-emerald-500" />
+          {t("copilot.nativeRuntime")}
+        </Badge>
+      )}
     </div>
   );
 }
