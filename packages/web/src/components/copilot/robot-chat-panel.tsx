@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { ArrowDown, ArrowUp, Bot, Maximize2, Square, SquarePen, XIcon } from "lucide-react";
+import { ArrowDown, Bot, Maximize2, Send, Square, SquarePen, XIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,13 +20,13 @@ import {
   indexToolResults,
 } from "@/components/copilot/copilot-message-primitives";
 import { CopilotWelcomeState } from "@/components/copilot/copilot-empty-state";
-import { CopilotRunOptions } from "@/components/copilot/CopilotRunOptions";
 import { CopilotFollowupChips } from "@/components/copilot/CopilotFollowupChips";
 import { CommandPalettePopup, useCommandPalette } from "@/components/copilot/command-palette-popup";
 import { CopilotStatusBar } from "@/components/copilot/copilot-runtime-panel";
 import { CopilotApproval } from "@/components/copilot/CopilotApproval";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
+import { useAutoGrowTextarea } from "@/hooks/use-auto-grow-textarea";
 import { useCopilotChatController } from "@/hooks/use-copilot-chat-controller";
 import { useCopilotFollowups } from "@/hooks/use-copilot-followups";
 import { copilotPhaseLabel } from "@/lib/copilot-phase";
@@ -87,9 +87,9 @@ interface RobotChatPanelProps {
  *
  * Send / stop / edit / scroll-follow behavior lives in the shared
  * useCopilotChatController hook (same as the /copilot console); this surface
- * only owns conversation restore/lazy creation plus the parity capability
- * row (project context, run options) and the model/thinking pickers from
- * CopilotStatusBar.
+ * only owns conversation restore/lazy creation plus the parity controls
+ * (project context picker and the model/thinking pickers from
+ * CopilotStatusBar).
  */
 export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" }: RobotChatPanelProps) {
   const { t } = useLanguage();
@@ -105,8 +105,6 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [modelId, setModelId] = useState<string | null>(null);
-  const [reviewTaskResults, setReviewTaskResults] = useState(false);
-  const [repairFailedChecks, setRepairFailedChecks] = useState(false);
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -179,8 +177,8 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     conversationId,
     projectId,
     modelId,
-    reviewTaskResults,
-    repairFailedChecks,
+    reviewTaskResults: false,
+    repairFailedChecks: false,
     savingPreferences,
     conversations: [],
     messages,
@@ -333,8 +331,8 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     conversationId,
     ...(projectId ? { projectId } : {}),
     ...(modelId ? { modelId } : {}),
-    reviewTaskResults,
-    repairFailedChecks,
+    reviewTaskResults: false,
+    repairFailedChecks: false,
     active: isBusy,
   });
   const enqueueRef = useRef(followups.enqueue);
@@ -351,6 +349,10 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     inputRef.current?.focus();
   }, [controller]);
   const palette = useCommandPalette(controller.input, applySlashCommand);
+
+  // Multi-line input grows the composer instead of staying one line tall;
+  // min-h/max-h on the textarea clamp the range and scroll past the max.
+  useAutoGrowTextarea(inputRef, controller.input);
 
   const toolResultById = useMemo(() => indexToolResults(messages), [messages]);
   const showEmpty = !loadError && !restoring && messages.length === 0 && !active;
@@ -504,10 +506,9 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
         )}
       </div>
 
-      {/* Floating composer: one elevated card owns every control — the input
-          up top, and a pill toolbar (project context, run options, model and
-          thinking pickers, send/stop) beneath it, mirroring modern assistant
-          surfaces (Cursor/v0) instead of separate chrome strips. The upward
+      {/* Floating composer: one elevated card owns every control — borderless
+          pill controls (project, model, thinking) float in a row above the
+          input, and the send/stop button sits below-right. The upward
           gradient fades messages out beneath the card, which lifts on hover
           and glows on focus. */}
       <div className="relative shrink-0 px-3 pb-3">
@@ -528,6 +529,30 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
             data-testid="robot-chat-composer"
             className="rounded-xl border border-border/70 bg-card/90 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
           >
+            {/* Context row: borderless pill pickers floating above the input.
+                The project picker stretches so long names truncate; model and
+                thinking pickers are shared with the console so both surfaces
+                read and write the same server-side preferences. */}
+            <div className="flex items-center gap-0.5 px-1.5 pt-1">
+              <Select
+                value={projectId || NO_PROJECT_VALUE}
+                disabled={isBusy || controller.sending}
+                onValueChange={(next) => setProjectId(next === NO_PROJECT_VALUE ? "" : next)}
+              >
+                <SelectTrigger
+                  aria-label={t("copilot.projectContext")}
+                  size="sm"
+                  className="h-7 min-w-0 flex-1 border-0 bg-transparent px-1.5 text-xs text-muted-foreground shadow-none hover:bg-muted/60 hover:text-foreground"
+                >
+                  <SelectValue placeholder={t("copilot.noProject")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_PROJECT_VALUE}>{t("copilot.noProject")}</SelectItem>
+                  {projects.map(project => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <CopilotStatusBar variant="compact" onModelChange={setModelId} onSavingChange={setSavingPreferences} controlsDisabled={isBusy || controller.sending} />
+            </div>
             <Textarea
               ref={inputRef}
               value={controller.input}
@@ -546,37 +571,10 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
               aria-autocomplete="list"
             placeholder={isRunning ? t("copilot.followups.placeholder") : t("copilot.placeholder")}
             aria-label={t("copilot.placeholder")}
-            className="min-h-[36px] max-h-32 w-full flex-1 resize-none rounded-none border-0 bg-transparent px-2.5 pb-1 pt-2.5 shadow-none focus-visible:ring-0"
+            className="max-h-32 min-h-[36px] w-full flex-1 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-2.5 pb-1 pt-1.5 shadow-none focus-visible:ring-0"
             rows={1}
           />
-          <div className="flex flex-wrap items-center gap-1 border-t border-border/50 px-1.5 py-1">
-            <Select
-              value={projectId || NO_PROJECT_VALUE}
-              disabled={isBusy || controller.sending}
-              onValueChange={(next) => setProjectId(next === NO_PROJECT_VALUE ? "" : next)}
-            >
-              <SelectTrigger
-                aria-label={t("copilot.projectContext")}
-                size="sm"
-                className="h-7 min-w-0 max-w-28 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted/60 hover:text-foreground"
-              >
-                <SelectValue placeholder={t("copilot.noProject")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_PROJECT_VALUE}>{t("copilot.noProject")}</SelectItem>
-                {projects.map(project => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <CopilotRunOptions
-              conversationId={conversationId}
-              disabled={isBusy || controller.sending}
-              reviewTaskResults={reviewTaskResults} onReviewChange={setReviewTaskResults}
-              repairFailedChecks={repairFailedChecks} onRepairChange={setRepairFailedChecks}
-            />
-            {/* Model / thinking-effort pickers as borderless pills, shared
-                with the console so both surfaces read and write the same
-                server-side preferences. */}
-            <CopilotStatusBar variant="compact" onModelChange={setModelId} onSavingChange={setSavingPreferences} controlsDisabled={isBusy || controller.sending} />
+          <div className="flex items-center justify-end gap-1 px-1.5 pb-1.5">
             {isBusy ? (
               <Button
                 variant="outline"
@@ -598,7 +596,7 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
               aria-label={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
               title={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
             >
-              <ArrowUp className="size-4" />
+              <Send className="size-3.5" />
             </Button>
           </div>
           </div>

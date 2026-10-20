@@ -14,18 +14,22 @@ export default function ProjectPage() {
   const search = useSearchParams();
   const { user } = useAuth();
   const { t } = useLanguage();
+  // Both queries are independent (detail needs only the id, and it succeeds
+  // for private owner projects too), so they fire in parallel — no waterfall.
   const context = useQuery({
     queryKey: ["project-task-context", id, user?.id],
     queryFn: () => getProjectTaskContext(id),
     enabled: !!user,
     retry: false,
+    staleTime: 30_000,
     refetchInterval: 30_000,
   });
   const detail = useQuery({
     queryKey: ["collaboration", id, "project", user?.id],
     queryFn: () => collaborationApi.project(id),
-    enabled: !!context.data,
+    enabled: !!user,
     retry: false,
+    staleTime: 30_000,
     refetchInterval: 30_000,
   });
   const error = context.error ?? detail.error;

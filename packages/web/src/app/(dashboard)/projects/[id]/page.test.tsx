@@ -96,7 +96,7 @@ it("gates all private hooks behind safe context and renders shared reviewer capa
     }),
   );
 });
-it("fails closed on a rejected context without fetching project detail", async () => {
+it("fails closed on a rejected context even though project detail loads in parallel", async () => {
   vi.mocked(getProjectTaskContext).mockRejectedValue(
     new Error("PROJECT_CAPABILITY_DENIED"),
   );
@@ -104,7 +104,7 @@ it("fails closed on a rejected context without fetching project detail", async (
   await screen.findByRole("alert");
   expect(spies.private).not.toHaveBeenCalled();
   expect(spies.panel).not.toHaveBeenCalled();
-  expect(collaborationApi.project).not.toHaveBeenCalled();
+  expect(collaborationApi.project).toHaveBeenCalledWith("p");
 });
 it("does not mount private views while the context is unresolved", async () => {
   vi.mocked(getProjectTaskContext).mockReturnValue(new Promise(() => {}));
@@ -112,7 +112,7 @@ it("does not mount private views while the context is unresolved", async () => {
   await screen.findByRole("status");
   await waitFor(() => expect(getProjectTaskContext).toHaveBeenCalled());
   expect(spies.private).not.toHaveBeenCalled();
-  expect(collaborationApi.project).not.toHaveBeenCalled();
+  expect(collaborationApi.project).toHaveBeenCalledWith("p");
 });
 
 it("resets project drafts when navigating directly between cached project contexts", async () => {

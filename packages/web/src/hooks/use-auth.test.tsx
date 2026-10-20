@@ -46,7 +46,7 @@ describe("useAuth session validation", () => {
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() => expect(result.current.isFetching).toBe(false));
 
     expect(result.current.user).toEqual(cachedUser);
     expect(localStorage.getItem("forgebadger.token")).toBe("session-token");
@@ -58,10 +58,28 @@ describe("useAuth session validation", () => {
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() => expect(result.current.isFetching).toBe(false));
 
     expect(result.current.user).toBeNull();
     expect(localStorage.getItem("forgebadger.token")).toBeNull();
     expect(localStorage.getItem("forgebadger.user")).toBeNull();
+  });
+
+  it("renders the cached user immediately while server validation is in flight", async () => {
+    let resolveValidation: (value: { code: number; data: typeof cachedUser }) => void = () => undefined;
+    getMeMock.mockImplementation(
+      () => new Promise((resolve) => { resolveValidation = resolve; })
+    );
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    // No loading gate: the cached user is available on the first render.
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.user).toEqual(cachedUser);
+    expect(result.current.isFetching).toBe(true);
+
+    resolveValidation({ code: 0, data: { ...cachedUser, email: "fresh@example.com" } });
+    await waitFor(() => expect(result.current.isFetching).toBe(false));
+    expect(result.current.user?.email).toBe("fresh@example.com");
   });
 });

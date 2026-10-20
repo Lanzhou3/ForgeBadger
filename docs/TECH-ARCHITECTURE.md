@@ -796,13 +796,13 @@ additive 语义，apply 把供应商全部 active 模型写入 models map 且不
 `[ui]`、`[mcp_servers]` 和用户自己的 `[model.*]`，切换 provider 时只删除上一次
 托管的 catalog key，不读写 `auth.json`。
 具体到各 CLI 的写入语义：claude 写入 `ANTHROPIC_AUTH_TOKEN` 时同步删除残留的
-`ANTHROPIC_API_KEY`，并对目录外模型 id 注入上下文窗口覆盖
-（`CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 两个键
-必须同时写，且仅对非 `claude-` 前缀模型 id 生效）：优先取模型 profile 的
-`contextWindow`，未设置时 Kimi For Coding 端点回落 256k、MiniMax
-`/anthropic` 端点回落 512k 保底；不覆盖用户显式值，切走时依据
-`cli_config_applied_providers` 指针仅剥离上一次 apply 注入的值（Kimi 的
-256k 默认值对指针建立前的历史 apply 也始终视为托管值）；codex 采用 0.149+ 布局，把 key 写入
+`ANTHROPIC_API_KEY`。上下文窗口处理：仅当模型 profile 显式配置了
+`contextWindow` 时注入 `CLAUDE_CODE_MAX_CONTEXT_TOKENS`（填充式，不覆盖用户
+显式值；`claude-` 前缀的目录内模型 id 跳过）；`CLAUDE_CODE_AUTO_COMPACT_WINDOW`
+一律不写——Claude Code 本身按窗口百分比触发自动压缩，压低窗口只会浪费可用
+上下文；历史版本注入的值（256k Kimi 默认值、512k MiniMax 保底、或
+`cli_config_applied_providers` 指针记录的上次注入值）会在下一次 apply 时被
+剥离；codex 采用 0.149+ 布局，把 key 写入
 `model_providers.<id>.experimental_bearer_token`，并从 `~/.codex/auth.json`
 移除遗留 `OPENAI_API_KEY`（保留 ChatGPT 登录 tokens 等其它字段，若因此清空则
 直接删除该文件——Codex 对空 auth.json 报错、缺文件才显示登录页）；opencode

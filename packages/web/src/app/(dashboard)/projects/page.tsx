@@ -26,12 +26,13 @@ export default function ProjectsPage() {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["projects", user?.id],
     enabled: !!user,
+    staleTime: 30_000,
     queryFn: listProjects,
   });
-  const shared = useQuery({queryKey: ["collaboration", "projects", user?.id], enabled: !!user, queryFn: collaborationApi.projects});
+  const shared = useQuery({queryKey: ["collaboration", "projects", user?.id], enabled: !!user, staleTime: 30_000, queryFn: collaborationApi.projects});
   const privateProjects = data?.projects ?? [];
   const projects = [...privateProjects.map(p => ({id: p.id, name: p.name, status: p.status, path: p.path ?? p.rootPath})), ...(shared.data?.projects ?? []).filter(p => !privateProjects.some(own => own.id === p.id)).map(p => ({id: p.id, name: p.name, status: p.role, path: undefined}))];
-  const contexts = useQueries({queries: projects.map(p => ({queryKey: ["project-task-context", p.id, user?.id], enabled: !!user, queryFn: () => getProjectTaskContext(p.id), retry: false}))});
+  const contexts = useQueries({queries: projects.map(p => ({queryKey: ["project-task-context", p.id, user?.id], enabled: !!user, staleTime: 60_000, queryFn: () => getProjectTaskContext(p.id), retry: false}))});
   const branches = useQueries({queries: projects.map((p, i) => ({queryKey: ["project", p.id, "git-branch"], queryFn: () => getProjectGitChanges(p.id), enabled: contexts[i]?.data?.privateDetailAllowed === true, staleTime: 60_000}))});
   const loadError = error ?? shared.error;
 

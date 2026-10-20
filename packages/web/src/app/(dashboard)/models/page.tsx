@@ -535,7 +535,7 @@ export default function ModelsPage() {
           empty={null}
         />
       ) : (
-      <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
+      <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
         <div className="min-w-0 space-y-6">
           <ProviderList
             providers={filteredProviders}
@@ -625,12 +625,12 @@ export default function ModelsPage() {
               t={t}
             />
           ) : providers.length === 0 ? (
-            <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-border/70 bg-card/50 px-6 py-12 text-center forgebadger-animate-in">
-              <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-                <Cloud className="size-5" />
+            <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 rounded-2xl bg-muted/20 px-6 py-12 text-center forgebadger-animate-in">
+              <div className="flex size-12 items-center justify-center rounded-2xl bg-brand/10 text-brand">
+                <Cloud className="size-6" />
               </div>
-              <div className="space-y-1">
-                <div className="text-sm font-medium">{t("models.emptyWorkspaceTitle")}</div>
+              <div className="space-y-1.5">
+                <div className="text-sm font-semibold">{t("models.emptyWorkspaceTitle")}</div>
                 <p className="max-w-md text-sm text-muted-foreground">{t("models.emptyProviders")}</p>
               </div>
               <Button
@@ -644,9 +644,9 @@ export default function ModelsPage() {
               </Button>
             </div>
           ) : (
-            <div className="flex min-h-[280px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border/70 bg-card/50 px-6 py-10 text-center forgebadger-animate-in">
-              <div className="flex size-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                <Cloud className="size-5" />
+            <div className="flex min-h-[280px] flex-col items-center justify-center gap-3 rounded-2xl bg-muted/20 px-6 py-10 text-center forgebadger-animate-in">
+              <div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+                <Cloud className="size-6" />
               </div>
               <p className="max-w-sm text-sm text-muted-foreground">{t("models.noProviderSelected")}</p>
             </div>

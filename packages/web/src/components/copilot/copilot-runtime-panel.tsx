@@ -49,6 +49,7 @@ export function CopilotStatusBar({
   controlsDisabled,
   onSavingChange,
   variant = "strip",
+  showRuntimeBadge,
 }: {
   /** When provided, the model label becomes a picker. */
   onModelChange?: (modelId: string | null) => void;
@@ -58,9 +59,11 @@ export function CopilotStatusBar({
   /**
    * "strip" renders the bordered full-width bar (console); "compact" renders
    * borderless pill triggers for embedding inside another toolbar (robot
-   * panel composer).
+   * panel composer, console composer).
    */
   variant?: "strip" | "compact";
+  /** Also render the Gateway-native runtime badge (console composer). */
+  showRuntimeBadge?: boolean;
 }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -198,8 +201,8 @@ export function CopilotStatusBar({
           ))}
         </SelectContent>
       </Select>
-      {compact ? null : (
-        <Badge variant="secondary" className="ml-auto hidden gap-1.5 whitespace-nowrap sm:inline-flex">
+      {compact && !showRuntimeBadge ? null : (
+        <Badge variant="secondary" className={compact ? "hidden gap-1.5 whitespace-nowrap sm:inline-flex" : "ml-auto hidden gap-1.5 whitespace-nowrap sm:inline-flex"}>
           <span className="size-1.5 rounded-full bg-emerald-500" />
           {t("copilot.nativeRuntime")}
         </Badge>

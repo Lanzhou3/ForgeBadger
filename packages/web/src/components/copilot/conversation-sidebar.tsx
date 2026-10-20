@@ -86,14 +86,14 @@ export function ConversationSidebar({
           />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {visible.map((conversation) => {
           const isActive = conversation.id === activeId;
           return (
             <div
               key={conversation.id}
               className={cn(
-                "group relative rounded-md transition-colors",
+                "group relative rounded-lg transition-colors",
                 isActive ? "bg-accent" : "hover:bg-muted/60"
               )}
             >
@@ -138,7 +138,7 @@ export function ConversationSidebar({
                 <button
                   onClick={() => onSelect(conversation.id)}
                   aria-current={isActive ? "page" : undefined}
-                  className="block w-full rounded-md px-2.5 py-2 pr-16 text-left"
+                  className="block w-full rounded-lg px-2.5 py-2 pr-16 text-left"
                 >
                   <span className="flex items-center gap-1.5 text-[13px]">
                     <MessageSquare className={cn("size-3.5 shrink-0", isActive ? "text-brand" : "text-muted-foreground")} />

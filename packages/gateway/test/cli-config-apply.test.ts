@@ -563,7 +563,7 @@ describe("cli-config apply service", () => {
       assert.equal(doc.env.ANTHROPIC_BASE_URL, "https://api.deepseek.com/anthropic");
     });
 
-    it("injects the 256k context window for the Kimi For Coding endpoint", async () => {
+    it("no longer injects context window overrides, and strips legacy injected values", async () => {
       const db = createTestDb();
       const user = new UserRepository(db).create("apply-kimi-coding@example.com", "hash");
       const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-kimi-coding-");
@@ -587,10 +587,19 @@ describe("cli-config apply service", () => {
       const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
         env: Record<string, string>;
       };
-      assert.equal(doc.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "262144");
-      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, "262144");
+      assert.equal(doc.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, undefined);
+      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
 
-      // Switching to a non-Kimi provider strips only the injected defaults.
+      // Values injected by an older ForgeBadger version are stripped on the
+      // next apply: the 256k Kimi default is always treated as managed.
+      await writeFile(path.join(root, "settings.json"), JSON.stringify({
+        ...doc,
+        env: {
+          ...doc.env,
+          CLAUDE_CODE_MAX_CONTEXT_TOKENS: "262144",
+          CLAUDE_CODE_AUTO_COMPACT_WINDOW: "262144"
+        }
+      }), "utf8");
       const fixture = createFixture(db, user.id, "claude");
       await applyCliConfigToAdapter({
         db, userId: user.id, masterKey, adapter: "claude",
@@ -603,7 +612,7 @@ describe("cli-config apply service", () => {
       assert.equal(switched.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
     });
 
-    it("never overwrites an explicit user context window setting", async () => {
+    it("never removes an explicit user context window setting", async () => {
       const db = createTestDb();
       const user = new UserRepository(db).create("apply-kimi-explicit@example.com", "hash");
       const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-kimi-explicit-");
@@ -631,9 +640,10 @@ describe("cli-config apply service", () => {
         env: Record<string, string>;
       };
       assert.equal(doc.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "100000");
-      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, "262144");
+      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
 
-      // Switching away keeps the explicit value but strips the injected one.
+      // Switching providers keeps the explicit value: it was never injected
+      // by ForgeBadger, so it is not managed.
       const fixture = createFixture(db, user.id, "claude");
       await applyCliConfigToAdapter({
         db, userId: user.id, masterKey, adapter: "claude",
@@ -646,7 +656,7 @@ describe("cli-config apply service", () => {
       assert.equal(switched.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
     });
 
-    it("injects the model profile's context window and strips it when switching away", async () => {
+    it("injects the model profile's context window as MAX_CONTEXT_TOKENS only, and strips it when switching away", async () => {
       const db = createTestDb();
       const user = new UserRepository(db).create("apply-minimax-ctx@example.com", "hash");
       const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-minimax-ctx-");
@@ -674,7 +684,7 @@ describe("cli-config apply service", () => {
         env: Record<string, string>;
       };
       assert.equal(doc.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "1000000");
-      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, "1000000");
+      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
 
       // Switching to a model without a context window strips exactly the
       // value the previous apply injected.
@@ -690,7 +700,7 @@ describe("cli-config apply service", () => {
       assert.equal(switched.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
     });
 
-    it("falls back to the 512k floor for MiniMax anthropic endpoints without a model context window", async () => {
+    it("does not inject the MiniMax 512k floor anymore", async () => {
       const db = createTestDb();
       const user = new UserRepository(db).create("apply-minimax-floor@example.com", "hash");
       const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-apply-minimax-floor-");
@@ -714,8 +724,8 @@ describe("cli-config apply service", () => {
       const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8")) as {
         env: Record<string, string>;
       };
-      assert.equal(doc.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "524288");
-      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, "524288");
+      assert.equal(doc.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, undefined);
+      assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
     });
 
     it("never injects context overrides for claude- prefixed model ids", async () => {

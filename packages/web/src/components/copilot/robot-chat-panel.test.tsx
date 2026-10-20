@@ -298,13 +298,12 @@ describe("RobotChatPanel", () => {
     expect(screen.getByRole("button", { name: "新建对话" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "关闭" })).toBeTruthy();
     expect(screen.getByText("你好，我是 Copilot")).toBeTruthy();
-    // Parity chrome: model / thinking pickers (shared preferences store),
-    // project context, and the run-options entry all live in the panel too.
+    // Parity chrome: model / thinking pickers (shared preferences store) and
+    // project context live in the panel too.
     expect(screen.getByTestId("copilot-status-bar")).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "当前模型" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "思考强度" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "项目上下文" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "执行选项" })).toBeTruthy();
     // The empty state shares the console's suggestion set.
     expect(screen.getByRole("button", { name: "项目整体进展如何？" })).toBeTruthy();
     // Mobile (<768px): near-fullscreen bottom sheet; desktop: 380x520 card

@@ -113,12 +113,11 @@ test("connection forms and quick chat fit a short desktop viewport", async ({ pa
   await page.locator("[data-floating-copilot]").getByRole("button", { name: "Copilot", exact: true }).click();
   const panel = page.getByTestId("robot-chat-panel");
   await expect(panel.getByRole("textbox")).toBeFocused();
-  // Parity chrome: model/thinking pickers, project context, and run options
-  // all live inside the floating panel as well.
+  // Parity chrome: model/thinking pickers and project context live inside
+  // the floating panel as well.
   await expect(panel.getByRole("combobox", { name: "当前模型", exact: true })).toBeVisible();
   await expect(panel.getByRole("combobox", { name: "思考强度", exact: true })).toBeVisible();
   await expect(panel.getByRole("combobox", { name: "项目上下文", exact: true })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "执行选项", exact: true })).toBeVisible();
   const box = await panel.boundingBox();
   expect(box!.y).toBeGreaterThanOrEqual(0);
   expect(box!.y + box!.height).toBeLessThanOrEqual(500);

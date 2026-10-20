@@ -686,7 +686,7 @@ function buildApplyDocument(
     const timeout = claudeTimeout(context.provider.providerKey);
     if (timeout) env.API_TIMEOUT_MS = timeout;
     else delete env.API_TIMEOUT_MS;
-    applyClaudeContextWindow(env, context.providerEndpoint, primary, context.previousContextWindow);
+    applyClaudeContextWindow(env, primary, context.previousContextWindow);
     doc.env = env;
     return;
   }
@@ -964,23 +964,33 @@ function writeOptionalClaudeSlot(
  * are never overwritten; when switching away, only values equal to what a
  * previous apply injected are stripped.
  */
+/**
+ * Context-window handling for Claude Code applies. Only an explicit context
+ * window on the model profile is injected, and only as
+ * CLAUDE_CODE_MAX_CONTEXT_TOKENS (never CLAUDE_CODE_AUTO_COMPACT_WINDOW —
+ * Claude Code already triggers auto-compaction at a percentage of the window,
+ * so capping it would waste usable context). Fill-only: an explicit user
+ * value is never overwritten. Values injected by earlier versions (the 256k
+ * Kimi default, the 512k MiniMax floor, or the pointer-recorded value) are
+ * stripped so upgrading uninstalls ForgeBadger-managed leftovers.
+ */
 function applyClaudeContextWindow(
   env: Record<string, unknown>,
-  baseUrl: string | null,
   model: ModelProfile,
   previousContextWindow: number | null
 ): void {
-  const target = claudeContextWindowTarget(baseUrl, model);
-  if (target !== null) {
-    const value = String(target);
-    env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ??= value;
-    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ??= value;
-    return;
-  }
-  // Kimi predates the applied-provider pointer, so its injected default is
-  // always treated as managed even when no pointer records it.
-  const managed = new Set<string>([kimiCodingContextTokens]);
+  // Claude Code knows the window of catalog-prefixed ids; only third-party
+  // ids need the correction.
+  const target = model.modelId.toLowerCase().startsWith("claude-")
+    ? null
+    : model.contextWindow && model.contextWindow > 0
+      ? model.contextWindow
+      : null;
+  if (target !== null) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ??= String(target);
+  const managed = new Set<string>([kimiCodingContextTokens, String(minimaxAnthropicContextTokens)]);
   if (previousContextWindow !== null) managed.add(String(previousContextWindow));
+  // Never strip the value this apply is itself managing.
+  if (target !== null) managed.delete(String(target));
   for (const key of ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"] as const) {
     const value = env[key];
     if (typeof value === "string" && managed.has(value)) delete env[key];
@@ -1001,6 +1011,7 @@ function codexNativeReasoningModel(modelId: string): boolean {
     || lower.startsWith("codex-");
 }
 
+/** The value a legacy apply injected for this provider/model, so it can be stripped on switch. */
 function claudeContextWindowTarget(baseUrl: string | null, model: ModelProfile | null): number | null {
   // Claude Code ignores the overrides for catalog-prefixed ids.
   if (model && model.modelId.toLowerCase().startsWith("claude-")) return null;

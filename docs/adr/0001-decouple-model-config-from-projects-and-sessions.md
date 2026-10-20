@@ -34,11 +34,16 @@ launch path.
   `model_providers.<id>.experimental_bearer_token`; the legacy
   `~/.codex/auth.json` `OPENAI_API_KEY` slot is removed and an emptied
   `auth.json` is deleted), OpenCode `opencode.json` (additive provider entry
-  with `name`/`models`), Kimi `~/.kimi-code/config.toml`. Applying the Kimi
-  For Coding endpoint to Claude also fills in the 256k context-window
-  overrides (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`)
-  without overwriting explicit user values, and a stale `ANTHROPIC_API_KEY`
-  is removed whenever a new `ANTHROPIC_AUTH_TOKEN` is written.
+  with `name`/`models`), Kimi `~/.kimi-code/config.toml`. Claude applies
+  inject the model profile's explicit `contextWindow` as
+  `CLAUDE_CODE_MAX_CONTEXT_TOKENS` (fill-only, never overwriting user-set
+  values, and skipped for `claude-` prefixed catalog ids);
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` is never written — Claude Code already
+  triggers auto-compaction at a percentage of the window, so capping it
+  would waste usable context. Values injected by earlier versions (the 256k
+  Kimi default, the 512k MiniMax floor, or pointer-recorded values) are
+  stripped on the next apply, and a stale `ANTHROPIC_API_KEY` is removed
+  whenever a new `ANTHROPIC_AUTH_TOKEN` is written.
 - Model selection is adapter-specific (2026-09-02): Claude
   accepts `modelMapping` (`opus`/`sonnet`/`haiku` plus optional
   `fable`/`subagent`; unset roles fall back to the primary model) and writes

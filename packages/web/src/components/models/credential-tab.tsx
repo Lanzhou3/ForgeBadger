@@ -169,14 +169,14 @@ export function CredentialTab({
       {credentials.length === 0 ? (
         <EmptyLine text={t("models.emptyCredentials")} />
       ) : (
-        <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+        <div className="space-y-0.5">
           {credentials.map((credential, index) => {
             const activeReveal = revealed && revealed.credential.id === credential.id && isCurrentCredential(revealed.credential) ? revealed : null;
             return (
             <div
               key={credential.id}
-              className={`flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40 ${
-                credential.id === selectedCredentialId ? "bg-brand/5" : ""
+              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors forgebadger-animate-in hover:bg-muted/50 ${
+                credential.id === selectedCredentialId ? "bg-accent" : ""
               }`}
               style={{ animationDelay: `${index * 40}ms` }}
             >

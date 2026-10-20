@@ -243,50 +243,6 @@ describe("CopilotChat console layout", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("keeps optional controls out of history and preserves their consent when the panel closes", async () => {
-    renderChat();
-    await waitForConversationLoaded();
-    expect(screen.queryByRole("checkbox")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "执行选项" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /任务结束后自动只读复核/ }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /测试失败后尝试修复/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByText("你好")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "执行选项" }));
-    expect((screen.getByRole("checkbox", { name: /任务结束后自动只读复核/ }) as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByRole("checkbox", { name: /测试失败后尝试修复/ }) as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "inspect" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
-    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "inspect", undefined,
-      expect.objectContaining({ reviewTaskResults: true, repairFailedChecks: true })));
-    fireEvent.click(screen.getByRole("button", { name: "执行选项" }));
-    expect((screen.getByRole("checkbox", { name: /测试失败后尝试修复/ }) as HTMLInputElement).disabled).toBe(true);
-  });
-
-  it("stops later repairs of the latest run from the run options sheet", async () => {
-    listRunsMock.mockResolvedValue({
-      runs: [{ id: "run-9", conversationId: "conv-1", userId: "user-1", status: "completed", steps: 3 }],
-      activeRun: null,
-    });
-    revokeRunRepairsMock.mockResolvedValue({ revoked: true });
-    renderChat();
-    await waitForConversationLoaded();
-    fireEvent.click(screen.getByRole("button", { name: "执行选项" }));
-    fireEvent.click(await screen.findByRole("button", { name: "停止本次执行的后续修复" }));
-    await waitFor(() => expect(revokeRunRepairsMock).toHaveBeenCalledWith("run-9"));
-    await screen.findByText("已停止后续修复");
-  });
-
-  it("hides the repair kill-switch when the conversation has no runs", async () => {
-    renderChat();
-    await waitForConversationLoaded();
-    fireEvent.click(screen.getByRole("button", { name: "执行选项" }));
-    await screen.findByRole("checkbox", { name: /任务结束后自动只读复核/ });
-    expect(screen.queryByRole("button", { name: "停止本次执行的后续修复" })).toBeNull();
-  });
-
   it("retains project and request identity when retrying an uncertain submission", async () => {
     sendMessageMock.mockRejectedValueOnce(new Error("network lost"));
     renderChat();

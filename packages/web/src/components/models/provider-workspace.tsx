@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useUiLocale } from "@/hooks/use-language";
 import { MoreHorizontal, Pencil, RefreshCw, ServerCog, ShieldCheck, Trash2, Wallet } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { CliBrandChip } from "@/components/cli-brand-chip";
@@ -91,15 +90,15 @@ export function ProviderWorkspace({
   return (
     <div className="min-w-0 space-y-6">
       <Card className="forgebadger-animate-in">
-        <CardContent className="space-y-4 p-4 md:p-5">
+        <CardContent className="space-y-3.5 p-4 md:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
-                <ServerCog className="size-4" />
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
+                <ServerCog className="size-5" />
               </div>
               <div className="min-w-0">
-                <div className="truncate text-base font-semibold">{provider.name}</div>
-                <div className="truncate text-xs text-muted-foreground">
+                <div className="truncate text-lg font-semibold tracking-tight">{provider.name}</div>
+                <div className="truncate font-mono text-xs text-muted-foreground">
                   {provider.baseUrl ?? provider.providerKey}
                 </div>
               </div>
@@ -147,42 +146,48 @@ export function ProviderWorkspace({
               </DropdownMenu>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant="outline">{apiFormatLabel(provider.apiFormat, t)}</Badge>
-            {routedToClaude && <Badge variant="secondary">{t("models.claudeRouteBadge")}</Badge>}
-            {provider.region ? <Badge variant="outline">{provider.region}</Badge> : null}
-            <Badge variant="secondary">{productTypeLabel(provider.productType, t)}</Badge>
-            <Badge variant="outline">{authTypeLabel(provider.authType, t)}</Badge>
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            {routedToClaude && (
+              <span className="rounded-full bg-brand/10 px-2 py-0.5 font-medium text-brand">
+                {t("models.claudeRouteBadge")}
+              </span>
+            )}
+            <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">{apiFormatLabel(provider.apiFormat, t)}</span>
+            {provider.region ? <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">{provider.region}</span> : null}
+            <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">{productTypeLabel(provider.productType, t)}</span>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">{authTypeLabel(provider.authType, t)}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border/40 pt-3">
             {applyTargetsForProvider(provider).map((adapter) => (
               <CliBrandChip key={adapter} aiTool={adapter} />
             ))}
           </div>
-          <div className="min-h-10 space-y-2" data-testid="provider-balance-row">
-            {balanceError ? (
-              <span className="text-xs text-destructive">{balanceError}</span>
-            ) : balance && !balance.supported ? (
-              <span className="text-xs text-muted-foreground">{t("models.balanceNotSupported")}</span>
-            ) : !balance && isCheckingBalance ? (
-              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                <RefreshCw className="size-3 animate-spin" />
-                {t("models.balanceLoading")}
-              </span>
-            ) : !balance ? (
-              <span className="text-xs text-muted-foreground">{t("models.balanceNotQueried")}</span>
-            ) : balance.balances.length === 0 ? (
-              <span className="text-xs text-muted-foreground">{t("models.balanceEmpty")}</span>
-            ) : (
-              balance.balances.map((entry) => (
-                <BalanceMeter key={`${entry.label}-${entry.resetsAt ?? ""}`} entry={entry} t={t} />
-              ))
-            )}
-            {balance?.supported && (
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                {isCheckingBalance && <RefreshCw className="size-3 animate-spin" />}
-                <span>{formatCheckedAt(balance.checkedAt, locale)}</span>
-              </div>
-            )}
-          </div>
+          {(balanceError || isCheckingBalance || balance) && (
+            <div className="space-y-2 border-t border-border/40 pt-3" data-testid="provider-balance-row">
+              {balanceError ? (
+                <span className="text-xs text-destructive">{balanceError}</span>
+              ) : balance && !balance.supported ? (
+                <span className="text-xs text-muted-foreground">{t("models.balanceNotSupported")}</span>
+              ) : !balance && isCheckingBalance ? (
+                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <RefreshCw className="size-3 animate-spin" />
+                  {t("models.balanceLoading")}
+                </span>
+              ) : !balance ? null : balance.balances.length === 0 ? (
+                <span className="text-xs text-muted-foreground">{t("models.balanceEmpty")}</span>
+              ) : (
+                balance.balances.map((entry) => (
+                  <BalanceMeter key={`${entry.label}-${entry.resetsAt ?? ""}`} entry={entry} t={t} />
+                ))
+              )}
+              {balance?.supported && (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {isCheckingBalance && <RefreshCw className="size-3 animate-spin" />}
+                  <span>{formatCheckedAt(balance.checkedAt, locale)}</span>
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

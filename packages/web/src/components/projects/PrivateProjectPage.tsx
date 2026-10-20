@@ -120,12 +120,16 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
     queryKey: ["project", id],
     queryFn: () => getProject(id),
     enabled: !!id,
+    staleTime: 30_000,
   });
 
   const { data: sessionsData } = useQuery({
-    queryKey: ["sessions", { projectId: id }],
+    // Key includes actorId to match ProjectManagerPanel's sessions query, so
+    // both surfaces share one cache entry instead of fetching twice.
+    queryKey: ["sessions", { projectId: id }, taskAuthority.actorId],
     queryFn: () => listSessions({ projectId: id }),
     enabled: !!id,
+    staleTime: 30_000,
   });
   const { data: taskPacketsData } = useQuery({
     queryKey: ["project-manager", id, "task-packets", { limit: 50 }],
@@ -142,22 +146,26 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
   const { data: skillsData } = useQuery({
     queryKey: ["skills"],
     queryFn: listSkills,
+    staleTime: 60_000,
   });
 
   const { data: projectSkillsData } = useQuery({
     queryKey: ["project-skills", id],
     queryFn: () => listProjectSkills(id),
     enabled: !!id,
+    staleTime: 60_000,
   });
 
   const { data: adapterDiscoveryData, isLoading: adapterDiscoveryLoading } = useQuery({
     queryKey: ADAPTER_DISCOVERY_QUERY_KEY,
     queryFn: discoverAdapters,
+    staleTime: 60_000,
   });
 
   const { data: dependenciesData, isLoading: dependenciesLoading } = useQuery({
     queryKey: ["dependencies"],
     queryFn: getDependencies,
+    staleTime: 60_000,
   });
 
   const { data: projectAiConfigData, isLoading: projectAiConfigLoading } = useQuery({

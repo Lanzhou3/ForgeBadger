@@ -1230,8 +1230,10 @@ bounded at 20 pages) so full model inventories are collected. Sync only adds
 missing models; existing model profiles are left untouched. When the
 provider's model list reports a context size (`context_length`,
 `context_window`, `max_context_length`, or `max_input_tokens`), sync fills it
-into the created model profile's `contextWindow` â Claude applies then inject
-it as `CLAUDE_CODE_MAX_CONTEXT_TOKENS`/`CLAUDE_CODE_AUTO_COMPACT_WINDOW`.
+into the created model profile's `contextWindow` â Claude applies inject it as
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS` (fill-only; `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
+is never written); Kimi Code, PI, MiniMax Code, and Grok applies also write
+it into the CLI's native config.
 
 Model profiles also carry `supportEfforts` â an array drawn from
 `low | medium | high | xhigh | max` (Kimi Code's effort ladder; Codex uses

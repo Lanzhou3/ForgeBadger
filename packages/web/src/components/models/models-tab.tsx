@@ -112,13 +112,13 @@ export function ModelsTab({
       {models.length === 0 ? (
         <EmptyLine text={t("models.emptyModelsForProvider")} />
       ) : (
-        <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+        <div className="space-y-0.5">
           {models.map((model, index) => {
             return (
               <div
                 key={model.id}
-                className={`flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40 ${
-                  model.id === selectedModelId ? "bg-brand/5" : ""
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors forgebadger-animate-in hover:bg-muted/50 ${
+                  model.id === selectedModelId ? "bg-accent" : ""
                 }`}
                 style={{ animationDelay: `${index * 40}ms` }}
               >
@@ -127,11 +127,21 @@ export function ModelsTab({
                     <span className="truncate text-sm font-medium">{model.name}</span>
                     {model.isDefault && <Badge className="shrink-0">{t("models.default")}</Badge>}
                   </div>
-                  <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{model.modelId}</div>
+                  <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                    {model.modelId}
+                    {model.contextWindow && model.contextWindow > 0 ? (
+                      <span className="font-sans text-muted-foreground/70">{` · ${Math.round(model.contextWindow / 1000)}k`}</span>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="hidden flex-wrap justify-end gap-1 md:flex md:max-w-40">
                   {model.capabilities.map((capability) => (
-                    <Badge key={capability} variant="outline">{capability}</Badge>
+                    <span
+                      key={capability}
+                      className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                    >
+                      {capability}
+                    </span>
                   ))}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
