@@ -90,10 +90,15 @@ it('rejects changed tests, expanded files, duplicate submissions and revoked aut
 for(const fromChild of [false,true]) it(`revokes root repair authority from ${fromChild?'child':'root'} without changing the immutable request`,t=>{
  const f=fixture(t),task=f.failed(f.runId),child=admitDevelopmentRepair(f.db,f.userId,task)!;
  const original=f.ledger.get(f.runId)!.input_json;
+ assert.equal(f.ledger.get(f.runId)!.status,'completed');
+ assert.equal(f.ledger.cancel(f.runId),false,'ordinary stop cannot withdraw a completed origin');
  revokeDevelopmentRepairs(f.db,f.userId,fromChild?child:f.runId);
  assert.equal(f.ledger.get(child)?.status,'cancelled');assert.equal(f.ledger.get(f.runId)!.input_json,original);
  assert.throws(()=>f.ledger.validateScope(JSON.parse(f.ledger.get(child)!.input_json)),/REVOKED/);
  assert.throws(()=>assertRepairPlan(f.db,f.userId,child,randomUUID(),f.plan),/REVOKED/);
+ recoverDevelopmentRepairs(f.db,f.userId);
+ assert.equal(f.ledger.get(child)?.status,'cancelled');
+ assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_repair_jobs').get() as {n:number}).n,1);
 });
 
 it('requires fresh patch approval then runs real sandbox checks for the repaired candidate',{skip:!sandboxCapability().available},async t=>{

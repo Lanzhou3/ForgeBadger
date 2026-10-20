@@ -258,7 +258,7 @@ const zh = {
   activationLoadError: "渠道状态加载失败，请重新加载后再授权。",
   activationReady: "已选择身份与项目，点击按钮后授予远程操作权限。",
   // Repair revocation kill-switch in the run options sheet
-  repairRevoke: "停止本次执行的后续修复",
+  repairRevoke: "停止此对话的后续修复",
   repairRevoked: "已停止后续修复",
   repairRevokeError: "停止修复失败，请重试。",
 };
@@ -518,7 +518,7 @@ const en: typeof zh = {
   activationLoadError: "Failed to load channel status; reload before authorizing.",
   activationReady: "Identity and project selected; click the button to grant remote operation permission.",
   // Repair revocation kill-switch in the run options sheet
-  repairRevoke: "Stop later repairs of this run",
+  repairRevoke: "Stop later repairs in this conversation",
   repairRevoked: "Later repairs stopped",
   repairRevokeError: "Failed to stop repairs; retry.",
 };
@@ -779,7 +779,7 @@ const zhTW: typeof zh = {
   activationLoadError: "渠道狀態載入失敗，請重新載入後再授權。",
   activationReady: "已選擇身份與專案，點擊按鈕後授予遠端操作權限。",
   // Repair revocation kill-switch in the run options sheet
-  repairRevoke: "停止本次執行的後續修復",
+  repairRevoke: "停止此對話的後續修復",
   repairRevoked: "已停止後續修復",
   repairRevokeError: "停止修復失敗，請重試。",
 };

@@ -267,7 +267,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     const id=parseId(req.params.id,res);if(!id)return;
     const {log}=buildAgentStack(deps,userId(req));if(!log.getConversation(id))return notFound(res);
     const runs=log.listRuns(id);
-    res.json(ok({runs:runs.slice(0,50),activeRun:runs.find(r=>["pending","running","awaiting_approval"].includes(r.status)) ?? null}));
+    res.json(ok({runs:runs.slice(0,50),repairRunIds:log.listRepairRunIds(id),activeRun:runs.find(r=>["pending","running","awaiting_approval"].includes(r.status)) ?? null}));
   });
 
   router.get("/runs/:id", (req, res) => {

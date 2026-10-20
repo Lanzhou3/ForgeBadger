@@ -36,6 +36,26 @@ it('enforces authenticated owner scope, rate validation and unknown cost over re
   assert.equal((await request(`/token-rates/${model.id}`,'PUT',{inputUsdPerMillion:0,outputUsdPerMillion:0})).status,200);
   const body=await (await request(`/runs/${run}/usage`)).json() as {data:{usage:{costUsd:number|null;reportedTokens:number};calls:Array<{measurement:string}>}};
   assert.equal(body.data.usage.costUsd,null,'new rates must not reprice past unpriced calls');assert.equal(body.data.usage.reportedTokens,7);assert.equal(body.data.calls[0]!.measurement,'provider_reported');
+  const conversationId=ledger.get(run)!.conversation_id,repairRuns:string[]=[];
+  for(let index=0;index<2;index++) {
+    const legacy=ledger.admit({userId:owner.id,conversationId,userText:`legacy repair ${index}`,repairFailedChecks:true},3);
+    ledger.finish(ledger.claim(legacy,'fixture',120000)!,'completed');
+    repairRuns.push(legacy);
+  }
+  // A newer ordinary run (or the latest-50 response cap) must not hide older consent.
+  for(let index=0;index<51;index++) {
+    const ordinary=ledger.log.createRun(conversationId,{});
+    ledger.log.updateRun(ordinary.id,{status:'completed'});
+  }
+  const listRepairs=async()=>{
+    const response=await request(`/conversations/${conversationId}/runs`);
+    assert.equal(response.status,200);
+    return (await response.json() as {data:{repairRunIds:string[]}}).data.repairRunIds;
+  };
+  assert.deepEqual(new Set(await listRepairs()),new Set(repairRuns));
+  assert.equal((await request(`/conversations/${conversationId}/runs`,'GET',undefined,other)).status,404);
+  assert.equal((await request(`/runs/${repairRuns[0]}/repairs`,'DELETE')).status,200);
+  assert.deepEqual(await listRepairs(),[repairRuns[1]]);
   assert.equal((await request(`/runs/${run}/repairs`,'DELETE')).status,200);
   db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(owner.id);
   assert.equal((await request(`/runs/${run}/usage`)).status,401);

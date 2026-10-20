@@ -184,7 +184,7 @@ export function sendMessage(conversationId: string, content: string, modelId?: s
 }
 
 export function listConversationRuns(conversationId: string) {
-  return fetchJson<{ runs: CopilotRun[]; activeRun: CopilotRun | null }>(
+  return fetchJson<{ runs: CopilotRun[]; activeRun: CopilotRun | null; repairRunIds?: string[] }>(
     `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/runs`
   );
 }

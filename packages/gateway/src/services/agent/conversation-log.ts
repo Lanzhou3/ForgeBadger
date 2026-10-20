@@ -235,6 +235,21 @@ export class CopilotConversationLog {
     return rows.map(toRun);
   }
 
+  /** Includes older consent outside the latest-run page without exposing turn inputs. */
+  listRepairRunIds(conversationId: string): string[] {
+    const rows = this.db.prepare(`
+      SELECT id FROM copilot_runs WHERE user_id = ? AND conversation_id = ?
+        AND repair_revoked_at IS NULL AND status IN ('pending', 'running', 'completed', 'awaiting_approval')
+        AND CASE WHEN json_valid(input_json) THEN
+          json_extract(input_json, '$.repairFailedChecks') = 1
+          AND json_extract(input_json, '$.executionMode') IS NULL
+          AND coalesce(json_extract(input_json, '$.source'), 'user') = 'user'
+        ELSE 0 END
+      ORDER BY created_at DESC
+    `).all(this.userId, conversationId) as Array<{ id: string }>;
+    return rows.map((row) => row.id);
+  }
+
   updateRun(id: string, input: { status?: AgentRunStatus; error?: string; steps?: number; startedAt?: Date; completedAt?: Date }): AgentRun | undefined {
     const existing = this.getRun(id);
     if (!existing) return undefined;
