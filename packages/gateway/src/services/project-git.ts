@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 
 import { validateProjectRoot } from "../lib/safe-resolve.js";
 import { readWorkspaceFile } from "./workspace-context.js";
+import { ProjectGitChangesCache } from "./project-git-cache.js";
 
 export interface GitWorkingTreeEntry {
   path: string;
@@ -92,19 +93,19 @@ function parseLog(output: string): GitCommitEntry[] {
 // git-changes request per project and panels poll the same project, each
 // costing 4 spawned git processes. Identical concurrent calls share one
 // computation and repeat calls within the TTL reuse it, which collapses the
-// process storm without any user-visible staleness.
-const GIT_CHANGES_TTL_MS = 5_000;
-const gitChangesCache = new Map<string, { expires: number; value: ProjectGitChanges }>();
+// process storm. Results may be up to five seconds old; retained payloads
+// expire actively and are bounded by both entry count and serialized bytes.
+const gitChangesCache = new ProjectGitChangesCache();
 const gitChangesInFlight = new Map<string, Promise<ProjectGitChanges>>();
 
 export function getProjectGitChangesCached(projectPath: string): Promise<ProjectGitChanges> {
   const cached = gitChangesCache.get(projectPath);
-  if (cached && cached.expires > Date.now()) return Promise.resolve(cached.value);
+  if (cached) return Promise.resolve(cached);
   const inFlight = gitChangesInFlight.get(projectPath);
   if (inFlight) return inFlight;
   const pending = getProjectGitChanges(projectPath)
     .then((value) => {
-      gitChangesCache.set(projectPath, { expires: Date.now() + GIT_CHANGES_TTL_MS, value });
+      gitChangesCache.set(projectPath, value);
       return value;
     })
     .finally(() => {
