@@ -955,16 +955,6 @@ function writeOptionalClaudeSlot(
 }
 
 /**
- * Claude Code assumes a 200k window for model IDs outside its built-in model
- * catalog and clamps auto-compact accordingly ("isn't described by this
- * version's model catalog"). Fill in the override pair for known coding
- * endpoints and for model profiles with an explicit context window — both
- * keys are required (either alone is clamped back to 200k), and Claude Code
- * only honors them for non-`claude-` prefixed model ids. Explicit user values
- * are never overwritten; when switching away, only values equal to what a
- * previous apply injected are stripped.
- */
-/**
  * Context-window handling for Claude Code applies. Only an explicit context
  * window on the model profile is injected, and only as
  * CLAUDE_CODE_MAX_CONTEXT_TOKENS (never CLAUDE_CODE_AUTO_COMPACT_WINDOW —
@@ -986,15 +976,15 @@ function applyClaudeContextWindow(
     : model.contextWindow && model.contextWindow > 0
       ? model.contextWindow
       : null;
-  if (target !== null) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ??= String(target);
   const managed = new Set<string>([kimiCodingContextTokens, String(minimaxAnthropicContextTokens)]);
   if (previousContextWindow !== null) managed.add(String(previousContextWindow));
-  // Never strip the value this apply is itself managing.
-  if (target !== null) managed.delete(String(target));
+  // Remove legacy managed values before filling the new MAX. AUTO has no
+  // replacement, even when the old and new model windows are identical.
   for (const key of ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"] as const) {
     const value = env[key];
     if (typeof value === "string" && managed.has(value)) delete env[key];
   }
+  if (target !== null) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ??= String(target);
 }
 
 /**

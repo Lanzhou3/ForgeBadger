@@ -700,6 +700,51 @@ describe("cli-config apply service", () => {
       assert.equal(switched.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
     });
 
+    it("replaces a managed context window in one apply when switching models", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-context-switch@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-context-switch-");
+      const fixture = createFixture(db, user.id, "claude");
+      const models = [262144, 1000000].map((contextWindow) => fixture.repo.createModelProfile({
+        providerProfileId: fixture.providerId, name: `External ${contextWindow}`,
+        modelId: `external-${contextWindow}`, contextWindow
+      }));
+      for (const model of models) {
+        await applyCliConfigToAdapter({
+          db, userId: user.id, masterKey, adapter: "claude", providerProfileId: fixture.providerId,
+          modelProfileId: model.id, resolveHost: publicResolver
+        });
+        const doc = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8"));
+        assert.equal(doc.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, String(model.contextWindow));
+        assert.equal(doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
+      }
+      db.close();
+    });
+
+    it("removes a legacy auto-compact override when reapplying the same model", async () => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("apply-context-reapply@example.com", "hash");
+      const root = await useConfigRoot("CLAUDE_CONFIG_DIR", "forgebadger-context-reapply-");
+      const fixture = createFixture(db, user.id, "claude");
+      const model = fixture.repo.createModelProfile({
+        providerProfileId: fixture.providerId, name: "External", modelId: "external", contextWindow: 1000000
+      });
+      const input = { db, userId: user.id, masterKey, adapter: "claude" as const,
+        providerProfileId: fixture.providerId, modelProfileId: model.id, resolveHost: publicResolver };
+      await applyCliConfigToAdapter(input);
+      const target = path.join(root, "settings.json");
+      const doc = JSON.parse(await readFile(target, "utf8"));
+      doc.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = "1000000";
+      await writeFile(target, JSON.stringify(doc), "utf8");
+
+      await applyCliConfigToAdapter(input);
+      const updated = JSON.parse(await readFile(target, "utf8"));
+      assert.equal(updated.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "1000000");
+      assert.equal(updated.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
+      assert.equal((await applyCliConfigToAdapter(input)).changed, false);
+      db.close();
+    });
+
     it("does not inject the MiniMax 512k floor anymore", async () => {
       const db = createTestDb();
       const user = new UserRepository(db).create("apply-minimax-floor@example.com", "hash");
