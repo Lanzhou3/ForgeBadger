@@ -66,7 +66,19 @@ interface AdapterUpdateConfig {
 
 const updateConfig: Record<AdapterId, AdapterUpdateConfig> = {
   claude: { npmPackage: "@anthropic-ai/claude-code", args: ["update"], installArgs: ["install", "-g", "@anthropic-ai/claude-code"] },
-  opencode: { npmPackage: "opencode-ai", args: ["upgrade"], installArgs: ["install", "-g", "opencode-ai"] },
+  // OpenCode 2 publishes `@opencode/cli`, whose platform binary arrives through
+  // a required postinstall script. npm 12 blocks unapproved scripts by default,
+  // so the install opts back in and keeps the optional platform packages.
+  opencode: {
+    npmPackage: "@opencode/cli",
+    args: ["upgrade"],
+    installArgs: [
+      "install", "-g", "@opencode/cli",
+      "--ignore-scripts=false",
+      "--include=optional",
+      "--allow-scripts=@opencode/cli"
+    ]
+  },
   codex: { npmPackage: "@openai/codex", args: ["update"], installArgs: ["install", "-g", "@openai/codex"] },
   kimi: { npmPackage: "@moonshot-ai/kimi-code", args: ["upgrade", "--yes"], installArgs: ["install", "-g", "@moonshot-ai/kimi-code"], minNode: "22.19.0" },
   pi: { npmPackage: "@earendil-works/pi-coding-agent", args: ["update", "--self"], installArgs: ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"], minNode: "22.19.0" },

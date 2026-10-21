@@ -241,7 +241,12 @@ describe("adapter updates", () => {
   it("offers and runs fixed official npm install commands for every missing CLI", async () => {
     const expected: Record<AdapterId, string[]> = {
       claude: ["install", "-g", "@anthropic-ai/claude-code"],
-      opencode: ["install", "-g", "opencode-ai"],
+      opencode: [
+        "install", "-g", "@opencode/cli",
+        "--ignore-scripts=false",
+        "--include=optional",
+        "--allow-scripts=@opencode/cli"
+      ],
       codex: ["install", "-g", "@openai/codex"],
       kimi: ["install", "-g", "@moonshot-ai/kimi-code"],
       pi: ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"]

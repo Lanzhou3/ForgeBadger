@@ -13,6 +13,7 @@ dist/
 .github/
 coverage/
 *.tsbuildinfo
+*.log
 package-lock.json
 playwright-report/
 test-results/

@@ -317,7 +317,7 @@ describe("SettingsPage terminal runtime", () => {
       canUpdate: true, canInstall: true,
       updates: [{ id: "opencode", state: "up_to_date", installedVersion: "1.18.31",
         latestVersion: "1.18.31", latestSource: "homebrew", command: "opencode upgrade",
-        installCommand: "npm install -g opencode-ai" }]
+        installCommand: "npm install -g @opencode/cli" }]
     });
 
     renderSettingsPage();
@@ -338,7 +338,7 @@ describe("SettingsPage terminal runtime", () => {
       canUpdate: true, canInstall: true,
       updates: [{ id: "opencode", state: "update_available", installedVersion: "1.18.31",
         latestVersion: "1.18.32", latestSource: "homebrew",
-        command: "opencode upgrade 1.18.32 --method brew", installCommand: "npm install -g opencode-ai" }]
+        command: "opencode upgrade 1.18.32 --method brew", installCommand: "npm install -g @opencode/cli" }]
     });
 
     renderSettingsPage();

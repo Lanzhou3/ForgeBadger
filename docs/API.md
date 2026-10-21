@@ -675,8 +675,8 @@ adapter reports the `terminal` runtime mode; the former Codex
   missing npm, or unmet Node.js requirements. Only one CLI install or update
   may run at a time. Existing terminal sessions are not restarted. npm uses
   the Gateway host's npm registry configuration; version checks use
-  `registry.npmjs.org`. The OpenCode adapter currently tracks the `opencode-ai`
-  package documented under OpenCode's `/docs` channel. Grok tracks
+  `registry.npmjs.org`. The OpenCode adapter tracks the `@opencode/cli`
+  package documented under OpenCode's `/v2/docs` channel. Grok tracks
   `@xai-official/grok`.
 
 ### Projects

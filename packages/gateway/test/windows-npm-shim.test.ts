@@ -321,9 +321,9 @@ for (const fixture of [
     ":start",
     "SETLOCAL",
     "CALL :find_dp0",
-    "\"%dp0%\\node_modules\\opencode-ai\\bin\\opencode.exe\"   %*"
+    "\"%dp0%\\node_modules\\@opencode\\cli\\bin\\opencode.exe\"   %*"
   ].join("\r\n"),
-  expectExe: "node_modules\\opencode-ai\\bin\\opencode.exe" }
+  expectExe: "node_modules\\@opencode\\cli\\bin\\opencode.exe" }
 ] as const) {
   test(`npm standard %dp0% shim resolves: ${fixture.name}`, () => {
     const directory = mkdtempSync(join(tmpdir(), `forgebadger-dp0-shim-${fixture.name}-`));
