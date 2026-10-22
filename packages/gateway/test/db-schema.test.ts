@@ -191,6 +191,8 @@ describe("db schema", () => {
       "team_projects",
       "teams",
       "telegram_channel_accounts",
+      "telegram_notification_deliveries",
+      "telegram_notification_settings",
       "telegram_polling_cursors",
       "template_files",
       "template_git_sources",

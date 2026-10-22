@@ -10,6 +10,7 @@ import { createFeishuNativeSender } from '../integrations/feishu-native-sender.j
 import { createTelegramNativeSender } from '../integrations/telegram-native-sender.js';
 import { FeishuTypingWorker } from './feishu-typing-worker.js';
 import { FeishuNotificationWorker } from '../notifications/feishu-notification-worker.js';
+import { TelegramNotificationWorker } from '../notifications/telegram-notification-worker.js';
 import { FeishuApprovalService, type RecordChannelApproval } from './feishu-approval.js';
 
 export interface NativeFeishuIO {
@@ -62,6 +63,8 @@ export function createNativeFeishuRuntime(db:Database,key:string,io:NativeFeishu
   const activeReactions=new Set<string>();
   let notificationCursor=0;
   const activeNotifications=new Set<string>();
+  let telegramNotificationCursor=0;
+  const activeTelegramNotifications=new Set<string>();
   return new FeishuChannelRuntime({supervisor,
     // HTTP/WS owns process lifetime, as with the native recovery pump.
     setInterval:(callback,ms)=>{const timer=setInterval(callback,ms);timer.unref();return timer;},
@@ -92,5 +95,13 @@ export function createNativeFeishuRuntime(db:Database,key:string,io:NativeFeishu
     activeNotifications.add(userId);
     try{await new FeishuNotificationWorker(db,userId,key,io).runOnce(signal);}
     finally{activeNotifications.delete(userId);}
+  },async(signal:AbortSignal)=>{
+    if(signal.aborted || !db.open)return;
+    const ids=userIds();if(!ids.length)return;
+    const userId=ids[telegramNotificationCursor++%ids.length]!;
+    if(activeTelegramNotifications.has(userId))return;
+    activeTelegramNotifications.add(userId);
+    try{await new TelegramNotificationWorker(db,userId,key,io).runOnce(signal);}
+    finally{activeTelegramNotifications.delete(userId);}
   }]});
 }

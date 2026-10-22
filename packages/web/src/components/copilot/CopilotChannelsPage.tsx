@@ -16,6 +16,7 @@ import { CopilotSettingsShell } from './copilot-settings-shell';
 import { useSettingsCopy } from './settings-copy';
 import { channelOverallState, channelSetupBlocker, type ChannelRouteStateKey } from './channel-setup';
 import { FeishuNotificationSettings } from './FeishuNotificationSettings';
+import { TelegramNotificationSettings } from './TelegramNotificationSettings';
 
 const channelKey=['copilot-channels'];
 const pairingKey=(p:channels.ChannelPairing|undefined)=>p?`${p.id}:${p.revision}:${p.externalUserId}:${p.chatId}`:'';
@@ -198,6 +199,7 @@ export function CopilotChannelsPage() {
             onRevokeRoute={(id)=>void perform(()=>channels.revokeChannelRoute(id))}
           />
           {channel==='feishu' && <FeishuNotificationSettings available={canPair&&!queriesError} />}
+          {channel==='telegram' && <TelegramNotificationSettings available={canPair&&!queriesError} />}
           <ChannelDiagnostics
             channelName={channelName}
             isPending={diagnostics.isPending}
