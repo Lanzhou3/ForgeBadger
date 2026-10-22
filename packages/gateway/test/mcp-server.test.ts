@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,7 @@ import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { signJwt } from "../src/auth/jwt.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { createServer } from "../src/server.js";
+import { isAllowedMcpOrigin } from "../src/routes/mcp.js";
 import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import type { InMemorySessionManager } from "../src/services/session-manager.js";
 import { RuntimeAuthorizationInvalidator } from "../src/services/runtime-authorization-invalidation.js";
@@ -51,21 +52,23 @@ function createApp(db: Database, mcpEnabled: boolean) {
 
 interface RpcResult {
   status: number;
+  headers: Record<string, string>;
   messages: Array<Record<string, any>>;
 }
 
-async function mcpRpc(port: number, token: string | undefined, method: string, params?: unknown): Promise<RpcResult> {
+async function mcpRpc(port: number, token: string | undefined, method: string, params?: unknown, extraHeaders: Record<string, string> = {}): Promise<RpcResult> {
   const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
-      ...(token ? { authorization: `Bearer ${token}` } : {})
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...extraHeaders
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, ...(params !== undefined ? { params } : {}) })
   });
   const text = await res.text();
-  return { status: res.status, messages: parseJsonRpcMessages(text) };
+  return { status: res.status, headers: Object.fromEntries(res.headers.entries()), messages: parseJsonRpcMessages(text) };
 }
 
 function parseJsonRpcMessages(text: string): Array<Record<string, any>> {
@@ -144,10 +147,31 @@ describe("mcp endpoint", () => {
     const unknown = await mcpRpc(port, "fbmcp_deadbeef", "tools/list");
     const revokedRes = await mcpRpc(port, revoked.token, "tools/list");
 
-    // Assert
-    assert.equal(missing.status, 401);
-    assert.equal(unknown.status, 401);
-    assert.equal(revokedRes.status, 401);
+    // Assert: status + RFC 6750 challenge + JSON-RPC envelope (not the REST one)
+    for (const res of [missing, unknown, revokedRes]) {
+      assert.equal(res.status, 401);
+      assert.match(res.headers["www-authenticate"] ?? "", /^Bearer /);
+      const body = res.messages[0];
+      assert.equal(body?.jsonrpc, "2.0");
+      assert.equal(body?.error?.code, -32000);
+    }
+  });
+
+  it("rejects disallowed Origin headers before authentication", async () => {
+    // A rebinding attacker's page presents its own origin: 403, with the
+    // JSON-RPC error shape the spec allows on this endpoint.
+    const evil = await mcpRpc(port, readToken, "tools/list", undefined, { origin: "https://evil.example" });
+    assert.equal(evil.status, 403);
+    assert.equal(evil.messages[0]?.error?.code, -32000);
+    // A malformed origin is rejected the same way.
+    const malformed = await mcpRpc(port, readToken, "tools/list", undefined, { origin: "not a url" });
+    assert.equal(malformed.status, 403);
+    // Loopback origins pass the guard (and then fail auth without a token).
+    const local = await mcpRpc(port, undefined, "tools/list", undefined, { origin: "http://127.0.0.1:48732" });
+    assert.equal(local.status, 401);
+    // The guard covers GET/405 traffic as well.
+    const getRes = await fetch(`http://127.0.0.1:${port}/mcp`, { headers: { origin: "https://evil.example" } });
+    assert.equal(getRes.status, 403);
   });
 
   it("rejects tokens of disabled users", async () => {
@@ -211,6 +235,31 @@ describe("mcp endpoint", () => {
     }
   });
 
+  it("annotates tools with risk-derived execution hints", async () => {
+    // Act
+    const reader = await mcpRpc(port, readToken, "tools/list");
+    const operator = await mcpRpc(port, operateToken, "tools/list");
+    const cli = await mcpRpc(port, cliToken, "tools/list");
+    const byToken = (res: RpcResult) => (res.messages[0]?.result?.tools ?? []) as Array<{ name: string; annotations?: Record<string, boolean> }>;
+
+    // Assert: every listed tool carries annotations with boolean hints.
+    for (const tools of [byToken(reader), byToken(operator), byToken(cli)]) {
+      assert.ok(tools.length > 0);
+      for (const tool of tools) {
+        assert.ok(tool.annotations, `${tool.name} needs annotations`);
+        for (const key of ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]) {
+          assert.equal(typeof tool.annotations[key], "boolean", `${tool.name} ${key}`);
+        }
+      }
+    }
+    const listProjects = byToken(reader).find((tool) => tool.name === "list_projects");
+    assert.deepEqual(listProjects?.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false });
+    const stopSession = byToken(operator).find((tool) => tool.name === "stop_session");
+    assert.deepEqual(stopSession?.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
+    const receipt = byToken(cli).find((tool) => tool.name === "get_mcp_operation");
+    assert.deepEqual(receipt?.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+  });
+
   it("executes read tools with tenant-scoped results", async () => {
     // Act
     const res = await mcpRpc(port, readToken, "tools/call", { name: "list_projects", arguments: {} });
@@ -222,6 +271,8 @@ describe("mcp endpoint", () => {
     const payload = JSON.parse(result?.content?.[0]?.text ?? "{}");
     assert.equal(payload.count, 1);
     assert.equal(payload.projects[0].name, "mcp-demo");
+    // Structured output mirrors the text payload for object-shaped results.
+    assert.deepEqual(result?.structuredContent, payload);
   });
 
   it("rejects operate tools for read-only tokens", async () => {
@@ -328,6 +379,48 @@ describe("mcp endpoint", () => {
 
     assert.equal(getRes.status, 405);
     assert.equal(deleteRes.status, 405);
+  });
+
+  it("serves an object-type inputSchema for union-shaped lifecycle tools", async () => {
+    // Arrange: pm_manage_stage takes a top-level zod union, which serializes
+    // without a top-level type. MCP clients (zod v4) reject the entire
+    // tools/list payload unless every inputSchema declares type: "object".
+    // Runs last: it adds a second project to the shared test database.
+    const projectPath = path.join(root, `mcp-lc-${randomUUID()}`);
+    mkdirSync(projectPath);
+    const project = new ProjectRepository(db, userId).create({ name: "mcp-lc", path: projectPath, aiTool: "claude" });
+    const lifecycle = new McpTokenRepository(db).create({
+      userId, name: "lifecycle", scopes: ["read", "operate", "lifecycle"],
+      allowedProjects: [{ id: project.id, root: projectPath }]
+    });
+
+    // Act
+    const res = await mcpRpc(port, lifecycle.token, "tools/list");
+
+    // Assert
+    const tools = (res.messages[0]?.result?.tools ?? []) as Array<{ name: string; inputSchema: { type?: unknown } }>;
+    const stage = tools.find((tool) => tool.name === "pm_manage_stage");
+    assert.ok(stage, "pm_manage_stage should be listed for a lifecycle-scoped token");
+    assert.equal(stage.inputSchema.type, "object");
+    for (const tool of tools) assert.equal(tool.inputSchema.type, "object", `${tool.name} inputSchema`);
+  });
+});
+
+describe("isAllowedMcpOrigin", () => {
+  it("allows absent origins (non-browser clients)", () => {
+    assert.equal(isAllowedMcpOrigin(undefined), true);
+  });
+  it("allows loopback http/https origins on any port", () => {
+    assert.equal(isAllowedMcpOrigin("http://127.0.0.1:48732"), true);
+    assert.equal(isAllowedMcpOrigin("http://localhost:3000"), true);
+    assert.equal(isAllowedMcpOrigin("https://[::1]:8080"), true);
+  });
+  it("rejects non-loopback, malformed, and non-http origins", () => {
+    assert.equal(isAllowedMcpOrigin("https://evil.example"), false);
+    assert.equal(isAllowedMcpOrigin("http://10.0.0.5:8080"), false);
+    assert.equal(isAllowedMcpOrigin("not a url"), false);
+    assert.equal(isAllowedMcpOrigin("file:///etc/passwd"), false);
+    assert.equal(isAllowedMcpOrigin(["http://127.0.0.1:48732"]), false);
   });
 });
 

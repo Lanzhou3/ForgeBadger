@@ -57,6 +57,18 @@ export class AgentToolValidationError extends Error {
   }
 }
 
+/**
+ * Model tool-calling contracts (Anthropic `input_schema`, OpenAI `parameters`,
+ * and MCP `inputSchema`) require the top-level JSON Schema to declare
+ * type: "object". A top-level union input (e.g. pm_manage_stage) serializes
+ * as a bare anyOf, which strict providers and clients reject for the whole
+ * tool list; the call arguments are an object either way, so restore the
+ * required type without touching the branches.
+ */
+export function modelObjectSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  return schema.type === "object" ? schema : { type: "object", ...schema };
+}
+
 export function createAgentToolRegistry(tools: AgentTool[]): AgentToolRegistry {
   const map = new Map(tools.map((t) => [t.name, t]));
   return {
@@ -65,7 +77,7 @@ export function createAgentToolRegistry(tools: AgentTool[]): AgentToolRegistry {
       return tools.map((t) => ({
         name: t.name,
         description: t.description,
-        inputSchema: t.modelInputSchema ?? zodToJsonSchema(t.inputSchema)
+        inputSchema: modelObjectSchema(t.modelInputSchema ?? zodToJsonSchema(t.inputSchema))
       }));
     }
   };

@@ -36,8 +36,47 @@ interface McpAuthenticatedRequest extends Request {
   mcpAuth?: { userId: string; tokenId: string; scopes: McpTokenScope[] };
 }
 
+/**
+ * Streamable HTTP security warning (MCP spec): servers MUST validate the
+ * `Origin` header on all incoming connections to prevent DNS rebinding
+ * attacks, and answer 403 when it is present and invalid. Non-browser MCP
+ * clients (Claude Code, Copilot CLI, curl) send no Origin header at all;
+ * only pages served from a loopback host carry an acceptable Origin, so the
+ * allowlist is loopback hostnames on http/https. A rebinding attacker's page
+ * always presents its own (non-loopback) origin and is rejected.
+ */
+const MCP_LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+export function isAllowedMcpOrigin(origin: string | string[] | undefined): boolean {
+  if (origin === undefined) return true;
+  if (typeof origin !== "string") return false;
+  try {
+    const url = new URL(origin);
+    return (url.protocol === "http:" || url.protocol === "https:") && MCP_LOOPBACK_HOSTNAMES.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function mcpJsonRpcError(res: Response, status: number, code: number, message: string): void {
+  res.status(status).json({
+    jsonrpc: "2.0",
+    id: null,
+    error: { code, message }
+  });
+}
+
 export function createMcpRoutes(deps: Pick<ServerDeps, "db" | "masterKey" | "sessionManager" | "appVersion" | "adapterCommandRunner">): Router {
   const router = Router();
+  // Origin validation runs before auth and before method dispatch (GET/405
+  // included): the spec mandates it for every incoming connection.
+  router.use((req: Request, res: Response, next: NextFunction) => {
+    if (!isAllowedMcpOrigin(req.headers.origin)) {
+      mcpJsonRpcError(res, 403, -32000, "Origin not allowed");
+      return;
+    }
+    next();
+  });
   const authenticateMcp = createMcpAuthenticator(deps.db);
   const rateLimiter = createRateLimiter({
     windowMs: 60_000,
@@ -49,10 +88,17 @@ export function createMcpRoutes(deps: Pick<ServerDeps, "db" | "masterKey" | "ses
     }
   });
 
+  const unauthorized = (res: Response): void => {
+    // RFC 6750 challenge so standard MCP clients can identify the scheme;
+    // the body keeps the JSON-RPC envelope used by every other error here.
+    res.setHeader("WWW-Authenticate", 'Bearer realm="forgebadger-mcp"');
+    mcpJsonRpcError(res, 401, -32000, "Unauthorized");
+  };
+
   router.post("/", authenticateMcp, rateLimiter, async (req: McpAuthenticatedRequest, res: Response) => {
     const auth = req.mcpAuth;
     if (!auth) {
-      res.status(401).json({ error: "unauthorized" });
+      unauthorized(res);
       return;
     }
     const server = buildMcpServer({
@@ -109,7 +155,10 @@ export function createMcpRoutes(deps: Pick<ServerDeps, "db" | "masterKey" | "ses
 
 function createMcpAuthenticator(db: Database) {
   return (req: McpAuthenticatedRequest, res: Response, next: NextFunction): void => {
-    const unauthorized = () => res.status(401).json({ error: "unauthorized" });
+    const unauthorized = (): void => {
+      res.setHeader("WWW-Authenticate", 'Bearer realm="forgebadger-mcp"');
+      mcpJsonRpcError(res, 401, -32000, "Unauthorized");
+    };
     const token = extractBearerToken(req.headers.authorization);
     if (!token) {
       unauthorized();

@@ -36,6 +36,7 @@ import { createSecurityPolicy, logSecurityDecision, type SecurityPolicyInput } f
 import { containsSensitiveAgentValue, redactAgentErrorMessage, redactAgentValue } from "../agent/redaction.js";
 import {
   executeAgentTool,
+  modelObjectSchema,
   zodToJsonSchema,
   type AgentTool,
   type AgentToolContext
@@ -120,8 +121,9 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
     tools: [...tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
-      inputSchema: mcpInputSchema(tool, hasWriteReceipts)
-    })), ...(hasWriteReceipts ? [{ name: "get_mcp_operation", description: "Read the durable receipt for a prior MCP operationId without replaying it.", inputSchema: { type: "object", properties: { operationId: { type: "string" } }, required: ["operationId"], additionalProperties: false } }] : [])]
+      inputSchema: mcpInputSchema(tool, hasWriteReceipts),
+      annotations: mcpToolAnnotations(tool)
+    })), ...(hasWriteReceipts ? [{ name: "get_mcp_operation", description: "Read the durable receipt for a prior MCP operationId without replaying it.", inputSchema: { type: "object", properties: { operationId: { type: "string" } }, required: ["operationId"], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }] : [])]
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -132,10 +134,10 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
         assertMcpTokenAuthority(deps.db, deps.userId, deps.tokenId);
         const actions = new PlatformActionRepository(deps.db, deps.userId);
         const intent = actions.byKey(mcpOperationKey(deps.tokenId, operationId));
-        if (!intent) return { content: [{ type: "text" as const, text: JSON.stringify({ found: false }) }] };
+        if (!intent) return toolResultContent({ found: false });
         assertMcpTokenAuthority(deps.db, deps.userId, deps.tokenId, JSON.parse(intent.resources_json));
         const receipt = actions.receipt(intent.id);
-        return { content: [{ type: "text" as const, text: JSON.stringify({ found: true, intentId: intent.id, status: intent.status, receipt: receipt ? { outcome: receipt.outcome, createdAt: receipt.createdAt } : null }) }] };
+        return toolResultContent({ found: true, intentId: intent.id, status: intent.status, receipt: receipt ? { outcome: receipt.outcome, createdAt: receipt.createdAt } : null });
       } catch (error) {
         return { isError: true, content: [{ type: "text" as const, text: redactAgentErrorMessage(error instanceof Error ? error.message : "Tool execution failed") }] };
       }
@@ -148,8 +150,8 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
       };
     }
     try {
-      const output = await executeMcpTool(tool, request.params.arguments ?? {}, deps);
-      return { content: [{ type: "text" as const, text: JSON.stringify(redactAgentValue(output)) }] };
+      const output = redactAgentValue(await executeMcpTool(tool, request.params.arguments ?? {}, deps));
+      return toolResultContent(output);
     } catch (error) {
       return {
         isError: true,
@@ -349,10 +351,41 @@ function mcpOperationKey(tokenId: string, operationId: string): string {
   return `mcp:${tokenId}:${operationId}`;
 }
 
+/**
+ * Tool result in the MCP shape: the redacted output serialized as a TextContent
+ * block (for hosts that do not parse structured results) plus `structuredContent`
+ * when the output is a JSON object — the only shape the 2025-11-25
+ * CallToolResult schema accepts there.
+ */
+function toolResultContent(output: unknown): {
+  content: Array<{ type: "text"; text: string }>;
+  structuredContent?: Record<string, unknown>;
+} {
+  const text = JSON.stringify(output);
+  if (output && typeof output === "object" && !Array.isArray(output)) {
+    return { content: [{ type: "text", text }], structuredContent: output as Record<string, unknown> };
+  }
+  return { content: [{ type: "text", text }] };
+}
+
+// MCP tool annotations let external hosts tier trust (e.g. auto-approve
+// read-only tools, flag destructive ones). They are advisory: derived from the
+// platform tool's risk class, and hosts still confirm before invoking.
+const MCP_OPEN_WORLD_TOOLS = new Set(["start_session", "stop_session", "dispatch_task_to_session", "pm_execute_task_packet"]);
+
+function mcpToolAnnotations(tool: AgentTool): { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean } {
+  return {
+    readOnlyHint: tool.risk === "read",
+    destructiveHint: tool.risk === "operate",
+    idempotentHint: false,
+    openWorldHint: MCP_OPEN_WORLD_TOOLS.has(tool.name)
+  };
+}
+
 function mcpInputSchema(tool: AgentTool, hasCliScope: boolean): Record<string, unknown> {
   const schema = tool.modelInputSchema ?? zodToJsonSchema(tool.inputSchema);
-  if (tool.risk !== "operate" || !hasCliScope) return schema;
-  return withOperationId(schema);
+  if (tool.risk !== "operate" || !hasCliScope) return modelObjectSchema(schema);
+  return modelObjectSchema(withOperationId(schema));
 }
 
 function withOperationId(schema: Record<string, unknown>): Record<string, unknown> {

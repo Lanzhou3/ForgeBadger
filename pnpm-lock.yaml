@@ -168,16 +168,16 @@ importers:
     devDependencies:
       '@larksuiteoapi/node-sdk':
         specifier: ^1.66.1
-        version: 1.66.1
+        version: 1.66.1(debug@4.4.3)
 
   packages/cli:
     dependencies:
       '@larksuiteoapi/node-sdk':
         specifier: 1.71.1
-        version: 1.71.1
+        version: 1.71.1(debug@4.4.3)
       '@modelcontextprotocol/sdk':
-        specifier: ^1.30.0
-        version: 1.30.0(zod@3.25.76)
+        specifier: ^1.32.1
+        version: 1.32.1(zod@3.25.76)
       '@xterm/addon-serialize':
         specifier: ^0.13.0
         version: 0.13.0(@xterm/xterm@5.5.0)
@@ -238,10 +238,10 @@ importers:
     dependencies:
       '@larksuiteoapi/node-sdk':
         specifier: 1.71.1
-        version: 1.71.1
+        version: 1.71.1(debug@4.4.3)
       '@modelcontextprotocol/sdk':
-        specifier: ^1.30.0
-        version: 1.30.0(zod@3.25.76)
+        specifier: ^1.32.1
+        version: 1.32.1(zod@3.25.76)
       '@xterm/addon-serialize':
         specifier: ^0.13.0
         version: 0.13.0(@xterm/xterm@5.5.0)
@@ -1292,8 +1292,8 @@ packages:
   '@larksuiteoapi/node-sdk@1.71.1':
     resolution: {integrity: sha512-Z4cZmgWvwiE7tCHqGm+t7DKvbpNRRTH2HqVwcYiOMAwbjIytXSoQqWytsOVu3p+d0fIvrtyIPZok5HOV/VNxxw==}
 
-  '@modelcontextprotocol/sdk@1.30.0':
-    resolution: {integrity: sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA==}
+  '@modelcontextprotocol/sdk@1.32.1':
+    resolution: {integrity: sha512-2DdE+SJDtzLEEWzY1ZjY7Q+VcPhcV1KisD3zI4u0XZyktsjHum1mwbMI+JaulUBi2OZk+KJAi2uPXzxichPkdw==}
     engines: {node: '>=18'}
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
@@ -4882,9 +4882,9 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@larksuiteoapi/node-sdk@1.66.1':
+  '@larksuiteoapi/node-sdk@1.66.1(debug@4.4.3)':
     dependencies:
-      axios: 1.13.6
+      axios: 1.13.6(debug@4.4.3)
       lodash.identity: 3.0.0
       lodash.merge: 4.6.2
       lodash.pickby: 4.6.0
@@ -4896,9 +4896,9 @@ snapshots:
       - debug
       - utf-8-validate
 
-  '@larksuiteoapi/node-sdk@1.71.1':
+  '@larksuiteoapi/node-sdk@1.71.1(debug@4.4.3)':
     dependencies:
-      axios: 1.19.0
+      axios: 1.19.0(debug@4.4.3)
       lodash.identity: 3.0.0
       lodash.merge: 4.6.2
       lodash.pickby: 4.6.0
@@ -4911,7 +4911,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@modelcontextprotocol/sdk@1.30.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.32.1(zod@3.25.76)':
     dependencies:
       '@hono/node-server': 2.1.1(hono@4.13.8)
       ajv: 8.20.0
@@ -6190,17 +6190,17 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  axios@1.13.6:
+  axios@1.13.6(debug@4.4.3):
     dependencies:
-      follow-redirects: 1.16.0
+      follow-redirects: 1.16.0(debug@4.4.3)
       form-data: 4.0.6
       proxy-from-env: 1.1.0
     transitivePeerDependencies:
       - debug
 
-  axios@1.19.0:
+  axios@1.19.0(debug@4.4.3):
     dependencies:
-      follow-redirects: 1.16.0
+      follow-redirects: 1.16.0(debug@4.4.3)
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -6707,7 +6707,7 @@ snapshots:
       once: 1.4.0
       parseurl: 1.3.3
       proxy-addr: 2.0.7
-      qs: 6.15.1
+      qs: 6.16.0
       range-parser: 1.2.1
       router: 2.2.0
       send: 1.2.1
@@ -6749,7 +6749,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  follow-redirects@1.16.0: {}
+  follow-redirects@1.16.0(debug@4.4.3):
+    optionalDependencies:
+      debug: 4.4.3
 
   form-data@4.0.6:
     dependencies:

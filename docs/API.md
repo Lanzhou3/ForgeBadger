@@ -1961,6 +1961,13 @@ independent, no SSE streams or session state are kept, and `GET`/`DELETE`
 return `405`. The endpoint speaks MCP/JSON-RPC semantics, not the project
 response envelope.
 
+DNS-rebinding protection (per the MCP transport spec): a request carrying an
+`Origin` header must present a loopback origin (`http`/`https` on
+`127.0.0.1`, `localhost`, or `[::1]`, any port); any other present or
+malformed origin is answered `403` with a JSON-RPC error before
+authentication. Non-browser clients (Claude Code, Copilot CLI, curl) send no
+`Origin` header and are unaffected.
+
 Authentication uses access tokens managed through the REST routes
 above (standard JWT/session auth + envelope). `POST /api/v1/mcp/tokens` accepts
 `{ name, scopes?, projectIds, expiresInHours? }` for new project grants.
@@ -2054,9 +2061,19 @@ high-risk approval-gated (for example `create_project` outside the home director
 with an older token) are refused rather than auto-approved, and `write_memory` with
 `scope: "session"` is rejected because session memory is bound to a Copilot
 conversation. Error responses on this endpoint use JSON-RPC error envelopes
-(`-32700` parse error, `-32603` internal error), never the project REST
-envelope. Tenant isolation is unchanged â all tools
+(`-32700` parse error, `-32603` internal error, `-32000`
+unauthorized/forbidden), never the project REST
+envelope; unauthenticated responses additionally carry a
+`WWW-Authenticate: Bearer` challenge. Tenant isolation is unchanged â all tools
 execute with the token owner's `userId`.
+
+Each listed tool carries MCP execution annotations derived from its platform
+risk class: `readOnlyHint: true` for read tools, `destructiveHint: true` for
+operate tools, `openWorldHint: true` for tools that drive external CLI
+sessions, so external hosts can tier trust (hosts still confirm before
+invoking). Successful object-shaped results are returned both as a JSON text
+block and as `structuredContent`; the text block is kept for hosts that do
+not parse structured results.
 
 Every operate call made with a `cli_dispatch` or `lifecycle` token requires a stable
 `operationId` (1–100 ASCII letters, digits, `_` or `-`, beginning with a letter
