@@ -58,7 +58,7 @@ it("submits without grants by default", async () => {
 it("submits checked grants and omits unchecked ones", async () => {
   mount();
   fillRequired();
-  fireEvent.click(screen.getByRole("button", { name: /预算（可选）/ }));
+  fireEvent.click(screen.getByRole("button", { name: /自动授权/ }));
   fireEvent.click(screen.getByRole("checkbox", { name: "会话启停" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "任务派发" }));
   // 终端命令 stays unchecked.

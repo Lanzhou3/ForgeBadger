@@ -1,6 +1,5 @@
 import { CopilotFollowups } from "../services/agent/followups.js";
-import { createCopilotMeteringRoutes } from './copilot-metering.js';
-import { RunGovernance } from "../services/agent/run-governance.js";
+import { revokeDevelopmentRepairs } from "../services/agent/development-repair.js";
 import { publicModelResponse } from "../db/repositories/copilot-model-response-repository.js";
 import { createCopilotDevelopmentRoutes } from './copilot-development.js';
 import { provisionalText, clearProvisionalText } from '../services/agent/provisional-text.js';
@@ -69,7 +68,6 @@ export type CopilotRouteDeps = AgentStackDeps;
 export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   const router = Router();
   router.use(authenticate);
-  router.use(createCopilotMeteringRoutes(deps.db));
   router.use(createCopilotDevelopmentRoutes(deps.db));
   router.use(createCopilotConnectionRoutes(deps.db, deps.masterKey));
 
@@ -276,7 +274,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     const run = log.getRun(id);
     if (!run) return notFound(res);
     if (!['pending', 'running', 'awaiting_approval'].includes(run.status)) clearProvisionalText(deps.db, id);
-    res.json(ok({ provisionalText: provisionalText(deps.db, userId(req), id), run: { ...run, usage: new RunGovernance(deps.db, userId(req), id).usage() }, pendingActions: log.listPendingActions(id).map(a=>({...a,platformIntentId:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)?.id??null:null,platformIntent:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)??null:null})), steps: new CopilotRunLedger(deps.db,userId(req)).steps(id).map(step => step.kind === 'model' ? { ...step, result_json: publicModelResponse(step.result_json) } : step) }));
+    res.json(ok({ provisionalText: provisionalText(deps.db, userId(req), id), run, pendingActions: log.listPendingActions(id).map(a=>({...a,platformIntentId:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)?.id??null:null,platformIntent:a.stepId?new PlatformActionRepository(deps.db,userId(req)).byKey(a.stepId)??null:null})), steps: new CopilotRunLedger(deps.db,userId(req)).steps(id).map(step => step.kind === 'model' ? { ...step, result_json: publicModelResponse(step.result_json) } : step) }));
   });
 
   router.get("/runs/:id/trace", (req, res) => {
@@ -290,6 +288,13 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     const { orchestrator } = buildAgentStack(deps, userId(req));
     const result = await orchestrator.cancelRun({ userId: userId(req), runId: id });
     res.json(ok(result));
+  });
+
+  router.delete("/runs/:id/repairs", (req, res) => {
+    const id = parseId(req.params.id, res); if (!id) return;
+    if (!new CopilotRunLedger(deps.db, userId(req)).get(id)) return notFound(res);
+    revokeDevelopmentRepairs(deps.db, userId(req), id);
+    res.json(ok({ revoked: true }));
   });
 
   const approveSchema = z.object({ approved: z.boolean() }).strict();

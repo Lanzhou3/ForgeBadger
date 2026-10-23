@@ -493,7 +493,7 @@ All responses use the standard `{code,data,message}` envelope and authenticated 
 | `POST /api/v1/copilot/conversations/:id/messages` | `{content,modelId?,projectId?,grantId?,clientRequestId?}`; returns 201 `{runId}` after durable admission, before model completion. A new request during an active run returns 409 `COPILOT_CONVERSATION_BUSY`. Matching request-key retries return the original run, including after completion; conflicting payloads return 409 `COPILOT_REQUEST_CONFLICT`. |
 | `GET /api/v1/copilot/conversations/:id/runs` | `{runs,activeRun,repairRunIds}`; latest 50 runs and current active run, or null. `repairRunIds` lists unrevoked user repair opt-ins for the conversation, including completed origins older than the latest 50 runs; revoke each through `DELETE /api/v1/copilot/runs/:id/repairs`. |
 | `GET /api/v1/copilot/runs/:id` | `{run,pendingActions,steps}`; run includes revision and stopReason, actions include full inputJson/inputDigest, stepId and toolCallId. Steps retain execution receipts. |
-| `GET /api/v1/copilot/runs/:id/trace` | `{events}`; tenant-scoped per-run decision timeline ordered by `created_at,seq` (admission, claims/recovery, step start/complete, tool gates, approval parking/decisions, LLM call metering, sub-run admissions, follow-up promotions, terminal states). Metadata only: rows carry monotonic `seq` (UNIQUE per run), the run-instance `fence`, optional `step_id` and whitelisted scalar `detail_json`; message contents, tool input plaintext and secrets are never stored. Unknown or foreign runs return 404. |
+| `GET /api/v1/copilot/runs/:id/trace` | `{events}`; tenant-scoped per-run decision timeline ordered by `created_at,seq` (admission, claims/recovery, step start/complete, tool gates, approval parking/decisions, sub-run admissions, follow-up promotions, terminal states). Metadata only: rows carry monotonic `seq` (UNIQUE per run), the run-instance `fence`, optional `step_id` and whitelisted scalar `detail_json`; message contents, tool input plaintext and secrets are never stored. Unknown or foreign runs return 404. |
 | `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/decide` | `{approved}`; persists a single decision and returns `{resumed,runId}`. The original run continues asynchronously, including after rejection. |
 | `POST /api/v1/copilot/runs/:id/cancel` | Awaits durable cancellation; returns `{cancelled,runId}`. It does not undo effects already sent to a CLI. |
 | `POST /api/v1/copilot/conversations/:id/edit-message` | Accepts `{messageId,content,clientRequestId?,modelId?,projectId?,toolDiscovery?}`. Validates a user text in the URL conversation. Active or unresolved writes return 409. Clears summary, preserves run/step receipts and admits the edit atomically. Matching request-key retries return the original run before truncation; changed targets or context return 409 `COPILOT_REQUEST_CONFLICT`. |
@@ -502,11 +502,10 @@ All responses use the standard `{code,data,message}` envelope and authenticated 
 Run terminal states are `completed`, `failed`, `cancelled`, `stopped` (for example `step_budget_exhausted`) and `indeterminate` (unconfirmed side effects). `pending`, `running` and `awaiting_approval` remain active. Cancellation may retain an indeterminate write step; a later receipt records the outcome without reviving the run. There is no automatic retry endpoint for unknown writes.
 
 Approval lifecycle (2026-10-04): a verified `awaiting_approval` interval is
-persisted and excluded from the run time budget. Multiple intervals accumulate;
-duplicate decisions do not restore spent execution time. `started_at`, token
-and step budgets remain unchanged. Ordinary queue time and Gateway downtime
-outside an approval interval retain their existing wall-clock semantics.
-The originating budget also bounds read-only research started after approval.
+persisted as approval-clock evidence; multiple intervals accumulate and
+duplicate decisions do not double-count them. There is no run time budget:
+a run continues until it completes, hits its step limit, fails, or is
+cancelled by the owner — including read-only research started after approval.
 
 The authenticated Web decision route can renew the original, still-unexecuted
 platform intent's 15-minute admission deadline only after atomically rechecking
@@ -2698,24 +2697,22 @@ evidence. This tool shares existing tenant/project and restricted-research check
 ### Copilot goals (goal mode)
 
 `POST /api/v1/copilot/goals` body `{conversationId, projectId?, title (1..200),
-spec (1..20000), budgets?{tokenBudget<=50M, maxDurationMs<=24h, maxRuns<=200}}`
-creates a goal bound to the conversation and enqueues the first (initializer)
-run, whose user message is the spec verbatim. Success is `201` with
-`{goalId, runId}` in the standard envelope. The conversation must belong to
-the caller (otherwise `404`); a conversation that already has an active run
-maps to `409 COPILOT_CONVERSATION_BUSY`, and a goal whose initializer cannot
-be enqueued is cancelled instead of left active. Budget defaults are 5M
-charged tokens, 8 wall-clock hours and 50 runs per goal; per-run budgets are
-unchanged.
+spec (1..20000)}` creates a goal bound to the conversation and enqueues the
+first (initializer) run, whose user message is the spec verbatim. Success is
+`201` with `{goalId, runId}` in the standard envelope. The conversation must
+belong to the caller (otherwise `404`); a conversation that already has an
+active run maps to `409 COPILOT_CONVERSATION_BUSY`, and a goal whose
+initializer cannot be enqueued is cancelled instead of left active. Goals have
+no enforced budget ceilings; continuation stops on task completion,
+stagnation or owner cancel.
 
 `GET /api/v1/copilot/goals?conversationId=` lists the caller's goals newest
 first as `{goals:[{id,title,status,projectId,conversationId,createdAt,
 taskTotal,taskPasses}]}`. `GET /api/v1/copilot/goals/:id` returns
-`{goal,tasks,journal,usage,pendingQuestion}`: the full goal row (including
-`spec`, `tokenBudget`, `maxDurationMs`, `maxRuns`, `blockedReason`,
-`pendingQuestion` and `completedAt`), the task checklist ordered by `seq`,
-the 20 most recent journal entries, `usage:{chargedTokens,runCount,elapsedMs}`
-aggregated over every run carrying the goal id, and the outstanding
+`{goal,tasks,journal,pendingQuestion}`: the full goal row (including
+`spec`, `grants`, `blockedReason`, `pendingQuestion` and `completedAt`),
+the task checklist ordered by `seq`,
+the 20 most recent journal entries, and the outstanding
 `goal_ask_user` question (null when none). Foreign goals `404`.
 
 `POST /api/v1/copilot/goals/:id/pause|resume|cancel` returns `{goal}` with the
@@ -2738,10 +2735,7 @@ Tasks without `verifyCommand` keep the evidence-text rule.
 
 Continuation is owned by the GoalDriver, not the client: when a run carrying
 `goal_id` reaches `completed`/`stopped`/`failed`, the goal is re-evaluated.
-All tasks `passes` sets the goal `completed`; exceeding the token, lifetime
-or run-count ceiling blocks it (`blockedReason: goal_budget_exhausted`,
-surfaced mid-run as `COPILOT_GOAL_BUDGET_EXHAUSTED`, which stops the run);
-three settled runs without a task status change block it with
+All tasks `passes` sets the goal `completed`; three settled runs without a task status change block it with
 `no_task_progress` (delegate/research child runs never count); a last run
 failed with a non-retryable code (`COPILOT_CONTEXT_TOO_LARGE`,
 `COPILOT_USER_INACTIVE`, `COPILOT_NOT_FOUND`) blocks with
@@ -2750,8 +2744,7 @@ exponential cooldown (15 s base, 5 min cap, journaled) instead of a retry
 loop; otherwise the next run is enqueued automatically with an
 audit-visible continuation message. Goal runs are exempt from the per-run
 no-progress stop (the task-level stagnation rule replaces it) and receive a
-prefix message with the goal spec, checklist, recent journal and remaining
-budget. The injected state is a bounded projection: the
+prefix message with the goal spec, checklist and recent journal. The injected state is a bounded projection: the
 spec is clipped to 2000 chars, per-task evidence to 500, and the checklist
 shows at most 30 entries (the remainder is summarised as a count). Goal
 transitions into `completed`/`blocked` (including `awaiting_user`) emit one
@@ -2870,11 +2863,11 @@ spec drives the initializer turn.
 | `/merge` | goal | merge the latest sandbox goal into the project (only when the goal is `completed`/`blocked`; journaled; owner chat auth is the authority) |
 | `/answer <内容>` | goal | answer an `awaiting_user` goal: journal, clear question, resume, enqueue the answer run |
 | `/model [list\|<id>]` | model | show the current model, list provider/model profiles, or switch by persisting the server-side model preference |
-| `/status` | info | active run, current model, conversation token usage, active goal count |
+| `/status` | info | active run, current model, active goal count |
 | `/stop` | session | cancel queued follow-ups (the single-active-run invariant leaves no other run to stop) |
 | `/new` | session | guidance for starting a new conversation (a console action) |
 | `/playbook <name>` | info | load a playbook's full text into the transcript (exact, case-insensitive name; lists candidates on miss) |
-| `/playbooks`, `/skills`, `/usage` | info | playbook listing, Skills page pointer, conversation token + goal usage |
+| `/playbooks`, `/skills` | info | playbook listing, Skills page pointer |
 
 ### Copilot goal grants, delegation and dispatch (M3)
 
@@ -2897,9 +2890,7 @@ conversation, tool surface limited to the goal sandbox tools
 (goal_file_*/goal_run_checks, goal_update_task restricted to the delegated
 taskId, goal_write_journal) plus read-only platform tools, and goal_delegate
 itself (a nested delegate is refused at admission — the parent-chain depth
-rule). Token/time budgets inherit the parent run's remaining ceilings via the
-existing parent/child budget recursion (copilot_research_jobs link). The
-sub-run writes only inside the goal sandbox; its report returns as the
+rule). The sub-run writes only inside the goal sandbox; its report returns as the
 delegating tool's result and a failed delegate does not block the goal. A
 cancelled or de-authorised parent cancels the delegate child (no orphaned
 runs), and the driver's busy/sweep checks treat the child run as goal-owned
@@ -2945,12 +2936,6 @@ any dispatch is `running` the goal driver does not enqueue continuation runs
 journals that the turn ended (not verification) and re-evaluates the goal; a
 session that stops without a report settles as `ended`. Dispatch and a
 finished turn are never completion — the task's verify gate still applies.
-
-Goal detail `usage` adds `costUsd` (number|null): the sum of
-`copilot_model_calls.cost_nanousd` across the goal's runs (computed from
-provider token rates at metering time). Any call without pricing (missing
-usage or rates) makes the aggregate `null`; a goal with no calls aggregates
-to `0`.
 
 ### Historical reference: retired Copilot grants
 
@@ -3646,13 +3631,10 @@ submission, edits, test execution, acceptance or deployment. Internal
 | POST | `/conversations/:id/followups` | Same content/model/project options as messages; `clientRequestId` required. Returns `{ followup: { id, status, runId } }`. At most 10 queued per conversation; same key/body returns the same item; different body conflicts. |
 | GET | `/conversations/:id/followups` | `{ followups }`; up to 100 rows, pending first. Rows expose redacted content, status, runId, error and createdAt; no internal request digest or authority metadata. |
 | DELETE | `/followups/:id` | `{ cancelled: boolean }`; succeeds only for this owner's still-queued item. A promoted item must be cancelled via its run. |
-| GET | `/runs/:id` | Run additionally exposes `phase`, `phaseStartedAt`, and `usage: { chargedTokens, reportedTokens, estimatedCalls, calls, costUsd, knownCostUsd, unpricedCalls }`. |
+| GET | `/runs/:id` | Run additionally exposes `phase` and `phaseStartedAt`. |
 
 Phases are `queued`, `context`, `summarizing`, `model`, `tool`,
-`awaiting_approval`, `finished`. Usage includes auxiliary and linked child model
-calls. `chargedTokens` mixes provider-reported counts and conservative estimates;
-it is a governance counter, not an invoice or exact token/cost measurement.
-Queued input is added to history only when transactionally promoted after the
+`awaiting_approval`, `finished`. Queued input is added to history only when transactionally promoted after the
 conversation's active run ends. Promotion rechecks current authorization.
 
 Native tools add `search_project_files` (literal text, redacted snippets, line
@@ -3664,7 +3646,7 @@ results are not proof that excluded or oversized files have no matches.
 `read_project_file` supports offset slices of permitted files up to 1 MiB;
 controlled patch/test source limits remain 64 KiB per file.
 
-### Copilot streaming, metering and controlled repair
+### Copilot streaming and controlled repair
 
 Message/edit/follow-up bodies additionally accept `repairFailedChecks?: boolean`
 (default false). Only the originating user's explicit opt-in permits a repair
@@ -3681,19 +3663,7 @@ Gateway events plus polling refresh the Web view.
 
 | Method | Path below `/api/v1/copilot` | Contract |
 |---|---|---|
-| GET | `/token-rates/:modelId` | `{ rates, currency: "USD", basis: "owner_configured_per_million_tokens" }`; `rates` is null until configured. Tenant-owned model profile ID required. |
-| PUT | `/token-rates/:modelId` | Required `inputUsdPerMillion`, `outputUsdPerMillion`; optional `cachedInputUsdPerMillion`, `cacheWriteUsdPerMillion`. Each rate 0..1,000,000, at most six decimals. 0 means free; omitted optional rates mean unknown. Changes affect future calls only. |
-| GET | `/runs/:runId/usage` | `{ usage, calls }` including linked research/review/repair children and auxiliary calls. Calls expose safe model identity, immutable pre-call price snapshot, normalized token counts, measurement kind, timestamps and cost. Never credentials, request payloads or private reasoning. |
 | DELETE | `/runs/:runId/repairs` | `{ revoked: true }`; persistently revokes the root repair chain and cancels its active children/queued or running sandbox tasks. A repair child's ID resolves to its root. Does not alter immutable request JSON or erase evidence. |
-
-`reportedTokens` contains validated provider-reported totals. Missing/interrupted
-usage keeps a conservative reservation in `chargedTokens` and increments
-`estimatedCalls`; it is never presented as measured zero. Normalized input counts
-include cache reads/writes; reasoning tokens are an output subset. `costUsd` is
-null if any included call lacks applicable usage/pricing; `knownCostUsd` preserves
-the priced subtotal and `unpricedCalls` its missing coverage. These calculations
-are configured estimates of cost, not invoices. Preflight reservations are not
-an exact local tokenizer for arbitrary providers.
 
 `copilot_run_updated` public text frames include `text_step_id`, `text_fence` and
 `text_sequence` alongside `text_delta`. The Web client orders/deduplicates frames,

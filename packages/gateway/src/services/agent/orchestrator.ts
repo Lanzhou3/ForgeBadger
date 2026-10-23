@@ -4,8 +4,7 @@ import { notificationContext } from './notification-context.js';
 import { streamWithContextRecovery } from './context-recovery.js';
 import { hasNoProgress } from './no-progress.js';
 import { goalContextMessage } from './goal-context.js';
-import { CopilotGoalStore, GOAL_BUDGET_EXHAUSTED_REASON } from './goal-store.js';
-import { notifyGoalStatus } from './goal-notify.js';
+import { CopilotGoalStore } from './goal-store.js';
 import { evaluateGoalContinuation } from './goal-driver.js';
 import { goalGrantForTool } from './goal-grants.js';
 import { clearGoalFailureCooldown } from './goal-driver.js';
@@ -14,7 +13,7 @@ import { reserveRepairSubmission } from '../development/repair-scope.js';
 import { CopilotToolArtifactRepository } from '../../db/repositories/copilot-tool-artifact-repository.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { readSource } from "../development/workspace.js";
-import { RunGovernance, meteredLlm } from "./run-governance.js";
+import { RunGovernance, type RunPhase } from "./run-governance.js";
 import { CopilotModelResponseRepository } from "../../db/repositories/copilot-model-response-repository.js";
 import type { LlmResult } from "./llm-response.js";
 import { listAvailableCopilotSkillSummaries } from "./skills/copilot-skill-service.js";
@@ -124,9 +123,6 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             return;
         }
         const controller = new AbortController();
-        const deadline = setTimeout(() => controller.abort(new AgentError('COPILOT_TIME_BUDGET', 'Run elapsed-time budget exhausted')),
-            Math.max(1, new RunGovernance(deps.db, userId, runId).remainingDurationMs()));
-        deadline.unref();
         const timer = setInterval(() => { if (control.stopped || !deps.db.open) {
             clearInterval(timer);
             controller.abort();
@@ -165,23 +161,12 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 ledger.commit(claim, () => new CopilotModelResponseRepository(deps.db, userId, deps.masterKey)
                     .recordInvalidResponse(runId, error.message));
             }
-            if (error instanceof AgentError && error.code === 'COPILOT_GOAL_BUDGET_EXHAUSTED') {
-                ledger.commit(claim, () => {
-                    const goalId = ledger.get(runId)?.goal_id;
-                    if (!goalId) return;
-                    const store = new CopilotGoalStore(deps.db, userId);
-                    if (store.getGoal(goalId)?.status !== 'active') return;
-                    store.setStatus(goalId, 'blocked', GOAL_BUDGET_EXHAUSTED_REASON);
-                    store.appendJournal(goalId, runId, 'Goal-level budget exhausted during this run; goal blocked.');
-                    notifyGoalStatus(deps.db, userId, store.getGoal(goalId)!);
-                });
-            }
             ledger.commit(claim, () => deps.db.prepare("UPDATE copilot_run_steps SET status='failed',result_json=COALESCE(result_json,?),completed_at=? WHERE user_id=? AND run_id=? AND kind='model' AND status='running' AND fence=?")
                 .run(error instanceof ProviderHttpError ? JSON.stringify(error.diagnostic()) : error instanceof AgentError ? error.code : null, Date.now(), userId, runId, claim.fence));
-            ledger.finish(claim, error instanceof AgentError && ["COPILOT_TIME_BUDGET", "COPILOT_TOKEN_BUDGET", "COPILOT_GOAL_BUDGET_EXHAUSTED"].includes(error.code) ? "stopped" : "failed", error instanceof AgentError ? error.code : redactAgentErrorMessage(error instanceof Error ? error.message : "Copilot failed"));
+            ledger.finish(claim, "failed", error instanceof AgentError ? error.code : redactAgentErrorMessage(error instanceof Error ? error.message : "Copilot failed"));
             emit(ledger, runId);
         }).finally(() => {
-            clearInterval(timer); clearTimeout(deadline); control.active.delete(runId);
+            clearInterval(timer); control.active.delete(runId);
             // Approval pauses execution, but the run is still visible and can
             // resume under a new fence. Keep its already-public text bounded.
             if (!deps.db.open || control.stopped || ledger.get(runId)?.status !== 'awaiting_approval')
@@ -237,15 +222,21 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     async function drive(ledger: CopilotRunLedger, c: Claim, signal: AbortSignal): Promise<void> {
         let input = loadRunFacts(deps.db, ledger.userId, c.runId)!.input;
         const meter = new RunGovernance(deps.db, input.userId, c.runId);
-        const llm = meteredLlm(deps.llm, meter, phase => {
-            if (ledger.commit(c, () => meter.phase(phase))) emit(ledger, c.runId);
-        });
+        const baseLlm = deps.llm;
+        const setPhase = (phase: RunPhase) => { if (ledger.commit(c, () => meter.phase(phase))) emit(ledger, c.runId); };
+        const llm: AgentLlmClient = {
+            ...(baseLlm.modelInfo ? { modelInfo: baseLlm.modelInfo } : {}),
+            ...(baseLlm.contextBudget ? { contextBudget: (modelId?: string) => baseLlm.contextBudget!(modelId) } : {}),
+            stream: (input) => { setPhase('model'); return baseLlm.stream(input); },
+            summarize: (input) => { setPhase('summarizing'); return baseLlm.summarize(input); },
+            generateTitle: (input) => baseLlm.generateTitle(input),
+            proposeMemory: (input) => baseLlm.proposeMemory(input),
+        };
         ledger.validateScope(input);
         const live = () => {
             if (control.stopped || !ledger.owns(c)) return false;
             signal.throwIfAborted();
             ledger.validateScope(input);
-            meter.check();
             return true;
         };
         while (live()) {
@@ -539,8 +530,6 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             const conversation = ledger.log.createConversation('项目只读研究');
             const child = ledger.admit({ userId: ledger.userId, conversationId: conversation.id, userText: research.goal,
                 projectId: research.projectId, executionMode: 'research', parentRunId: claim.runId, ...(origin.modelId ? { modelId: origin.modelId } : {}) }, 6);
-            deps.db.prepare('UPDATE copilot_runs SET max_duration_ms=MIN(max_duration_ms,?) WHERE user_id=? AND id=?')
-                .run(Math.max(1, new RunGovernance(deps.db, ledger.userId, claim.runId).remainingDurationMs()), ledger.userId, child);
             deps.db.prepare('INSERT INTO copilot_research_jobs(id,user_id,origin_run_id,source_key,conversation_id,child_run_id,created_at) VALUES(?,?,?,?,?,?,?)')
                 .run(randomUUID(), ledger.userId, claim.runId, key, conversation.id, child, Date.now());
             return child;
@@ -556,7 +545,6 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 parentSignal?.throwIfAborted();
                 if (control.stopped || !ledger.owns(claim)) throw new Error('Research parent lost execution authority');
                 ledger.validateScope(JSON.parse(ledger.get(claim.runId)!.input_json) as TurnInput);
-                new RunGovernance(deps.db, ledger.userId, claim.runId).check();
                 await delay(200, undefined, { signal: parentSignal });
                 await executeRun(ledger.userId, childId);
             }
@@ -568,11 +556,10 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     /**
      * Coding delegate sub-run: a write-capable child (executionMode 'coding')
      * whose tool surface is the goal sandbox tools + read-only platform
-     * tools, budgeted from the parent run's remaining token/time ceilings.
-     * The child is linked to the parent via copilot_research_jobs (parent
-     * budget recursion) and carries the goal id on its run row so the
-     * sandbox tools resolve their context; its steps and trace make the
-     * parent/child relationship auditable.
+     * tools. The child is linked to the parent via copilot_research_jobs and
+     * carries the goal id on its run row so the sandbox tools resolve their
+     * context; its steps and trace make the parent/child relationship
+     * auditable.
      */
     async function runCodingDelegate(ledger: CopilotRunLedger, claim: Claim, step: RunStep, delegate: { goalId: string; projectId: string; taskId: string; instructions: string }) {
         const key = `coding:${claim.runId}:${step.id}`;
@@ -586,12 +573,8 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             const child = ledger.admit({ userId: ledger.userId, conversationId: conversation.id, userText: delegate.instructions,
                 projectId: delegate.projectId, executionMode: 'coding', parentRunId: claim.runId, delegateTaskId: delegate.taskId,
                 ...(origin.modelId ? { modelId: origin.modelId } : {}) }, 24);
-            const parentBudget = (deps.db.prepare('SELECT token_budget FROM copilot_runs WHERE user_id=? AND id=?').get(ledger.userId, claim.runId) as { token_budget: number }).token_budget;
-            const parentRemainingTokens = Math.max(1, parentBudget - new RunGovernance(deps.db, ledger.userId, claim.runId).usage().chargedTokens);
-            deps.db.prepare(`UPDATE copilot_runs SET goal_id=?, max_duration_ms=MIN(max_duration_ms,?),
-                token_budget=MIN(token_budget,?) WHERE user_id=? AND id=?`)
-                .run(delegate.goalId, Math.max(1, new RunGovernance(deps.db, ledger.userId, claim.runId).remainingDurationMs()),
-                    parentRemainingTokens, ledger.userId, child);
+            deps.db.prepare('UPDATE copilot_runs SET goal_id=? WHERE user_id=? AND id=?')
+                .run(delegate.goalId, ledger.userId, child);
             deps.db.prepare('INSERT INTO copilot_research_jobs(id,user_id,origin_run_id,source_key,conversation_id,child_run_id,created_at) VALUES(?,?,?,?,?,?,?)')
                 .run(randomUUID(), ledger.userId, claim.runId, key, conversation.id, child, Date.now());
             return child;
@@ -607,7 +590,6 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 parentSignal?.throwIfAborted();
                 if (control.stopped || !ledger.owns(claim)) throw new Error('Delegate parent lost execution authority');
                 ledger.validateScope(JSON.parse(ledger.get(claim.runId)!.input_json) as TurnInput);
-                new RunGovernance(deps.db, ledger.userId, claim.runId).check();
                 await delay(200, undefined, { signal: parentSignal });
                 await executeRun(ledger.userId, childId);
             }

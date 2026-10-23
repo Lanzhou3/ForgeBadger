@@ -229,10 +229,10 @@ describe("GoalDriver continuation", () => {
     } finally { fixture.driver.stop(); fixture.db.close(); }
   });
 
-  it("blocks instead of enqueueing when the goal run budget is already exhausted", () => {
+  it("does not enqueue an already blocked goal", () => {
     const fixture = driverFixture();
     try {
-      fixture.store.setStatus(fixture.goalId, "blocked", "goal_budget_exhausted");
+      fixture.store.setStatus(fixture.goalId, "blocked", "no_task_progress");
       const decision = evaluateGoalContinuation({ db: fixture.db, masterKey, eventBus: new ForgeBadgerEventBus() },
         fixture.userId, fixture.goalId, () => assert.fail("enqueue must not be called"));
       assert.equal(decision.action, "inactive");

@@ -84,7 +84,7 @@ export function createGoalDelegateTools(): AgentTool[] {
   return [
     {
       name: 'goal_delegate',
-      description: 'Delegate one goal task to a write-capable coding sub-run that works inside the goal sandbox (goal_file_*/goal_run_checks, read-only platform reads; 24 steps; budget inherited from this run). The sub-run report returns as the tool result; a failed delegate does not block the goal. 把单个任务委派给沙箱内的 coding 子 run。',
+      description: 'Delegate one goal task to a write-capable coding sub-run that works inside the goal sandbox (goal_file_*/goal_run_checks, read-only platform reads; 24 steps). The sub-run report returns as the tool result; a failed delegate does not block the goal. 把单个任务委派给沙箱内的 coding 子 run。',
       risk: 'read',
       requiresApproval: false,
       inputSchema: delegateInput,

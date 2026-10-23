@@ -54,8 +54,8 @@ it("HTTP accepts before model completion, restores durable runs, rejects busy ed
     assert.equal((await post(queuePath, { content: 'forged', clientRequestId: 'forged', executionMode: 'research' })).status, 400);
     const deleted = await fetch(base + `/followups/${queueData.data.followup.id}`, { method: 'DELETE', headers });
     assert.deepEqual((await deleted.json() as { data: unknown }).data, { cancelled: true });
-    const detail = await (await fetch(base + `/runs/${runId}`, { headers })).json() as { data: { run: { phase: string; usage: { calls: number } } } };
-    assert.equal(detail.data.run.phase, 'model'); assert.ok(detail.data.run.usage.calls >= 1);
+    const detail = await (await fetch(base + `/runs/${runId}`, { headers })).json() as { data: { run: { phase: string } } };
+    assert.equal(detail.data.run.phase, 'model');
     const cancelled=await post(`/runs/${runId}/cancel`);
     assert.deepEqual((await cancelled.json() as {data:unknown}).data,{cancelled:true,runId});
     release();await new Promise(resolve=>setTimeout(resolve,20));

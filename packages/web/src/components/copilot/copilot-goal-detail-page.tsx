@@ -47,7 +47,6 @@ import {
   type CopilotGoalTaskStatus,
 } from "@/lib/copilot-api";
 import { toast } from "@/lib/toast";
-import { formatCostUsd, formatDurationMs, formatTokens } from "@/lib/usage-format";
 import { cn } from "@/lib/utils";
 
 const TASK_META: Record<CopilotGoalTaskStatus, { icon: LucideIcon; className: string; key: "taskPending" | "taskInProgress" | "taskPasses" | "taskFailed" | "taskCancelled" }> = {
@@ -63,8 +62,8 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
   const locale = useUiLocale();
   const queryClient = useQueryClient();
   const queryKey = ["copilot", "goals", "detail", goalId] as const;
-  // Active goals move (driver re-evaluates, tasks flip, budgets tick): poll
-  // while active only; settled goals are static.
+  // Active goals move (driver re-evaluates, tasks flip): poll while active
+  // only; settled goals are static.
   const goalQuery = useQuery({
     queryKey,
     queryFn: () => getGoal(goalId),
@@ -141,7 +140,7 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
     );
   }
 
-  const { goal, tasks, journal, usage, pendingQuestion } = goalQuery.data;
+  const { goal, tasks, journal, pendingQuestion } = goalQuery.data;
   const sortedTasks = [...tasks].sort((a, b) => a.seq - b.seq);
   // createdAt is epoch ms; numeric sort (localeCompare would TypeError).
   const sortedJournal = [...journal].sort((a, b) => b.createdAt - a.createdAt);
@@ -282,39 +281,6 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
         <CardContent className="space-y-1.5">
           <h2 className="text-sm font-semibold">{copy.spec}</h2>
           <p className="whitespace-pre-wrap text-sm text-muted-foreground">{goal.spec}</p>
-        </CardContent>
-      </Card>
-
-      <Card className="forgebadger-animate-in">
-        <CardContent className="space-y-3">
-          <h2 className="text-sm font-semibold">{copy.budget}</h2>
-          <BudgetRow
-            label={copy.tokens}
-            usedText={formatTokens(usage.chargedTokens)}
-            limitText={goal.tokenBudget != null ? formatTokens(goal.tokenBudget) : null}
-            used={usage.chargedTokens}
-            limit={goal.tokenBudget ?? null}
-          />
-          <BudgetRow
-            label={copy.runs}
-            usedText={String(usage.runCount)}
-            limitText={goal.maxRuns != null ? String(goal.maxRuns) : null}
-            used={usage.runCount}
-            limit={goal.maxRuns ?? null}
-          />
-          <BudgetRow
-            label={copy.duration}
-            usedText={formatDurationMs(usage.elapsedMs)}
-            limitText={goal.maxDurationMs != null ? formatDurationMs(goal.maxDurationMs) : null}
-            used={usage.elapsedMs}
-            limit={goal.maxDurationMs ?? null}
-          />
-          {usage.costUsd != null ? (
-            <div className="flex items-center justify-between gap-2 text-xs">
-              <span className="text-muted-foreground">{copy.cost}</span>
-              <span className="shrink-0 font-mono text-[11px] tabular-nums">{formatCostUsd(usage.costUsd)}</span>
-            </div>
-          ) : null}
         </CardContent>
       </Card>
 
@@ -461,42 +427,6 @@ function CancelButton({ pending, onConfirm }: { pending: boolean; onConfirm: () 
         }}
       />
     </>
-  );
-}
-
-function BudgetRow({ label, usedText, limitText, used, limit }: {
-  label: string;
-  usedText: string;
-  limitText: string | null;
-  used: number;
-  limit: number | null;
-}) {
-  const copy = useGoalsCopy();
-  const percent = limit != null && limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : null;
-  return (
-    <div>
-      <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="shrink-0 font-mono text-[11px] tabular-nums">
-          {usedText}{limitText != null ? ` / ${limitText}` : ` · ${copy.unlimited}`}
-        </span>
-      </div>
-      {percent !== null ? (
-        <div
-          className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted/60"
-          role="progressbar"
-          aria-valuenow={percent}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label={label}
-        >
-          <div
-            className={cn("h-full rounded-full transition-[width] duration-700 ease-out", percent >= 100 ? "bg-destructive" : "bg-brand")}
-            style={{ width: `${percent}%` }}
-          />
-        </div>
-      ) : null}
-    </div>
   );
 }
 

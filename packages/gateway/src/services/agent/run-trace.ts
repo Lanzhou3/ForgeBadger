@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Database } from '../../db/types.js';
 
 export const RUN_TRACE_EVENTS = [
-  'admitted', 'claimed', 'step_started', 'step_completed', 'llm_call_completed',
+  'admitted', 'claimed', 'step_started', 'step_completed',
   'tool_gate', 'approval_parked', 'approval_decided', 'subrun_admitted',
   'followup_promoted', 'run_finished', 'run_recovered', 'goal_bound',
 ] as const;
@@ -12,7 +12,7 @@ export type RunTraceEvent = (typeof RUN_TRACE_EVENTS)[number];
 export type RunTraceDetail = Record<string, string | number | boolean | null>;
 const DETAIL_KEYS = new Set([
   'status', 'toolName', 'decision', 'reason', 'attempt', 'tokens', 'durationMs',
-  'executionMode', 'phase', 'kind', 'childRunId', 'chargedTokens', 'reported',
+  'executionMode', 'phase', 'kind', 'childRunId',
   'source', 'parentRunId',
 ]);
 function isScalar(value: unknown): value is string | number | boolean | null {

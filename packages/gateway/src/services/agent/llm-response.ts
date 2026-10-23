@@ -110,6 +110,16 @@ export function usage(value: unknown, format: "openai" | "anthropic"): LlmUsage 
   return result;
 }
 
+/** Normalized total token count from provider usage, or undefined when absent/inconsistent. */
+export function reportedTokens(usage: LlmUsage | undefined): number | undefined {
+  if (!usage) return undefined;
+  if (Object.values(usage).some(value => !Number.isSafeInteger(value) || value < 0)) return undefined;
+  if (usage.inputTokens !== undefined && usage.outputTokens !== undefined && usage.totalTokens !== undefined
+    && usage.totalTokens !== usage.inputTokens + usage.outputTokens) return undefined;
+  const total = usage.totalTokens ?? (usage.inputTokens !== undefined && usage.outputTokens !== undefined ? usage.inputTokens + usage.outputTokens : undefined);
+  return Number.isSafeInteger(total) ? total : undefined;
+}
+
 /** Abort even injected transports/readers that do not honor AbortSignal themselves. */
 export async function withAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) void operation.catch(() => undefined);

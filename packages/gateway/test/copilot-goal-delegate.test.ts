@@ -141,7 +141,7 @@ describe("goal_delegate coding sub-run", () => {
     assert.ok(toolResult);
     assert.match(toolResult.content, /delegate report: wrote delegated\.txt/);
 
-    // The child run: coding mode, goal-bound, budgeted from the parent, linked for audit.
+    // The child run: coding mode, goal-bound, linked for audit.
     const child = fixture2.db.prepare(`SELECT r.* FROM copilot_runs r JOIN copilot_research_jobs j ON j.child_run_id=r.id AND j.user_id=r.user_id
       WHERE r.user_id=? AND j.origin_run_id=?`).get(fixture2.userId, parentRunId) as Record<string, unknown> | undefined;
     assert.ok(child);
@@ -151,7 +151,6 @@ describe("goal_delegate coding sub-run", () => {
     assert.equal(childInput.delegateTaskId, fixture2.taskId);
     assert.equal(child.goal_id, fixture2.goalId);
     assert.equal(child.max_steps, 24);
-    assert.ok((child.token_budget as number) <= 500_000);
     assert.ok((child.max_duration_ms as number) <= 1_800_000);
 
     // The write landed in the sandbox only.

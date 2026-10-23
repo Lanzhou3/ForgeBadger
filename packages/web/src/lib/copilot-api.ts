@@ -43,7 +43,6 @@ export interface CopilotMessage {
 export interface CopilotRun {
   phase?: string;
   phaseStartedAt?: string;
-  usage?: { chargedTokens: number; reportedTokens: number; estimatedCalls: number; calls: number };
   revision?: number;
   stopReason?: string;
   id: string;
@@ -457,12 +456,6 @@ export type CopilotGoalTaskStatus =
   /** Set only by the owner cancelling the linked board work item. */
   | "cancelled";
 
-export interface CopilotGoalBudgets {
-  tokenBudget?: number;
-  maxDurationMs?: number;
-  maxRuns?: number;
-}
-
 /** One-time authority grants a goal holds for its whole run; granted
  * categories skip per-action owner approval while the goal is active. */
 export type CopilotGoalGrant = "operate_sessions" | "terminal_run" | "pm_dispatch" | "sandbox_checks";
@@ -481,9 +474,6 @@ export interface CopilotGoal {
   title: string;
   spec: string;
   status: CopilotGoalStatus;
-  tokenBudget?: number | null;
-  maxDurationMs?: number | null;
-  maxRuns?: number | null;
   blockedReason?: string | null;
   grants: CopilotGoalGrant[];
   /** Where goal edits live until the owner merges; null before the first write or dispatch. */
@@ -539,14 +529,6 @@ export interface CopilotGoalJournalEntry {
   createdAt: number;
 }
 
-export interface CopilotGoalUsage {
-  chargedTokens: number;
-  runCount: number;
-  elapsedMs: number;
-  /** Estimated cost in USD; null when no rate data is available. */
-  costUsd?: number | null;
-}
-
 export interface CopilotGoalListItem {
   id: string;
   title: string;
@@ -565,7 +547,6 @@ export function createGoal(input: {
   projectId?: string;
   title: string;
   spec: string;
-  budgets?: CopilotGoalBudgets;
   grants?: CopilotGoalGrant[];
 }) {
   return fetchJson<{ goalId: string; runId: string }>("/api/v1/copilot/goals", {
@@ -588,7 +569,6 @@ export function getGoal(id: string) {
     goal: CopilotGoal;
     tasks: CopilotGoalTask[];
     journal: CopilotGoalJournalEntry[];
-    usage: CopilotGoalUsage;
     /** Agent question awaiting a user answer; non-null only while blockedReason === "awaiting_user". */
     pendingQuestion: string | null;
   }>(`/api/v1/copilot/goals/${encodeURIComponent(id)}`);

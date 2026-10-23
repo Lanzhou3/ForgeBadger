@@ -27,11 +27,11 @@ function createTestDb(): Database.Database {
 interface Envelope<T> { code: number; message: string; data?: T }
 interface GoalDto {
   id: string; title: string; status: string; projectId: string | null; conversationId: string;
-  spec: string; tokenBudget: number; maxDurationMs: number; maxRuns: number; blockedReason: string | null;
+  spec: string; blockedReason: string | null;
   createdAt: number; updatedAt: number; completedAt: number | null;
 }
 interface GoalListItemDto { id: string; title: string; status: string; projectId: string | null; conversationId: string; createdAt: number; taskTotal: number; taskPasses: number }
-interface GoalDetailDto { goal: GoalDto; tasks: Array<{ id: string; status: string; evidence: string | null }>; journal: Array<{ id: string; note: string }>; usage: { chargedTokens: number; runCount: number; elapsedMs: number } }
+interface GoalDetailDto { goal: GoalDto; tasks: Array<{ id: string; status: string; evidence: string | null }>; journal: Array<{ id: string; note: string }> }
 
 describe("copilot goals routes", () => {
   let server: ReturnType<typeof createGatewayApp>["server"];
@@ -101,8 +101,8 @@ describe("copilot goals routes", () => {
       { conversationId, title: "", spec: "empty title" },
       { conversationId, title: "x".repeat(201), spec: "oversized title" },
       { conversationId, title: "ok", spec: "" },
-      { conversationId, title: "ok", spec: "spec", budgets: { tokenBudget: 60_000_000 } },
-      { conversationId, title: "ok", spec: "spec", budgets: { maxRuns: 500 } }
+      { conversationId, title: "ok", spec: "spec", grants: ["not_a_grant"] },
+      { conversationId, title: "ok", spec: "spec", unknownField: true }
     ]) {
       const res = await fetch(`${baseUrl}/api/v1/copilot/goals`, {
         method: "POST",
@@ -132,11 +132,6 @@ describe("copilot goals routes", () => {
     assert.equal(detail.status, 200);
     assert.equal(detailBody.data!.goal.conversationId, conversationId);
     assert.equal(detailBody.data!.goal.status, "active");
-    assert.equal(detailBody.data!.goal.tokenBudget, 5_000_000);
-    assert.equal(detailBody.data!.goal.maxDurationMs, 28_800_000);
-    assert.equal(detailBody.data!.goal.maxRuns, 50);
-    assert.equal(detailBody.data!.usage.runCount >= 1, true);
-    assert.equal(typeof detailBody.data!.usage.elapsedMs, "number");
     await cancelGoal(token, body.data!.goalId);
   });
 

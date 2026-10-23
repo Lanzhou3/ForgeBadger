@@ -27,11 +27,12 @@ function createGoal(store: CopilotGoalStore, conversationId: string, title = "Tr
 }
 
 describe("CopilotGoalStore", () => {
-  it("creates a goal with default budgets and reads it back tenant scoped", () => {
+  it("creates a goal and reads it back tenant scoped", () => {
     const { db, conversation, store } = fixture();
     try {
       const goal = createGoal(store, conversation.id);
       assert.equal(goal.status, "active");
+      // Legacy budget columns stay populated with defaults; they are not enforced.
       assert.equal(goal.token_budget, 5_000_000);
       assert.equal(goal.max_duration_ms, 28_800_000);
       assert.equal(goal.max_runs, 50);
@@ -42,13 +43,9 @@ describe("CopilotGoalStore", () => {
     } finally { db.close(); }
   });
 
-  it("applies custom budgets and rejects unknown conversations", () => {
-    const { db, conversation, store } = fixture();
+  it("rejects unknown conversations", () => {
+    const { db, store } = fixture();
     try {
-      const goal = store.createGoal({ conversationId: conversation.id, title: "t", spec: "s", budgets: { tokenBudget: 1000, maxDurationMs: 2000, maxRuns: 3 } });
-      assert.equal(goal.token_budget, 1000);
-      assert.equal(goal.max_duration_ms, 2000);
-      assert.equal(goal.max_runs, 3);
       assert.throws(() => store.createGoal({ conversationId: "missing", title: "t", spec: "s" }), (error) => error instanceof AgentError && error.code === "COPILOT_NOT_FOUND");
     } finally { db.close(); }
   });
@@ -135,21 +132,13 @@ describe("CopilotGoalStore", () => {
     } finally { db.close(); }
   });
 
-  it("aggregates usage across all goal runs and cascades rows with the conversation", () => {
+  it("cascades goal rows with the conversation", () => {
     const { db, user, conversation, store } = fixture();
     db.pragma("foreign_keys = ON");
     try {
       const goal = createGoal(store, conversation.id);
-      const runUuid = crypto.randomUUID();
       db.prepare("INSERT INTO copilot_runs(id,user_id,conversation_id,status,goal_id,runtime_version,input_json,started_at,created_at,updated_at) VALUES(?,?,?,'completed',?,1,'{}',?,?,?)")
-        .run(runUuid, user.id, conversation.id, goal.id, Date.now(), Date.now(), Date.now());
-      db.prepare("INSERT INTO copilot_model_calls(id,user_id,run_id,kind,charged_tokens,created_at) VALUES(?,?,?,'model',1200,?)")
-        .run(crypto.randomUUID(), user.id, runUuid, Date.now());
-      const usage = store.usage(goal.id);
-      assert.equal(usage.chargedTokens, 1200);
-      assert.equal(usage.runCount, 1);
-      assert.ok(usage.startedAt !== null);
-      assert.ok(usage.elapsedMs >= 0);
+        .run(crypto.randomUUID(), user.id, conversation.id, goal.id, Date.now(), Date.now(), Date.now());
       // Physical conversation removal cascades goals, tasks and journal.
       db.prepare("DELETE FROM copilot_conversations WHERE id=?").run(conversation.id);
       assert.equal(store.getGoal(goal.id), undefined);

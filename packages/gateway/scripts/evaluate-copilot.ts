@@ -17,8 +17,7 @@ import { createCopilotOrchestrator } from '../src/services/agent/orchestrator.js
 import { createPlatformTools } from '../src/services/agent/tools/index.js';
 import { createAgentToolRegistry } from '../src/services/agent/tool-registry.js';
 import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
-import { reportedTokens } from '../src/services/agent/model-metering.js';
-import { RunGovernance } from '../src/services/agent/run-governance.js';
+import { reportedTokens } from '../src/services/agent/llm-response.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { runSandboxChecks, sandboxCapability } from '../src/services/development/sandbox.js';
 import { redactAgentValue } from '../src/services/agent/redaction.js';
@@ -82,7 +81,6 @@ try {
     const orchestrator=createCopilotOrchestrator({db,masterKey:key,eventBus:new ForgeBadgerEventBus(),maxSteps:6,llm:bounded,
       toolRegistry:createAgentToolRegistry(createPlatformTools().filter(tool=>['get_project','read_project_file','list_project_files'].includes(tool.name)))});
     runId=ledger.admit({userId,conversationId,projectId:project.id,userText:instruction},6);
-    db.prepare('UPDATE copilot_runs SET token_budget=40000,max_duration_ms=90000 WHERE id=?').run(runId);
     await orchestrator.executeRun(userId,runId);
     text=ledger.log.listMessages(conversationId).filter(m=>m.role==='assistant'&&m.kind==='text').at(-1)?.content??'';
     if(ledger.get(runId)?.status!=='completed')throw new Error('Evaluation run did not complete: '+ledger.get(runId)?.status+' / '+ledger.get(runId)?.stop_reason);
@@ -99,8 +97,8 @@ try {
    writeFileSync(join(root,'subject.test.cjs'),scenario.checks);
    const check=await runSandboxChecks({workspace:root,checks:['subject.test.cjs'],signal,timeoutMs:5000});
    results.push({fixture:scenario.id,arm,passed:check.exitCode===0,check,calls,reportedTokens:unknownUsageCalls?null:tokens,knownReportedTokens:tokens,unknownUsageCalls,durationMs:Date.now()-started,firstTextMs,response:text,
-    ...(runId?{usage:new RunGovernance(db,userId,runId).usage()}:{}),outputHash:createHash('sha256').update(JSON.stringify(files)).digest('hex')});
-  }catch(error){results.push({fixture:scenario.id,arm,passed:false,calls,reportedTokens:unknownUsageCalls?null:tokens,knownReportedTokens:tokens,unknownUsageCalls,durationMs:Date.now()-started,firstTextMs,response:text,...(runId?{usage:new RunGovernance(db,userId,runId).usage()}:{}),error:error instanceof Error?error.message:'Evaluation failed'});}
+    outputHash:createHash('sha256').update(JSON.stringify(files)).digest('hex')});
+  }catch(error){results.push({fixture:scenario.id,arm,passed:false,calls,reportedTokens:unknownUsageCalls?null:tokens,knownReportedTokens:tokens,unknownUsageCalls,durationMs:Date.now()-started,firstTextMs,response:text,error:error instanceof Error?error.message:'Evaluation failed'});}
   writeFileSync(out,JSON.stringify(redactAgentValue(report),null,2)+'\n',{mode:0o600});
   console.log(JSON.stringify({fixture:scenario.id,arm,passed:results.at(-1)!.passed,calls,durationMs:Date.now()-started}));
  }

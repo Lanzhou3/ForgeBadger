@@ -8,9 +8,9 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
-import { RunGovernance } from '../src/services/agent/run-governance.js';
+import { runDuration } from '../src/services/agent/approval-clock.js';
 
-it('upgrades populated 0124 conservatively, preserving wall-clock budgets and all prior execution evidence', () => {
+it('upgrades populated 0124 conservatively, preserving approval-clock evidence and all prior execution evidence', () => {
   const root = new URL('../src/db/migrations/', import.meta.url).pathname;
   const dir = mkdtempSync(join(tmpdir(), 'fb-approval-migration-'));
   const legacy = join(dir, 'legacy');
@@ -72,11 +72,9 @@ it('upgrades populated 0124 conservatively, preserving wall-clock budgets and al
       else if (originalRuns[i].id !== invalid[0].id) assert.equal(approval_wait_started_at, null);
     }
     for (let i = 0; i < evidenceTables.length; i++) assert.deepEqual(db.prepare(`SELECT * FROM ${evidenceTables[i]} ORDER BY 1`).all(), evidence[i]);
-    const meter = new RunGovernance(db, userId, valid.id);
-    assert.ok(meter.remainingDurationMs() > 49_000 && meter.remainingDurationMs() <= 50_000);
+    assert.ok(runDuration(db, userId, valid.id).remainingMs > 49_000 && runDuration(db, userId, valid.id).remainingMs <= 50_000);
     for (const id of [...invalid.map(row => row.id), missing, running, pending]) {
-      assert.equal(new RunGovernance(db, userId, id).remainingDurationMs(), 0);
-      assert.throws(() => new RunGovernance(db, userId, id).check(), /elapsed-time budget/);
+      assert.equal(runDuration(db, userId, id).remainingMs, 0);
     }
     migrate(drizzle(db), { migrationsFolder: root });
     assert.deepEqual(db.prepare('SELECT * FROM copilot_runs ORDER BY id').all(), upgraded);
@@ -86,7 +84,7 @@ it('upgrades populated 0124 conservatively, preserving wall-clock budgets and al
     assert.equal(reopened.decide(valid.id, valid.actionId, true), true);
     assert.equal(reopened.get(completed)?.status, 'completed');
     assert.equal((db.prepare('SELECT started_at FROM copilot_runs WHERE id=?').get(valid.id) as { started_at: number }).started_at, startedAt);
-    assert.ok(new RunGovernance(db, userId, valid.id).remainingDurationMs() > 49_000);
+    assert.ok(runDuration(db, userId, valid.id).remainingMs > 49_000);
     assert.deepEqual(db.pragma('foreign_key_check'), []);
     assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
   } finally { if (db.open) db.close(); rmSync(dir, { recursive: true, force: true }); }

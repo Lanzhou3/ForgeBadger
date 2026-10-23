@@ -10,7 +10,6 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
-import { RunGovernance } from '../src/services/agent/run-governance.js';
 import { createCopilotOrchestrator } from '../src/services/agent/orchestrator.js';
 import { createAgentToolRegistry, executeAgentTool } from '../src/services/agent/tool-registry.js';
 import { createPlatformTools } from '../src/services/agent/tools/index.js';
@@ -41,7 +40,7 @@ it('execution boundary rejects writes, cross-project reads, nested delegation an
   assert.equal(result.ok, false); assert.equal(executed, false);
 });
 
-it('runs isolated research with inherited model, blocks forged writes, meters parent, and rejects a revoked origin', async t => {
+it('runs isolated research with inherited model, blocks forged writes, and rejects a revoked origin', async t => {
   const f = fixture(t); let mainCalls = 0, childCalls = 0;
   const conversationId = f.ledger.log.createConversation().id;
   const orchestrator = createCopilotOrchestrator({ db: f.db, masterKey: 'test', eventBus: new ForgeBadgerEventBus(), toolRegistry: f.registry, llm: {
@@ -64,10 +63,6 @@ it('runs isolated research with inherited model, blocks forged writes, meters pa
   const child = jobs[0]!.child_run_id;
   assert.notEqual(f.ledger.get(child)!.conversation_id, conversationId);
   assert.match(f.ledger.steps(child).find(step => step.tool_name === 'submit_development_task')!.result_json!, /cannot execute/);
-  const meter = new RunGovernance(f.db, f.userId, parent);
-  assert.equal(meter.usage().reportedTokens, 60);
-  f.db.prepare('UPDATE copilot_runs SET token_budget=1 WHERE id=?').run(parent);
-  assert.throws(() => new RunGovernance(f.db, f.userId, child).check(), /token budget/);
   f.db.prepare("UPDATE copilot_runs SET status='cancelled' WHERE id=?").run(parent);
   assert.throws(() => f.ledger.validateScope(JSON.parse(f.ledger.get(child)!.input_json)), /origin is no longer valid/);
 });
@@ -82,7 +77,7 @@ it('source search continues within a file and Chinese discovery finds project to
   assert.ok(discoverToolSchemas(f.registry.toModelSchemas(), '查找项目代码', 10).length > 0);
 });
 
-for (const reason of ['cancel', 'deadline'] as const) it(`propagates parent ${reason} to an in-flight research model`, async t => {
+it('propagates parent cancel to an in-flight research model', async t => {
   const f = fixture(t);
   let childStarted!: () => void;
   const started = new Promise<void>(resolve => { childStarted = resolve; });
@@ -102,17 +97,15 @@ for (const reason of ['cancel', 'deadline'] as const) it(`propagates parent ${re
     }, async summarize() { return ''; }, async generateTitle() { return ''; }, async proposeMemory() { return []; }
   } });
   const parent = f.ledger.admit({ userId: f.userId, conversationId: f.ledger.log.createConversation().id, projectId: f.project.id, userText: 'Research' }, 4);
-  if (reason === 'deadline') f.db.prepare('UPDATE copilot_runs SET max_duration_ms=150 WHERE id=?').run(parent);
   const execution = orchestrator.executeRun(f.userId, parent);
-  // Keep node:test alive while the runtime's deadline timer is deliberately unref'ed.
+  // Keep node:test alive while the runtime's polling timer is deliberately unref'ed.
   const watchdog = setTimeout(() => {}, 2000);
   try {
     await started;
-    if (reason === 'cancel') await orchestrator.cancelRun({ userId: f.userId, runId: parent });
+    await orchestrator.cancelRun({ userId: f.userId, runId: parent });
     await execution;
     assert.equal(aborted, true);
-    assert.equal(f.ledger.get(parent)?.status, reason === 'cancel' ? 'cancelled' : 'stopped');
-    if (reason === 'deadline') assert.equal(f.ledger.get(parent)?.stop_reason, 'COPILOT_TIME_BUDGET');
+    assert.equal(f.ledger.get(parent)?.status, 'cancelled');
     const child = f.db.prepare('SELECT child_run_id FROM copilot_research_jobs WHERE origin_run_id=?').get(parent) as { child_run_id: string };
     assert.ok(['cancelled', 'stopped'].includes(f.ledger.get(child.child_run_id)!.status));
   } finally { clearTimeout(watchdog); }

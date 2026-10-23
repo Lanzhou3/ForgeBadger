@@ -10,7 +10,6 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
 import { CopilotFollowups } from '../src/services/agent/followups.js';
-import { RunGovernance } from '../src/services/agent/run-governance.js';
 
 function fixture(filename = ':memory:') {
   const db = new Database(filename); db.pragma('foreign_keys=ON');
@@ -54,26 +53,6 @@ it('cancellation and revoked owner prevent promotion; another tenant cannot insp
     assert.equal(f.ledger.log.listMessages(f.input.conversationId).length, 0);
   } finally { f.db.close(); }
 });
-
-it('persists reported usage, conservatively charges missing/failed usage, and enforces budgets after reconstruction', async () => {
-  const f = fixture();
-  try {
-    const run = f.ledger.admit(f.input, 2); f.ledger.claim(run, 'worker', 30000);
-    const meter = new RunGovernance(f.db, f.userId, run);
-    await meter.measure('model', 'input', async () => ({ usage: { inputTokens: 10, outputTokens: 5 } }), result => result.usage);
-    assert.equal(meter.usage().reportedTokens, 15);
-    await meter.measure('summary', 'history', async () => 'summary');
-    await assert.rejects(meter.measure('model', 'input', async () => { throw new Error('lost response'); }));
-    const restored = new RunGovernance(f.db, f.userId, run);
-    assert.equal(restored.usage().calls, 3); assert.equal(restored.usage().estimatedCalls, 2);
-    assert.ok(restored.usage().chargedTokens > 15);
-    f.db.prepare('UPDATE copilot_runs SET token_budget=1 WHERE id=?').run(run);
-    assert.throws(() => restored.check(), /token budget/);
-    f.db.prepare('UPDATE copilot_runs SET token_budget=500000,started_at=1 WHERE id=?').run(run);
-    assert.throws(() => restored.check(), /elapsed-time budget/);
-  } finally { f.db.close(); }
-});
-
 
 it('recovers queued input from a file database once across two independent connections', () => {
   const root = mkdtempSync(join(tmpdir(), 'fb-followup-reopen-'));

@@ -84,13 +84,6 @@ function formatGoalLine(goal: GoalRow & { task_total?: number; task_passes?: num
   return `- [${goal.status}] ${goal.title}${progress} — /copilot/goals/${goal.id}`;
 }
 
-function conversationTokenUsage(context: SlashCommandContext): number {
-  return (context.db.prepare(`SELECT COALESCE(SUM(c.charged_tokens),0) AS tokens FROM copilot_model_calls c
-      JOIN copilot_runs r ON r.id=c.run_id AND r.user_id=c.user_id
-      WHERE c.user_id=? AND r.conversation_id=?`)
-    .get(context.userId, context.conversationId) as { tokens: number }).tokens;
-}
-
 function currentModelLabel(context: SlashCommandContext): string {
   const preferences = new CopilotPreferencesRepository(context.db, context.userId, context.masterKey).get();
   if (!preferences.modelId) return "默认（跟随运行选项）";
@@ -231,11 +224,9 @@ function statusReport(context: SlashCommandContext): string {
     .get(context.userId, context.conversationId) as { status: string; steps: number } | undefined;
   const activeGoals = (context.db.prepare("SELECT count(*) AS count FROM copilot_goals WHERE user_id=? AND conversation_id=? AND status='active'")
     .get(context.userId, context.conversationId) as { count: number }).count;
-  const usage = conversationTokenUsage(context);
   return [
     `活跃 run：${activeRun ? `${activeRun.status}（${activeRun.steps} 步）` : "无"}（本条 /status 即其命令回合）`,
     `当前模型：${currentModelLabel(context)}`,
-    `本对话 token 用量：${usage}`,
     `活跃 Goal：${activeGoals} 个`
   ].join("\n");
 }
@@ -249,16 +240,6 @@ function stopWork(context: SlashCommandContext): string {
   for (const item of followups) if (item.status === "queued" && new CopilotFollowups(context.db, context.userId).cancel(item.id)) cancelled += 1;
   const queuedLeft = followups.filter(item => item.status === "queued").length - cancelled;
   return `已取消 ${cancelled} 条排队 follow-up。当前对话没有其它活跃 run 可停止${queuedLeft > 0 ? "（仍有 follow-up 在排队）" : ""}。`;
-}
-
-function usageReport(context: SlashCommandContext): string {
-  const lines = [`本对话 token 消耗：${conversationTokenUsage(context)}`];
-  const goal = latestGoal(context);
-  if (goal) {
-    const usage = goalStore(context).usage(goal.id);
-    lines.push(`最近 Goal「${goal.title}」：tokens ${usage.chargedTokens}/${goal.token_budget}，runs ${usage.runCount}/${goal.max_runs}，elapsed ${Math.round(usage.elapsedMs / 1000)}s`);
-  }
-  return lines.join("\n");
 }
 
 export function createSlashCommands(): SlashCommand[] {
@@ -283,7 +264,6 @@ export function createSlashCommands(): SlashCommand[] {
     { name: "new", usage: "/new", description: "如何开始一个新对话", category: "session", handler: () => "在 Web 控制台点击新建对话即可开始新会话（/copilot）。命令无法替你切换页面。" },
     { name: "playbook", usage: "/playbook <name>", description: "把指定 playbook 全文载入对话", category: "info", handler: playbookContent },
     { name: "playbooks", usage: "/playbooks", description: "列出可用 Copilot playbooks", category: "info", handler: playbooksListing },
-    { name: "usage", usage: "/usage", description: "本对话 token 消耗与 Goal 用量", category: "info", handler: usageReport },
     { name: "skills", usage: "/skills", description: "CLI Skill 管理入口提示", category: "info", handler: () => "CLI Skills are managed on the Skills page. Use /playbooks for Copilot operating guides." }
   ];
 }

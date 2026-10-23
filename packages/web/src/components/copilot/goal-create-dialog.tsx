@@ -31,17 +31,14 @@ interface GoalCreateDialogProps {
 /**
  * "Create Goal" dialog reachable from the Copilot chat header. Submits the
  * goal against the current conversation, then navigates to the new goal's
- * detail page. Budgets live behind a collapsed advanced section.
+ * detail page. Auto-grants live behind a collapsed advanced section.
  */
 export function GoalCreateDialog({ open, conversationId, projectId, onOpenChange }: GoalCreateDialogProps) {
   const copy = useGoalsCopy();
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [spec, setSpec] = useState("");
-  const [budgetsOpen, setBudgetsOpen] = useState(false);
-  const [tokenBudget, setTokenBudget] = useState("");
-  const [maxDurationMin, setMaxDurationMin] = useState("");
-  const [maxRuns, setMaxRuns] = useState("");
+  const [grantsOpen, setGrantsOpen] = useState(false);
   const [grants, setGrants] = useState<CopilotGoalGrant[]>([]);
 
   const toggleGrant = (grant: CopilotGoalGrant, checked: boolean) => {
@@ -55,37 +52,16 @@ export function GoalCreateDialog({ open, conversationId, projectId, onOpenChange
         ...(projectId ? { projectId } : {}),
         title: title.trim(),
         spec: spec.trim(),
-        budgets: {
-          ...(tokenBudget.trim() ? { tokenBudget: Number(tokenBudget) } : {}),
-          ...(maxDurationMin.trim() ? { maxDurationMs: Number(maxDurationMin) * 60_000 } : {}),
-          ...(maxRuns.trim() ? { maxRuns: Number(maxRuns) } : {}),
-        },
         ...(grants.length > 0 ? { grants } : {}),
       }),
     onSuccess: ({ goalId }) => {
       onOpenChange(false);
       setTitle("");
       setSpec("");
-      setTokenBudget("");
-      setMaxDurationMin("");
-      setMaxRuns("");
       setGrants([]);
       router.push(`/copilot/goals/${encodeURIComponent(goalId)}`);
     },
   });
-
-  const budgetFieldError = (raw: string, max: number, maxKey: "tokenMax" | "durationMax" | "runsMax"): string | null => {
-    const text = raw.trim();
-    if (!text) return null;
-    const value = Number(text);
-    if (!Number.isInteger(value) || value <= 0) return copy.budgetErrors.integer!;
-    if (value > max) return copy.budgetErrors[maxKey]!;
-    return null;
-  };
-  const tokenBudgetError = budgetFieldError(tokenBudget, 50_000_000, "tokenMax");
-  const maxDurationError = budgetFieldError(maxDurationMin, 1440, "durationMax");
-  const maxRunsError = budgetFieldError(maxRuns, 200, "runsMax");
-  const budgetValid = !tokenBudgetError && !maxDurationError && !maxRunsError;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -119,66 +95,27 @@ export function GoalCreateDialog({ open, conversationId, projectId, onOpenChange
           <div className="rounded-md border border-border/70">
             <button
               type="button"
-              aria-expanded={budgetsOpen}
-              onClick={() => setBudgetsOpen((v) => !v)}
+              aria-expanded={grantsOpen}
+              onClick={() => setGrantsOpen((v) => !v)}
               className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium hover:bg-muted/60"
             >
-              {budgetsOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-              {copy.budgets}
+              {grantsOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+              {copy.grantsTitle}
             </button>
-            {budgetsOpen ? (
-              <div className="space-y-3 border-t border-border/70 px-3 py-3">
-                <p className="text-xs text-muted-foreground">{copy.budgetsHint}</p>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="goal-token-budget" className="text-xs">{copy.tokenBudget}</Label>
-                    <Input
-                      id="goal-token-budget"
-                      inputMode="numeric"
-                      value={tokenBudget}
-                      onChange={(event) => setTokenBudget(event.target.value)}
-                      aria-invalid={Boolean(tokenBudgetError)}
-                    />
-                    {tokenBudgetError ? <p role="alert" className="text-xs text-destructive">{tokenBudgetError}</p> : null}
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="goal-max-duration" className="text-xs">{copy.maxDuration}</Label>
-                    <Input
-                      id="goal-max-duration"
-                      inputMode="numeric"
-                      value={maxDurationMin}
-                      onChange={(event) => setMaxDurationMin(event.target.value)}
-                      aria-invalid={Boolean(maxDurationError)}
-                    />
-                    {maxDurationError ? <p role="alert" className="text-xs text-destructive">{maxDurationError}</p> : null}
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="goal-max-runs" className="text-xs">{copy.maxRuns}</Label>
-                    <Input
-                      id="goal-max-runs"
-                      inputMode="numeric"
-                      value={maxRuns}
-                      onChange={(event) => setMaxRuns(event.target.value)}
-                      aria-invalid={Boolean(maxRunsError)}
-                    />
-                    {maxRunsError ? <p role="alert" className="text-xs text-destructive">{maxRunsError}</p> : null}
-                  </div>
-                </div>
-                <div className="space-y-2 border-t border-border/70 pt-3">
-                  <p className="text-xs font-medium">{copy.grantsTitle}</p>
-                  <p className="text-xs text-muted-foreground">{copy.grantsHint}</p>
-                  <div className="flex flex-wrap gap-3">
-                    {COPILOT_GOAL_GRANTS.map((grant) => (
-                      <label key={grant} className="flex cursor-pointer items-center gap-1.5 text-xs" title={copy.grantTooltips[grant]}>
-                        <Checkbox
-                          checked={grants.includes(grant)}
-                          onCheckedChange={(checked) => toggleGrant(grant, checked === true)}
-                          aria-label={copy.grantLabels[grant]}
-                        />
-                        {copy.grantLabels[grant]}
-                      </label>
-                    ))}
-                  </div>
+            {grantsOpen ? (
+              <div className="space-y-2 border-t border-border/70 px-3 py-3">
+                <p className="text-xs text-muted-foreground">{copy.grantsHint}</p>
+                <div className="flex flex-wrap gap-3">
+                  {COPILOT_GOAL_GRANTS.map((grant) => (
+                    <label key={grant} className="flex cursor-pointer items-center gap-1.5 text-xs" title={copy.grantTooltips[grant]}>
+                      <Checkbox
+                        checked={grants.includes(grant)}
+                        onCheckedChange={(checked) => toggleGrant(grant, checked === true)}
+                        aria-label={copy.grantLabels[grant]}
+                      />
+                      {copy.grantLabels[grant]}
+                    </label>
+                  ))}
                 </div>
               </div>
             ) : null}
@@ -192,7 +129,7 @@ export function GoalCreateDialog({ open, conversationId, projectId, onOpenChange
             {copy.cancel}
           </Button>
           <Button
-            disabled={createMutation.isPending || !title.trim() || !spec.trim() || !budgetValid}
+            disabled={createMutation.isPending || !title.trim() || !spec.trim()}
             onClick={() => createMutation.mutate()}
           >
             {createMutation.isPending ? copy.loading : copy.submit}

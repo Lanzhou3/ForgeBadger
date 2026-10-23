@@ -5,8 +5,8 @@ import { parseGoalGrants } from './goal-grants.js';
 
 /**
  * Copilot Goal mode persistence. Goal rows bind a conversation to a durable,
- * budget-capped objective; tasks are the model-maintained checklist; the
- * journal is the run-to-run handover log. All statements are parameterized and
+ * multi-run objective; tasks are the model-maintained checklist; the journal
+ * is the run-to-run handover log. All statements are parameterized and
  * tenant scoped by user_id, mirroring CopilotFollowups conventions.
  */
 
@@ -43,21 +43,8 @@ export interface GoalTaskRow {
   created_at: number; updated_at: number;
 }
 export interface GoalTaskInput { description: string; verifyCommand?: string | undefined; workItemId?: string | undefined }
-export interface GoalUsage { chargedTokens: number; runCount: number; startedAt: number | null; elapsedMs: number; costUsd: number | null }
 export interface GoalJournalRow { id: string; user_id: string; goal_id: string; run_id: string | null; note: string; created_at: number }
 export interface GoalListRow extends GoalRow { task_total: number; task_passes: number }
-export interface GoalBudgets { tokenBudget?: number | undefined; maxDurationMs?: number | undefined; maxRuns?: number | undefined }
-
-/** Triple goal-level ceiling: charged tokens, wall-clock lifetime, run count. */
-export function goalBudgetExhausted(goal: GoalRow, usage: GoalUsage, now = Date.now()): boolean {
-  if (usage.chargedTokens >= goal.token_budget) return true;
-  if (usage.startedAt !== null && now - usage.startedAt >= goal.max_duration_ms) return true;
-  if (usage.runCount >= goal.max_runs) return true;
-  return false;
-}
-
-/** blocked_reason recorded on goals stopped by any of the three ceilings. */
-export const GOAL_BUDGET_EXHAUSTED_REASON = 'goal_budget_exhausted';
 
 const TERMINAL_STATUSES: readonly GoalStatus[] = ['completed', 'blocked', 'cancelled'];
 const MAX_TASKS_PER_CALL = 50;
@@ -81,7 +68,7 @@ export function normalizeTaskInputs(tasks: ReadonlyArray<string | GoalTaskInput>
 export class CopilotGoalStore {
   constructor(private db: Database, private userId: string) {}
 
-  createGoal(input: { conversationId: string; projectId?: string | null; title: string; spec: string; budgets?: GoalBudgets | undefined; grants?: readonly string[] | undefined }): GoalRow {
+  createGoal(input: { conversationId: string; projectId?: string | null; title: string; spec: string; grants?: readonly string[] | undefined }): GoalRow {
     const conversation = this.db.prepare("SELECT id FROM copilot_conversations WHERE user_id=? AND id=?").get(this.userId, input.conversationId);
     if (!conversation) throw new AgentError('COPILOT_NOT_FOUND', 'Conversation not found');
     if (input.projectId && !this.db.prepare('SELECT id FROM projects WHERE user_id=? AND id=?').get(this.userId, input.projectId))
@@ -89,10 +76,10 @@ export class CopilotGoalStore {
     const grants = parseGoalGrants(JSON.stringify(input.grants ?? []));
     const id = randomUUID();
     const now = Date.now();
+    // The budget columns are legacy (no longer enforced); defaults keep rows populated.
     this.db.prepare(`INSERT INTO copilot_goals(id,user_id,conversation_id,project_id,title,spec,status,token_budget,max_duration_ms,max_runs,grants_json,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,'active',?,?,?,?,?,?)`)
+      VALUES(?,?,?,?,?,?,'active',5000000,28800000,50,?,?,?)`)
       .run(id, this.userId, input.conversationId, input.projectId ?? null, input.title, input.spec,
-        input.budgets?.tokenBudget ?? 5_000_000, input.budgets?.maxDurationMs ?? 28_800_000, input.budgets?.maxRuns ?? 50,
         JSON.stringify(grants), now, now);
     return this.getGoal(id)!;
   }
@@ -269,29 +256,6 @@ export class CopilotGoalStore {
   recentJournal(goalId: string, limit = 5): GoalJournalRow[] {
     return this.db.prepare('SELECT * FROM copilot_goal_journal WHERE user_id=? AND goal_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?')
       .all(this.userId, goalId, Math.max(1, Math.min(100, limit))) as GoalJournalRow[];
-  }
-
-  /** Aggregated across every run of the goal; missing usage never counts as zero progress. */
-  usage(goalId: string, now = Date.now()): GoalUsage {
-    const row = this.db.prepare(`SELECT COUNT(DISTINCT r.id) AS run_count, MIN(COALESCE(r.started_at, r.created_at)) AS started_at,
-        COALESCE((SELECT SUM(c.charged_tokens) FROM copilot_model_calls c
-          JOIN copilot_runs r2 ON r2.id=c.run_id AND r2.user_id=c.user_id
-          WHERE c.user_id=? AND r2.goal_id=?), 0) AS charged_tokens,
-        (SELECT COUNT(*) FROM copilot_model_calls c
-          JOIN copilot_runs r3 ON r3.id=c.run_id AND r3.user_id=c.user_id
-          WHERE c.user_id=? AND r3.goal_id=? AND c.cost_nanousd IS NULL) AS unpriced_calls,
-        COALESCE((SELECT SUM(c.cost_nanousd) FROM copilot_model_calls c
-          JOIN copilot_runs r4 ON r4.id=c.run_id AND r4.user_id=c.user_id
-          WHERE c.user_id=? AND r4.goal_id=? AND c.cost_nanousd IS NOT NULL), 0) AS cost_nanousd
-      FROM copilot_runs r WHERE r.user_id=? AND r.goal_id=?`)
-      .get(this.userId, goalId, this.userId, goalId, this.userId, goalId, this.userId, goalId) as {
-        run_count: number; started_at: number | null; charged_tokens: number; unpriced_calls: number; cost_nanousd: number;
-      };
-    return {
-      chargedTokens: row.charged_tokens, runCount: row.run_count, startedAt: row.started_at,
-      elapsedMs: row.started_at === null ? 0 : Math.max(0, now - row.started_at),
-      costUsd: row.unpriced_calls > 0 ? null : row.cost_nanousd / 1_000_000_000
-    };
   }
 
   /** Runs in any settled state since the last task-status change; the GoalDriver's stagnation signal. Sub-runs (delegates/research children) never count. */

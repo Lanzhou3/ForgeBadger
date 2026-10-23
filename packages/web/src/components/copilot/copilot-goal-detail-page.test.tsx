@@ -40,9 +40,6 @@ const goal: api.CopilotGoal = {
   title: "Ship goal mode",
   spec: "Implement goal mode end to end.",
   status: "active",
-  tokenBudget: null,
-  maxDurationMs: null,
-  maxRuns: null,
   blockedReason: null,
   grants: [],
   createdAt: 1728624000000,
@@ -68,7 +65,6 @@ const baseTask: api.CopilotGoalTask = {
 function goalPayload(overrides: Partial<{
   goal: Partial<api.CopilotGoal>;
   tasks: api.CopilotGoalTask[];
-  usage: Partial<api.CopilotGoalUsage>;
   pendingQuestion: string | null;
 }> = {}) {
   return {
@@ -79,7 +75,6 @@ function goalPayload(overrides: Partial<{
       { id: "j1", goalId: "g1", runId: "r1", note: "First journal entry", createdAt: 1728624000000 },
       { id: "j2", goalId: "g1", runId: "r2", note: "Second journal entry", createdAt: 1728624060000 },
     ],
-    usage: { chargedTokens: 1000, runCount: 1, elapsedMs: 60_000, costUsd: null, ...overrides.usage },
     pendingQuestion: overrides.pendingQuestion ?? null,
   };
 }
@@ -229,24 +224,6 @@ it("renders no grant badges for an empty grant list", async () => {
   mount();
   const header = (await screen.findByText("Ship goal mode")).closest("header")!;
   expect(within(header as HTMLElement).queryByText("会话启停")).toBeNull();
-});
-
-it("formats costUsd >= $1 with two decimals", async () => {
-  vi.mocked(api.getGoal).mockResolvedValue(goalPayload({ usage: { costUsd: 1.257 } }));
-  mount();
-  expect(await screen.findByText("$1.26")).toBeTruthy();
-});
-
-it("formats costUsd below $1 with four significant digits", async () => {
-  vi.mocked(api.getGoal).mockResolvedValue(goalPayload({ usage: { costUsd: 0.123456 } }));
-  mount();
-  expect(await screen.findByText("$0.1235")).toBeTruthy();
-});
-
-it("omits the cost row when costUsd is null", async () => {
-  mount();
-  await screen.findByText("Ship goal mode");
-  expect(screen.queryByText("成本")).toBeNull();
 });
 
 it("links a dispatched task to its CLI session", async () => {

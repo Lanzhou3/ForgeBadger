@@ -193,7 +193,6 @@ export class CopilotRunLedger {
                 this.db.prepare("UPDATE copilot_runs SET goal_id=? WHERE user_id=? AND id=?").run(input.goalId, this.userId, run.id);
             if (!input.skipUserMessage)
                 this.append(run.id, { role: "user", kind: "text", content: input.userText });
-            if (input.executionMode) this.db.prepare('UPDATE copilot_runs SET token_budget=120000,max_duration_ms=300000 WHERE user_id=? AND id=?').run(this.userId, run.id);
             const created = this.get(run.id)!;
             traceRunEvent(this.db, this.userId, run.id, created.fence, 'admitted',
                 { source: input.source ?? 'user', parentRunId: !!input.parentRunId, ...(input.executionMode ? { executionMode: input.executionMode } : {}) });
@@ -342,7 +341,7 @@ export class CopilotRunLedger {
                 // Stale claims never reach this commit (owns() gates it), so an
                 // inconsistent stored step is terminal: settle the run loudly
                 // instead of leaving the recovery pump to re-drive the identical
-                // mismatch until the run's time budget exhausts. A step from
+                // mismatch on every recovery sweep. A step from
                 // another run is never touched; only this run is settled.
                 const reason = 'COPILOT_APPROVAL_CHECKPOINT_MISMATCH';
                 if (current)

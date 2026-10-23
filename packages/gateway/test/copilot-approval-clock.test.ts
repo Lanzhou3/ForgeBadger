@@ -8,10 +8,12 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
-import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { CopilotRunLedger, type Claim } from '../src/services/agent/run-ledger.js';
-import { RunGovernance } from '../src/services/agent/run-governance.js';
+import { runDuration } from '../src/services/agent/approval-clock.js';
 
+// The approval clock still meters approval-only pauses (approval_wait_ms) for
+// audit; it no longer gates execution. These tests cover the accounting and
+// its reopen/durability behavior.
 function fixture(filename = ':memory:') {
   const db = new Database(filename);
   db.pragma('foreign_keys=ON');
@@ -22,7 +24,7 @@ function fixture(filename = ':memory:') {
   const runId = ledger.admit({ userId, conversationId, userText: 'bounded task' }, 16);
   db.prepare('UPDATE copilot_runs SET max_duration_ms=60000 WHERE id=?').run(runId);
   const claim = ledger.claim(runId, 'clock-worker', 30_000)!;
-  return { db, ledger, userId, runId, claim, meter: new RunGovernance(db, userId, runId) };
+  return { db, ledger, userId, runId, claim };
 }
 
 function wait(ledger: CopilotRunLedger, claim: Claim, toolCallId: string) {
@@ -48,21 +50,18 @@ it('persists approval-only pause across database reopen without resetting origin
     now += 20_000;
     const action = wait(f.ledger, f.claim, 'pause-1');
     now += 40 * 60_000;
-    assert.doesNotThrow(() => f.meter.check());
-    assert.equal(f.meter.remainingDurationMs(), 40_000);
+    assert.equal(runDuration(f.db, f.userId, f.runId, now).remainingMs, 40_000);
     f.db.close();
     restored = new Database(filename);
     const ledger = new CopilotRunLedger(restored, f.userId);
-    const meter = new RunGovernance(restored, f.userId, f.runId);
-    assert.equal(meter.remainingDurationMs(), 40_000);
+    assert.equal(runDuration(restored, f.userId, f.runId, now).remainingMs, 40_000);
     assert.equal(ledger.decide(f.runId, action.id, true), true);
     assert.deepEqual(clockRow(restored, f.runId), { started_at: startedAt, approval_wait_ms: 40 * 60_000, approval_wait_started_at: null });
     ledger.claim(f.runId, 'reopened-worker', 60_000);
     now += 39_999;
-    assert.doesNotThrow(() => meter.check());
+    assert.ok(runDuration(restored, f.userId, f.runId, now).remainingMs > 0);
     now++;
-    assert.throws(() => meter.check(), /elapsed-time budget/);
-    assert.equal(meter.remainingDurationMs(), 0);
+    assert.equal(runDuration(restored, f.userId, f.runId, now).remainingMs, 0);
     assert.deepEqual(restored.pragma('foreign_key_check'), []);
   } finally {
     if (f.db.open) f.db.close();
@@ -88,9 +87,9 @@ it('accumulates multiple waits once and charges ordinary pending downtime after 
     now += 180_000;
     assert.equal(f.ledger.decide(f.runId, second.id, false), true);
     assert.equal(clockRow(f.db, f.runId).approval_wait_ms, 300_000);
-    assert.equal(f.meter.remainingDurationMs(), 50_000);
+    assert.equal(runDuration(f.db, f.userId, f.runId, now).remainingMs, 50_000);
     now += 50_000;
-    assert.throws(() => f.meter.check(), /elapsed-time budget/);
+    assert.equal(runDuration(f.db, f.userId, f.runId, now).remainingMs, 0);
   } finally { f.db.close(); }
 });
 
@@ -106,7 +105,7 @@ it('settles cancelled approval once and prevents another tenant or mismatched ac
     const before = clockRow(f.db, f.runId);
     assert.equal(other.decide(f.runId, action.id, true), false);
     assert.equal(other.cancel(f.runId), false);
-    assert.throws(() => new RunGovernance(f.db, otherId, f.runId).remainingDurationMs(), /Run not found/);
+    assert.throws(() => runDuration(f.db, otherId, f.runId, now), /Run not found/);
     assert.deepEqual(clockRow(f.db, f.runId), before);
     f.db.prepare("UPDATE copilot_pending_actions SET input_digest='changed' WHERE id=?").run(action.id);
     assert.equal(f.ledger.decide(f.runId, action.id, true), false);
@@ -193,21 +192,6 @@ it('opens a persisted approval wait when the stored step matches the request', t
   } finally { f.db.close(); }
 });
 
-it('keeps ordinary running downtime and pending time charged and does not revive exhausted budgets', t => {
-  let now = 2_000_000_000_000;
-  t.mock.method(Date, 'now', () => now);
-  const f = fixture();
-  try {
-    now += 61_000;
-    assert.equal(f.meter.remainingDurationMs(), 0);
-    assert.throws(() => f.meter.check(), /elapsed-time budget/);
-    f.db.prepare("UPDATE copilot_runs SET status='pending',lease_owner=NULL,lease_expires_at=NULL WHERE id=?").run(f.runId);
-    f.ledger.claim(f.runId, 'after-downtime', 30_000);
-    assert.equal(f.meter.remainingDurationMs(), 0);
-    assert.throws(() => f.meter.check(), /elapsed-time budget/);
-  } finally { f.db.close(); }
-});
-
 it('settles an approved wait before finish while stale terminal commits cannot alter pending approval', t => {
   let now = 2_000_000_000_000;
   t.mock.method(Date, 'now', () => now);
@@ -259,40 +243,13 @@ it('never grants time credit from forged stored digests and bounds persisted cum
     now += 90_000;
     f.db.prepare("UPDATE copilot_pending_actions SET input_digest='forged' WHERE id=?").run(action.id);
     f.db.prepare("UPDATE copilot_run_steps SET input_digest='forged' WHERE id=?").run(action.stepId);
-    assert.equal(f.meter.remainingDurationMs(), 0);
+    assert.equal(runDuration(f.db, f.userId, f.runId, now).remainingMs, 0);
     assert.equal(f.ledger.decide(f.runId, action.id, true), false);
     assert.equal(f.ledger.cancel(f.runId), true);
     assert.equal(clockRow(f.db, f.runId).approval_wait_ms, 0);
     f.db.prepare('UPDATE copilot_runs SET approval_wait_ms=-1 WHERE id=?').run(f.runId);
-    assert.equal(f.meter.remainingDurationMs(), 0);
+    assert.equal(runDuration(f.db, f.userId, f.runId, now).remainingMs, 0);
     f.db.prepare('UPDATE copilot_runs SET approval_wait_ms=900000 WHERE id=?').run(f.runId);
-    assert.equal(f.meter.remainingDurationMs(), 60_000);
+    assert.equal(runDuration(f.db, f.userId, f.runId, now).remainingMs, 60_000);
   } finally { f.db.close(); }
-});
-
-it('research governance shares the originating run approval-adjusted remaining budget', t => {
-  let now = 2_000_000_000_000;
-  t.mock.method(Date, 'now', () => now);
-  const f = fixture();
-  const root = mkdtempSync(join(tmpdir(), 'fb-approval-research-'));
-  try {
-    const project = new ProjectRepository(f.db, f.userId).create({ name: 'research', path: root, aiTool: 'codex' });
-    now += 20_000;
-    const action = wait(f.ledger, f.claim, 'parent');
-    now += 90_000;
-    assert.equal(f.ledger.decide(f.runId, action.id, true), true);
-    const conversationId = f.ledger.log.createConversation().id;
-    const child = f.ledger.admit({ userId: f.userId, conversationId, userText: 'research', projectId: project.id,
-      executionMode: 'research', parentRunId: f.runId }, 6);
-    f.db.prepare('INSERT INTO copilot_research_jobs(id,user_id,origin_run_id,source_key,conversation_id,child_run_id,created_at) VALUES(?,?,?,?,?,?,?)')
-      .run('research-job', f.userId, f.runId, 'parent-call', conversationId, child, now);
-    f.ledger.claim(child, 'research-worker', 60_000);
-    const childMeter = new RunGovernance(f.db, f.userId, child);
-    assert.equal(f.meter.remainingDurationMs(), 40_000);
-    assert.doesNotThrow(() => childMeter.check());
-    now += 40_000;
-    assert.ok(childMeter.remainingDurationMs() > 0);
-    assert.throws(() => childMeter.check(), /elapsed-time budget/);
-    assert.doesNotThrow(() => childMeter.check(0, false));
-  } finally { f.db.close(); rmSync(root, { recursive: true, force: true }); }
 });

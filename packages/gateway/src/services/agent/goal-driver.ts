@@ -4,14 +4,14 @@ import { SessionRepository } from '../../db/repositories/session-repository.js';
 import type { ForgeBadgerEvent } from '../event-bus.js';
 import { buildAgentStack, type AgentStackDeps } from './agent-stack.js';
 import { notifyGoalStatus } from './goal-notify.js';
-import { CopilotGoalStore, goalBudgetExhausted, RESOLVED_TASK_STATUSES, type GoalRow } from './goal-store.js';
+import { CopilotGoalStore, RESOLVED_TASK_STATUSES, type GoalRow } from './goal-store.js';
 import { syncGoalFromBoard } from './goal-board.js';
 import type { TurnInput } from './run-ledger.js';
 
 /**
  * GoalDriver: after a goal-owned run reaches a terminal state, decide the
- * goal's next step and enqueue the following run until the checklist passes,
- * a goal-level budget trips, or task progress stagnates. Evaluation is
+ * goal's next step and enqueue the following run until the checklist passes
+ * or task progress stagnates. Evaluation is
  * idempotent — the single-active-run invariant and the goal status gate make
  * duplicate triggers safe — and it is shared by the event hook, the recovery
  * sweep, and the resume route.
@@ -22,7 +22,6 @@ export interface GoalContinuationDecision { action: GoalContinuationAction; reas
 
 const TERMINAL_RUN_STATES = ['completed', 'stopped', 'failed'];
 const STAGNATION_RUN_LIMIT = 3;
-export const GOAL_BUDGET_EXHAUSTED_REASON = 'goal_budget_exhausted';
 /** Run failures with these codes never benefit from an immediate retry. */
 const NON_RETRYABLE_RUN_ERRORS = new Set(['COPILOT_CONTEXT_TOO_LARGE', 'COPILOT_USER_INACTIVE', 'COPILOT_NOT_FOUND']);
 const FAILURE_COOLDOWN_INITIAL_MS = 15_000;
@@ -63,14 +62,6 @@ export function evaluateGoalContinuation(
     store.appendJournal(goalId, null, 'All tasks passed; goal completed.');
     notifyGoalStatus(deps.db, userId, store.getGoal(goalId)!);
     return { action: 'completed' };
-  }
-  const usage = store.usage(goalId, now);
-  if (goalBudgetExhausted(goal, usage, now)) {
-    failureCooldowns.delete(goalId);
-    store.setStatus(goalId, 'blocked', GOAL_BUDGET_EXHAUSTED_REASON);
-    store.appendJournal(goalId, null, `Goal budget exhausted (tokens=${usage.chargedTokens}/${goal.token_budget}, runs=${usage.runCount}/${goal.max_runs}).`);
-    notifyGoalStatus(deps.db, userId, store.getGoal(goalId)!);
-    return { action: 'blocked', reason: GOAL_BUDGET_EXHAUSTED_REASON };
   }
   // An active parent, delegate-child, or same-conversation run owns the
   // goal: never enqueue a competing run, regardless of stagnation or

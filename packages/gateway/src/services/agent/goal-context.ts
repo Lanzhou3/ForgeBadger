@@ -5,9 +5,9 @@ import { boardStatusOf } from './goal-board.js';
 
 /**
  * Model-facing projection of one goal's current state. Injected as a prefix
- * message for goal runs so every continuation run sees the checklist, the
- * recent handover journal, and the remaining budget without changing the
- * system prompt for non-goal conversations.
+ * message for goal runs so every continuation run sees the checklist and the
+ * recent handover journal without changing the system prompt for non-goal
+ * conversations.
  */
 const SPEC_MAX_CHARS = 2000;
 const TASK_EVIDENCE_MAX_CHARS = 500;
@@ -20,7 +20,6 @@ export function goalContextMessage(db: Database, userId: string, goalId: string)
   const allTasks = store.listTasks(goalId);
   const shownTasks = allTasks.slice(0, TASK_MAX_ENTRIES);
   const journal = store.recentJournal(goalId, 3);
-  const usage = store.usage(goalId);
   const grants = parseGoalGrants(goal.grants_json);
   const grantedTools = grants.flatMap(grant => GOAL_GRANT_TOOLS[grant]);
   const clip = (value: string | null, max: number) => {
@@ -42,10 +41,6 @@ export function goalContextMessage(db: Database, userId: string, goalId: string)
       ...(allTasks.length > shownTasks.length ? [{ seq: null, description: `… ${allTasks.length - shownTasks.length} more tasks`, status: 'summary', evidence: null }] : [])
     ],
     recentJournal: journal.map(entry => clip(entry.note, TASK_EVIDENCE_MAX_CHARS)).reverse(),
-    remainingBudget: {
-      tokens: Math.max(0, goal.token_budget - usage.chargedTokens),
-      runs: Math.max(0, goal.max_runs - usage.runCount)
-    },
     grants: grants.length
       ? `预授权可自动执行（免逐次审批）：${grants.join(', ')} → ${grantedTools.join(', ')}`
       : '无预授权：operate 类工具仍需逐次审批',

@@ -1937,14 +1937,13 @@ to Copilot Grants describe retired behavior; migration 0105 removed that model.
 Repository instructions and Skills are descriptive context, never executable
 authority.
 
-Migrations 0108/0109 add durable execution phase, per-run budgets, model-call
-accounting, follow-up queues and linked research/review jobs. The default run
-limit is 500,000 charged tokens and 30 minutes from first execution, including
-approval/restart elapsed time. Every model call reserves estimated usage before
-sending; missing usage or interrupted responses retain a conservative charge.
-Titles and summaries are also charged. This is approximate governance, not a
-billing or strict tokenizer guarantee; a provider response can exceed its
-reservation, after which further model/tool work is refused. HTTP retries are
+Migrations 0108/0109 add durable execution phase, budget and model-call
+accounting columns, follow-up queues and linked research/review jobs. Neither
+execution budgets nor model-call metering are tracked anymore: the historical
+per-run token ceiling, the 30-minute wall-clock limit, the goal-level
+ceilings and the `copilot_model_calls` accounting are no longer written or
+enforced, and runs end on completion, step limit, failure or an explicit user
+stop. The columns remain for historical rows. HTTP retries are
 limited to two retries for 429/502/503/504 with Retry-After and cancellation;
 accepted streams, ambiguous network failures and tool effects are not replayed.
 
@@ -1966,9 +1965,8 @@ state and reconciles durable phases through the existing event/REST path.
 conversations are isolated from global memory and retain the original explicit
 model selection. Persisted executionMode and an execution-time project read
 whitelist block write tools, external MCP, cross-project reads and recursion,
-even when a model forges a hidden tool call. Children allow at most 6 model steps,
-120,000 charged tokens and 5 minutes, sharing the parent's aggregate token limit.
-Synchronous research also inherits the remaining parent time and cancellation.
+even when a model forges a hidden tool call. Children allow at most 6 model
+steps. Synchronous research inherits the parent's cancellation.
 Cross-worker recovery waits for the same durable child instead of spawning a
 replacement or claiming a pending analysis is complete.
 
@@ -2005,7 +2003,7 @@ returns at most 20 changed files and can return an empty intermediate page.
 Read-only research inherits the same current project and cancellation checks.
 
 
-#### Streaming, read concurrency, metering and repair (third delivery)
+#### Streaming, read concurrency and repair (third delivery)
 
 Public text is provisional and identified by run/model-step/fence/sequence.
 `PublicTextStream` buffers incomplete identifiers and shares credential-field
@@ -2020,12 +2018,9 @@ Each operation retains authorization and lease fencing; all in-flight reads
 settle before advancing. Asynchronous receipts are reconstructed in original
 model tool-call order. Cancelled/superseded workers cannot publish or advance.
 
-Migration 0111 extends model-call receipts with model identity, immutable
-owner-configured per-million-token pricing, and integer nano-USD costs. Main,
-summary, title, memory and linked-child calls share the ledger. Cache and
-reasoning details are normalized without double charging; unavailable counts or
-rates remain explicitly unknown. Reservations remain conservative estimates;
-provider-reported completion usage supplies measured counts. There is no universal
+Model-call receipts from migration 0111 (model identity, owner-configured
+per-million-token pricing, integer nano-USD costs) are no longer recorded;
+the columns are retained for historical rows. There is no universal
 exact preflight tokenizer or provider invoice reconciliation.
 
 Migration 0112 adds tenant-bound repair jobs and an explicit root revocation
@@ -2035,8 +2030,7 @@ fixed original source/check scope, fresh patch approval and independent retestin
 Current parent conversation/message provenance, owner/tool/project authority,
 receipt identity and source digests are rechecked at admission, approval and
 sandbox execution. Edits, including identical-text edits, revoke old authority.
-The existing durable child relation supplies aggregate token budgets and
-cancellation. Recovery and reporting use bounded rotating cursors; transactional
+The existing durable child relation supplies cancellation. Recovery and reporting use bounded rotating cursors; transactional
 uniqueness prevents duplicate admission. No candidate is applied or accepted.
 
 The reproducible evaluation script is
@@ -2106,8 +2100,8 @@ or improved real-model benchmark scores follows from these regression tests.
   Anthropic serializer uses an ephemeral cache marker on the system text block;
   OpenAI wire messages remain unchanged. Savings require provider measurements.
 - `context-recovery.ts` owns one bounded attempt after a structured rejected
-  overflow. It fixes the model profile for context assembly, summary and retry,
-  preserves the run deadline and meters auxiliary calls. The ledger increments
+  overflow. It fixes the model profile for context assembly, summary and
+  retry and threads the run's abort signal through. The ledger increments
   the existing attempt and writes a recovery marker before summary/inference.
   Crash retries conservatively consume the allowance; an interrupted recovery
   marker stops the resumed run. No historical tool replay or source mutation.

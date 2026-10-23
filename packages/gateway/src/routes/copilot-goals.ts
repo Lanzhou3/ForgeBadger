@@ -1,10 +1,10 @@
 /**
  * Copilot Goal routes — /api/v1/copilot/goals*.
  *
- * Goal mode turns a conversation into a budget-capped, multi-run objective:
- * the first run decomposes the spec into a task checklist, and the GoalDriver
- * enqueues continuation runs until every task passes, a goal-level budget
- * trips, or task progress stagnates. These routes own the lifecycle only
+ * Goal mode turns a conversation into a multi-run objective: the first run
+ * decomposes the spec into a task checklist, and the GoalDriver enqueues
+ * continuation runs until every task passes or task progress stagnates.
+ * These routes own the lifecycle only
  * (create/pause/resume/cancel, list, detail); run execution stays in the
  * orchestrator and the driver.
  */
@@ -28,11 +28,6 @@ const createGoalSchema = z.object({
   projectId: idSchema.optional(),
   title: z.string().trim().min(1).max(200),
   spec: z.string().trim().min(1).max(20_000),
-  budgets: z.object({
-    tokenBudget: z.number().int().min(1).max(50_000_000).optional(),
-    maxDurationMs: z.number().int().min(1).max(86_400_000).optional(),
-    maxRuns: z.number().int().min(1).max(200).optional()
-  }).strict().optional(),
   grants: z.array(z.enum(GOAL_GRANTS)).max(GOAL_GRANTS.length).optional()
 }).strict();
 
@@ -47,9 +42,6 @@ function goalDto(row: GoalRow) {
     projectId: row.project_id,
     conversationId: row.conversation_id,
     spec: row.spec,
-    tokenBudget: row.token_budget,
-    maxDurationMs: row.max_duration_ms,
-    maxRuns: row.max_runs,
     blockedReason: row.blocked_reason,
     pendingQuestion: row.pending_question,
     grants: parseGoalGrants(row.grants_json),
@@ -120,7 +112,6 @@ export function createCopilotGoalRoutes(deps: AgentStackDeps): Router {
         ...(value.projectId ? { projectId: value.projectId } : {}),
         title: value.title,
         spec: value.spec,
-        budgets: value.budgets,
         ...(value.grants ? { grants: value.grants } : {})
       });
       try {
@@ -153,12 +144,10 @@ export function createCopilotGoalRoutes(deps: AgentStackDeps): Router {
     if (!goal) return notFound(res);
     // Owner board decisions show up even while the goal is paused/blocked.
     if (syncGoalFromBoard(deps.db, userId(req), goal)) goal = store.getGoal(id)!;
-    const usage = store.usage(id);
     res.json(ok({
       goal: goalDto(goal),
       tasks: store.listTasks(id).map(task => taskDto(task, boardStatusOf(deps.db, userId(req), goal!, task))),
       journal: store.recentJournal(id, 20).map(journalDto),
-      usage: { chargedTokens: usage.chargedTokens, runCount: usage.runCount, elapsedMs: usage.elapsedMs, costUsd: usage.costUsd },
       pendingQuestion: goal.pending_question
     }));
   });
