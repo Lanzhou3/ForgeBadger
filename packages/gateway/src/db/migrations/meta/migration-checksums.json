@@ -139,5 +139,6 @@
   "0138_copilot_goal_verify.sql": "0ffc69568bd03d73d8985c755a65df550db7671067561290397a44692eb78692",
   "0139_copilot_goal_grants.sql": "a3c530aebbf5a7cc2b84d05ca01a35c9e8381c22bb3a67fc280b65d12217f299",
   "0140_copilot_goal_workspaces.sql": "dad635dc2963973376b185b53ef4860f3a1cff0d43e91b4c5e267d0720ac74bb",
-  "0141_copilot_goal_board_links.sql": "d32a5beea5b465f93b57f5fd9dacad9a3b33e723d3b6fd620d6f2907c9dbd729"
+  "0141_copilot_goal_board_links.sql": "d32a5beea5b465f93b57f5fd9dacad9a3b33e723d3b6fd620d6f2907c9dbd729",
+  "0142_telegram_notifications.sql": "0e84748cb5223f8da78203bc6c38caaf8764958e78975e9ce4eef16fe153d2fd"
 }

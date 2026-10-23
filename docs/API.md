@@ -1813,6 +1813,42 @@ automatically resent. Other statuses are `pending`, `sending`, `delivered`,
 `failed`, and `cancelled`; `delivered` means Feishu acknowledged the message,
 not that the user read it. Gateway restarts resume pending entries.
 
+#### Telegram notification messages
+
+Telegram notifications reuse the Feishu notification authority and queue model
+with a separate, independent personal subscription (migration `0142`).
+
+- `GET /api/v1/notifications/telegram` returns `{ config, ready, blocker, targets }`.
+- `PUT /api/v1/notifications/telegram` replaces the subscription with exactly
+  `{ enabled, targetId, types, webBaseUrl, revision }`; unknown fields return
+  `400`/`INPUT_INVALID`. Revision, `CONFIG_CONFLICT`, `TYPES_REQUIRED`,
+  `WEB_URL_INVALID` and `INTERNAL_ERROR` semantics match the Feishu endpoint.
+- `GET /api/v1/notifications/telegram/deliveries` returns the latest 30 delivery
+  metadata records: `id`, `type`, `status`, `errorCode`, and `createdAt`.
+- `POST /api/v1/notifications/telegram/test` accepts only `{ requestId }` (UUID)
+  and returns `202` with `{ id, status }`; reusing a request ID returns the
+  existing record.
+
+Targets are confirmed, active Telegram private-chat identities on the current
+bot account revision (`private:<identityId>`). Group delivery is not supported,
+and there is no target-refresh endpoint. The bot token is decrypted only inside
+the worker. Types, defaults, expiry, the one-transaction enqueue alongside the
+local notification, configuration-change cancellation and the send-time
+recheck (active user, current enabled bot account, enabled integration without
+emergency stop, unchanged subscription/target revisions and an existing source
+notification, immediately before the request) follow the Feishu rules above.
+
+Messages are sent with `sendMessage` as plain text without `parse_mode`, so
+notification content cannot inject markup. The body is the same redacted,
+1800-character-budgeted content as the Feishu card, prefixed with the
+`ForgeBadger · <state>` title. When `webBaseUrl` is set, the message ends with
+a view link instead of a button. Messages carry no approval actions. HTTP 429
+honours `retry_after` within the five-attempt bound. A Telegram error payload
+(for example, the user blocked the bot) is `failed`/`SEND_REJECTED`. Network
+errors or 5xx after the request starts become `unknown`/`SEND_UNCERTAIN` and
+are never resent. `delivered` means Telegram accepted the message and stores
+its `message_id`.
+
 Cards use Feishu JSON 2.0 `interactive` messages with bounded, redacted plain
 text and no approval actions. An optional `webBaseUrl` enables view buttons
 using canonical ForgeBadger paths; credentials, query strings, fragments,

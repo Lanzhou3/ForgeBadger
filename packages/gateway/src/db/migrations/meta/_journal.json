@@ -988,6 +988,13 @@
       "when": 1792500000000,
       "tag": "0141_copilot_goal_board_links",
       "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1792600000000,
+      "tag": "0142_telegram_notifications",
+      "breakpoints": true
     }
   ]
 }

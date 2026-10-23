@@ -54,6 +54,28 @@ export const feishuNotificationGroups = sqliteTable('feishu_notification_groups'
   revision:integer('revision').notNull().default(1),checkedAt:integer('checked_at').notNull(),
 },table=>({chat:uniqueIndex('feishu_notification_group_unique').on(table.userId,table.accountId,table.accountRevision,table.chatId)}));
 
+export const telegramNotificationSettings = sqliteTable('telegram_notification_settings', {
+  userId:text('user_id').primaryKey().notNull().references(()=>users.id,{onDelete:'cascade'}),
+  enabled:integer('enabled',{mode:'boolean'}).notNull().default(false),targetId:text('target_id'),
+  typesJson:text('types_json').notNull().default('["attention","failure","completion"]'),webBaseUrl:text('web_base_url').notNull().default(''),
+  revision:integer('revision').notNull().default(1),updatedAt:integer('updated_at').notNull()
+});
+export const telegramNotificationDeliveries = sqliteTable('telegram_notification_deliveries', {
+  id:text('id').primaryKey().notNull(),userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),
+  notificationId:text('notification_id'),testKey:text('test_key'),eventType:text('event_type').notNull(),
+  subscriptionRevision:integer('subscription_revision').notNull(),identityRevision:integer('identity_revision').notNull(),
+  targetId:text('target_id'),targetRevision:integer('target_revision').notNull().default(0),
+  status:text('status').notNull().default('pending'),errorCode:text('error_code'),providerMessageId:text('provider_message_id'),
+  claimToken:text('claim_token'),leaseUntil:integer('lease_until'),attemptCount:integer('attempt_count').notNull().default(0),
+  nextAttemptAt:integer('next_attempt_at').notNull().default(0),expiresAt:integer('expires_at').notNull(),createdAt:integer('created_at').notNull()
+},table=>({
+  due:index('idx_telegram_notification_due').on(table.userId,table.status,table.nextAttemptAt),
+  notification:uniqueIndex('telegram_notification_notification_unique').on(table.userId,table.notificationId),
+  test:uniqueIndex('telegram_notification_test_unique').on(table.userId,table.testKey),
+  statusValid:check('telegram_notification_status',sql`${table.status} IN ('pending','sending','delivered','failed','unknown','cancelled')`),
+  sourceValid:check('telegram_notification_source',sql`(${table.notificationId} IS NOT NULL AND ${table.testKey} IS NULL) OR (${table.notificationId} IS NULL AND ${table.testKey} IS NOT NULL)`)
+}));
+
 export const users = sqliteTable("users", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   username: text("username").notNull().unique(),
