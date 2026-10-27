@@ -22,6 +22,7 @@ import {
   applyCliConfigToAdapter,
   discoverAdapters,
   getClaudeRoute,
+  isAdapterLaunchable,
   previewCliConfigApply,
   setClaudeRoute,
   type AdapterDiscovery,
@@ -95,6 +96,14 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
     () => adaptersQuery.data?.adapters ?? EMPTY_ADAPTERS,
     [adaptersQuery.data]
   );
+  // Selected adapter's live detection. Unknown (discovery still loading) is
+  // optimistic, mirroring chooseDefaultAdapter's behavior; a known-missing
+  // CLI blocks the apply even though the value was preset programmatically.
+  const selectedDetection = useMemo(
+    () => (adapter ? detectedAdapters.find((entry) => entry.id === adapter) : undefined),
+    [adapter, detectedAdapters]
+  );
+  const selectedCliMissing = selectedDetection !== undefined && !isAdapterLaunchable(selectedDetection);
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
   // Track the route requirement across renders so the open effect can default
@@ -107,13 +116,20 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
     // An explicit entry point (CLI status cell) wins; otherwise default to a
     // locally installed, provider-supported CLI when possible, falling back to
     // the first supported CLI so the dialog still renders.
+    const detected = new Map(detectedAdapters.map((adapter) => [adapter.id, adapter]));
+    // The preset entry point (a CLI status cell) must pass the same
+    // selectability check as the default path: preselecting an uninstalled
+    // CLI otherwise leaves a disabled dropdown value the user can confirm
+    // without ever opening the menu.
     const preset = initialAdapter && targets.includes(initialAdapter as ProviderSupportedAdapter)
       ? (initialAdapter as ProviderSupportedAdapter)
       : undefined;
-    const fallback = preset ?? chooseDefaultAdapter(detectedAdapters, targets) ?? targets[0] ?? "";
-    const detected = new Map(detectedAdapters.map((adapter) => [adapter.id, adapter]));
+    const presetDetected = preset ? detected.get(preset) : undefined;
+    const usablePreset =
+      preset && (presetDetected ? isAdapterSelectable(presetDetected, targets) : true) ? preset : undefined;
+    const fallback = usablePreset ?? chooseDefaultAdapter(detectedAdapters, targets) ?? targets[0] ?? "";
     setAdapter((current) =>
-      current !== "" && !preset && targets.includes(current) && (detected.get(current) ? isAdapterSelectable(detected.get(current)!, targets) : true)
+      current !== "" && !usablePreset && targets.includes(current) && (detected.get(current) ? isAdapterSelectable(detected.get(current)!, targets) : true)
         ? current
         : fallback
     );
@@ -172,6 +188,10 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
   const applyMutation = useMutation({
     mutationFn: async () => {
       if (!adapter) throw new Error("No CLI selected");
+      // Defense in depth behind the disabled button: never fire an apply for
+      // a CLI the live detection says is missing.
+      const detection = detectedAdapters.find((entry) => entry.id === adapter);
+      if (detection && !isAdapterLaunchable(detection)) throw new Error(t("models.applyToCliCliMissing"));
       // One-tap path: enable the route first, then apply through it.
       if (needsRoute && !routeEnabled) {
         await setClaudeRoute(true);
@@ -410,6 +430,12 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
           )}
         </div>
 
+        {selectedCliMissing && (
+          <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive" data-testid="apply-cli-missing">
+            {t("models.applyToCliCliMissing")}
+          </p>
+        )}
+
         <DialogFooter>
           <Button type="button" variant="outline" disabled={applyMutation.isPending} onClick={() => onOpenChange(false)}>
             {t("common.cancel")}
@@ -421,6 +447,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
               applyMutation.isPending ||
               routeUnsupported ||
               codexWireApiBlocked ||
+              selectedCliMissing ||
               (needsRoute && routeQuery.isLoading)
             }
             onClick={() => applyMutation.mutate()}

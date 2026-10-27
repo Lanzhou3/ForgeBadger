@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import http from "node:http";
 import { mkdtemp, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,7 @@ import { ModelProviderRepository } from "../src/db/repositories/model-provider-r
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import { createCliConfigRoutes } from "../src/routes/cli-config.js";
 import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
+import { getAdapterDefinition, type AdapterDiscoveryResult, type AdapterId } from "../src/services/adapter-discovery.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
@@ -40,6 +42,16 @@ describe("cli-config apply-provider route", () => {
   let baseUrl: string;
   let configRoot: string;
   let eventBus: ForgeBadgerEventBus;
+  /** Mutable so individual tests can simulate an uninstalled CLI. */
+  let adapterAvailability: (adapter: AdapterId) => Promise<AdapterDiscoveryResult>;
+
+  function adapterInstalled(adapter: AdapterId): AdapterDiscoveryResult {
+    return { ...getAdapterDefinition(adapter), available: true, status: "available", version: "test" };
+  }
+
+  function adapterMissing(adapter: AdapterId): AdapterDiscoveryResult {
+    return { ...getAdapterDefinition(adapter), available: false, status: "missing", error: "command not found" };
+  }
 
   beforeEach(async () => {
     db = createTestDb();
@@ -48,11 +60,16 @@ describe("cli-config apply-provider route", () => {
     configRoot = await mkdtemp(path.join(tmpdir(), "forgebadger-apply-route-"));
     process.env.CLAUDE_CONFIG_DIR = configRoot;
     eventBus = new ForgeBadgerEventBus();
+    adapterAvailability = (adapter) => Promise.resolve(adapterInstalled(adapter));
 
     const app = express();
     app.locals.jwtSecret = secret;
     app.use(express.json());
-    app.use("/api/v1/cli-config", createCliConfigRoutes(db, masterKey, { resolveHost: publicResolver, eventBus }));
+    app.use("/api/v1/cli-config", createCliConfigRoutes(db, masterKey, {
+      resolveHost: publicResolver,
+      eventBus,
+      adapterAvailabilityCheck: (adapter) => adapterAvailability(adapter)
+    }));
     server = http.createServer(app);
     await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
     const address = server.address();
@@ -194,6 +211,47 @@ describe("cli-config apply-provider route", () => {
     assert.equal(applied.json.code, 1);
     const details = applied.json.details as { code?: string } | undefined;
     assert.equal(details?.code, "CLI_CONFIG_APPLY_FIELD_UNSUPPORTED");
+  });
+
+  it("rejects apply and preview for an uninstalled CLI without writing or recording", async () => {
+    const { provider, model } = createProvider();
+    adapterAvailability = (adapter) => Promise.resolve(adapterMissing(adapter));
+    const pointers = new CliConfigAppliedProviderRepository(db, userIdFromToken());
+
+    const applied = await post("/api/v1/cli-config/claude/apply-provider", {
+      providerProfileId: provider.id,
+      modelProfileId: model.id
+    });
+    assert.equal(applied.status, 409, JSON.stringify(applied.json));
+    assert.equal((applied.json.details as { code?: string })?.code, "CLI_CONFIG_APPLY_CLI_MISSING");
+    assert.match(String(applied.json.message), /not installed/);
+
+    const preview = await post("/api/v1/cli-config/claude/apply-provider/preview", {
+      providerProfileId: provider.id
+    });
+    assert.equal(preview.status, 409, JSON.stringify(preview.json));
+    assert.equal((preview.json.details as { code?: string })?.code, "CLI_CONFIG_APPLY_CLI_MISSING");
+
+    assert.equal(existsSync(path.join(configRoot, "settings.json")), false);
+    assert.equal(pointers.get("claude"), undefined);
+  });
+
+  it("rejects apply when the CLI probe fails with a verification message", async () => {
+    const { provider, model } = createProvider();
+    adapterAvailability = (adapter) => Promise.resolve({
+      ...getAdapterDefinition(adapter),
+      available: false,
+      status: "check_failed",
+      error: "timeout after 3000ms"
+    });
+    const applied = await post("/api/v1/cli-config/claude/apply-provider", {
+      providerProfileId: provider.id,
+      modelProfileId: model.id
+    });
+    assert.equal(applied.status, 409, JSON.stringify(applied.json));
+    assert.equal((applied.json.details as { code?: string })?.code, "CLI_CONFIG_APPLY_CLI_MISSING");
+    assert.match(String(applied.json.message), /could not be verified/);
+    assert.match(String(applied.json.message), /timeout after 3000ms/);
   });
 
   it("applies a PI provider over HTTP, writes both files, and records the pointer", async () => {

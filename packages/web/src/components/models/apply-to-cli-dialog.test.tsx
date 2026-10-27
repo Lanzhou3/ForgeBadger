@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApplyToCliDialog, maskSecrets } from "./apply-to-cli-dialog";
 import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
-import { applyCliConfigToAdapter, getClaudeRoute, previewCliConfigApply, setClaudeRoute, type ModelProfile, type ProviderProfile } from "@/lib/api";
+import { applyCliConfigToAdapter, getClaudeRoute, previewCliConfigApply, setClaudeRoute, type AdapterDiscovery, type ModelProfile, type ProviderProfile } from "@/lib/api";
 
 vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) => key }), useUiLocale: () => "en-US" }));
 vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
@@ -15,6 +15,8 @@ vi.mock("@/lib/api", () => ({
   setClaudeRoute: vi.fn(async () => ({ enabled: true })),
   previewCliConfigApply: vi.fn(async () => ({ files: [], warnings: [] })),
   applyCliConfigToAdapter: vi.fn(async () => ({ files: [] })),
+  isAdapterLaunchable: (adapter: { available: boolean; launchEnabled: boolean }) =>
+    adapter.available && adapter.launchEnabled,
 }));
 
 const provider: ProviderProfile = {
@@ -32,12 +34,18 @@ function makeModel(overrides: Partial<ModelProfile> = {}): ModelProfile {
 
 function setup(
   overrides: Partial<ProviderProfile> = {},
-  models: ModelProfile[] = []
+  models: ModelProfile[] = [],
+  adapters: AdapterDiscovery[] = [],
+  initialAdapter?: string
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  client.setQueryData(ADAPTER_DISCOVERY_QUERY_KEY, { adapters: [] });
+  client.setQueryData(ADAPTER_DISCOVERY_QUERY_KEY, { adapters });
   const invalidate = vi.spyOn(client, "invalidateQueries");
-  render(<QueryClientProvider client={client}><ApplyToCliDialog provider={{ ...provider, ...overrides }} models={models} credentials={[]} open onOpenChange={vi.fn()} /></QueryClientProvider>);
+  render(
+    <QueryClientProvider client={client}>
+      <ApplyToCliDialog provider={{ ...provider, ...overrides }} models={models} credentials={[]} open onOpenChange={vi.fn()} initialAdapter={initialAdapter} />
+    </QueryClientProvider>
+  );
   return invalidate;
 }
 
@@ -144,6 +152,46 @@ describe("Codex wire API blocker", () => {
       ).toBeTruthy()
     );
     expect(screen.queryByText("models.codexWireApiBlocked")).toBeNull();
+  });
+});
+
+describe("uninstalled CLI gating", () => {
+  const missingClaude: AdapterDiscovery = {
+    id: "claude", label: "Claude Code", command: "claude",
+    supportLevel: "supported", launchEnabled: false, configDir: ".claude", runtimeModes: ["terminal"],
+    available: false, status: "missing", error: "command not found"
+  };
+  const installedCodex: AdapterDiscovery = {
+    id: "codex", label: "Codex", command: "codex",
+    supportLevel: "supported", launchEnabled: true, configDir: ".codex", runtimeModes: ["terminal"],
+    available: true, status: "available", version: "codex-cli 0.1.0"
+  };
+
+  it("falls back to an installed supported CLI when the preset is missing", () => {
+    // Entered from the (uninstalled) claude status cell: the preset must not
+    // win over the selectability check.
+    setup({ supportedAdapters: ["claude", "codex"] }, [makeModel()], [missingClaude, installedCodex], "claude");
+    const trigger = screen.getByLabelText("common.aiTool") as HTMLElement;
+    expect(trigger.textContent).toContain("Codex");
+    const applyButton = screen.getByRole("button", { name: "models.applyConfig" }) as HTMLButtonElement;
+    expect(applyButton.disabled).toBe(false);
+    expect(screen.queryByTestId("apply-cli-missing")).toBeNull();
+  });
+
+  it("blocks apply and shows the missing banner when the only supported CLI is missing", () => {
+    // anthropicBaseUrl keeps the test on the plain applyConfig button (no route branch).
+    setup({ supportedAdapters: ["claude"], anthropicBaseUrl: "https://example.com/anthropic" }, [makeModel()], [missingClaude], "claude");
+    expect(screen.getByTestId("apply-cli-missing")).toBeTruthy();
+    const applyButton = screen.getByRole("button", { name: "models.applyConfig" }) as HTMLButtonElement;
+    expect(applyButton.disabled).toBe(true);
+  });
+
+  it("does not flag a selected adapter while discovery is still unknown", () => {
+    // No detection rows: unknown adapters stay optimistic (existing behavior).
+    setup({ supportedAdapters: ["claude"], anthropicBaseUrl: "https://example.com/anthropic" }, [makeModel()], [], "claude");
+    expect(screen.queryByTestId("apply-cli-missing")).toBeNull();
+    const applyButton = screen.getByRole("button", { name: "models.applyConfig" }) as HTMLButtonElement;
+    expect(applyButton.disabled).toBe(false);
   });
 });
 

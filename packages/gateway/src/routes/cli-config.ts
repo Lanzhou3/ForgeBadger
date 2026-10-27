@@ -6,7 +6,7 @@ import type { Database } from "../db/types.js";
 import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-config-applied-provider-repository.js";
 import { ClaudeRouteRepository } from "../db/repositories/claude-route-repository.js";
 import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
-import { isAdapterId, type AdapterId } from "../services/adapter-discovery.js";
+import { isAdapterId, getAdapterLaunchStatus, type AdapterDiscoveryResult, type AdapterId } from "../services/adapter-discovery.js";
 import {
   applyCliConfigFieldPatch,
   listCliConfigAdapters,
@@ -96,15 +96,24 @@ const claudeRouteBodySchema = z.object({
   enabled: z.boolean()
 }).strict();
 
+interface CliConfigRouteOptions {
+  operationObserver?: ((operation: string) => void) | undefined;
+  /** Test seam: DNS resolver for the apply SSRF endpoint check. */
+  resolveHost?: import("../services/network-policy.js").OutboundHostResolver | undefined;
+  eventBus?: ForgeBadgerEventBus | undefined;
+  /**
+   * Test seam: adapter availability check. Defaults to probing the installed
+   * CLI (`getAdapterLaunchStatus`), which spawns the adapter's `--version`
+   * command; tests inject a fixed outcome to stay hermetic on machines
+   * without every CLI installed.
+   */
+  adapterAvailabilityCheck?: ((adapter: AdapterId) => Promise<AdapterDiscoveryResult>) | undefined;
+}
+
 export function createCliConfigRoutes(
   db: Database,
   masterKey: string,
-  options: {
-    operationObserver?: ((operation: string) => void) | undefined;
-    /** Test seam: DNS resolver for the apply SSRF endpoint check. */
-    resolveHost?: import("../services/network-policy.js").OutboundHostResolver | undefined;
-    eventBus?: ForgeBadgerEventBus | undefined;
-  } = {}
+  options: CliConfigRouteOptions = {}
 ): Router {
   const router = Router();
   router.use(authenticate);
@@ -365,9 +374,12 @@ export function createCliConfigRoutes(
       return;
     }
     observe(options, "apply.preview");
-    await handle(res, async () => ({
-      preview: await previewCliConfigApply(applyInput(db, masterKey, req, adapter, body.data, options))
-    }));
+    await handle(res, async () => {
+      await assertAdapterInstalled(adapterAvailability(options), adapter);
+      return {
+        preview: await previewCliConfigApply(applyInput(db, masterKey, req, adapter, body.data, options))
+      };
+    });
   });
 
   router.post("/:adapter/apply-provider", async (req, res) => {
@@ -387,6 +399,7 @@ export function createCliConfigRoutes(
       const providerName = new ModelProviderRepository(db, userId, masterKey)
         .getProviderProfile(body.data.providerProfileId)?.name;
       try {
+        await assertAdapterInstalled(adapterAvailability(options), adapter);
         const result = await applyCliConfigToAdapter(applyInput(db, masterKey, req, adapter, body.data, options));
         emitApplyProviderNotification(options.eventBus, {
           userId,
@@ -473,8 +486,34 @@ function compactModelMapping(
   return compact;
 }
 
-function observe(options: { operationObserver?: ((operation: string) => void) | undefined }, operation: string): void {
+function observe(options: CliConfigRouteOptions, operation: string): void {
   options.operationObserver?.(operation);
+}
+
+function adapterAvailability(options: CliConfigRouteOptions): (adapter: AdapterId) => Promise<AdapterDiscoveryResult> {
+  return options.adapterAvailabilityCheck ?? ((adapter) => getAdapterLaunchStatus(adapter));
+}
+
+/**
+ * Hard gate: applying a provider to a CLI that is not installed is a no-op
+ * that still pollutes the applied-provider state (the model page would show
+ * "active here" for a CLI that does not exist). Both preview and apply are
+ * refused so the API surface can never record a zombie apply. The check
+ * distinguishes "not found" from "probe misbehaved" (timeout / non-zero
+ * --version) so the message tells the user what to fix.
+ */
+async function assertAdapterInstalled(
+  check: (adapter: AdapterId) => Promise<AdapterDiscoveryResult>,
+  adapter: AdapterId
+): Promise<void> {
+  const status = await check(adapter);
+  if (status.available) return;
+  throw new CliConfigApplyError(
+    "CLI_CONFIG_APPLY_CLI_MISSING",
+    status.status === "check_failed"
+      ? `${status.label} CLI could not be verified (${status.error ?? "probe failed"}); check the installation before applying a provider.`
+      : `${status.label} CLI is not installed; install it before applying a provider.`
+  );
 }
 
 interface ApplyProviderNotificationInput {
@@ -539,7 +578,8 @@ function applyErrorStatus(error: CliConfigApplyError): number {
   if (error.code.endsWith("_NOT_FOUND")) return 404;
   if (error.code === "CLI_CONFIG_APPLY_ROUTE_REQUIRED"
     || error.code === "CLI_CONFIG_APPLY_ROUTE_DISABLED"
-    || error.code === "CLI_CONFIG_APPLY_CODEX_WIRE_API_UNSUPPORTED") return 409;
+    || error.code === "CLI_CONFIG_APPLY_CODEX_WIRE_API_UNSUPPORTED"
+    || error.code === "CLI_CONFIG_APPLY_CLI_MISSING") return 409;
   if (error.code === "CLI_CONFIG_APPLY_FAILED"
     || error.code === "CLI_CONFIG_APPLY_VERIFY_FAILED"
     || error.code === "CLI_CONFIG_ROLLBACK_FAILED") return 500;

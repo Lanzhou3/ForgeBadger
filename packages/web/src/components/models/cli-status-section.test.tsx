@@ -253,6 +253,49 @@ describe("cli-status-section grok row", () => {
   });
 });
 
+describe("cli-status-section apply gating", () => {
+  function renderWithDiscovery(adapters: unknown) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(ADAPTER_DISCOVERY_QUERY_KEY, { adapters });
+    vi.mocked(getCliAccounts).mockResolvedValue({ accounts: [] });
+    render(
+      <QueryClientProvider client={client}>
+        <CliStatusSection provider={provider} onApply={vi.fn()} onViewConfig={vi.fn()} />
+      </QueryClientProvider>
+    );
+  }
+
+  it("disables apply for a missing CLI but keeps it enabled for installed ones", async () => {
+    renderWithDiscovery([
+      { id: "claude", available: true, status: "available" },
+      { id: "codex", available: false, status: "missing" },
+    ]);
+    const claudeCard = await screen.findByTestId("cli-status-claude");
+    const codexCard = screen.getByTestId("cli-status-codex");
+    const claudeApply = claudeCard.querySelector("button") as HTMLButtonElement;
+    const codexApply = codexCard.querySelector("button") as HTMLButtonElement;
+    expect(claudeApply.disabled).toBe(false);
+    expect(codexApply.disabled).toBe(true);
+    expect(codexApply.title).toBe("models.cliStatusCliMissing");
+  });
+
+  it("keeps apply enabled while discovery has not settled yet", async () => {
+    // Never-resolving probe: absence must not be treated as "not installed"
+    // before the first detection result arrives.
+    vi.mocked(discoverAdapters).mockImplementation(() => new Promise(() => {}));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(getCliAccounts).mockResolvedValue({ accounts: [] });
+    render(
+      <QueryClientProvider client={client}>
+        <CliStatusSection provider={provider} onApply={vi.fn()} onViewConfig={vi.fn()} />
+      </QueryClientProvider>
+    );
+    const claudeCard = await screen.findByTestId("cli-status-claude");
+    const claudeApply = claudeCard.querySelector("button") as HTMLButtonElement;
+    expect(claudeApply.disabled).toBe(false);
+  });
+});
+
 describe("cli-status-section failure degradation", () => {
   it("hides the login area silently when the cli-accounts query fails", async () => {
     setup(new Error("gateway down"));

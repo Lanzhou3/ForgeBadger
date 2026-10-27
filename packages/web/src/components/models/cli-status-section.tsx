@@ -120,6 +120,10 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
           const applied = status?.applied ?? null;
           const activeHere = isProviderActiveOnAdapter(status, provider.id);
           const supportedByProvider = provider.supportedAdapters.includes(adapter);
+          // An uninstalled CLI cannot be applied to: the write would only
+          // pollute the applied-provider state. Discovery must have settled
+          // (isSuccess) before we treat absence as "not installed" so the
+          // button is not disabled during the initial probe.
           const routedHere =
             adapter === "claude" &&
             routeState?.enabled === true &&
@@ -220,8 +224,14 @@ export function CliStatusSection({ provider, onApply, onViewConfig }: CliStatusS
                   size="sm"
                   variant="outline"
                   className="h-7 flex-1 px-2 text-xs"
-                  disabled={!supportedByProvider}
-                  title={!supportedByProvider ? t("models.cliStatusApplyUnsupported") : undefined}
+                  disabled={!supportedByProvider || (adaptersQuery.isSuccess && !installed)}
+                  title={
+                    !supportedByProvider
+                      ? t("models.cliStatusApplyUnsupported")
+                      : adaptersQuery.isSuccess && !installed
+                        ? t("models.cliStatusCliMissing")
+                        : undefined
+                  }
                   onClick={() => onApply(adapter)}
                 >
                   <ShieldCheck className="size-3.5" />
