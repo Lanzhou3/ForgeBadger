@@ -152,6 +152,30 @@ describe("api client", () => {
     });
   });
 
+  it("waits for a MiniMax npm update including its preflight and version probes", async () => {
+    vi.useFakeTimers();
+    let finish!: (response: Response) => void;
+    let signal: AbortSignal | null | undefined;
+    vi.stubGlobal("fetch", vi.fn((_url: string, options: RequestInit) => {
+      signal = options.signal;
+      return new Promise<Response>((resolve) => { finish = resolve; });
+    }));
+    const result = apiModule.updateAdapter("mcode").then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error })
+    );
+    try {
+      await vi.advanceTimersByTimeAsync(340_000);
+      expect(signal?.aborted).toBe(false);
+      finish(await mockEnvelope({ id: "mcode", versionStillBehind: false }));
+      await expect(result).resolves.toMatchObject({ value: { id: "mcode", versionStillBehind: false } });
+    } finally {
+      finish(await mockEnvelope({}));
+      await result;
+      vi.useRealTimers();
+    }
+  });
+
   it("reports unreachable gateways with the resolved base URL", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
 

@@ -283,6 +283,71 @@ describe("SettingsPage terminal runtime", () => {
     expect(screen.queryByRole("button", { name: "settings.adapterUpdateNow" })).toBeNull();
   });
 
+  it.each([
+    ["update", "update"], ["install", "install"],
+    ["update", "install"], ["install", "update"],
+  ] as const)("keeps other CLIs usable during concurrent %s/%s operations and an independent failure", async (firstAction, secondAction) => {
+    setSection("adapters");
+    getDependenciesMock.mockResolvedValue({ dependencies: [] });
+    const actions = { claude: firstAction, codex: secondAction, grok: "update" };
+    const ids = ["claude", "codex", "grok"] as const;
+    discoverAdaptersMock.mockResolvedValue({ adapters: ids.map((id) => ({
+      id, label: id, command: id, supportLevel: "supported", configDir: `.${id}`,
+      runtimeModes: ["terminal"], launchEnabled: actions[id] === "update",
+      available: actions[id] === "update", status: actions[id] === "update" ? "available" : "missing",
+      version: actions[id] === "update" ? "1.0.0" : undefined,
+    })) });
+    const updates = {
+      canUpdate: true, canInstall: true,
+      updates: ids.map((id) => ({
+        id, state: actions[id] === "update" ? "update_available" : "missing",
+        installedVersion: "1.0.0", latestVersion: "2.0.0",
+        command: `${id} update`, installCommand: `npm install -g ${id}`,
+      })),
+    };
+    checkAdapterUpdatesMock.mockResolvedValue(updates);
+    const pending: Record<string, { resolve: (value: object) => void; reject: (reason: Error) => void }> = {};
+    const operation = (id: string) => new Promise<object>((resolve, reject) => { pending[id] = { resolve, reject }; });
+    updateAdapterMock.mockImplementation(operation);
+    installAdapterMock.mockImplementation(operation);
+    renderSettingsPage();
+
+    const buttonName = (action: string) => `settings.adapter${action === "update" ? "Update" : "Install"}Now`;
+    const rowFor = (id: string) => {
+      const row = screen.getByText(`${id} --version`).closest<HTMLElement>("div.rounded-md");
+      if (!row) throw new Error(`Missing CLI row: ${id}`);
+      return within(row);
+    };
+    const buttonFor = (id: string, action: string) => rowFor(id)
+      .getByRole("button", { name: buttonName(action) });
+    await screen.findByText("claude --version");
+    await waitFor(() => expect(buttonFor("claude", firstAction).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(buttonFor("claude", firstAction));
+    const busyName = `settings.adapter${firstAction === "update" ? "Updating" : "Installing"}`;
+    expect(rowFor("claude").getByRole("button", { name: busyName }).hasAttribute("disabled")).toBe(true);
+    expect(buttonFor("codex", secondAction).hasAttribute("disabled")).toBe(false);
+    fireEvent.click(buttonFor("codex", secondAction));
+    expect(Object.keys(pending).sort()).toEqual(["claude", "codex"]);
+    const claudePending = pending.claude;
+    const codexPending = pending.codex;
+    if (!claudePending || !codexPending) throw new Error("Both CLI operations must start");
+
+    // A completion-triggered refresh must not block unrelated CLI actions.
+    let finishRefresh!: () => void;
+    checkAdapterUpdatesMock.mockImplementationOnce(() => new Promise((resolve) => {
+      finishRefresh = () => resolve(updates);
+    }));
+    claudePending.resolve({ commandAvailable: true, versionStillBehind: false });
+    await waitFor(() => expect(finishRefresh).toBeTypeOf("function"));
+    expect(buttonFor("grok", "update").hasAttribute("disabled")).toBe(false);
+    codexPending.reject(new Error("CLI operation failed"));
+    await screen.findByText(`settings.adapter${secondAction === "update" ? "Update" : "Install"}Failed`);
+    expect(buttonFor("codex", secondAction).hasAttribute("disabled")).toBe(false);
+    finishRefresh();
+    await screen.findByText(`settings.adapter${firstAction === "update" ? "Update" : "Install"}Done`);
+    expect(rowFor("claude").queryByText("settings.adapterUpdateFailed")).toBeNull();
+  });
+
   it("hides stale update actions if a forced update check fails", async () => {
     setSection("adapters");
     getDependenciesMock.mockResolvedValue({ dependencies: [] });

@@ -54,6 +54,7 @@ export class AdapterUpdateError extends Error {
 
 interface AdapterUpdateConfig {
   npmPackage: string;
+  updateCommand?: "npm";
   args: string[];
   installArgs: string[];
   minNode?: string;
@@ -63,6 +64,14 @@ interface AdapterUpdateConfig {
    */
   nodeRange?: string;
 }
+
+const MCODE_NPM_INSTALL_ARGS = [
+  "install", "-g", "@minimax-ai/code@latest",
+  "--registry=https://registry.npmjs.org/",
+  "--ignore-scripts=false",
+  "--include=optional",
+  "--allow-scripts=@minimax-ai/code,better-sqlite3"
+];
 
 const updateConfig: Record<AdapterId, AdapterUpdateConfig> = {
   claude: { npmPackage: "@anthropic-ai/claude-code", args: ["update"], installArgs: ["install", "-g", "@anthropic-ai/claude-code"] },
@@ -82,22 +91,19 @@ const updateConfig: Record<AdapterId, AdapterUpdateConfig> = {
   codex: { npmPackage: "@openai/codex", args: ["update"], installArgs: ["install", "-g", "@openai/codex"] },
   kimi: { npmPackage: "@moonshot-ai/kimi-code", args: ["upgrade", "--yes"], installArgs: ["install", "-g", "@moonshot-ai/kimi-code"], minNode: "22.19.0" },
   pi: { npmPackage: "@earendil-works/pi-coding-agent", args: ["update", "--self"], installArgs: ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"], minNode: "22.19.0" },
-  // MiniMax Code ships `@minimax-ai/code` and self-updates with `mcode
-  // update`. better-sqlite3 is an optional native dependency, so the install
+  // `mcode update` requires a TTY confirmation and otherwise only prints
+  // instructions (verified in official npm 0.7.4). Use the documented npm
+  // install command for non-interactive updates as well. better-sqlite3 is an
+  // optional native dependency, so the install
   // must opt into optional packages AND approve exactly those two lifecycle
   // scripts — npm 12 blocks unapproved scripts by default and the CLI then
   // fails at startup with a missing-better_sqlite3.node binding. The explicit
   // registry also matters for mirrors.
   mcode: {
     npmPackage: "@minimax-ai/code",
-    args: ["update"],
-    installArgs: [
-      "install", "-g", "@minimax-ai/code",
-      "--registry=https://registry.npmjs.org/",
-      "--ignore-scripts=false",
-      "--include=optional",
-      "--allow-scripts=@minimax-ai/code,better-sqlite3"
-    ],
+    updateCommand: "npm",
+    args: MCODE_NPM_INSTALL_ARGS,
+    installArgs: MCODE_NPM_INSTALL_ARGS,
     minNode: "22.19.0",
     nodeRange: ">=22.19.0 <23 || >=24.2.0 <27"
   },
@@ -113,7 +119,9 @@ const updateConfig: Record<AdapterId, AdapterUpdateConfig> = {
 
 const ADAPTER_IDS: AdapterId[] = [...adapterIds];
 const VERSION_PATTERN = /(?:^|[^\d])v?(\d+)\.(\d+)\.(\d+)(?:-([\da-z.-]+))?/i;
-let cliOperationInProgress = false;
+// The binaries are host-wide, so serialize each CLI across users and routes.
+// Different CLI packages can be installed or updated independently.
+const cliOperationsInProgress = new Set<AdapterId>();
 
 export async function checkAdapterUpdates(
   dependencies: AdapterUpdateDependencies = {}
@@ -169,8 +177,8 @@ export async function updateAdapter(
   id: AdapterId,
   dependencies: AdapterUpdateDependencies = {}
 ): Promise<AdapterUpdateResult> {
-  if (cliOperationInProgress) throw new AdapterUpdateError("Another CLI install or update is in progress", 409);
-  cliOperationInProgress = true;
+  if (cliOperationsInProgress.has(id)) throw new AdapterUpdateError("This CLI already has an install or update in progress", 409);
+  cliOperationsInProgress.add(id);
   let cleanupUncertain = false;
   try {
     const before = await checkAdapterUpdate(id, dependencies);
@@ -181,8 +189,9 @@ export async function updateAdapter(
       );
     }
     const definition = getAdapterDefinition(id);
-    const result = await (dependencies.runner ?? runCommand)(definition.command, updateArgs(id, before.latestSource, before.latestVersion), {
-      timeoutMs: 180_000,
+    if (updateConfig[id].updateCommand === "npm") await assertNpmInstallationAvailable(id, dependencies);
+    const result = await (dependencies.runner ?? runCommand)(updateCommand(id), updateArgs(id, before.latestSource, before.latestVersion), {
+      timeoutMs: updateConfig[id].updateCommand === "npm" ? 300_000 : 180_000,
       maxOutputBytes: 16 * 1024,
       killGraceMs: 5000,
       killProcessTree: true,
@@ -212,7 +221,7 @@ export async function updateAdapter(
       versionStillBehind: compareVersions(installedVersion, before.latestVersion) < 0
     };
   } finally {
-    if (!cleanupUncertain) cliOperationInProgress = false;
+    if (!cleanupUncertain) cliOperationsInProgress.delete(id);
   }
 }
 
@@ -220,26 +229,15 @@ export async function installAdapter(
   id: AdapterId,
   dependencies: AdapterUpdateDependencies = {}
 ): Promise<AdapterInstallResult> {
-  if (cliOperationInProgress) throw new AdapterUpdateError("Another CLI install or update is in progress", 409);
-  cliOperationInProgress = true;
+  if (cliOperationsInProgress.has(id)) throw new AdapterUpdateError("This CLI already has an install or update in progress", 409);
+  cliOperationsInProgress.add(id);
   let cleanupUncertain = false;
   try {
     const definition = getAdapterDefinition(id);
     const before = await checkAdapterCommand(definition.command, definition.versionArgs, dependencies.runner, safeCommandOptions());
     if (before.available) throw new AdapterUpdateError("CLI is already installed", 409);
     if (before.checkFailed) throw new AdapterUpdateError("CLI installation state could not be verified", 503);
-    if (await requiredNodeVersion(id, dependencies)) {
-      const range = updateConfig[id].nodeRange;
-      throw new AdapterUpdateError(
-        `CLI npm installation requires Node.js ${range ?? `${updateConfig[id].minNode} or later`}`,
-        409
-      );
-    }
-    const npm = await checkAdapterCommand("npm", ["--version"], dependencies.runner, {
-      timeoutMs: 10_000,
-      ...safeCommandOptions()
-    });
-    if (!npm.available) throw new AdapterUpdateError("npm is not available on the Gateway host", 503);
+    await assertNpmInstallationAvailable(id, dependencies);
     const result = await (dependencies.runner ?? runCommand)("npm", updateConfig[id].installArgs, {
       timeoutMs: 300_000,
       maxOutputBytes: 16 * 1024,
@@ -261,12 +259,16 @@ export async function installAdapter(
       ...(after.available && installedVersion ? { installedVersion } : {})
     };
   } finally {
-    if (!cleanupUncertain) cliOperationInProgress = false;
+    if (!cleanupUncertain) cliOperationsInProgress.delete(id);
   }
 }
 
 function formatCommand(id: AdapterId): string {
-  return [getAdapterDefinition(id).command, ...updateConfig[id].args].join(" ");
+  return [updateCommand(id), ...updateConfig[id].args].join(" ");
+}
+
+function updateCommand(id: AdapterId): string {
+  return updateConfig[id].updateCommand ?? getAdapterDefinition(id).command;
 }
 
 function updateArgs(id: AdapterId, latestSource: AdapterUpdateStatus["latestSource"], latestVersion: string): string[] {
@@ -276,11 +278,24 @@ function updateArgs(id: AdapterId, latestSource: AdapterUpdateStatus["latestSour
 }
 
 function formatUpdateCommand(id: AdapterId, latestSource: AdapterUpdateStatus["latestSource"], latestVersion: string): string {
-  return [getAdapterDefinition(id).command, ...updateArgs(id, latestSource, latestVersion)].join(" ");
+  return [updateCommand(id), ...updateArgs(id, latestSource, latestVersion)].join(" ");
 }
 
 function formatInstallCommand(id: AdapterId): string {
   return ["npm", ...updateConfig[id].installArgs].join(" ");
+}
+
+async function assertNpmInstallationAvailable(id: AdapterId, dependencies: AdapterUpdateDependencies): Promise<void> {
+  if (await requiredNodeVersion(id, dependencies)) {
+    const range = updateConfig[id].nodeRange;
+    throw new AdapterUpdateError(
+      `CLI npm installation requires Node.js ${range ?? `${updateConfig[id].minNode} or later`}`, 409
+    );
+  }
+  const npm = await checkAdapterCommand("npm", ["--version"], dependencies.runner, {
+    timeoutMs: 10_000, ...safeCommandOptions()
+  });
+  if (!npm.available) throw new AdapterUpdateError("npm is not available on the Gateway host", 503);
 }
 
 async function requiredNodeVersion(

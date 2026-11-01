@@ -661,22 +661,47 @@ adapter reports the `terminal` runtime mode; the former Codex
   with a Bearer credential; cookie-only requests are rejected.
   It rechecks availability, executes only the adapter's fixed official command
   (`claude update`, `opencode upgrade`, `codex update`, `kimi upgrade --yes`,
-  `pi update --self`, `mcode update`, or `grok update`), then probes the installed version again. For a Homebrew
+  `pi update --self`, or `grok update`; MiniMax Code uses its official npm install
+  command with `@latest`), then probes the installed version again. For a Homebrew
   OpenCode install, the command specifies the published formula version and
-  `--method brew` so the CLI refreshes its tap before upgrading. Only one update
-  may run at a time; the response reports whether the installed version is
+  `--method brew` so the CLI refreshes its tap before upgrading. Different CLIs
+  may update concurrently; each CLI allows only one install or update at a time
+  across all users (`409` for a duplicate operation). The response reports whether the installed version is
   still behind its installation channel's available version. Existing terminal sessions are not
   restarted by this endpoint.
 - `POST /api/v1/adapters/:adapterId/install` requires an active instance admin
   with a Bearer credential. It installs a missing CLI with its fixed official
   npm command, then checks whether the CLI command is visible on Gateway's
   `PATH`. It rejects an already installed CLI, an uncertain discovery result,
-  missing npm, or unmet Node.js requirements. Only one CLI install or update
-  may run at a time. Existing terminal sessions are not restarted. npm uses
+  missing npm, or unmet Node.js requirements. Different CLIs may install or
+  update concurrently. If a timed-out subprocess cannot be confirmed stopped,
+  only that CLI remains locked until Gateway restarts. Existing terminal sessions are not restarted. npm uses
   the Gateway host's npm registry configuration; version checks use
   `registry.npmjs.org`. The OpenCode adapter tracks the `@opencode/cli`
   package documented under OpenCode's `/v2/docs` channel. Grok tracks
   `@xai-official/grok`.
+
+Official command audit (2026-10-31): the one-click npm installs use the packages
+below. OpenCode includes optional dependencies and permits its postinstall
+script; Pi disables lifecycle scripts as documented; MiniMax uses `@latest`,
+the public npm registry, optional dependencies, and the two documented allowed
+scripts (`@minimax-ai/code`, `better-sqlite3`).
+MiniMax's `mcode update` requires terminal confirmation and, in the official
+npm 0.7.4 release, only prints instructions without a TTY. Gateway therefore
+uses the official npm command for its non-interactive update and validates
+Node.js/npm before execution; native/custom installations may still require
+their original install method if the npm binary does not replace the command
+on `PATH` (reported as `versionStillBehind`).
+
+| CLI | Official npm package | Official update command and reference |
+| --- | --- | --- |
+| Claude Code | `@anthropic-ai/claude-code` | [`claude update`](https://code.claude.com/docs/en/setup) |
+| OpenCode 2 | [`@opencode/cli`](https://opencode.ai/v2/docs/) | [`opencode upgrade`](https://opencode.ai/docs/cli/#upgrade) |
+| Codex | [`@openai/codex`](https://learn.chatgpt.com/docs/codex/cli) | [`codex update`](https://learn.chatgpt.com/docs/developer-commands?surface=cli#codex-update) (release builds supporting self-update) |
+| Kimi Code | [`@moonshot-ai/kimi-code`](https://moonshotai.github.io/kimi-code/en/guides/getting-started) | [`kimi upgrade --yes`](https://moonshotai.github.io/kimi-code/en/reference/kimi-command) |
+| Pi | [`@earendil-works/pi-coding-agent`](https://pi.dev/docs/latest/quickstart) | [`pi update --self`](https://pi.dev/docs/latest/cli) (official alias of `pi update`) |
+| MiniMax Code | [`@minimax-ai/code@latest`](https://github.com/MiniMax-AI/minimax-code/blob/main/README.md) | The same official npm install command (non-interactive update) |
+| Grok | [`@xai-official/grok`](https://docs.x.ai/build/enterprise) | [`grok update`](https://docs.x.ai/build/cli/reference) |
 
 ### Projects
 

@@ -1839,7 +1839,9 @@ export async function checkAdapterUpdates(refresh = false): Promise<{ updates: A
 }
 
 export async function updateAdapter(id: RuntimeAdapterId): Promise<AdapterUpdateResult> {
-  return fetchJson(`/api/v1/adapters/${id}/update`, { method: "POST", timeoutMs: 200_000 }) as Promise<AdapterUpdateResult>;
+  // Cover MiniMax's five-minute install, preflight/version probes and cleanup.
+  const timeoutMs = id === "mcode" ? 370_000 : 200_000;
+  return fetchJson(`/api/v1/adapters/${id}/update`, { method: "POST", timeoutMs }) as Promise<AdapterUpdateResult>;
 }
 
 export async function installAdapter(id: RuntimeAdapterId): Promise<AdapterInstallResult> {
