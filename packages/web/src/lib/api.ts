@@ -2950,8 +2950,11 @@ export async function stopSession(id: string): Promise<{ session: { warning?: st
   return fetchJson(`/api/v1/sessions/${id}/stop`, { method: "POST" });
 }
 
-export async function deleteSession(id: string, options?: { force?: boolean }): Promise<unknown> {
-  const suffix = options?.force ? "?force=true" : "";
+export async function deleteSession(id: string, options?: { force?: boolean; onlyStopped?: boolean }): Promise<unknown> {
+  const params = new URLSearchParams();
+  if (options?.onlyStopped) params.set("onlyStopped", "true");
+  if (options?.force) params.set("force", "true");
+  const suffix = params.size ? `?${params}` : "";
   return fetchJson(`/api/v1/sessions/${id}${suffix}`, { method: "DELETE" });
 }
 

@@ -77,3 +77,88 @@ test('HTTP force delete fails closed when the runtime state cannot be verified',
   }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
  }finally{f.close();}}
 });
+
+test('conditional delete never stops a session that became running', async () => {
+ const f=forceFixture('running');
+ try {
+  f.sessions.update(f.session.id,{status:'running'});
+  const server=f.app.listen(0,'127.0.0.1'); await once(server,'listening');
+  try {
+   const address=server.address(); assert.ok(address&&typeof address!=='string');
+   const response=await fetch(`http://127.0.0.1:${address.port}/sessions/${f.session.id}?onlyStopped=true`,{method:'DELETE',headers:f.headers});
+   assert.equal(response.status,409);
+   assert.equal((await response.json() as {details:{code:string}}).details.code,'SESSION_NOT_STOPPED');
+   assert.ok(f.sessions.getById(f.session.id));
+  } finally {server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+ } finally {f.close();}
+});
+
+for (const force of [false, true]) test(`conditional delete rechecks status after waiting for the lifecycle lock (force=${force})`, async () => {
+ const f=forceFixture('running');
+ let releaseLock!: () => void;
+ const held=new Promise<void>(resolve=>{releaseLock=resolve;});
+ let enterLock!: () => void;
+ const entered=new Promise<void>(resolve=>{enterLock=resolve;});
+ const lifecycle=f.manager.runExclusive(f.session.id,async()=>{enterLock();await held;});
+ try {
+  await entered;
+  f.sessions.update(f.session.id,{status:'stopped'});
+  const server=f.app.listen(0,'127.0.0.1');await once(server,'listening');
+  try {
+   const address=server.address();assert.ok(address&&typeof address!=='string');
+   const requested=once(server,'request');
+   const responsePromise=fetch(`http://127.0.0.1:${address.port}/sessions/${f.session.id}?onlyStopped=true${force?'&force=true':''}`,{method:'DELETE',headers:f.headers});
+   await requested;
+   f.sessions.update(f.session.id,{status:'running'});
+   releaseLock();
+   const response=await responsePromise;
+   assert.equal(response.status,409);
+   assert.equal((await response.json() as {details:{code:string}}).details.code,'SESSION_NOT_STOPPED');
+   assert.equal(f.sessions.getById(f.session.id)?.status,'running');
+   assert.equal(f.repo.get(f.session.id)?.status,'pending');
+  } finally {releaseLock();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+ } finally {releaseLock();await lifecycle;f.close();}
+});
+
+for (const confirmed of [false, true]) test(`conditional delete ${confirmed ? 'removes confirmed stopped session' : 'retains unconfirmed session'}`, async () => {
+ const f=forceFixture('exited');
+ try {
+  f.sessions.update(f.session.id,{status:'exited'});
+  if (confirmed) f.repo.confirm(f.session.id,f.generation.launchNonce,f.receipt);
+  const server=f.app.listen(0,'127.0.0.1'); await once(server,'listening');
+  try {
+   const address=server.address(); assert.ok(address&&typeof address!=='string');
+   const response=await fetch(`http://127.0.0.1:${address.port}/sessions/${f.session.id}?onlyStopped=true`,{method:'DELETE',headers:f.headers});
+   assert.equal(response.status,confirmed ? 200 : 409);
+   assert.equal(Boolean(f.sessions.getById(f.session.id)),!confirmed);
+  } finally {server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+ } finally {f.close();}
+});
+
+for (const status of ['lost', 'exited'] as const) test(`conditional cleanup can remove ${status} with unconfirmed proof only when explicitly forced`, async () => {
+ const f=forceFixture(null);
+ try {
+  f.sessions.update(f.session.id,{status,runtimeSessionName:null});
+  const server=f.app.listen(0,'127.0.0.1'); await once(server,'listening');
+  try {
+   const address=server.address(); assert.ok(address&&typeof address!=='string');
+   const response=await fetch(`http://127.0.0.1:${address.port}/sessions/${f.session.id}?onlyStopped=true&force=true`,{method:'DELETE',headers:f.headers});
+   assert.equal(response.status,200);
+   assert.equal(f.sessions.getById(f.session.id),undefined);
+  } finally {server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+ } finally {f.close();}
+});
+
+test('conditional forced cleanup refuses a still running runtime', async () => {
+ const f=forceFixture('running');
+ try {
+  f.sessions.update(f.session.id,{status:'exited',runtimeSessionName:null});
+  const server=f.app.listen(0,'127.0.0.1'); await once(server,'listening');
+  try {
+   const address=server.address(); assert.ok(address&&typeof address!=='string');
+   const response=await fetch(`http://127.0.0.1:${address.port}/sessions/${f.session.id}?onlyStopped=true&force=true`,{method:'DELETE',headers:f.headers});
+   assert.equal(response.status,409);
+   assert.ok(f.sessions.getById(f.session.id));
+  } finally {server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+ } finally {f.close();}
+});

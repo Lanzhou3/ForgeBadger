@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
 import type { Session } from "@/lib/api";
@@ -15,9 +15,11 @@ class ResizeObserverStub {
 }
 window.ResizeObserver = window.ResizeObserver ?? (ResizeObserverStub as unknown as typeof ResizeObserver);
 
-const { getSessionBoardMock, getDependenciesMock, pushMock } = vi.hoisted(() => ({
+const { getSessionBoardMock, getDependenciesMock, deleteSessionMock, toastWarningMock, pushMock } = vi.hoisted(() => ({
   getSessionBoardMock: vi.fn(),
   getDependenciesMock: vi.fn(),
+  deleteSessionMock: vi.fn(),
+  toastWarningMock: vi.fn(),
   pushMock: vi.fn(),
 }));
 
@@ -32,8 +34,11 @@ vi.mock("@/lib/api", async (importOriginal) => {
     ...actual,
     getSessionBoard: getSessionBoardMock,
     getDependencies: getDependenciesMock,
+    deleteSession: deleteSessionMock,
   };
 });
+
+vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), warning: toastWarningMock, error: vi.fn() } }));
 
 function makeSession(overrides: Partial<Session>): Session {
   return {
@@ -104,6 +109,30 @@ describe("SessionsPage", () => {
         message: "",
       },
     });
+  });
+
+  it("clears stopped and lost sessions across filters and reports failures", async () => {
+    const rows = [
+      makeSession({ id: "running", status: "running" }),
+      makeSession({ id: "lost", status: "lost" }),
+      makeSession({ id: "error", status: "error" }),
+      makeSession({ id: "stopped", status: "stopped" }),
+      makeSession({ id: "exited", status: "exited" }),
+    ];
+    getSessionBoardMock.mockResolvedValue({ board: { projects: [{ id: "p1", name: "Alpha" }], sessions: rows, sessionTasks: {} } });
+    deleteSessionMock.mockImplementation((id: string) => id === "exited" ? Promise.reject(new Error("changed")) : Promise.resolve({}));
+    renderPage();
+    const search = await screen.findByPlaceholderText("搜索会话、项目或工具");
+    fireEvent.change(search, { target: { value: "no matches" } });
+    fireEvent.click(screen.getByRole("button", { name: "清理已停止和丢失的会话" }));
+    expect(await screen.findByText(/将删除所有项目中的 3 个已停止或已丢失会话/)).toBeTruthy();
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "清理已停止和丢失的会话" }));
+    await waitFor(() => expect(toastWarningMock).toHaveBeenCalledWith(expect.stringContaining("已清理 2 个会话，1 个未能清理")));
+    expect(deleteSessionMock).toHaveBeenCalledTimes(3);
+    expect(deleteSessionMock).toHaveBeenCalledWith("lost", { onlyStopped: true, force: true });
+    expect(deleteSessionMock).toHaveBeenCalledWith("stopped", { onlyStopped: true, force: true });
+    expect(deleteSessionMock).toHaveBeenCalledWith("exited", { onlyStopped: true, force: true });
   });
 
   it("keeps the toolbar (including the search input) mounted when filters match nothing", async () => {

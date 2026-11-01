@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, FolderOpen, Plus, TerminalSquare } from "lucide-react";
+import { AlertTriangle, FolderOpen, Plus, TerminalSquare, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -38,7 +38,7 @@ import {
   stopSession,
 } from "@/lib/api";
 import { notifySessionTabsChanged } from "@/components/session-tabs";
-import { pruneSessionTabs, readSessionTabs, sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
+import { pruneSessionTabs, readSessionTabs, removeSessionTab, sessionToTab, upsertSessionTab } from "@/lib/session-tabs";
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { toast } from "@/lib/toast";
 import { useLanguage } from "@/hooks/use-language";
@@ -53,6 +53,7 @@ export default function SessionsPage() {
   const [selectedCliTools, setSelectedCliTools] = useState<ReadonlySet<string>>(new Set());
   const [showEmptyProjects, setShowEmptyProjects] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [clearStoppedOpen, setClearStoppedOpen] = useState(false);
   const [forceDeleteId, setForceDeleteId] = useState<string | null>(null);
   const { data, isLoading, isFetching, isError } = useQuery({
     queryKey: ["sessions-board"],
@@ -135,8 +136,35 @@ export default function SessionsPage() {
     },
   });
 
+  const clearStoppedMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results: PromiseSettledResult<unknown>[] = [];
+      for (let offset = 0; offset < ids.length; offset += 5) {
+        results.push(...await Promise.allSettled(
+          ids.slice(offset, offset + 5).map((id) => deleteSession(id, { onlyStopped: true, force: true }))
+        ));
+      }
+      return results;
+    },
+    onSuccess: (results, ids) => {
+      const succeeded = results.filter((result) => result.status === "fulfilled").length;
+      results.forEach((result, index) => {
+        const id = ids[index];
+        if (result.status === "fulfilled" && id) removeSessionTab(id);
+      });
+      if (succeeded) notifySessionTabsChanged();
+      const failed = results.length - succeeded;
+      const message = t(failed ? "sessions.clearStoppedPartial" : "sessions.clearStoppedSuccess")
+        .replace("{count}", String(succeeded)).replace("{failed}", String(failed));
+      if (failed) toast.warning(message); else toast.success(message);
+      setClearStoppedOpen(false);
+      refreshSessions();
+    },
+  });
+
   const board = data?.board;
   const sessions = board?.sessions ?? [];
+  const stoppedSessions = sessions.filter((session) => ["idle", "stopped", "exited", "completed", "lost"].includes(session.status));
   const projects = board?.projects ?? [];
   const sessionTasks = board?.sessionTasks ?? {};
   const hasProjects = !isLoading && projects.length > 0;
@@ -213,7 +241,7 @@ export default function SessionsPage() {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
-  const actionPending = startMutation.isPending || stopMutation.isPending || deleteMutation.isPending;
+  const actionPending = startMutation.isPending || stopMutation.isPending || deleteMutation.isPending || clearStoppedMutation.isPending;
 
   const toggleCliTool = (tool: string) => {
     setSelectedCliTools((current) => {
@@ -249,23 +277,31 @@ export default function SessionsPage() {
             {t("sessions.subtitle")}
           </p>
         </div>
-        {hasProjects ? (
-          <Button
-            size="sm"
-            variant="brand"
-            onClick={() => setProjectPickerOpen(true)}
-          >
-            <Plus className="size-4" />
-            {t("projects.newSession")}
-          </Button>
-        ) : (
-          <Button asChild size="sm" variant="brand">
-            <Link href="/projects/new">
+        <div className="flex flex-wrap items-center gap-2">
+          {sessions.length > 0 && (
+            <Button size="sm" variant="outline" disabled={actionPending || isFetching || isError || stoppedSessions.length === 0} onClick={() => setClearStoppedOpen(true)}>
+              <Trash2 className="size-4" />
+              {t("sessions.clearStopped")}
+            </Button>
+          )}
+          {hasProjects ? (
+            <Button
+              size="sm"
+              variant="brand"
+              onClick={() => setProjectPickerOpen(true)}
+            >
               <Plus className="size-4" />
-              {t("sessions.createProject")}
-            </Link>
-          </Button>
-        )}
+              {t("projects.newSession")}
+            </Button>
+          ) : (
+            <Button asChild size="sm" variant="brand">
+              <Link href="/projects/new">
+                <Plus className="size-4" />
+                {t("sessions.createProject")}
+              </Link>
+            </Button>
+          )}
+        </div>
       </div>
 
       {isLoading ? (
@@ -434,6 +470,21 @@ export default function SessionsPage() {
                 </Button>
               </div>
             ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={clearStoppedOpen} onOpenChange={(open) => { if (!clearStoppedMutation.isPending) setClearStoppedOpen(open); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("sessions.clearStoppedTitle")}</DialogTitle>
+            <DialogDescription>{t("sessions.clearStoppedDescription").replace("{count}", String(stoppedSessions.length))}</DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" disabled={clearStoppedMutation.isPending} onClick={() => setClearStoppedOpen(false)}>{t("sessions.forceDeleteCancel")}</Button>
+            <Button variant="destructive" size="sm" disabled={clearStoppedMutation.isPending || stoppedSessions.length === 0} onClick={() => clearStoppedMutation.mutate(stoppedSessions.map((session) => session.id))}>
+              {clearStoppedMutation.isPending ? t("sessions.clearingStopped") : t("sessions.clearStopped")}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

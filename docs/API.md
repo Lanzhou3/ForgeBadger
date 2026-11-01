@@ -982,6 +982,7 @@ Project Agent orchestration:
 - `POST /api/v1/sessions/:id/stop`
 - `DELETE /api/v1/sessions/:id`
 - `DELETE /api/v1/sessions/:id?force=true`
+- `DELETE /api/v1/sessions/:id?onlyStopped=true`
 
 `GET /api/v1/sessions/:id/summary` requires authentication and returns
 `{ summary, latestResult, workState }` inside `data`; another tenant's session
@@ -1046,6 +1047,8 @@ request fails with `409 SESSION_RUNTIME_STOP_UNCONFIRMED` and the row plus its
 durable stop proof are kept â retry once the leftover processes exit. A
 pending stop proof also blocks project deletion; force-delete the session
 first in that case.
+
+`?onlyStopped=true` deletes only idle, stopped, exited, completed, or lost sessions after checking their current status under the lifecycle lock and verifying a stop receipt without stopping the runtime. It returns `409 SESSION_NOT_STOPPED` if the session is active or has another status. With `force=true`, unconfirmed sessions use the force-delete gate described below; leftover processes may continue running.
 
 `?force=true` is the operator escape hatch: it is rejected with
 `409 SESSION_FORCE_DELETE_NOT_ALLOWED` while the daemon reports the runtime

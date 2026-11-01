@@ -873,6 +873,18 @@ describe("api client", () => {
       "http://127.0.0.1:18332/api/v1/sessions/session-1?force=true",
       expect.objectContaining({ method: "DELETE" })
     );
+
+    await deleteSession("session-1", { onlyStopped: true });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:18332/api/v1/sessions/session-1?onlyStopped=true",
+      expect.objectContaining({ method: "DELETE" })
+    );
+
+    await deleteSession("session-1", { onlyStopped: true, force: true });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:18332/api/v1/sessions/session-1?onlyStopped=true&force=true",
+      expect.objectContaining({ method: "DELETE" })
+    );
   });
 
 
