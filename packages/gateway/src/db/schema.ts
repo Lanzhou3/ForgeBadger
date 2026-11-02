@@ -1002,12 +1002,18 @@ export const userSettings = sqliteTable("user_settings", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 });
 
+// Ordered Claude-route candidate list: position 1 is the primary target,
+// later positions are failover candidates (migration 0143).
 export const claudeRouteAssignments = sqliteTable("claude_route_assignments", {
-  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   providerProfileId: text("provider_profile_id").notNull().references(() => modelProviderProfiles.id, { onDelete: "cascade" }),
   credentialId: text("credential_id").notNull().references(() => providerCredentials.id, { onDelete: "cascade" }),
+  position: integer("position").notNull().default(1),
   updatedAt: integer("updated_at").notNull()
-});
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.providerProfileId] }),
+  idx_claude_route_assignments_user_position: uniqueIndex("idx_claude_route_assignments_user_position").on(table.userId, table.position)
+}));
 
 export const integrationFeishuConfigs = sqliteTable(
   "integration_feishu_configs",

@@ -995,6 +995,13 @@
       "when": 1792600000000,
       "tag": "0142_telegram_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1792700000000,
+      "tag": "0143_claude_route_failover",
+      "breakpoints": true
     }
   ]
 }
