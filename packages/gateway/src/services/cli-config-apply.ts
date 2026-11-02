@@ -82,7 +82,9 @@ export interface CliConfigApplyInput {
   reasoningEffort?: CodexReasoningEffort | undefined;
   /**
    * Claude only: point Claude Code at the Gateway route endpoint instead of
-   * the provider (required for OpenAI-protocol providers).
+   * the provider. Required for OpenAI-protocol providers; optional for
+   * Anthropic-protocol relays, where it adds the Gateway's retry/rectify
+   * layer and keeps the provider key out of the CLI config.
    */
   routeThroughGateway?: boolean | undefined;
   /**
@@ -150,10 +152,11 @@ interface ApplyContext {
   /** Effective ANTHROPIC_BASE_URL: the provider endpoint, or the Gateway loopback URL when routed. */
   baseUrl: string | null;
   /**
-   * Claude protocol routing state: "direct" = provider speaks Anthropic
-   * protocol; "routed" = applied through the Gateway endpoint;
-   * "route_required" = OpenAI protocol without routeThroughGateway (apply
-   * must fail; preview only).
+   * Claude protocol routing state: "direct" = the provider endpoint is
+   * written into the CLI config as-is; "routed" = applied through the
+   * Gateway endpoint (any provider, when routeThroughGateway is set);
+   * "route_required" = OpenAI-protocol provider without routeThroughGateway
+   * (apply must fail; preview only).
    */
   routeMode: "direct" | "routed" | "route_required";
   /** Loopback route token written as ANTHROPIC_AUTH_TOKEN when routed. */
@@ -487,13 +490,20 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
       error instanceof Error ? error.message : "Provider endpoint is not a public HTTPS endpoint"
     );
   }
-  // An explicit Anthropic endpoint takes precedence over the provider's
-  // default protocol, including a stale routeThroughGateway request flag.
-  // Preserve legacy Anthropic providers whose endpoint lives in baseUrl.
+  // Claude Code routing resolution:
+  // - OpenAI-protocol providers can only reach Claude Code through the
+  //   Gateway route, so the route is mandatory (route_required).
+  // - Anthropic-protocol relays default to a direct apply, but an explicit
+  //   routeThroughGateway routes them through the Gateway data plane instead:
+  //   the request gets the retry/rectify layer, and the provider key stays
+  //   in the vault instead of the CLI config. The explicit flag wins over
+  //   the provider's endpoint shape (including a legacy explicit
+  //   anthropicBaseUrl, which still resolves the upstream the Gateway calls).
   let routeMode: ApplyContext["routeMode"] = "direct";
   let routeToken: string | null = null;
-  if (input.adapter === "claude" && !provider.anthropicBaseUrl && provider.apiFormat !== "anthropic") {
-    routeMode = "route_required";
+  if (input.adapter === "claude") {
+    const openaiOnly = !provider.anthropicBaseUrl && provider.apiFormat !== "anthropic";
+    if (openaiOnly) routeMode = "route_required";
     if (input.routeThroughGateway === true) {
       const settings = new ClaudeRouteRepository(input.db, input.userId, input.masterKey).getSettings();
       if (!settings.enabled || !settings.token) {

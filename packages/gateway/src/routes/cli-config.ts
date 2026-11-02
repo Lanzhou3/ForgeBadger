@@ -96,6 +96,13 @@ const claudeRouteBodySchema = z.object({
   enabled: z.boolean()
 }).strict();
 
+const claudeRouteAssignmentsBodySchema = z.object({
+  assignments: z.array(z.object({
+    providerProfileId: z.string().min(1),
+    credentialId: z.string().min(1).optional()
+  }).strict()).min(1).max(5)
+}).strict();
+
 interface CliConfigRouteOptions {
   operationObserver?: ((operation: string) => void) | undefined;
   /** Test seam: DNS resolver for the apply SSRF endpoint check. */
@@ -165,6 +172,68 @@ export function createCliConfigRoutes(
     observe(options, "route.update");
     handle(res, async () => {
       new ClaudeRouteRepository(db, userId, masterKey).setEnabled(body.data.enabled);
+      return { routing: readClaudeRouteState(db, masterKey, userId) };
+    });
+  });
+
+  // Full ordered failover list for the Claude route (position 1 = primary).
+  router.put("/routing/claude/assignments", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    if (!userIsInstanceAdmin(db, userId)) {
+      res.status(403).json({
+        code: 1,
+        message: "Instance administrator access is required",
+        details: { code: "INSTANCE_ADMIN_REQUIRED" }
+      });
+      return;
+    }
+    const body = claudeRouteAssignmentsBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ code: 1, message: "Invalid Claude route assignments payload" });
+      return;
+    }
+    const repository = new ModelProviderRepository(db, userId, masterKey);
+    const seen = new Set<string>();
+    for (const entry of body.data.assignments) {
+      if (seen.has(entry.providerProfileId)) {
+        res.status(400).json({ code: 1, message: "Duplicate provider in failover order" });
+        return;
+      }
+      seen.add(entry.providerProfileId);
+    }
+    const resolved = body.data.assignments.map((entry) => {
+      const provider = repository.getProviderProfile(entry.providerProfileId);
+      const credential = entry.credentialId
+        ? provider
+          ? repository.getCredential(entry.credentialId)
+          : undefined
+        : provider
+          ? repository.getOldestActiveCredential(provider.id)
+          : undefined;
+      return { provider, credential };
+    });
+    for (let i = 0; i < resolved.length; i++) {
+      const { provider, credential } = resolved[i]!;
+      if (!provider) {
+        res.status(404).json({ code: 1, message: "Unknown provider in failover order" });
+        return;
+      }
+      // An explicitly assigned credential may be inactive (the data plane
+      // falls back to the oldest active one); a defaulted credential must
+      // exist and be active, or the candidate could never route.
+      if (!credential || credential.providerProfileId !== provider.id) {
+        res.status(400).json({ code: 1, message: "No usable credential for provider" });
+        return;
+      }
+    }
+    observe(options, "route.assignments.update");
+    handle(res, async () => {
+      new ClaudeRouteRepository(db, userId, masterKey).setOrderedAssignments(
+        body.data.assignments.map((entry, index) => ({
+          providerProfileId: entry.providerProfileId,
+          credentialId: resolved[index]!.credential!.id
+        }))
+      );
       return { routing: readClaudeRouteState(db, masterKey, userId) };
     });
   });
@@ -555,20 +624,37 @@ function parseAdapter(value: string | undefined): AdapterId | undefined {
 function readClaudeRouteState(db: Database, masterKey: string, userId: string): Record<string, unknown> {
   const routeRepository = new ClaudeRouteRepository(db, userId, masterKey);
   const settings = routeRepository.getSettings();
-  const assignment = routeRepository.getAssignment();
-  const provider = assignment
-    ? new ModelProviderRepository(db, userId, masterKey).getProviderProfile(assignment.providerProfileId)
-    : undefined;
+  const providerRepository = new ModelProviderRepository(db, userId, masterKey);
+  const assignments = routeRepository.listAssignments().map((assignment) => {
+    const provider = providerRepository.getProviderProfile(assignment.providerProfileId);
+    const modelIds = provider
+      ? providerRepository.listModelProfiles(provider.id)
+        .filter((model) => model.status === "active")
+        .map((model) => model.modelId)
+      : [];
+    return {
+      position: assignment.position,
+      providerProfileId: assignment.providerProfileId,
+      providerName: provider ? provider.name : null,
+      providerStatus: provider ? provider.status : null,
+      credentialId: assignment.credentialId,
+      modelIds,
+      updatedAt: assignment.updatedAt
+    };
+  });
+  const primary = assignments[0];
   return {
     enabled: settings.enabled,
     hasToken: settings.token !== null,
     gatewayUrl: gatewayLoopbackUrl(),
-    assignment: assignment && provider
+    assignments,
+    // Legacy single-assignment view (primary candidate) kept for the current UI.
+    assignment: primary
       ? {
-          providerProfileId: assignment.providerProfileId,
-          providerName: provider.name,
-          credentialId: assignment.credentialId,
-          updatedAt: assignment.updatedAt
+          providerProfileId: primary.providerProfileId,
+          providerName: primary.providerName,
+          credentialId: primary.credentialId,
+          updatedAt: primary.updatedAt
         }
       : null
   };
