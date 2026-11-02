@@ -57,17 +57,38 @@ describe("Claude endpoint routing", () => {
     { apiFormat: "openai-responses" as const, anthropicBaseUrl: "https://example.com/anthropic", openaiBaseUrl: "https://example.com/v1" },
     { apiFormat: "openai-compatible" as const, anthropicBaseUrl: "https://example.com/anthropic" },
     { apiFormat: "anthropic" as const },
-  ])("applies native Anthropic configuration directly: %j", async (overrides) => {
+  ])("applies native Anthropic configuration directly by default: %j", async (overrides) => {
     const invalidate = setup(overrides);
     fireEvent.click(screen.getByRole("button", { name: "models.applyChangeSummary" }));
     await waitFor(() => expect(previewCliConfigApply).toHaveBeenCalled());
+    // The optional-routing checkbox is off by default: no route flag.
     expect(vi.mocked(previewCliConfigApply).mock.calls[0]?.[1]).not.toHaveProperty("routeThroughGateway");
     fireEvent.click(screen.getByRole("button", { name: "models.applyConfig" }));
     await waitFor(() => expect(applyCliConfigToAdapter).toHaveBeenCalled());
     expect(vi.mocked(applyCliConfigToAdapter).mock.calls[0]?.[1]).not.toHaveProperty("routeThroughGateway");
     expect(setClaudeRoute).not.toHaveBeenCalled();
-    expect(getClaudeRoute).not.toHaveBeenCalled();
+    // The route state is fetched to render the optional-routing hint.
+    await waitFor(() => expect(getClaudeRoute).toHaveBeenCalled());
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["claude-route"] }));
+  });
+
+  it("offers optional Gateway routing for Anthropic providers and applies through it when checked", async () => {
+    setup({ apiFormat: "anthropic" });
+    fireEvent.click(screen.getByRole("button", { name: "models.applyAdvancedOptions" }));
+    const checkbox = screen.getByRole("checkbox", { name: "models.claudeRouteOptional" });
+    fireEvent.click(checkbox);
+    // Route is disabled (mock): the button offers the one-tap enable+apply.
+    const button = screen.getByRole("button", { name: "models.claudeRouteEnableAndApply" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+    await waitFor(() => expect(applyCliConfigToAdapter).toHaveBeenCalledWith("claude", expect.objectContaining({ routeThroughGateway: true })));
+    expect(setClaudeRoute).toHaveBeenCalledWith(true);
+  });
+
+  it("does not offer the optional routing checkbox for OpenAI-only providers (route is mandatory there)", async () => {
+    setup({ apiFormat: "openai-compatible" });
+    fireEvent.click(screen.getByRole("button", { name: "models.applyAdvancedOptions" }));
+    expect(screen.queryByRole("checkbox", { name: "models.claudeRouteOptional" })).toBeNull();
   });
 
   it.each(["openai-responses", "openai-compatible"] as const)("enables routing for %s without Anthropic", async (apiFormat) => {

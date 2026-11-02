@@ -2183,11 +2183,24 @@ export interface ClaudeRouteAssignment {
   updatedAt: number;
 }
 
+/** One entry of the ordered Claude-route failover list (position 1 = primary). */
+export interface ClaudeRouteAssignmentEntry {
+  position: number;
+  providerProfileId: string;
+  providerName: string | null;
+  providerStatus: string | null;
+  credentialId: string;
+  modelIds: string[];
+  updatedAt: number;
+}
+
 export interface ClaudeRouteState {
   enabled: boolean;
   hasToken: boolean;
   /** Loopback URL Claude Code is pointed at when a provider is applied through the route. */
   gatewayUrl: string;
+  /** Ordered failover candidates (position 1 = primary). */
+  assignments: ClaudeRouteAssignmentEntry[];
   assignment: ClaudeRouteAssignment | null;
 }
 
@@ -2200,6 +2213,16 @@ export async function setClaudeRoute(enabled: boolean): Promise<ClaudeRouteState
   const { routing } = await fetchJson<{ routing: ClaudeRouteState }>("/api/v1/cli-config/routing/claude", {
     method: "PUT",
     body: JSON.stringify({ enabled }),
+  });
+  return routing;
+}
+
+export async function setClaudeRouteAssignments(
+  assignments: Array<{ providerProfileId: string; credentialId?: string }>,
+): Promise<ClaudeRouteState> {
+  const { routing } = await fetchJson<{ routing: ClaudeRouteState }>("/api/v1/cli-config/routing/claude/assignments", {
+    method: "PUT",
+    body: JSON.stringify({ assignments }),
   });
   return routing;
 }
