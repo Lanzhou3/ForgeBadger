@@ -367,7 +367,9 @@
 
   /* Restrained motion helpers keyed to the --forgebadger-motion-* tokens:
      short, quiet, ease-out. forgebadger-motion-surface covers interactive
-     surfaces (buttons, cards, chips), including the press scale. */
+     surfaces (buttons, cards, chips); the translate/rotate/scale entries
+     mirror Tailwind v4's independent transform properties so press states
+     like active:scale-[0.98] animate instead of snapping. */
   .forgebadger-motion-fade {
     transition: opacity var(--forgebadger-motion-fast) var(--forgebadger-ease-out);
   }
@@ -379,7 +381,10 @@
       color var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
       box-shadow var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
       opacity var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
-      transform var(--forgebadger-motion-fast) var(--forgebadger-ease-out);
+      transform var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
+      translate var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
+      rotate var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
+      scale var(--forgebadger-motion-fast) var(--forgebadger-ease-out);
   }
 
   /* Session board column stagger entrance (pair with an inline animation-delay). */
