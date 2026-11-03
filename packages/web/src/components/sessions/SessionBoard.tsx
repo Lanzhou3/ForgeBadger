@@ -11,6 +11,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 
+import { gsap, useGSAP } from "@/lib/gsap-motion";
 import type { Session, SessionBoardTask } from "@/lib/api";
 import { sessionTabGroupColor } from "@/lib/session-tabs";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,9 @@ import {
 
 const EDGE_FADE_PX = 32;
 const SCROLL_EDGE_TOLERANCE_PX = 1;
+/** Cap the staggered card entrance per column so wide lanes stay snappy. */
+const ENTRANCE_CARDS_PER_COLUMN = 4;
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
 export function buildEdgeFadeMask(fadeLeft: boolean, fadeRight: boolean): string | undefined {
   if (!fadeLeft && !fadeRight) {
@@ -67,12 +71,69 @@ export function SessionBoard({
   const [liveWidth, setLiveWidth] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [edgeFade, setEdgeFade] = useState({ left: false, right: false });
+  // The entrance runs exactly once per mount: filters, polling refetches, and
+  // session actions re-render this component but must not replay it.
+  const entrancePlayedRef = useRef(false);
   const dragSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor)
   );
 
   const width = liveWidth ?? columnWidth;
+
+  useGSAP(
+    () => {
+      if (entrancePlayedRef.current) {
+        return;
+      }
+      entrancePlayedRef.current = true;
+      const root = scrollRef.current;
+      if (!root || window.matchMedia?.(REDUCED_MOTION)?.matches) {
+        return;
+      }
+      const columnEls = Array.from(
+        root.querySelectorAll<HTMLElement>(".forgebadger-board-column")
+      );
+      if (columnEls.length === 0) {
+        return;
+      }
+      const timeline = gsap.timeline({ defaults: { ease: "power2.out" } });
+      columnEls.forEach((columnEl, columnIndex) => {
+        const columnAt = columnIndex * 0.07;
+        // clearProps hands the column back to dnd-kit/React once the tween
+        // completes so no inline transform ever competes with drag transforms.
+        timeline.fromTo(
+          columnEl,
+          { autoAlpha: 0, y: 10 },
+          {
+            autoAlpha: 1,
+            y: 0,
+            duration: 0.3,
+            clearProps: "transform,opacity,visibility",
+          },
+          columnAt
+        );
+        const cardEls = Array.from(
+          columnEl.querySelectorAll<HTMLElement>("[data-session-id]")
+        ).slice(0, ENTRANCE_CARDS_PER_COLUMN);
+        if (cardEls.length > 0) {
+          timeline.fromTo(
+            cardEls,
+            { autoAlpha: 0, y: 6 },
+            {
+              autoAlpha: 1,
+              y: 0,
+              duration: 0.22,
+              stagger: 0.03,
+              clearProps: "transform,opacity,visibility",
+            },
+            columnAt + 0.06
+          );
+        }
+      });
+    },
+    { scope: scrollRef }
+  );
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -185,24 +246,26 @@ export function SessionBoardSkeleton() {
     <div className="flex items-start gap-4 overflow-x-auto pb-2">
       {[0, 1, 2].map((columnIndex) => (
         <div key={columnIndex} className="flex w-[300px] shrink-0 flex-col gap-2">
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 shadow-xs">
             <div className="size-2 rounded-full bg-muted-foreground/30" />
             <div className="h-4 w-24 animate-pulse rounded bg-muted" />
             <div className="ml-auto h-3 w-16 animate-pulse rounded bg-muted" />
           </div>
-          {[0, 1, 2].map((cardIndex) => (
-            <div
-              key={cardIndex}
-              className={cn("animate-pulse rounded-lg border border-border bg-card p-3 pl-4")}
-            >
-              <div className="flex items-center gap-2">
-                <div className="size-2 rounded-full bg-muted" />
-                <div className="h-4 w-16 rounded bg-muted" />
+          <div className="rounded-xl bg-muted/20 p-2">
+            {[0, 1, 2].map((cardIndex) => (
+              <div
+                key={cardIndex}
+                className={cn("animate-pulse rounded-lg border border-border bg-card p-3")}
+              >
+                <div className="flex items-center gap-2">
+                  <div className="size-2 rounded-full bg-muted" />
+                  <div className="h-4 w-16 rounded bg-muted" />
+                </div>
+                <div className="mt-2 h-4 w-4/5 rounded bg-muted" />
+                <div className="mt-1.5 h-3 w-2/5 rounded bg-muted" />
               </div>
-              <div className="mt-2 h-4 w-4/5 rounded bg-muted" />
-              <div className="mt-1.5 h-3 w-2/5 rounded bg-muted" />
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       ))}
     </div>

@@ -24,7 +24,6 @@ interface SessionBoardColumnProps {
 
 export function SessionBoardColumn({
   column,
-  index,
   color,
   width,
   onNewSessionFor,
@@ -53,18 +52,17 @@ export function SessionBoardColumn({
       ref={setRefs}
       aria-label={column.projectName}
       className={cn(
-        "forgebadger-board-column-in relative flex shrink-0 flex-col gap-2 self-start",
+        "forgebadger-board-column relative flex shrink-0 flex-col gap-2 self-start",
         isDragging ? "z-20 opacity-80" : ""
       )}
       style={{
         width,
-        animationDelay: `${index * 40}ms`,
         transform: transform
           ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
           : undefined,
       }}
     >
-      <header className="sticky top-0 z-10 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5">
+      <header className="sticky top-0 z-10 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 shadow-xs">
         {sortable ? (
           <button
             type="button"
@@ -113,11 +111,11 @@ export function SessionBoardColumn({
           </div>
         ) : null}
       </header>
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 rounded-xl bg-muted/20 p-2">
         {column.sessions.length === 0 ? (
           <div
             className={cn(
-              "rounded-lg border border-dashed border-border/70 py-8 text-center",
+              "rounded-lg border border-dashed border-border/60 py-8 text-center",
               "text-xs text-muted-foreground"
             )}
           >
