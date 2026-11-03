@@ -29,6 +29,7 @@ import {
   type AdapterDiscovery,
   type ClaudeModelSlot,
   type CodexReasoningEffort,
+  type KimiPermissionMode,
   type ModelProfile,
   type ProviderCredentialSummary,
   type ProviderProfile,
@@ -48,6 +49,7 @@ const CLAUDE_ADVANCED_SLOTS: Array<{ slot: ClaudeModelSlot; label: string }> = [
 ];
 
 const CODEX_REASONING_EFFORTS: CodexReasoningEffort[] = ["minimal", "low", "medium", "high"];
+const KIMI_PERMISSION_MODES: KimiPermissionMode[] = ["manual", "yolo", "auto"];
 const EMPTY_ADAPTERS: AdapterDiscovery[] = [];
 
 interface ApplyToCliDialogProps {
@@ -94,6 +96,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
   const [credentialId, setCredentialId] = useState("");
   const [modelMapping, setModelMapping] = useState<Partial<Record<ClaudeModelSlot, string>>>({});
   const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort | "">("");
+  const [permissionMode, setPermissionMode] = useState<KimiPermissionMode | "">("");
   const adaptersQuery = useQuery({
     queryKey: ADAPTER_DISCOVERY_QUERY_KEY,
     queryFn: discoverAdapters,
@@ -145,6 +148,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
     setCredentialId(activeCredentials[0]?.id ?? "");
     setModelMapping({});
     setReasoningEffort("");
+    setPermissionMode("");
     setRouteOptional(false);
     setAdvancedOpen(routeRequiredRef.current);
     setPreviewExpanded(false);
@@ -162,12 +166,13 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
         ...(credentialId ? { credentialId } : {}),
         ...(adapter === "claude" && Object.keys(mapping).length > 0 ? { modelMapping: mapping } : {}),
         ...(adapter === "codex" && reasoningEffort ? { reasoningEffort } : {}),
+        ...(adapter === "kimi" && permissionMode ? { permissionMode } : {}),
         // Preview the routed document (Gateway URL + masked token) so the diff
         // matches what "enable route and apply" will write.
         ...(routeEffective ? { routeThroughGateway: true } : {}),
       };
     },
-    [adapter, credentialId, modelMapping, modelProfileId, routeEffective, provider.id, reasoningEffort]
+    [adapter, credentialId, modelMapping, modelProfileId, permissionMode, routeEffective, provider.id, reasoningEffort]
   );
 
   // The change summary is pulled lazily: only while the section is expanded,
@@ -304,7 +309,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
           </p>
         )}
 
-        {(adapter === "claude" || adapter === "codex" || routeRequired) && (
+        {(adapter === "claude" || adapter === "codex" || adapter === "kimi" || routeRequired) && (
           <div className="rounded-md border border-border/70">
             <button
               type="button"
@@ -360,6 +365,30 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
                       <option value="">{t("models.reasoningEffortDefault")}</option>
                       {CODEX_REASONING_EFFORTS.map((effort) => (
                         <option key={effort} value={effort}>{effort}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {adapter === "kimi" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="apply-cli-permission-mode">{t("models.kimiDefaultPermissionMode")}</Label>
+                    <select
+                      id="apply-cli-permission-mode"
+                      aria-label={t("models.kimiDefaultPermissionMode")}
+                      className="h-9 w-full rounded-md border bg-background px-3 text-sm md:max-w-xs"
+                      value={permissionMode}
+                      onChange={(event) => setPermissionMode(event.target.value as KimiPermissionMode | "")}
+                    >
+                      <option value="">{t("models.kimiPermissionKeepCurrent")}</option>
+                      {KIMI_PERMISSION_MODES.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {mode === "manual"
+                            ? t("models.kimiPermissionManual")
+                            : mode === "yolo"
+                              ? t("models.kimiPermissionYolo")
+                              : t("models.kimiPermissionAuto")}
+                        </option>
                       ))}
                     </select>
                   </div>

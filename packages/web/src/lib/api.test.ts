@@ -384,12 +384,17 @@ describe("api client", () => {
     }));
   });
 
-  it("loads CLI field schema and values separately", async () => {
+  it("loads and patches CLI field schema and values separately", async () => {
     await apiModule.getCliConfigFields("codex");
     await apiModule.getCliConfigFieldValues("codex");
+    await apiModule.updateCliConfigFields("kimi", { defaultPermissionMode: "yolo" });
 
     expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:18332/api/v1/cli-config/codex/fields", expect.objectContaining({}));
     expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:18332/api/v1/cli-config/codex/field-values", expect.objectContaining({}));
+    expect(fetch).toHaveBeenNthCalledWith(3, "http://127.0.0.1:18332/api/v1/cli-config/kimi/fields", expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ updates: { defaultPermissionMode: "yolo" } }),
+    }));
   });
 
   it("manages provider model profiles through REST", async () => {

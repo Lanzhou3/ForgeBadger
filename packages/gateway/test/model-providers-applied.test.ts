@@ -183,23 +183,32 @@ describe("model providers applied overview route", () => {
     assert.equal(claude.stale, true);
   });
 
-  it("parses the kimi <providerKey>/<modelId> defaultModel format for comparison", async () => {
+  it("does not mark Kimi stale when native login changes the default but the applied model remains", async () => {
     promoteToAdmin(userId);
     const { providerId, modelProfileId } = createProviderAndModel("Moonshot", "Kimi K2", "kimi-k2-0905");
     new CliConfigAppliedProviderRepository(db, userId).upsert("kimi", providerId, modelProfileId);
 
     const matching = await getOverview(token, {
-      readCliConfigSnapshot: async (adapter) => snapshotWith(adapter === "kimi" ? "moonshot/kimi-k2-0905" : "")
+      readCliConfigSnapshot: async (adapter) => adapter === "kimi" ? {
+        ...snapshotWith("kimi-code/k3"),
+        adapter,
+        providers: [{ id: "moonshot", name: "Moonshot", protocol: "anthropic", baseUrl: "https://api.deepseek.com", hasApiKey: true, isActive: false }],
+        models: [{ alias: "moonshot/kimi-k2-0905", provider: "moonshot", modelId: "kimi-k2-0905" }]
+      } : snapshotWith("")
     });
     const kimiMatch = matching.body.data.adapters.find((entry: any) => entry.adapter === "kimi");
-    assert.equal(kimiMatch.configDefaultModel, "moonshot/kimi-k2-0905");
+    assert.equal(kimiMatch.configDefaultModel, "kimi-code/k3");
     assert.equal(kimiMatch.stale, false);
 
-    const drifted = await getOverview(token, {
-      readCliConfigSnapshot: async (adapter) => snapshotWith(adapter === "kimi" ? "moonshot/other-model" : "")
+    const removed = await getOverview(token, {
+      readCliConfigSnapshot: async (adapter) => adapter === "kimi" ? {
+        ...snapshotWith("kimi-code/k3"),
+        adapter,
+        models: []
+      } : snapshotWith("")
     });
-    const kimiDrift = drifted.body.data.adapters.find((entry: any) => entry.adapter === "kimi");
-    assert.equal(kimiDrift.stale, true);
+    const kimiRemoved = removed.body.data.adapters.find((entry: any) => entry.adapter === "kimi");
+    assert.equal(kimiRemoved.stale, true);
   });
 
   it("compares the PI bare defaultModel id directly (no alias parsing)", async () => {

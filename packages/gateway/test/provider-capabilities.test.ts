@@ -10,6 +10,9 @@ describe("provider capability matrix", () => {
     assert.deepEqual(codex?.apiFormats, ["openai-responses", "openai-compatible"]);
     assert.equal(codex?.projectionScope, "user-global");
     const kimi = getProviderCapabilities().find((entry) => entry.adapter === "kimi");
+    assert.deepEqual(kimi?.apiFormats, ["anthropic", "openai-responses", "openai-compatible", "google"]);
+    assert.deepEqual(kimi?.scopes, ["global"]);
+    assert.equal(kimi?.projectionScope, "user-global");
     assert.equal(kimi?.modelSelection, "native-config");
     assert.equal(kimi?.remoteModelList, false);
     assert.ok(getProviderCapabilities().every((entry) => !("bindingProjection" in entry)));

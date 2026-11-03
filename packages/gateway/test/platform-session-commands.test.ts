@@ -4,6 +4,9 @@ import { createSessionCommands } from '../src/services/platform-commands/session
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { ProjectRepository } from '../src/db/repositories/project-repository.js';
@@ -13,10 +16,16 @@ import { PlatformActions } from '../src/services/platform-commands/actions.js';
 import type { CommandContext } from '../src/services/platform-commands/types.js';
 import { CopilotConversationLog } from '../src/services/agent/conversation-log.js';
 
-test('session lifecycle catalog exposes start, stop and takeover with strict inputs', () => {
+test('session lifecycle catalog exposes create, start, stop and takeover with strict inputs', () => {
   const commands = createSessionCommands();
-  assert.deepEqual(commands.map(c => c.id), ['session.start', 'session.stop', 'session.takeover']);
-  for (const command of commands) assert.throws(() => command.inputSchema.parse({sessionId:'s', userId:'other'}));
+  assert.deepEqual(commands.map(c => c.id), ['session.create', 'session.start', 'session.stop', 'session.takeover']);
+  for (const command of commands.filter(c => c.id !== 'session.create'))
+    assert.throws(() => command.inputSchema.parse({sessionId:'s', userId:'other'}));
+  const create = commands.find(c => c.id === 'session.create')!;
+  assert.equal(create.inputSchema.safeParse({projectId:'p', aiTool:'codex', sessionId:'s'}).success, false);
+  assert.equal(create.inputSchema.safeParse({projectId:'p'}).success, false, 'the runtime kind is explicit');
+  assert.equal(create.inputSchema.safeParse({projectId:'p', aiTool:'terminal', shell:'fish'}).success, false);
+  assert.equal(create.inputSchema.safeParse({projectId:'p', aiTool:'terminal', shell:'bash'}).success, true);
 });
 
 test('owner stop persists a safe receipt once and preserves stopped lifecycle state', async () => {
@@ -179,4 +188,45 @@ test('copilot origin intents are approved immediately and record their origin; t
   assert.equal(receipt.outcome,'confirmed');
   assert.equal(repo.getById(s.id)?.status,'running');
  }finally{db.close();}
+});
+
+// `session.create` is the MCP-only launch path: it must write the session row
+// only after every launch precondition passed, and it must bind the launch plan
+// to the row it just created (FORGEBADGER_SESSION_ID is baked into the env).
+test('session.create launches the requested kind and binds the launch plan to the new row',async()=>{
+ const db=new Database(':memory:');const launches:Array<{sessionId:string;cwd:string;command:string}>=[];
+ const root=mkdtempSync(path.join(tmpdir(),'fb-create-session-'));
+ try{
+ migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
+ const user=new UserRepository(db).create('create-session@test.dev','hash');
+ const project=new ProjectRepository(db,user.id).create({name:'created',path:root,aiTool:'codex'});
+ const manager=new InMemorySessionManager({async createSession(input){launches.push({sessionId:input.name,cwd:input.cwd,command:input.command});},async killSession(){},async listSessions(){return[];},async capturePane(){return '';}},undefined,undefined,{db,sleep:async()=>{}});
+ const actions=new PlatformActions({db,userId:user.id,sessionManager:manager,adapterCommandRunner:async()=>({exitCode:0,stdout:'codex 1.0.0',stderr:''})},new Map(createSessionCommands().map(c=>[c.id,c])));
+ const intent=actions.preview({commandId:'session.create',input:{projectId:project.id,aiTool:'codex'},idempotencyKey:'create-codex'});
+ const session=await actions.execute(intent.id);
+ const row=new SessionRepository(db,user.id).getById((session.result as {id:string}).id)!;
+ assert.equal(row.aiTool,'codex');
+ assert.equal(row.status,'running');
+ assert.equal(row.projectId,project.id);
+ assert.equal(launches.length,1);
+ assert.equal(launches[0]!.cwd,root);
+ // No secret material survives into the MCP-visible receipt.
+ assert.equal(JSON.stringify(session.result).includes('attachToken'),false);
+ }finally{db.close();rmSync(root,{recursive:true,force:true});}
+});
+test('session.create leaves no session row when the runtime cannot launch',async()=>{
+ const db=new Database(':memory:');
+ const root=mkdtempSync(path.join(tmpdir(),'fb-create-no-effect-'));
+ try{
+ migrate(drizzle(db),{migrationsFolder:fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
+ const user=new UserRepository(db).create('create-no-effect@test.dev','hash');
+ const project=new ProjectRepository(db,user.id).create({name:'p',path:root,aiTool:'codex'});
+ const manager=new InMemorySessionManager({async createSession(){assert.fail('must not launch');},async killSession(){},async listSessions(){return[];},async capturePane(){return '';}});
+ const actions=new PlatformActions({db,userId:user.id,sessionManager:manager,adapterCommandRunner:async()=>({exitCode:1,stdout:'',stderr:'missing'})},new Map(createSessionCommands().map(c=>[c.id,c])));
+ const intent=actions.preview({commandId:'session.create',input:{projectId:project.id,aiTool:'codex'},idempotencyKey:'create-missing'});
+ await assert.rejects(actions.execute(intent.id),/not available for launch/);
+ assert.equal(actions.intents.get(intent.id)?.status,'approved');
+ assert.equal(actions.intents.receipt(intent.id),undefined);
+ assert.equal(new SessionRepository(db,user.id).list().length,0,'no orphan session row');
+ }finally{db.close();rmSync(root,{recursive:true,force:true});}
 });

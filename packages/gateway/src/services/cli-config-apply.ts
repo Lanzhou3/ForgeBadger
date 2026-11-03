@@ -67,6 +67,7 @@ export class CliConfigApplyError extends Error {
 export type ClaudeModelSlot = "opus" | "sonnet" | "haiku" | "fable" | "subagent";
 
 export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";
+export type KimiPermissionMode = "manual" | "yolo" | "auto";
 
 export interface CliConfigApplyInput {
   db: Database;
@@ -87,6 +88,8 @@ export interface CliConfigApplyInput {
    * layer and keeps the provider key out of the CLI config.
    */
   routeThroughGateway?: boolean | undefined;
+  /** Kimi only: default_permission_mode for new sessions. */
+  permissionMode?: KimiPermissionMode | undefined;
   /**
    * Codex only: wire protocol the provider uses. Defaults to the profile's
    * apiFormat (openai-responses→"responses", everything else→"chat"). Set
@@ -145,6 +148,7 @@ interface ApplyContext {
   /** Claude role slots resolved to model profiles; unset slots fall back to the primary model. */
   slotModels: Partial<Record<ClaudeModelSlot, ModelProfile>>;
   reasoningEffort: CodexReasoningEffort | undefined;
+  permissionMode: KimiPermissionMode | undefined;
   credential: ProviderCredentialSummary;
   providerKey: string;
   /** The provider's own endpoint (SSRF-validated); used for context-window special cases. */
@@ -459,6 +463,9 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
   if (input.routeThroughGateway === true && input.adapter !== "claude") {
     throw new CliConfigApplyError("CLI_CONFIG_APPLY_FIELD_UNSUPPORTED", "routeThroughGateway is only supported for the Claude adapter");
   }
+  if (input.permissionMode && input.adapter !== "kimi") {
+    throw new CliConfigApplyError("CLI_CONFIG_APPLY_FIELD_UNSUPPORTED", "permissionMode is only supported for the Kimi adapter");
+  }
   const slotModels: Partial<Record<ClaudeModelSlot, ModelProfile>> = {};
   if (input.modelMapping) {
     for (const slot of ["opus", "sonnet", "haiku", "fable", "subagent"] as const) {
@@ -536,6 +543,7 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
     activeModels: models,
     slotModels,
     reasoningEffort: input.reasoningEffort,
+    permissionMode: input.permissionMode,
     credential,
     providerKey: normalizeProviderKey(provider.providerKey),
     providerEndpoint,
@@ -892,11 +900,18 @@ function buildApplyDocument(
     return;
   }
   const providers = record(doc.providers);
+  const existingProvider = record(providers[context.providerKey]);
   const definition: Record<string, unknown> = {
+    ...existingProvider,
     type: kimiProviderType(context.provider.apiFormat, context.baseUrl),
     api_key: secret
   };
+  // A managed plaintext credential replaces alternative auth declarations;
+  // user-owned custom_headers and other provider options remain intact.
+  delete definition.api_key_env;
+  delete definition.oauth;
   if (context.baseUrl) definition.base_url = context.baseUrl;
+  else delete definition.base_url;
   providers[context.providerKey] = definition;
   // Merge-style upsert (matching the opencode/PI branches): every active
   // model of the provider becomes an alias the Kimi Code /model picker can
@@ -941,6 +956,7 @@ function buildApplyDocument(
   doc.providers = providers;
   doc.models = models;
   doc.default_model = `${context.providerKey}/${context.model.modelId}`;
+  if (context.permissionMode) doc.default_permission_mode = context.permissionMode;
 }
 
 /**
@@ -1090,10 +1106,10 @@ export function maskSecrets(fileType: "json" | "toml" | "yaml", content: string)
 function maskSecretsDeep(value: Record<string, unknown>): void {
   for (const [key, child] of Object.entries(value)) {
     const normalized = key.replace(/[^a-z0-9]/giu, "").toLowerCase();
-    // Suffix-match instead of a fixed allowlist: api_key / auth_token /
-    // bearer_token / access_token / refresh_token and any future *-key/*-token
-    // field are all masked.
-    if ((normalized === "apikey" || normalized.endsWith("apikey") || normalized.endsWith("token"))
+    // Cover provider custom_headers as well as api_key / auth_token and other
+    // credential-shaped fields before any current or proposed file is previewed.
+    if ((normalized === "apikey" || normalized.endsWith("apikey") || normalized.endsWith("token")
+      || normalized === "authorization" || normalized === "proxyauthorization" || normalized === "cookie")
       && typeof child === "string" && child.length > 0) {
       value[key] = "[redacted]";
       continue;
@@ -1205,7 +1221,7 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function normalizeProviderKey(value: string): string {
+export function normalizeProviderKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "") || "provider";
 }
 
@@ -1291,19 +1307,11 @@ export function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId
   return provider.openaiBaseUrl ?? provider.baseUrl;
 }
 
-/**
- * Kimi Code provider types (official configuration docs): "kimi" is
- * Moonshot's OpenAI-compatible protocol (managed service + Kimi Platform
- * keys), "anthropic" speaks the Anthropic Messages protocol, and "openai"
- * covers generic Chat Completions relays.
- *
- * Kimi Code's config has a single OpenAI-family provider type ("openai"),
- * so both openai-responses and openai-compatible providers are declared
- * there; whether the endpoint actually serves the provider's wire protocol
- * is the owner's responsibility, the same as for any relay endpoint.
- */
+/** Kimi Code provider types from the 2.4.x configuration schema. */
 function kimiProviderType(apiFormat: ProviderProfile["apiFormat"], baseUrl: string | null): string {
   if (apiFormat === "anthropic") return "anthropic";
+  if (apiFormat === "openai-responses") return "openai_responses";
+  if (apiFormat === "google") return "google-genai";
   if (isMoonshotEndpoint(baseUrl)) return "kimi";
   return "openai";
 }

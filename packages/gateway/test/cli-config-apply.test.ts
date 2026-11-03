@@ -11,6 +11,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { parse as parseToml } from "smol-toml";
 
 import { ModelProviderRepository } from "../src/db/repositories/model-provider-repository.js";
+import { readCliConfig, removeCliProvider } from "../src/services/cli-config.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
 import type { AdapterId } from "../src/services/adapter-discovery.js";
 import {
@@ -382,41 +383,48 @@ describe("cli-config apply service", () => {
       assert.match(configToml, /default_model = "kimi-code\/kimi-for-coding"/u);
     });
 
-    it("uses the openai provider type for generic OpenAI-compatible relays", async () => {
-      const db = createTestDb();
-      const user = new UserRepository(db).create("apply-kimi-openai@example.com", "hash");
-      const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-apply-kimi-openai-");
-      const repo = new ModelProviderRepository(db, user.id, masterKey);
-      const provider = repo.createProviderProfile({
-        name: "Relay",
-        providerKey: "relay",
-        baseUrl: "https://relay.example.com/v1",
-        openaiBaseUrl: "https://relay.example.com/v1",
-        authType: "api_key",
-        apiFormat: "openai-compatible",
-        supportedAdapters: ["kimi"]
-      });
-      repo.createModelProfile({
-        providerProfileId: provider.id,
-        name: "Relay Model",
-        modelId: "relay-model-1",
-        isDefault: true
-      });
-      repo.createCredential({
-        providerProfileId: provider.id,
-        label: "Primary",
-        plaintextSecret: "sk-relay-secret"
-      });
+    it("maps OpenAI chat, OpenAI Responses, and Google provider types", async () => {
+      for (const { apiFormat, expectedType } of [
+        { apiFormat: "openai-compatible", expectedType: "openai" },
+        { apiFormat: "openai-responses", expectedType: "openai_responses" },
+        { apiFormat: "google", expectedType: "google-genai" }
+      ] as const) {
+        const db = createTestDb();
+        const user = new UserRepository(db).create(`apply-kimi-${apiFormat}@example.com`, "hash");
+        const root = await useConfigRoot("KIMI_CODE_HOME", `forgebadger-apply-kimi-${apiFormat}-`);
+        const repo = new ModelProviderRepository(db, user.id, masterKey);
+        const provider = repo.createProviderProfile({
+          name: "Relay",
+          providerKey: "relay",
+          baseUrl: "https://relay.example.com/v1",
+          openaiBaseUrl: "https://relay.example.com/v1",
+          authType: "api_key",
+          apiFormat,
+          supportedAdapters: ["kimi"]
+        });
+        repo.createModelProfile({
+          providerProfileId: provider.id,
+          name: "Relay Model",
+          modelId: "relay-model-1",
+          isDefault: true
+        });
+        repo.createCredential({
+          providerProfileId: provider.id,
+          label: "Primary",
+          plaintextSecret: "sk-relay-secret"
+        });
 
-      await applyCliConfigToAdapter({
-        db, userId: user.id, masterKey, adapter: "kimi",
-        providerProfileId: provider.id, resolveHost: publicResolver
-      });
+        await applyCliConfigToAdapter({
+          db, userId: user.id, masterKey, adapter: "kimi",
+          providerProfileId: provider.id, resolveHost: publicResolver
+        });
 
-      const configToml = await readFile(path.join(root, "config.toml"), "utf8");
-      assert.match(configToml, /\[providers\.relay\]/u);
-      assert.match(configToml, /type = "openai"/u);
-      assert.match(configToml, /base_url = "https:\/\/relay\.example\.com\/v1"/u);
+        const configToml = await readFile(path.join(root, "config.toml"), "utf8");
+        assert.match(configToml, /\[providers\.relay\]/u);
+        assert.match(configToml, new RegExp(`type = "${expectedType}"`, "u"));
+        assert.match(configToml, /base_url = "https:\/\/relay\.example\.com\/v1"/u);
+        db.close();
+      }
     });
 
     it("writes the capability projection, display_name, and thinking efforts for Kimi models", async () => {
@@ -433,10 +441,11 @@ describe("cli-config apply service", () => {
 
       await applyCliConfigToAdapter({
         db, userId: user.id, masterKey, adapter: "kimi",
-        providerProfileId: fixture.providerId, resolveHost: publicResolver
+        providerProfileId: fixture.providerId, permissionMode: "yolo", resolveHost: publicResolver
       });
 
       const doc = parseToml(await readFile(path.join(root, "config.toml"), "utf8")) as {
+        default_permission_mode?: string;
         models: Record<string, Record<string, unknown>>;
       };
       const entry = doc.models["kimi-provider/kimi-model-1"];
@@ -446,6 +455,7 @@ describe("cli-config apply service", () => {
       assert.equal(entry.display_name, "Qwen 3.8");
       assert.deepEqual(entry.support_efforts, ["low", "high", "xhigh"]);
       assert.equal(entry.default_effort, "high");
+      assert.equal(doc.default_permission_mode, "yolo");
     });
 
     it("merges hand-written Kimi model entries instead of wiping them", async () => {
@@ -460,6 +470,11 @@ describe("cli-config apply service", () => {
         'type = "anthropic"',
         'api_key = "sk-stale"',
         'base_url = "https://api.deepseek.com/anthropic"',
+        'api_key_env = "STALE_ENV"',
+        "",
+        '[providers.kimi-provider.custom_headers]',
+        'Authorization = "Bearer header-secret"',
+        'X-Custom = "keep-me"',
         "",
         '[models."kimi-provider/kimi-model-1"]',
         'provider = "kimi-provider"',
@@ -497,9 +512,15 @@ describe("cli-config apply service", () => {
       assert.equal(entry.default_effort, undefined);
       // The stale provider secret is replaced by the vault credential.
       const providers = (parseToml(await readFile(path.join(root, "config.toml"), "utf8")) as {
-        providers: Record<string, Record<string, string>>;
+        providers: Record<string, Record<string, unknown>>;
       }).providers;
-      assert.equal(providers["kimi-provider"]?.api_key, "sk-kimi-secret");
+      const appliedProvider = providers["kimi-provider"];
+      assert.equal(appliedProvider?.api_key, "sk-kimi-secret");
+      assert.equal(appliedProvider?.api_key_env, undefined);
+      assert.deepEqual(appliedProvider?.custom_headers, {
+        Authorization: "Bearer header-secret",
+        "X-Custom": "keep-me"
+      });
     });
 
     it("writes and clears Kimi thinking efforts as managed keys", async () => {

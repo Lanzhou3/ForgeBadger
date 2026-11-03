@@ -2093,8 +2093,12 @@ request and revocation takes effect at once.
 The tool surface reuses the native Copilot platform tools
 (`services/agent/tools`) through an explicit MCP allowlist shared by listing, lookup and available-tool
 validation. New native tools are not automatically granted to existing tokens.
-Raw `terminal_run`, `terminal_run_in_session` and `open_copilot_shell` remain
+The native Copilot's own shell tools (`terminal_run`, `terminal_open`,
+`terminal_close` — the per-project persistent Copilot shell) remain
 unavailable for every token type, including `operate` and CLI-scoped tokens.
+`create_session` is the MCP equivalent of the console's "new session" button;
+it is deliberately not `terminal_open`, which reuses a single project shell and
+cannot mint a session row.
 Legacy account tokens without `cli_dispatch` expose read tools
 (`list_projects`, `get_project`,
 `list_sessions`, `get_session`, `get_session_output`, `list_playbooks`,
@@ -2105,8 +2109,18 @@ Legacy account tokens without `cli_dispatch` expose read tools
 `pm_create_work_item`, `pm_update_work_item`,
 `pm_update_management`, `pm_prepare_task_packet`, `write_memory`) require the
 `operate` scope and are hidden from `tools/list` without it. `pm_execute_task_packet`,
-`import_project`, `apply_project_config`, and `dispatch_task_to_session`
+`import_project`, `apply_project_config`, `create_session`, and `dispatch_task_to_session`
 require both `operate` and `cli_dispatch`.
+`create_session { projectId, aiTool, shell?, name? }` creates **and launches** a new
+session — the only MCP path that mints a session row (the native Copilot's
+`terminal_open` shells stay MCP-invisible). `aiTool` is explicit: an adapter id
+or `"terminal"` for a plain shell (`shell` selects `pwsh`/`powershell`/`cmd`/
+`bash`/`zsh`/`sh`, defaulting to the platform shell); `name` defaults to the
+project name. It runs through the `session.create` platform command, so it
+needs a stable `operationId`, revalidates the token's project/root authority
+before the row is written, and creates no session when the shell or adapter
+probe fails. Use `start_session` to relaunch a stopped session rather than
+creating a duplicate.
 `dispatch_task_to_session { sessionId, message }` submits a free-form task
 message (1–4000 chars, no control characters) to a running CLI session that is
 not linked to a work-item Task Packet: start the session first with
@@ -2141,11 +2155,17 @@ envelope; unauthenticated responses additionally carry a
 `WWW-Authenticate: Bearer` challenge. Tenant isolation is unchanged â all tools
 execute with the token owner's `userId`.
 
-Each listed tool carries MCP execution annotations derived from its platform
-risk class: `readOnlyHint: true` for read tools, `destructiveHint: true` for
-operate tools, `openWorldHint: true` for tools that drive external CLI
-sessions, so external hosts can tier trust (hosts still confirm before
-invoking). Successful object-shaped results are returned both as a JSON text
+Each listed tool carries a human `title` plus MCP execution annotations
+derived from its platform risk class: `readOnlyHint: true` for read tools,
+`destructiveHint: true` for operate tools, `openWorldHint: true` for tools that
+drive external CLI sessions, so external hosts can tier trust (hosts still
+confirm before invoking). `idempotentHint` reports the **replay** guarantee, not
+the risk class: every tool backed by a durable platform-command receipt is
+idempotent by stable `operationId` (including `create_session`, `stop_session`
+and `start_session`). Only writes whose effect cannot be replayed verbatim stay
+`idempotentHint: false` — `dispatch_task_to_session` and
+`pm_execute_task_packet` type into a live CLI, so a retry would deliver the
+prompt twice. Successful object-shaped results are returned both as a JSON text
 block and as `structuredContent`; the text block is kept for hosts that do
 not parse structured results.
 

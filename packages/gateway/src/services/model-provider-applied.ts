@@ -6,6 +6,7 @@ import {
 import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 import type { AdapterId } from "./adapter-discovery.js";
 import { readCliConfig, type CliConfigSnapshot } from "./cli-config.js";
+import { normalizeProviderKey } from "./cli-config-apply.js";
 
 export interface AppliedProviderSummary {
   providerProfileId: string;
@@ -61,7 +62,7 @@ export async function buildAppliedProvidersOverview(
 function resolvePointer(
   pointer: CliConfigAppliedProvider,
   providerRepo: ModelProviderRepository
-): { summary: AppliedProviderSummary; dangling: boolean } {
+): { summary: AppliedProviderSummary; dangling: boolean; providerKey: string | null } {
   const provider = providerRepo.getProviderProfile(pointer.providerProfileId);
   const model = pointer.modelProfileId
     ? providerRepo.getModelProfile(pointer.modelProfileId)
@@ -76,7 +77,8 @@ function resolvePointer(
       modelName: model?.name ?? null,
       appliedAt: new Date(pointer.appliedAt).toISOString()
     },
-    dangling: !provider || (pointer.modelProfileId !== null && !model)
+    dangling: !provider || (pointer.modelProfileId !== null && !model),
+    providerKey: provider ? normalizeProviderKey(provider.providerKey) : null
   };
 }
 
@@ -93,13 +95,26 @@ async function readConfigSnapshot(
 
 function isStale(
   adapter: AdapterId,
-  resolved: { summary: AppliedProviderSummary; dangling: boolean } | null,
+  resolved: { summary: AppliedProviderSummary; dangling: boolean; providerKey: string | null } | null,
   snapshot: CliConfigSnapshot | null
 ): boolean {
   if (!resolved) return false;
   if (resolved.dangling) return true;
   // A missing/unparseable snapshot cannot prove drift; stay conservative.
-  if (!snapshot?.defaultModel.trim()) return false;
+  if (!snapshot) return false;
+  if (adapter === "kimi") {
+    // Kimi login and /model legitimately change default_model while keeping the
+    // applied third-party provider available. Drift means that provider, its
+    // credential, or the exact applied alias disappeared — not another default.
+    if (!resolved.providerKey || !resolved.summary.modelId) return true;
+    const provider = snapshot.providers.find((entry) => entry.id === resolved.providerKey);
+    const alias = `${resolved.providerKey}/${resolved.summary.modelId}`;
+    const model = snapshot.models.find((entry) =>
+      entry.alias === alias && entry.provider === resolved.providerKey && entry.modelId === resolved.summary.modelId
+    );
+    return !provider?.hasApiKey || !model;
+  }
+  if (!snapshot.defaultModel.trim()) return false;
   return configModelId(adapter, snapshot) !== resolved.summary.modelId;
 }
 
@@ -110,7 +125,5 @@ function configModelId(adapter: AdapterId, snapshot: CliConfigSnapshot): string 
     // A readable config with no matching entry proves the selection drifted.
     return snapshot.models.find((model) => model.alias === configDefaultModel)?.modelId ?? null;
   }
-  if (adapter !== "kimi") return configDefaultModel;
-  const slash = configDefaultModel.lastIndexOf("/");
-  return slash === -1 ? configDefaultModel : configDefaultModel.slice(slash + 1);
+  return configDefaultModel;
 }

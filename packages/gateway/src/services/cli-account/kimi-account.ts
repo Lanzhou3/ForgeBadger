@@ -67,7 +67,10 @@ export async function observeKimiLogin(options: CliAccountProbeOptions = {}): Pr
     return { ...base, state: "not_authenticated", method: "oauth", detailCode: "token_expired" };
   }
   const providers = await readKimiProviders(options);
-  if (providers.some((provider) => Boolean(provider.apiKey))) {
+  if (providers.some((provider) => provider.hasOauthTable)) {
+    return { ...base, state: "ready", method: "oauth" };
+  }
+  if (providers.some((provider) => hasConfiguredApiKey(provider))) {
     return { ...base, state: "ready", method: "api_key" };
   }
   return { ...base, state: "not_authenticated", method: "unknown" };
@@ -86,10 +89,10 @@ export async function observeKimiQuota(options: CliAccountProbeOptions = {}): Pr
   let bearer: string | undefined = oauthToken;
   if (!bearer) {
     const providers = await readKimiProviders(options);
-    const codingProvider = providers.find((provider) => provider.apiKey && isKimiCodingBaseUrl(provider.baseUrl));
-    bearer = codingProvider?.apiKey;
+    const codingProvider = providers.find((provider) => resolveApiKey(provider) && isKimiCodingBaseUrl(provider.baseUrl));
+    bearer = codingProvider ? resolveApiKey(codingProvider) : undefined;
     if (!bearer) {
-      if (providers.some((provider) => Boolean(provider.apiKey))) {
+      if (providers.some(hasConfiguredApiKey)) {
         return unsupportedQuota(fetchedAt, "api_key_mode");
       }
       return unsupportedQuota(fetchedAt, "no_native_login");
@@ -141,6 +144,8 @@ interface KimiProviderConfig {
   id: string;
   baseUrl: string;
   apiKey: string | undefined;
+  apiKeyEnv: string | undefined;
+  envApiKey: string | undefined;
   hasOauthTable: boolean;
 }
 
@@ -162,13 +167,29 @@ async function readKimiProviders(options: CliAccountProbeOptions): Promise<KimiP
   if (!providers) return [];
   return Object.entries(providers).map(([id, value]) => {
     const entry = asRecord(value) ?? {};
+    const env = asRecord(entry.env) ?? {};
     return {
       id,
       baseUrl: stringField(entry.base_url) ?? "",
       apiKey: stringField(entry.api_key),
+      apiKeyEnv: stringField(entry.api_key_env),
+      envApiKey: stringField(env.KIMI_API_KEY)
+        ?? stringField(env.ANTHROPIC_API_KEY)
+        ?? stringField(env.OPENAI_API_KEY)
+        ?? stringField(env.GOOGLE_API_KEY),
       hasOauthTable: asRecord(entry.oauth) !== undefined
     };
   });
+}
+
+function hasConfiguredApiKey(provider: KimiProviderConfig): boolean {
+  return Boolean(provider.apiKey || provider.apiKeyEnv || provider.envApiKey);
+}
+
+function resolveApiKey(provider: KimiProviderConfig): string | undefined {
+  if (provider.apiKey) return provider.apiKey;
+  if (provider.apiKeyEnv) return process.env[provider.apiKeyEnv] || undefined;
+  return provider.envApiKey;
 }
 
 function isKimiCodingBaseUrl(baseUrl: string): boolean {

@@ -79,7 +79,7 @@ describe("CLI lifecycle notification settings", () => {
       assert.match(await readFile(configPath, "utf8"), /# Keep this user comment/);
       assert.deepEqual(
         config.hooks?.map((hook) => hook.event).sort(),
-        ["UserPromptSubmit", "TurnStarted", "PostToolUse", "Interrupt", "Notification", "PermissionRequest", "SessionEnd", "Stop", "StopFailure"].sort()
+        ["UserPromptSubmit", "TurnStarted", "TaskStarted", "PostToolUse", "PostToolUseFailure", "Interrupt", "Notification", "PermissionRequest", "SessionEnd", "Stop", "StopFailure"].sort()
       );
       assert.ok(config.hooks?.every((hook) => hook.matcher === undefined));
       assert.ok(

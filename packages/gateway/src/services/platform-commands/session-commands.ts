@@ -10,10 +10,38 @@ import type { ForgeBadgerEventBus } from "../event-bus.js";
 import { recordActivity } from "../activity-events.js";
 import { recordSessionSnapshot } from "../session-snapshots.js";
 import { getAdapterLaunchStatus } from "../adapter-discovery.js";
-import { createLaunchPlan, createTerminalLaunchPlan, checkTerminalShell, resolveAvailableTerminalShell, normalizeSessionKind, prepareAdapterLaunchExtras } from "../session-launch-plan.js";
+import { createLaunchPlan, createTerminalLaunchPlan, checkTerminalShell, resolveAvailableTerminalShell, normalizeSessionKind, prepareAdapterLaunchExtras, TERMINAL_SHELLS } from "../session-launch-plan.js";
+import { adapterIds } from "../../lib/adapter-ids.js";
 import { canonical } from "./actions.js";
 import type { CommandContext, PlatformCommand } from "./types.js";
 const inputSchema = z.object({ sessionId: z.string().min(1).max(128) }).strict();
+
+/**
+ * `session.create` names the runtime kind explicitly (`aiTool` "terminal" for a
+ * shell, or an adapter id). Projects with no `aiTool` cannot be resolved
+ * implicitly here: the caller must say what to launch.
+ */
+export const sessionCreateInput = z.object({
+    projectId: z.string().min(1).max(128),
+    aiTool: z.enum([...adapterIds, "terminal"]),
+    shell: z.enum(TERMINAL_SHELLS).optional(),
+    /** Display name; defaults to the project name. */
+    name: z.string().trim().min(1).max(200).optional()
+}).strict();
+export type SessionCreateInput = z.infer<typeof sessionCreateInput>;
+
+function createProjectRoot(ctx: CommandContext, projectId: string) {
+    const project = new ProjectRepository(ctx.db, ctx.userId).getById(projectId);
+    if (!project)
+        throw new PlatformNoEffectError("Project not found", 404);
+    return project;
+}
+
+function createResources(ctx: CommandContext, input: unknown) {
+    const v = sessionCreateInput.parse(input);
+    const project = createProjectRoot(ctx, v.projectId);
+    return { projectIds: [project.id], rootPaths: [project.path], revision: createHash("sha256").update(canonical(project)).digest("hex") };
+}
 function resolve(ctx: CommandContext, input: unknown, action: string) {
     const parsed = (action === "stop" ? stopSessionInput : inputSchema).parse(input);
     const { sessionId } = parsed;
@@ -24,7 +52,7 @@ function resolve(ctx: CommandContext, input: unknown, action: string) {
     return { projectIds: [session.projectId], rootPaths: [session.workingDir], revision: createHash("sha256").update(canonical(session)).digest("hex"), ...(stopTarget ? { stopTarget } : {}) };
 }
 export function createSessionCommands(): PlatformCommand[] {
-    return ["start", "stop", "takeover"].map(action => ({
+    return [createSessionCommand(), ...["start", "stop", "takeover"].map((action): PlatformCommand => ({
         id: `session.${action}`, capability: `session.${action}`, effect: "external", inputSchema: action === "stop" ? stopSessionInput : inputSchema,
         resolve: (ctx, input) => resolve(ctx, input, action),
         prepare(ctx, input) {
@@ -41,7 +69,125 @@ export function createSessionCommands(): PlatformCommand[] {
             ctx.sessionManager.takeoverSession(ctx.userId, sessionId);
             return { sessionId, takenOver: true };
         }
-    }));
+    }))];
+}
+
+/**
+ * Create a session row and launch its runtime in one intent. The row is only
+ * written after preflight passes and authority is re-authorized, so a refused
+ * launch leaves no orphan session behind.
+ */
+function createSessionCommand(): PlatformCommand {
+    return {
+        id: "session.create", capability: "session.create", effect: "external", inputSchema: sessionCreateInput,
+        resolve: (ctx, input) => createResources(ctx, input),
+        prepare(ctx, input) {
+            return preflightCreate(ctx, sessionCreateInput.parse(input));
+        },
+        execute(ctx, input) {
+            return create(ctx, sessionCreateInput.parse(input));
+        }
+    };
+}
+
+async function preflightCreate(ctx: CommandContext, input: SessionCreateInput) {
+    if (!ctx.sessionManager)
+        throw new PlatformNoEffectError("Session runtime unavailable");
+    createProjectRoot(ctx, input.projectId);
+    const kind = normalizeSessionKind(input.aiTool);
+    if (!kind)
+        throw new PlatformNoEffectError("Unsupported session adapter", 400);
+    if (kind === "terminal") {
+        let shell = input.shell;
+        if (!shell) {
+            try { shell = await resolveAvailableTerminalShell(undefined, undefined, ctx.adapterCommandRunner); }
+            catch (error) { throw new PlatformNoEffectError(error instanceof Error ? error.message : "No supported shell is installed"); }
+        }
+        const shellStatus = await checkTerminalShell(shell, undefined, undefined, ctx.adapterCommandRunner);
+        if (!shellStatus.available)
+            throw new PlatformNoEffectError(`${shell} is not available for launch`);
+        return;
+    }
+    const status = await getAdapterLaunchStatus(kind, ctx.adapterCommandRunner, ctx.sessionManager?.terminalBackendHealth());
+    if (!status.launchEnabled)
+        throw new PlatformNoEffectError(`${status.label} is not available for launch`);
+}
+
+async function create(ctx: CommandContext, input: SessionCreateInput) {
+    const { db, userId, eventBus, adapterCommandRunner } = ctx;
+    const sessionManager = ctx.sessionManager;
+    if (!sessionManager)
+        throw new Error("Session runtime unavailable");
+    const project = createProjectRoot(ctx, input.projectId);
+    const kind = normalizeSessionKind(input.aiTool);
+    if (!kind)
+        throw new Error("Unsupported session adapter");
+    const sessionRepo = new SessionRepository(db, userId);
+    let effectsStarted = false;
+    let created!: Session;
+    let authorizationPassed = true;
+    const authorize = () => {
+        authorizationPassed = false;
+        ctx.authorize?.();
+        authorizationPassed = true;
+    };
+    try {
+        // Everything that can still refuse the launch runs before the row
+        // exists, so a rejected preflight leaves no orphan session.
+        let shell;
+        if (kind === "terminal") {
+            shell = input.shell ?? await resolveAvailableTerminalShell(undefined, undefined, adapterCommandRunner);
+            const shellStatus = await checkTerminalShell(shell, undefined, undefined, adapterCommandRunner);
+            if (!shellStatus.available)
+                throw new PlatformNoEffectError(`${shell} is not available for launch`);
+        } else {
+            const launchStatus = await getAdapterLaunchStatus(kind, adapterCommandRunner, sessionManager.terminalBackendHealth());
+            if (!launchStatus.launchEnabled)
+                throw new PlatformNoEffectError(`${launchStatus.label} is not available for launch`);
+        }
+        const pluginDirs = kind === "terminal" ? [] : await prepareAdapterLaunchExtras(db, userId, kind, project.path);
+        authorize();
+        const dbSession = sessionRepo.create({
+            projectId: project.id,
+            name: input.name ?? project.name,
+            aiTool: kind,
+            workingDir: project.path,
+            credentialMode: "host_environment"
+        });
+        created = dbSession;
+        effectsStarted = true;
+        recordSessionActivity(db, eventBus, userId, dbSession, "session_created", "info", `Session ${dbSession.name} created`);
+        // Launch plans embed the session id in FORGEBADGER_SESSION_ID, so they
+        // are built only once the row (and therefore its id) exists.
+        const launchPlan = kind === "terminal"
+            ? createTerminalLaunchPlan({ projectRoot: dbSession.workingDir, sessionId: dbSession.id, ...(shell ? { shell } : {}) })
+            : createLaunchPlan({ adapter: kind, projectRoot: dbSession.workingDir, sessionId: dbSession.id, ...(pluginDirs.length > 0 ? { pluginDirs } : {}) });
+        const attachToken = randomUUID();
+        authorize();
+        sessionRepo.update(dbSession.id, { attachToken });
+        const live = await sessionManager.createSession({ userId, sessionId: dbSession.id, launchPlan, attachToken });
+        const updated = sessionRepo.update(dbSession.id, {
+            status: "running",
+            attachToken: live.attachToken,
+            runtimeSessionName: live.runtimeSessionName,
+            lastActive: new Date()
+        });
+        recordSessionActivity(db, eventBus, userId, updated ?? dbSession, "session_started", "success", `Session ${dbSession.name} started`);
+        recordSessionSnapshot({ db, userId, session: updated ?? dbSession, metadata: { reason: "session_started" } });
+        eventBus?.emitEvent({ type: "session_created", userId, sessionId: dbSession.id, projectId: project.id, name: dbSession.name });
+        eventBus?.emitEvent({ type: "session_status_changed", userId, sessionId: dbSession.id, oldStatus: dbSession.status, newStatus: "running" });
+        return safeSession(updated ?? dbSession);
+    }
+    catch (error) {
+        if (!effectsStarted)
+            throw new PlatformNoEffectError(error instanceof Error ? error.message : "Session precondition failed");
+        if (!authorizationPassed)
+            throw error;
+        sessionRepo.update(created.id, { status: "error", attachToken: "", errorMessage: error instanceof Error ? error.message : String(error) });
+        recordSessionActivity(db, eventBus, userId, created, "session_error", "error", error instanceof Error ? error.message : "Session creation failed");
+        eventBus?.emitEvent({ type: "session_status_changed", userId, sessionId: created.id, oldStatus: created.status, newStatus: "error" });
+        throw error;
+    }
 }
 async function preflight(ctx: CommandContext, sessionId: string, action: string, input: unknown) {
     if (action === "stop") await assertSessionStopTargetLive(ctx, stopSessionInput.parse(input));

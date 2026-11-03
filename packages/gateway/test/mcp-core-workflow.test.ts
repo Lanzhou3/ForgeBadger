@@ -368,6 +368,37 @@ describe("MCP private project development workflow", () => {
     } finally { rmSync(outsideRoot, { recursive: true, force: true }); }
   });
 
+  it("creates a launchable session over MCP and reuses the intent on retry", async () => {
+    const projectPath = path.join(root, `create-session-${randomUUID()}`);
+    mkdirSync(projectPath);
+    const project = new ProjectRepository(db, userId).create({ name: "create-session", path: projectPath, aiTool: "codex" });
+    const created = output(await rpc(port, cliToken, "create_session", {
+      operationId: "create-session-once", projectId: project.id, aiTool: "codex", name: "first run"
+    }));
+    assert.equal(created.aiTool, "codex");
+    assert.equal(created.status, "running");
+    const sessionId = created.id as string;
+    assert.ok(sessionId);
+    const row = new SessionRepository(db, userId).getById(sessionId);
+    assert.equal(row?.projectId, project.id);
+    assert.equal(row?.workingDir, projectPath);
+    assert.equal(row?.modelId, null, "the MCP receipt carries no credential columns");
+    // Replaying the same operationId returns the recorded receipt, not a second session.
+    const replay = output(await rpc(port, cliToken, "create_session", {
+      operationId: "create-session-once", projectId: project.id, aiTool: "codex", name: "first run"
+    }));
+    assert.equal(replay.id, sessionId);
+    assert.equal(new SessionRepository(db, userId).listByProject(project.id).filter(s => s.aiTool === "codex").length, 1);
+    // The new session is immediately usable for direct dispatch.
+    pane = "› Ask Codex to do anything\nmodel · cwd";
+    const beforeEnter = enterCount;
+    const dispatched = output(await rpc(port, cliToken, "dispatch_task_to_session", {
+      operationId: "created-session-dispatch", sessionId, message: "Summarize the project layout."
+    }));
+    assert.equal(dispatched.delivery, "consumed");
+    assert.equal(enterCount, beforeEnter + 1);
+  });
+
   it("dispatches free-form messages to a running unlinked session with a CLI token", async () => {
     pane = "› Ask Codex to do anything\nmodel · cwd";
     const projectPath = path.join(root, `direct-dispatch-${randomUUID()}`);

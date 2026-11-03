@@ -72,7 +72,15 @@ const codexFields: CliConfigFieldSpec[] = [
 ];
 
 const kimiFields: CliConfigFieldSpec[] = [
-  { key: "defaultModel", path: "default_model", label: "Default model", type: "string" }
+  { key: "defaultModel", path: "default_model", label: "Default model", type: "string" },
+  {
+    key: "defaultPermissionMode",
+    path: "default_permission_mode",
+    label: "Default permission mode",
+    type: "enum",
+    values: ["manual", "yolo", "auto"],
+    description: "manual = Always Ask, yolo = Ask When Needed, auto = Never Ask."
+  }
 ];
 
 // PI's models.json is a provider/model registry (like OpenCode's), and its
