@@ -17,6 +17,8 @@ import {
 const {
   createConversationMock,
   listMessagesMock,
+  getConversationMock,
+  updateConversationProjectMock,
   renameConversationMock,
   sendMessageMock,
   editMessageMock,
@@ -33,6 +35,8 @@ const {
 } = vi.hoisted(() => ({
   createConversationMock: vi.fn(),
   listMessagesMock: vi.fn(),
+  getConversationMock: vi.fn(),
+  updateConversationProjectMock: vi.fn(),
   renameConversationMock: vi.fn(),
   sendMessageMock: vi.fn(),
   editMessageMock: vi.fn(),
@@ -54,6 +58,8 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     ...actual,
     createConversation: createConversationMock,
     listMessages: listMessagesMock,
+    getConversation: getConversationMock,
+    updateConversationProject: updateConversationProjectMock,
     renameConversation: renameConversationMock,
     sendMessage: sendMessageMock,
     editMessage: editMessageMock,
@@ -119,6 +125,7 @@ const newConversation = {
   id: "conv-new",
   title: null,
   status: "active",
+  project_id: null as string | null,
   created_at: 1779370000000,
   updated_at: 1779373600000,
 };
@@ -238,6 +245,8 @@ describe("RobotChatPanel", () => {
     window.localStorage.clear();
     createConversationMock.mockResolvedValue({ conversation: newConversation });
     listMessagesMock.mockResolvedValue({ messages: [] });
+    getConversationMock.mockImplementation(async (id: string) => ({ conversation: { ...newConversation, id, project_id: null } }));
+    updateConversationProjectMock.mockImplementation(async (id: string, projectId: string) => ({ conversation: { ...newConversation, id, project_id: projectId || null } }));
     renameConversationMock.mockResolvedValue({ conversation: newConversation });
     sendMessageMock.mockResolvedValue({ runId: "run-1" });
     editMessageMock.mockResolvedValue({ runId: "run-2" });
@@ -642,7 +651,7 @@ describe("RobotChatPanel", () => {
     await waitFor(() => expect(scrollToSpy.mock.calls.length).toBeGreaterThan(callsBefore));
   });
 
-  it("passes the picked project context through to the send", async () => {
+  it("stores the picked project when creating the conversation, then inherits it on send", async () => {
     listProjectsMock.mockResolvedValue({ projects: [{ id: "project-1", name: "示例项目" }] });
     renderPanel();
 
@@ -650,12 +659,30 @@ describe("RobotChatPanel", () => {
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "检查这个项目" } });
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
 
-    await waitFor(() =>
-      expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "检查这个项目", undefined, {
-        projectId: "project-1",
-        clientRequestId: expect.any(String),
-      })
-    );
+    await waitFor(() => expect(createConversationMock).toHaveBeenCalledWith(undefined, "project-1"));
+    expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "检查这个项目", undefined, {
+      clientRequestId: expect.any(String),
+    });
+  });
+
+  it("blocks send until the conversation project update settles", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    listProjectsMock.mockResolvedValue({ projects: [{ id: "project-1", name: "示例项目" }] });
+    const pending = deferred<{ conversation: typeof newConversation }>();
+    updateConversationProjectMock.mockReturnValue(pending.promise);
+    renderPanel();
+    await waitFor(() => expect(getConversationMock).toHaveBeenCalledWith("conv-stored"));
+
+    await pickOption("项目上下文", "示例项目");
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "检查这个项目" } });
+    expect(screen.getByRole("button", { name: "发送" })).toHaveProperty("disabled", true);
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    expect(sendMessageMock).not.toHaveBeenCalled();
+
+    await act(async () => pending.resolve({ conversation: { ...newConversation, id: "conv-stored", project_id: "project-1" } }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送" })).toHaveProperty("disabled", false));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-stored", "检查这个项目", undefined, { clientRequestId: expect.any(String) }));
   });
 
   it("edits a persisted user message and reruns it through the shared controller", async () => {

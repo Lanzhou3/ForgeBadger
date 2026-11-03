@@ -9,10 +9,6 @@ interface SetupState {
   staleIdentity: boolean;
   identity?: ChannelIdentity;
   pairing?: ChannelPairing;
-  projectsLoading: boolean;
-  projectsError: boolean;
-  projectCount: number;
-  selectedProject: boolean;
   existingRoute?: ChannelRoute;
 }
 
@@ -57,10 +53,6 @@ export function channelSetupBlocker(state: SetupState, copy: ChannelSetupCopy): 
     return pairing(state.staleIdentity ? copy.identityStale : copy.pairFirst);
   }
   if (state.existingRoute) return authorization(copy.existingRoute);
-  if (state.projectsLoading) return authorization(copy.projectsLoading);
-  if (state.projectsError) return authorization(copy.projectsError);
-  if (!state.projectCount) return authorization(copy.noProjects);
-  if (!state.selectedProject) return authorization(copy.selectProject);
   return undefined;
 }
 

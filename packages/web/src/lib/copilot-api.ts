@@ -21,6 +21,7 @@ export interface CopilotConversation {
   id: string;
   title: string | null;
   status: string;
+  project_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -136,11 +137,22 @@ export function listConversations() {
   return fetchJson<{ conversations: CopilotConversation[] }>("/api/v1/copilot/conversations");
 }
 
-export function createConversation(title?: string) {
+export function createConversation(title?: string, projectId?: string) {
   return fetchJson<{ conversation: CopilotConversation }>("/api/v1/copilot/conversations", {
     method: "POST",
-    body: JSON.stringify(title ? { title } : {}),
+    body: JSON.stringify({ ...(title ? { title } : {}), ...(projectId ? { projectId } : {}) }),
   });
+}
+
+export function getConversation(conversationId: string) {
+  return fetchJson<{ conversation: CopilotConversation }>(`/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}`);
+}
+
+export function updateConversationProject(conversationId: string, projectId: string) {
+  return fetchJson<{ conversation: CopilotConversation }>(
+    `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}`,
+    { method: "PATCH", body: JSON.stringify({ projectId: projectId || null }) }
+  );
 }
 
 export function renameConversation(conversationId: string, title: string) {

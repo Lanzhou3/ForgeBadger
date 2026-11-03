@@ -26,8 +26,10 @@ import { copilotPhaseLabel } from "@/lib/copilot-phase";
 import { GatewayApiError, listProjects, type Project } from "@/lib/api";
 import {
   createConversation,
+  getConversation,
   listMessages,
   renameConversation,
+  updateConversationProject,
   type CopilotMessage,
 } from "@/lib/copilot-api";
 import { cn } from "@/lib/utils";
@@ -93,6 +95,9 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
+  const projectMutationRef = useRef(0);
+  const [projectPendingCount, setProjectPendingCount] = useState(0);
+  const projectSaving = projectPendingCount > 0;
   const [modelId, setModelId] = useState<string | null>(null);
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -168,7 +173,7 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     modelId,
     reviewTaskResults: false,
     repairFailedChecks: false,
-    savingPreferences,
+    savingPreferences: savingPreferences || projectSaving,
     conversations: [],
     messages,
     active,
@@ -200,13 +205,15 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     let disposed = false;
     const epoch = controllerEpochRef.current;
     const serial = ++controllerMessageSerialRef.current;
+    const projectSerial = projectMutationRef.current;
     setRestoring(true);
     controller.conversationIdRef.current = stored;
     setConversationId(stored);
-    listMessages(stored)
-      .then(({ messages: next }) => {
-        if (!disposed && serial === controllerMessageSerialRef.current && epoch === controllerEpochRef.current && controller.conversationIdRef.current === stored) {
+    Promise.all([listMessages(stored), getConversation(stored)])
+      .then(([{ messages: next }, { conversation }]) => {
+        if (!disposed && serial === controllerMessageSerialRef.current && projectSerial === projectMutationRef.current && epoch === controllerEpochRef.current && controller.conversationIdRef.current === stored) {
           setMessages(next);
+          setProjectId(conversation.project_id ?? "");
           setLoadError(null);
         }
       })
@@ -245,7 +252,7 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     if (controller.conversationIdRef.current) return Promise.resolve(controller.conversationIdRef.current);
     if (!creatingRef.current) {
       const epoch = controllerEpochRef.current;
-      creatingRef.current = createConversation()
+      creatingRef.current = createConversation(undefined, projectId || undefined)
         .then(({ conversation }) => {
           if (epoch !== controllerEpochRef.current) return null;
           flushSync(() => {
@@ -265,9 +272,31 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
         });
     }
     return creatingRef.current;
-  }, [controller, t]);
+  }, [controller, projectId, t]);
+
+  const changeProject = useCallback(async (next: string) => {
+    const serial = ++projectMutationRef.current;
+    const previous = projectId;
+    setProjectId(next);
+    if (!conversationId) return;
+    setProjectPendingCount(count => count + 1);
+    try {
+      const { conversation } = await updateConversationProject(conversationId, next);
+      if (serial === projectMutationRef.current) {
+        projectMutationRef.current++;
+        setProjectId(conversation.project_id ?? "");
+      }
+    } catch {
+      if (serial !== projectMutationRef.current) return;
+      setProjectId(previous);
+      setLoadError(t("copilot.loadError"));
+    } finally {
+      setProjectPendingCount(count => Math.max(0, count - 1));
+    }
+  }, [conversationId, projectId, t]);
 
   const send = useCallback(async (textOverride?: string, retry = false) => {
+    if (projectSaving) return;
     if (retry) {
       await controller.send(undefined, true);
       return;
@@ -296,9 +325,10 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     const id = await ensureConversation();
     if (!id) return;
     await controller.send(textOverride, false);
-  }, [controller, ensureConversation, conversationId, t]);
+  }, [controller, ensureConversation, conversationId, projectSaving, t]);
 
   const newChat = useCallback(() => {
+    projectMutationRef.current++;
     controller.advanceSelectionEpoch();
     controller.messageSerialRef.current++;
     controller.conversationIdRef.current = null;
@@ -318,7 +348,6 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
 
   const followups = useCopilotFollowups({
     conversationId,
-    ...(projectId ? { projectId } : {}),
     ...(modelId ? { modelId } : {}),
     reviewTaskResults: false,
     repairFailedChecks: false,
@@ -506,8 +535,8 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
         )}
         <div className="relative">
           <CopilotComposerToolbar projects={projects} projectId={projectId} conversationId={conversationId}
-            onProjectChange={setProjectId} onModelChange={setModelId} onSavingChange={setSavingPreferences}
-            disabled={isBusy || controller.sending} />
+            onProjectChange={next => void changeProject(next)} onModelChange={setModelId} onSavingChange={setSavingPreferences}
+            disabled={isBusy || controller.sending || projectSaving} />
           <CommandPalettePopup
             view={palette.view}
             onHoverItem={palette.hoverItem}
@@ -556,7 +585,7 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
                 size="icon"
                 className="size-7 shrink-0 rounded-full"
                 onClick={() => void send()}
-                disabled={controller.sending || savingPreferences || followups.enqueuing || !controller.input.trim()}
+                disabled={controller.sending || savingPreferences || projectSaving || followups.enqueuing || !controller.input.trim()}
                 aria-label={t("copilot.send")}
                 title={t("copilot.send")}
               >

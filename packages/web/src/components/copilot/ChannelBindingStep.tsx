@@ -18,11 +18,6 @@ import type { ChannelIdentity, ChannelRoute } from "@/lib/copilot-channels-api";
 import { DESTRUCTIVE_ROUTE_STATES, type ChannelRouteStateKey, type SetupBlocker } from "./channel-setup";
 import { useSettingsCopy } from "./settings-copy";
 
-export interface ProjectOption {
-  id: string;
-  name: string;
-}
-
 interface Props {
   busy: boolean;
   queriesError: boolean;
@@ -30,19 +25,12 @@ interface Props {
   identities: ChannelIdentity[];
   identityId: string;
   onIdentityChange: (id: string) => void;
-  projects: ProjectOption[];
-  projectId: string;
-  onProjectChange: (id: string) => void;
-  projectsLoading: boolean;
-  projectsError: boolean;
   blocker: SetupBlocker | undefined;
   activationReason: string;
   showBlockerLink: boolean;
   onActivate: () => void;
   routes: ChannelRoute[];
-  /** Semantic state key for an active route; null renders the raw route status. */
   routeState: (route: ChannelRoute) => ChannelRouteStateKey | null;
-  projectName: (projectId: string) => string;
   onRevokeRoute: (id: string) => void;
 }
 
@@ -53,11 +41,10 @@ function routeBadgeClass(state: ChannelRouteStateKey | null): string {
   return "text-muted-foreground";
 }
 
-/** Step 3: bind a confirmed identity to a project. */
+/** Step 3: attach a confirmed channel identity to a Copilot conversation. */
 export function ChannelBindingStep({
   busy, queriesError, channelName, identities, identityId, onIdentityChange,
-  projects, projectId, onProjectChange, projectsLoading, projectsError,
-  blocker, activationReason, showBlockerLink, onActivate, routes, routeState, projectName, onRevokeRoute,
+  blocker, activationReason, showBlockerLink, onActivate, routes, routeState, onRevokeRoute,
 }: Props) {
   const copy = useSettingsCopy();
   return (
@@ -68,37 +55,18 @@ export function ChannelBindingStep({
         description={copy.bindingDescription}
       />
       <CardContent className="space-y-3">
-        {projectsLoading && <p role="status">{copy.projectsLoading}</p>}
-        {!projectsLoading && !projectsError && !projects.length && (
-          <p className="text-sm">{copy.noProjects}</p>
-        )}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1 text-sm">
-            <span>{copy.identityLabel}</span>
-            <Select value={identityId} onValueChange={onIdentityChange}>
-              <SelectTrigger aria-label={copy.identityLabel} className="w-full">
-                <SelectValue placeholder={copy.identityPlaceholder} />
-              </SelectTrigger>
-              <SelectContent>
-                {identities.map((identity) => (
-                  <SelectItem key={identity.id} value={identity.id}>{identity.externalUserId}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1 text-sm">
-            <span>{copy.projectLabel}</span>
-            <Select value={projectId} onValueChange={onProjectChange}>
-              <SelectTrigger aria-label={copy.projectLabel} className="w-full">
-                <SelectValue placeholder={copy.projectPlaceholder} />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map((project) => (
-                  <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="max-w-sm space-y-1 text-sm">
+          <span>{copy.identityLabel}</span>
+          <Select value={identityId} onValueChange={onIdentityChange}>
+            <SelectTrigger aria-label={copy.identityLabel} className="w-full">
+              <SelectValue placeholder={copy.identityPlaceholder} />
+            </SelectTrigger>
+            <SelectContent>
+              {identities.map((identity) => (
+                <SelectItem key={identity.id} value={identity.id}>{identity.externalUserId}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex justify-end">
           <Button aria-describedby="channel-activation-reason" disabled={busy || !!blocker || queriesError} onClick={onActivate}>{copy.activateRemote(channelName)}</Button>
@@ -117,7 +85,7 @@ export function ChannelBindingStep({
           return (
             <div key={route.id} className="space-y-2 rounded-md border border-border/70 p-3 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="min-w-0">{projectName(route.projectId)}</span>
+                <span className="min-w-0">{route.projectId ?? copy.routeProjectMissing}</span>
                 <Badge variant="secondary" className={routeBadgeClass(stateKey)}>
                   {stateKey ? copy.routeStates[stateKey] : (copy.channelStates[route.status] ?? route.status)}
                 </Badge>

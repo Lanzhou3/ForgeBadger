@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import type { ChannelPlatform } from '@/lib/api';
 import { getFeishuChannelAccount, getFeishuConnectionHealth, saveFeishuChannelAccount, emergencyStopFeishu, getTelegramChannelAccount, getTelegramConnectionHealth, saveTelegramChannelAccount, getTelegramIntegrationConfig, updateTelegramIntegrationConfig, getFeishuIntegrationConfig, updateFeishuIntegrationConfig, emergencyStopTelegram, getChannelDiagnostics } from '@/lib/api';
-import { getProjectOverview } from '@/lib/platform-actions-api';
 import * as channels from '@/lib/copilot-channels-api';
 import { ChannelBindingStep } from './ChannelBindingStep';
 import { ChannelConnectionStep } from './ChannelConnectionStep';
@@ -36,10 +35,9 @@ export function CopilotChannelsPage() {
   },refetchInterval:3000,refetchIntervalInBackground:false});
   const diagnostics=useQuery({queryKey:['channel-diagnostics',channel],queryFn:()=>getChannelDiagnostics(channel),refetchInterval:5000,refetchIntervalInBackground:false});
   const integrationConfig=useQuery({queryKey:['channel-integration-config',channel],queryFn:()=>channel==='telegram'?getTelegramIntegrationConfig():getFeishuIntegrationConfig(),refetchInterval:5000,refetchIntervalInBackground:false});
-  const projects=useQuery({queryKey:['project-management-overview'],queryFn:()=>getProjectOverview(),refetchInterval:15000,refetchIntervalInBackground:false});
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [success,setSuccess]=useState('');
   const [token,setToken]=useState<IssuedPairingToken&{id:string}|null>(null);
-  const [identityId,setIdentityId]=useState('');const [projectId,setProjectId]=useState('');
+  const [identityId,setIdentityId]=useState('');
   const [now,setNow]=useState(Date.now());
   const [failedChecks,setFailedChecks]=useState(0);
   const data=query.data && accountQuery.data ? {...query.data,...accountQuery.data} : undefined;
@@ -50,7 +48,6 @@ export function CopilotChannelsPage() {
   const accountRevision=account?.configRevision;
   const pairing=data?.pairings.find(p=>p.accountId===accountId && p.accountRevision===accountRevision && ['pending','claimed'].includes(p.status) && p.expiresAt>now);
   const candidate=pairingKey(pairing);
-  // The 1s tick only matters while a pairing code is on screen; pause it otherwise.
   const timeSensitive=!!(pairing||token);
   useEffect(()=>{
     if(!timeSensitive)return;
@@ -63,18 +60,15 @@ export function CopilotChannelsPage() {
   const routes=data?.routes.filter(r=>accountIdentities.some(i=>i.id===r.identityId))??[];
   const deliveries=data?.deliveries.filter(d=>d.accountId===accountId && d.channel===channel)??[];
   const identities=data?.identities.filter(i=>i.status==='active' && i.accountId===accountId && i.accountRevision===accountRevision)??[];
-  const bindableProjects=projects.data?.projects??[];
-  const project=bindableProjects.find(p=>p.id===projectId);
   const identity=identities.find(i=>i.id===identityId)??(identities.length===1?identities[0]:undefined);
   const integrationEnabled=!integrationConfig.isPending&&!integrationConfig.isError&&!!integrationConfig.data?.enabled&&!integrationConfig.data.emergencyDisabled;
   const canPair=!!account?.enabled&&integrationEnabled;
   const blocker=channelSetupBlocker({account,configLoading:integrationConfig.isPending,configError:integrationConfig.isError,
     config:integrationConfig.data,identities,identity,pairing,staleIdentity:accountIdentities.some(i=>i.accountRevision!==accountRevision),
-    projectsLoading:projects.isPending,projectsError:projects.isError,projectCount:bindableProjects.length,selectedProject:!!project,
     existingRoute:routes.find(r=>r.identityId===identity?.id&&r.status==='active')},copy.channelSetup);
   const tokenVisible=!!token && token.expiresAt>now && (data?.pairings.some(p=>p.id===token.id && p.accountId===accountId)??false);
   const queriesError=!!(query.isError||accountQuery.isError);
-  function switchChannel(value:ChannelPlatform){setChannel(value);setToken(null);setIdentityId('');setProjectId('');setError('');setSuccess('');}
+  function switchChannel(value:ChannelPlatform){setChannel(value);setToken(null);setIdentityId('');setError('');setSuccess('');}
   function routeStateKey(route:channels.ChannelRoute):ChannelRouteStateKey|null {
     if(route.status!=='active')return null;
     const owner=data?.identities.find(i=>i.id===route.identityId);
@@ -83,16 +77,14 @@ export function CopilotChannelsPage() {
     if(!account?.enabled)return 'channel_disabled';
     if(integrationConfig.isPending || integrationConfig.isError)return 'pending_review';
     if(!integrationConfig.data?.enabled || integrationConfig.data.emergencyDisabled)return 'channel_disabled';
-    if(projects.isPending || projects.isError)return 'pending_review';
-    const bound=projects.data?.projects.find(p=>p.id===route.projectId);
-    if(!bound)return 'project_missing';
+    if(!route.projectId)return 'project_missing';
     if(route.authorityValid===false)return 'authority_revoked';
     if(route.authorityValid!==true)return 'pending_review';
     return 'authorized';
   }
   const authorized=routes.some(r=>routeStateKey(r)==='authorized');
   const pendingReview=routes.some(r=>routeStateKey(r)==='pending_review');
-  const statusText=query.isError||accountQuery.isError||projects.isPending||projects.isError
+  const statusText=query.isError||accountQuery.isError||integrationConfig.isPending||integrationConfig.isError
     ? copy.channelStatusPending
     : authorized
       ? copy.channelStatusAuthorized(channelName)
@@ -100,14 +92,13 @@ export function CopilotChannelsPage() {
         ? copy.channelStatusPending
         : copy.channelStatusNotEnabled(channelName,blocker?.message??copy.channelReadyHint);
   const overall=channelOverallState({
-    loadPending:queriesError||projects.isPending||projects.isError,
+    loadPending:queriesError||integrationConfig.isPending||integrationConfig.isError,
     authorized,
     pendingReview,
     stopped:!!account?.secretConfigured&&(!account.enabled||!!integrationConfig.data?.emergencyDisabled),
     blocker,
   });
-  async function refresh(){await Promise.all([client.invalidateQueries({queryKey:channelKey}),client.invalidateQueries({queryKey:['project-management-overview']}),client.invalidateQueries({queryKey:['channel-diagnostics']}),client.invalidateQueries({queryKey:['channel-integration-config']}),client.invalidateQueries({queryKey:['copilot-channel-account']})]);}
-  // Do not use mutation cache: these calls can carry write-only secrets or one-time tokens.
+  async function refresh(){await Promise.all([client.invalidateQueries({queryKey:channelKey}),client.invalidateQueries({queryKey:['channel-diagnostics']}),client.invalidateQueries({queryKey:['channel-integration-config']}),client.invalidateQueries({queryKey:['copilot-channel-account']})]);}
   async function perform(action:()=>Promise<unknown>):Promise<boolean>{
     setBusy(true);setError('');setSuccess('');
     try {await action();await refresh();return true;}
@@ -115,15 +106,14 @@ export function CopilotChannelsPage() {
     finally{setBusy(false);}
   }
   const handleFailedCount=useCallback((count:number)=>setFailedChecks(count),[]);
-  const projectName=(projectId:string)=>projects.data?.projects.find(p=>p.id===projectId)?.name??projectId;
   const activationReason=queriesError?copy.activationLoadError:blocker?.message??copy.activationReady;
   return (
     <CopilotSettingsShell active="channels" title={copy.channelsCardTitle} description={copy.channelsCardDescription}>
       <div className="flex flex-col gap-4">
         {(query.isPending || accountQuery.isPending) && <p role="status">{copy.channelsLoading}</p>}
-        {(query.isError || accountQuery.isError || projects.isError || integrationConfig.isError) && <div role="alert">{copy.loadFailed}<Button variant="outline" onClick={()=>void refresh()}>{copy.reloadAction}</Button></div>}
+        {(query.isError || accountQuery.isError || integrationConfig.isError) && <div role="alert">{copy.loadFailed}<Button variant="outline" onClick={()=>void refresh()}>{copy.reloadAction}</Button></div>}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        {success && <p role="status" className="text-sm">{success}</p>}
+        {success && <p role="status" className="text-sm text-muted-foreground">{success}</p>}
         <ChannelStatusBanner
           channel={channel}
           busy={busy}
@@ -181,21 +171,15 @@ export function CopilotChannelsPage() {
             identities={identities}
             identityId={identity?.id??''}
             onIdentityChange={setIdentityId}
-            projects={bindableProjects}
-            projectId={project?.id??''}
-            onProjectChange={setProjectId}
-            projectsLoading={projects.isPending}
-            projectsError={projects.isError}
             blocker={blocker}
             activationReason={activationReason}
             showBlockerLink={!!blocker&&blocker.step!=='authorization'}
             onActivate={()=>void perform(async()=>{
-              await channels.createChannelRoute(identity!.id,project!.id);
+              await channels.createChannelRoute(identity!.id);
               setSuccess(copy.bindingCreated);
             })}
             routes={routes}
             routeState={routeStateKey}
-            projectName={projectName}
             onRevokeRoute={(id)=>void perform(()=>channels.revokeChannelRoute(id))}
           />
           {channel==='feishu' && <FeishuNotificationSettings available={canPair&&!queriesError} />}

@@ -43,6 +43,7 @@ import {
   listConversations,
   listMessages,
   renameConversation,
+  updateConversationProject,
   type CopilotConversation,
   type CopilotMessage,
 } from "@/lib/copilot-api";
@@ -67,10 +68,17 @@ export function CopilotChat() {
   const requestedConversationId = searchParams.get("c");
 
   const [conversations, setConversations] = useState<CopilotConversation[]>([]);
+  const conversationsRef = useRef<CopilotConversation[]>([]);
+  conversationsRef.current = conversations;
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
+  const projectIdRef = useRef("");
+  projectIdRef.current = projectId;
+  const projectMutationRef = useRef(0);
+  const [projectPendingCount, setProjectPendingCount] = useState(0);
+  const projectSaving = projectPendingCount > 0;
   const [creating, setCreating] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingConversations, setLoadingConversations] = useState(true);
@@ -125,10 +133,17 @@ export function CopilotChat() {
 
   const refreshConversations = useCallback(async () => {
     const serial = ++listSerialRef.current;
+    const projectSerial = projectMutationRef.current;
     try {
       const { conversations: next } = await listConversations();
       if (serial !== listSerialRef.current) return;
-      setConversations(next);
+      const currentId = controllerConversationIdRef.current;
+      const merged = projectSerial === projectMutationRef.current ? next : next.map(item =>
+        item.id === currentId ? { ...item, project_id: projectIdRef.current || null } : item);
+      conversationsRef.current = merged;
+      setConversations(merged);
+      const current = merged.find(item => item.id === currentId);
+      if (current && !deepLinkPendingRef.current && projectSerial === projectMutationRef.current) setProjectId(current.project_id ?? "");
       if (!controllerConversationIdRef.current || deepLinkPendingRef.current) {
         const requested = deepLinkPendingRef.current ? requestedConversationRef.current : readLastCopilotConversation();
         const target = (requested ? next.find((item) => item.id === requested) : undefined) ?? next[0];
@@ -244,7 +259,7 @@ export function CopilotChat() {
     modelId,
     reviewTaskResults: false,
     repairFailedChecks: false,
-    savingPreferences,
+    savingPreferences: savingPreferences || projectSaving,
     conversations,
     messages,
     active,
@@ -274,7 +289,7 @@ export function CopilotChat() {
     if (controller.conversationIdRef.current) return Promise.resolve(controller.conversationIdRef.current);
     if (!creatingRef.current) {
       const epoch = controllerEpochRef.current;
-      creatingRef.current = createConversation()
+      creatingRef.current = createConversation(undefined, projectId || undefined)
         .then(({ conversation }) => {
           if (epoch !== controllerEpochRef.current) return null;
           flushSync(() => {
@@ -297,9 +312,10 @@ export function CopilotChat() {
         });
     }
     return creatingRef.current;
-  }, [controller, refreshConversations, t]);
+  }, [controller, projectId, refreshConversations, t]);
 
   const selectConversation = useCallback(async (id: string) => {
+    projectMutationRef.current++;
     const epoch = controller.advanceSelectionEpoch();
     controller.conversationIdRef.current = id;
     setConversationId(id);
@@ -308,7 +324,7 @@ export function CopilotChat() {
     writeLastCopilotConversation(id);
     setLoadError(null);
     controller.resetInteractionState();
-    setProjectId("");
+    setProjectId(conversationsRef.current.find(item => item.id === id)?.project_id ?? "");
     // A user-initiated switch retires any pending deep link, so the URL can
     // no longer pull the selection back.
     deepLinkPendingRef.current = false;
@@ -322,6 +338,27 @@ export function CopilotChat() {
       if (controller.selectionEpochRef.current === epoch) setLoadingMessages(false);
     }
   }, [controller, readMessages, t]);
+
+  const changeProject = useCallback(async (next: string) => {
+    const serial = ++projectMutationRef.current;
+    const previous = projectId;
+    setProjectId(next);
+    if (!conversationId) return;
+    setProjectPendingCount(count => count + 1);
+    try {
+      const { conversation } = await updateConversationProject(conversationId, next);
+      if (serial !== projectMutationRef.current) return;
+      projectMutationRef.current++;
+      setProjectId(conversation.project_id ?? "");
+      setConversations(current => current.map(item => item.id === conversation.id ? conversation : item));
+    } catch {
+      if (serial !== projectMutationRef.current) return;
+      setProjectId(previous);
+      toast.error(t("copilot.loadError"));
+    } finally {
+      setProjectPendingCount(count => Math.max(0, count - 1));
+    }
+  }, [conversationId, projectId, t]);
 
   const newConversation = useCallback(async () => {
     setCreating(true);
@@ -383,7 +420,6 @@ export function CopilotChat() {
   // racing a competing turn; the chips render above the composer.
   const followups = useCopilotFollowups({
     conversationId,
-    ...(projectId ? { projectId } : {}),
     ...(modelId ? { modelId } : {}),
     reviewTaskResults: false,
     repairFailedChecks: false,
@@ -397,6 +433,7 @@ export function CopilotChat() {
   runningRef.current = Boolean(isRunning);
 
   const submit = useCallback(async (textOverride?: string) => {
+    if (projectSaving) return;
     // Lazy creation in flight: the controller's sending guard is not armed
     // yet, so a second Enter here would double-submit (duplicate message +
     // run). Drop the duplicate and let the user know their input was not
@@ -425,7 +462,7 @@ export function CopilotChat() {
       return;
     }
     await controller.send(textOverride, false);
-  }, [controller, conversationId, ensureConversation, t]);
+  }, [controller, conversationId, ensureConversation, projectSaving, t]);
   const inputRef = useRef(controller.input);
   inputRef.current = controller.input;
 
@@ -654,8 +691,8 @@ export function CopilotChat() {
           )}
           <div className="relative mx-auto w-full max-w-3xl">
             <CopilotComposerToolbar projects={projects} projectId={projectId} conversationId={conversationId}
-              onProjectChange={setProjectId} onModelChange={onModelChange} onSavingChange={setSavingPreferences}
-              disabled={isBusy || controller.sending} showRuntimeBadge />
+              onProjectChange={next => void changeProject(next)} onModelChange={onModelChange} onSavingChange={setSavingPreferences}
+              disabled={isBusy || controller.sending || projectSaving} showRuntimeBadge />
             <CommandPalettePopup
               view={palette.view}
               onHoverItem={palette.hoverItem}
@@ -704,7 +741,7 @@ export function CopilotChat() {
                   size="icon"
                   className="size-8 shrink-0 rounded-full"
                   onClick={() => void submit()}
-                  disabled={controller.sending || savingPreferences || followups.enqueuing || !controller.input.trim()}
+                  disabled={controller.sending || savingPreferences || projectSaving || followups.enqueuing || !controller.input.trim()}
                   aria-label={t("copilot.send")}
                   title={t("copilot.send")}
                 >
