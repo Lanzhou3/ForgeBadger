@@ -10,7 +10,7 @@ import "./globals.css";
 // locally hosted `/brand/*` files, so share cards point at the raw GitHub copy.
 const brandBannerUrl =
   "https://raw.githubusercontent.com/Lanzhou3/ForgeBadger/main/packages/web/public/brand/forgebadger-banner.png";
-const brandDescription = "Local-first AI programming IDE control platform";
+const brandDescription = "Local-first workspace for your AI coding tools";
 
 export const metadata: Metadata = {
   title: "ForgeBadger",
