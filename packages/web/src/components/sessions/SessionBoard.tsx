@@ -251,7 +251,7 @@ export function SessionBoardSkeleton() {
             <div className="h-4 w-24 animate-pulse rounded bg-muted" />
             <div className="ml-auto h-3 w-16 animate-pulse rounded bg-muted" />
           </div>
-          <div className="rounded-xl bg-muted/20 p-2">
+          <div className="flex flex-col gap-2 rounded-xl bg-muted/20 p-2">
             {[0, 1, 2].map((cardIndex) => (
               <div
                 key={cardIndex}

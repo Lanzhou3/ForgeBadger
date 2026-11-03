@@ -268,6 +268,22 @@ export default function SessionsPage() {
     onDeleteSession: (session: Session) => deleteMutation.mutate({ id: session.id }),
   };
 
+  const noMatchesCard = (
+    <Card>
+      <CardContent className="flex flex-col items-center justify-center gap-3 py-10 text-center">
+        <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+          <TerminalSquare className="size-5" />
+        </div>
+        <div>
+          <div className="text-sm font-medium">{t("sessions.noMatchesTitle")}</div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("sessions.noMatchesDescription")}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
   return (
     <div className="mx-auto max-w-[1440px] space-y-4 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -387,40 +403,37 @@ export default function SessionsPage() {
             view={boardView}
             onViewChange={prefs.setView}
           />
-          {filteredSessions.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center gap-3 py-10 text-center">
-                <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-                  <TerminalSquare className="size-5" />
-                </div>
-                <div>
-                  <div className="text-sm font-medium">{t("sessions.noMatchesTitle")}</div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("sessions.noMatchesDescription")}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          ) : boardView === "list" ? (
-            <SessionBoardListView
-              columns={orderedColumns}
-              prompts={prompts}
-              now={now}
-              actionPending={actionPending}
-              {...sessionActions}
-            />
+          {boardView === "list" ? (
+            filteredSessions.length === 0 ? (
+              noMatchesCard
+            ) : (
+              <SessionBoardListView
+                columns={orderedColumns}
+                prompts={prompts}
+                now={now}
+                actionPending={actionPending}
+                {...sessionActions}
+              />
+            )
           ) : (
-            <SessionBoard
-              columns={orderedColumns}
-              sessionTasks={sessionTasks}
-              prompts={prompts}
-              now={now}
-              actionPending={actionPending}
-              columnWidth={prefs.columnWidth}
-              onColumnWidthChange={prefs.setColumnWidth}
-              onColumnOrderChange={prefs.setColumnOrder}
-              {...sessionActions}
-            />
+            <>
+              {/* Keep the board mounted while filters hit zero results so its
+                  one-time entrance does not replay when results return. */}
+              <div className={cn(filteredSessions.length === 0 && "hidden")}>
+                <SessionBoard
+                  columns={orderedColumns}
+                  sessionTasks={sessionTasks}
+                  prompts={prompts}
+                  now={now}
+                  actionPending={actionPending}
+                  columnWidth={prefs.columnWidth}
+                  onColumnWidthChange={prefs.setColumnWidth}
+                  onColumnOrderChange={prefs.setColumnOrder}
+                  {...sessionActions}
+                />
+              </div>
+              {filteredSessions.length === 0 ? noMatchesCard : null}
+            </>
           )}
         </div>
       )}
