@@ -259,7 +259,7 @@ export function createSlashCommands(): SlashCommand[] {
       }
       return switchModel(context, args);
     } },
-    { name: "status", usage: "/status", description: "当前对话状态：run、模型、token、Goal", category: "info", handler: statusReport },
+    { name: "status", usage: "/status", description: "当前对话状态：run、模型、Goal", category: "info", handler: statusReport },
     { name: "stop", usage: "/stop", description: "取消排队 follow-up 并停止当前工作", category: "session", handler: stopWork },
     { name: "new", usage: "/new", description: "如何开始一个新对话", category: "session", handler: () => "在 Web 控制台点击新建对话即可开始新会话（/copilot）。命令无法替你切换页面。" },
     { name: "playbook", usage: "/playbook <name>", description: "把指定 playbook 全文载入对话", category: "info", handler: playbookContent },

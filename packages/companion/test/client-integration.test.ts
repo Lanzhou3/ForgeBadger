@@ -15,6 +15,7 @@ import { CompanionService } from '../../gateway/src/services/companion/companion
 import { CompanionHostRuntime } from '../../gateway/src/services/companion/host-runtime.js';
 import { CopilotGoalStore } from '../../gateway/src/services/agent/goal-store.js';
 import { CopilotConversationLog } from '../../gateway/src/services/agent/conversation-log.js';
+import { CopilotRunLedger } from '../../gateway/src/services/agent/run-ledger.js';
 import { ForgeBadgerEventBus } from '../../gateway/src/services/event-bus.js';
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -107,11 +108,11 @@ it('restores an encrypted read-only client through pairing, scope reset, reconne
     assert.equal(answerReceipt.status, 'succeeded');
     assert.equal(goals.getGoal(goal.id)?.status, 'active');
 
-    const run = new CopilotConversationLog(db, owner.id).createRun(conversation.id, {});
-    new CopilotConversationLog(db, owner.id).updateRun(run.id, { status: 'awaiting_approval' });
-    db.prepare('UPDATE copilot_runs SET input_json=? WHERE id=?').run(JSON.stringify({
+    const runId = new CopilotRunLedger(db, owner.id).admit({
       userId: owner.id, conversationId: conversation.id, projectId: 'client-project', goalId: goal.id, source: 'user', userText: 'approve'
-    }), run.id);
+    }, 24);
+    const run = new CopilotConversationLog(db, owner.id).getRun(runId)!;
+    new CopilotConversationLog(db, owner.id).updateRun(run.id, { status: 'awaiting_approval' });
     const inputJson = JSON.stringify({ path: 'note.txt', content: 'approved' });
     const inputDigest = createHash('sha256').update(inputJson).digest('hex');
     const action = new CopilotConversationLog(db, owner.id).createPendingAction({ runId: run.id, tool: 'goal_file_write', inputJson, inputDigest });

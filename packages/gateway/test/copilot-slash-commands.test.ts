@@ -212,13 +212,13 @@ describe("slash commands end to end", () => {
     assert.ok(fixture.store.recentJournal(goal.id).some(entry => entry.note.includes("方案A，选最小的改动")));
   });
 
-  it("/status reports run, model, token usage and active goals", async () => {
+  it("/status reports run, model and active goals without retired metering", async () => {
     const fixture = tracked();
     fixture.store.createGoal({ conversationId: fixture.conversationId, title: "Status goal", spec: "s" });
     const reply = await fixture.run("/status");
     assert.match(reply, /活跃 run/);
     assert.match(reply, /当前模型/);
-    assert.match(reply, /token 用量/);
+    assert.doesNotMatch(reply, /token 用量/);
     assert.match(reply, /活跃 Goal：1 个/);
   });
 
@@ -230,12 +230,12 @@ describe("slash commands end to end", () => {
     assert.equal(new CopilotFollowups(fixture.db, fixture.userId).list(fixture.conversationId)[0]!.status, "cancelled");
   });
 
-  it("/usage reports conversation tokens and goal usage", async () => {
+  it("retired /usage returns an unknown-command reply", async () => {
     const fixture = tracked();
     fixture.store.createGoal({ conversationId: fixture.conversationId, title: "Usage goal", spec: "s" });
     const reply = await fixture.run("/usage");
-    assert.match(reply, /token 消耗/);
-    assert.match(reply, /Usage goal/);
+    assert.match(reply, /未知命令：\/usage/);
+    assert.doesNotMatch(reply, /token 消耗|Usage goal/);
   });
 
   it("/model reports, lists and switches the persisted preference", async () => {
@@ -370,7 +370,8 @@ describe("GET /api/v1/copilot/commands", () => {
     const body = (await res.json()) as { code: number; data: { commands: Array<{ name: string; usage: string; description: string; category: string }> } };
     assert.equal(body.code, 0);
     const names = body.data.commands.map(command => command.name);
-    for (const expected of ["help", "goal", "goals", "diff", "merge", "answer", "model", "status", "stop", "new", "playbook", "playbooks", "usage", "skills"])
+    assert.ok(!names.includes("usage"), "retired metering must not be advertised");
+    for (const expected of ["help", "goal", "goals", "diff", "merge", "answer", "model", "status", "stop", "new", "playbook", "playbooks", "skills"])
       assert.ok(names.includes(expected), `${expected} missing from /commands`);
     for (const command of body.data.commands) {
       assert.ok(["goal", "session", "model", "info"].includes(command.category), `bad category ${command.category}`);

@@ -12,6 +12,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { TemplateRepository } from "../src/db/repositories/template-repository.js";
 import { ProjectRepository } from "../src/db/repositories/project-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
+import { isolateLocalSkillSources } from "./helpers/local-skill-sources.js";
 import {
   applyTemplateSync,
   buildTemplateUsage,
@@ -19,6 +20,8 @@ import {
   previewTemplateSync,
   TemplateSyncError
 } from "../src/services/template-sync.js";
+
+isolateLocalSkillSources();
 
 function createTestDb(): Database {
   const db = new Database(":memory:");

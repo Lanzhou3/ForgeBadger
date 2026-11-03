@@ -12,6 +12,7 @@ import jwt from "jsonwebtoken";
 import { createGatewayApp } from "../src/server.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
+import { isolateLocalSkillSources } from "./helpers/local-skill-sources.js";
 import { TerminalInputRateLimiter } from "../src/websocket/terminal.js";
 import { ApiKeyRepository } from "../src/db/repositories/api-key-repository.js";
 import { UserRepository } from "../src/db/repositories/user-repository.js";
@@ -21,6 +22,7 @@ import {
 } from "../src/services/runtime-authorization-invalidation.js";
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
+isolateLocalSkillSources();
 const masterKey = "abcdef0123456789abcdef0123456789";
 
 process.env.FORGEBADGER_JWT_SECRET = jwtSecret;
