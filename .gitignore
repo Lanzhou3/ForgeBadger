@@ -67,6 +67,8 @@ docs/adr/*
 !docs/superpowers/specs/
 docs/superpowers/specs/*
 !docs/superpowers/specs/2026-08-13-portfolio-operations-architecture.md
+!docs/superpowers/specs/2026-11-01-companion-relay-design.md
+!docs/superpowers/specs/2026-11-01-companion-relay-threat-model.md
 !docs/superpowers/plans/
 docs/superpowers/plans/*
 !docs/superpowers/plans/2026-08-13-portfolio-operations-clean-break.md

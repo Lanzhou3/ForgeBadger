@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "ForgeBadger Companion",
+    "slug": "forgebadger-companion",
+    "scheme": "forgebadger",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.forgebadger.companion"
+    },
+    "android": {
+      "package": "com.forgebadger.companion"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow ForgeBadger Companion to scan a computer pairing QR code.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": "Allow ForgeBadger Companion to protect device credentials with Face ID."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

@@ -32,6 +32,7 @@ const envSchema = z.object({
   FORGEBADGER_REGISTRATION: registrationModeSchema.default("open"),
   FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED: strictEnvBoolean,
   FORGEBADGER_MCP_ENABLED: strictEnvBoolean,
+  FORGEBADGER_COMPANION_ENABLED: strictEnvBoolean,
   /**
    * Operator escape hatch: when true the runtime-settings API rejects writes
    * and the console renders the settings page read-only (.env stays the only

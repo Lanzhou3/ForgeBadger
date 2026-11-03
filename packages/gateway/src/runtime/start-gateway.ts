@@ -91,6 +91,7 @@ export async function createGatewayRuntime(
       sessionServerIpcPath,
       sessionServerTokenPath: resolveSessionServerTokenPath(env.FORGEBADGER_STATE_DIR),
       mcpEnabled: env.FORGEBADGER_MCP_ENABLED,
+      companionEnabled: env.FORGEBADGER_COMPANION_ENABLED,
       pmAutoDispatchEnabled: env.FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED,
       // Builds the DB-backed runtime settings store (settings page) and
       // hot-applies changes; its initial apply also reconciles pre-existing

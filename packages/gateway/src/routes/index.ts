@@ -7,6 +7,7 @@ import { createTaskArtifactLinkRoutes } from './task-artifact-links.js';
 import { createCollaborationRoutes } from './collaboration.js';
 import { DeliveryService } from '../services/collaboration/delivery-service.js';
 import { createCopilotChannelRoutes } from "./copilot-channels.js";
+import { createCompanionRoutes } from "./companion.js";
 import { createChannelDiagnosticsRoutes } from "./channel-diagnostics.js";
 import { createPlatformActionRoutes } from "./platform-actions.js";
 import { createProjectManagementRoutes } from "./project-management.js";
@@ -143,6 +144,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   }));
   app.use("/api/v1/dashboard", createDashboardRoutes(deps.db));
   app.use("/api/v1/copilot/channels", createCopilotChannelRoutes({ db: deps.db, masterKey: deps.masterKey }));
+  app.use("/api/v1/companion", createCompanionRoutes({ db: deps.db, masterKey: deps.masterKey, companionEnabled: deps.companionEnabled }));
   app.use("/api/v1/channels", createChannelDiagnosticsRoutes({ db: deps.db, masterKey: deps.masterKey }));
   app.use("/api/v1", createPlatformActionRoutes({db:deps.db,masterKey:deps.masterKey,sessionManager:deps.sessionManager,adapterCommandRunner:deps.adapterCommandRunner,eventBus:deps.eventBus}));
   app.use("/api/v1", createProjectManagementRoutes(deps.db, (userId,commandId,input) => new PlatformActions({db:deps.db,userId},createPlatformCommands()).executeOwner(commandId,input,randomUUID())));

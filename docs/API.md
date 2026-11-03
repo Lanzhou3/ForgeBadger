@@ -2350,6 +2350,102 @@ Before frontend implementation begins, `.claude/rules/api.md`, `AGENTS.md`, `doc
 
 The former DeepSeek Harness bridge under `/api/internal/v1/copilot-bridge/**` and the former Portfolio API under `/api/v1/portfolio/**` are retired and not mounted. Programmatic terminal submission remains an internal, approval-gated Project Manager/Copilot tool path with the standard session, tenant, and runtime authorization checks.
 
+### Companion host, pairing, and device management (local foundation)
+
+All endpoints below live under `/api/v1/companion`, require normal active-user
+authentication, return the standard API envelope, and set `Cache-Control:
+no-store`. Migration `0144` adds the installation-level host record and
+tenant-scoped pairing/device tables. `FORGEBADGER_COMPANION_ENABLED` defaults to
+`false`; this gate blocks host enablement and new pairing/confirmation while
+leaving inspection, cancellation, and revocation available.
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/host` | `{featureEnabled,host}`; public host metadata only, or `host: null` before configuration |
+| PUT | `/host` | `{enabled,relayUrl,expectedRevision}` → `{host}`; active instance admin only |
+| POST | `/pairings` | `{projectIds,capabilities}` → `{pairing,qr}`; 201, QR secret returned once, expires in 10 minutes |
+| GET | `/pairings` | `{pairings}`; latest 100, excluding token hashes and QR secrets |
+| POST | `/pairings/:id/confirm` | `{revision,sas}` after an internal trusted-transport claim → `{device}` |
+| POST | `/pairings/:id/cancel` | `{}` → `{cancelled:true}` |
+| GET | `/devices` | `{devices}`; latest 100 for the authenticated owner |
+| PATCH | `/devices/:id` | `{expectedRevision,name?,projectIds?,capabilities?}` → `{device}` |
+| POST | `/devices/:id/revoke` | `{}` → `{revoked:true}` |
+
+Host configuration is installation-level and cannot be changed by an ordinary
+tenant. Relay URLs must be credential-free `wss` URLs. Host Ed25519/X25519 private
+keys are encrypted with the existing master-key secret-box and are never returned
+by these APIs. Changing the Relay URL increments the host revision and revokes all
+outstanding pairings and active devices. Re-enabling after a disable without a
+Relay change retains the existing host identity and non-revoked device records.
+
+Pairing is limited to explicitly selected personal projects owned by the caller;
+foreign, missing, and `team_projects`-enrolled projects are rejected. Creating a
+new pairing cancels the owner's previous pending/claimed pairing. The trusted
+future Relay seam claims a one-time secret and device Ed25519/X25519 public keys;
+there is deliberately no public HTTP claim endpoint. The owner must confirm the
+current pairing revision and six-digit SAS before a device becomes active.
+Device scope changes increment `authorityRevision`; name-only changes do not.
+Revocation is tenant-scoped and idempotent.
+
+The `@forgebadger/relay` package serves `/companion/v1` over WebSocket and
+`/health` over HTTP. `FORGEBADGER_RELAY_HOST` defaults to `127.0.0.1` and
+`FORGEBADGER_RELAY_PORT` to `18334`; production deployments must put the Relay
+behind a TLS-terminating `wss` endpoint. Relay keeps only in-memory host/device
+routes and opaque ciphertext; it is not a canonical database and has no project
+authority. The Gateway HostRuntime makes the outbound connection, validates the
+Relay host with the existing DNS/SSRF policy, and reconnects without affecting
+local Web, Session Server, or CLI work.
+
+Migration `0145` links confirmed pairings to devices and adds a bounded per-device
+outbox. Pairing claims and query/event payloads use Ed25519 signatures plus X25519,
+HKDF-SHA-256, and AES-256-GCM with host/device/message context. Owner confirmation
+creates a durable `device.confirmed` event; the HostRuntime signs the corresponding
+device registration, so Relay never needs the pairing secret or owner credentials.
+After a successful claim, the host returns a `pairing.claimed` notice whose
+signed/encrypted payload contains the SAS; the app independently derives and
+compares it before asking the owner to confirm. Relay restarts cause the host to
+replay registration and outbox events. Scope changes also emit `sync.reset`;
+sequence gaps require a canonical snapshot reset.
+
+The two Companion migrations retain their original SQL bytes and journal
+timestamps after their filenames were renumbered to follow upstream Claude-route
+migration `0143`. On startup, databases that already recorded the original
+Companion foundation hash but lack the Claude-route migration hash are repaired
+only when the assignment table still has its exact legacy column set. The
+original upstream SQL and its journal record are applied together in a
+transaction before normal migrations; already-upgraded candidate lists are
+never rebuilt, and unexpected schema/history combinations stop startup.
+
+Authenticated devices can currently make two encrypted read-only queries:
+`snapshot` and `sync`, both carrying the current `authorityRevision`. Snapshots
+include scoped project/session summaries, Goal status/questions when `goals.read`
+is present, and attention metadata. They exclude attach tokens, working paths,
+terminal scrollback, Goal specifications, and notification message bodies. Queries
+recheck active user/device, current personal projects, capabilities, and revision.
+Unknown methods, revoked devices, stale revisions, and cross-tenant resources fail
+closed. The Expo Companion renders these projections in read-only Attention,
+project, and Goal screens. Invalid local management input returns 400
+`COMPANION_INPUT_INVALID`; failures use stable `COMPANION_*` codes without private
+keys or pairing secrets in error details.
+
+Migration `0146` adds durable per-device commands with encrypted payloads and
+parameter digests. Relay accepts only `goal.create`, `goal.answer`, `goal.pause`,
+`goal.resume`, `goal.cancel`, `approval.decide`, and `run.stop`; arbitrary prompts,
+Shell, terminal input, and generic HTTP forwarding are not methods. Mobile-created
+Goals always start with `grants: []`. Admission and pre-effect checks revalidate
+active user/device, project scope, capabilities, and `authorityRevision`.
+Same-ID/same-payload retries return the stored receipt; conflicting reuse is
+rejected. Offline commands are not queued.
+
+Receipts use `accepted`, `running`, `succeeded`, `rejected`, `failed`, and
+`unknown`, with independent `none`, `confirmed`, or `unknown` effect status.
+Approval decisions additionally require the exact pending-action `inputDigest`.
+Startup recovery reconciles only effects proven by canonical Goal/run/approval
+records and marks everything else `unknown`; it never automatically replays an
+uncertain write. Snapshots expose bounded approval detail and the latest 20 command
+receipts. Expo Goal screens support answers and lifecycle controls, while exact
+approval screens require device authentication before approval.
+
 ### Copilot channel identity and route management (P2a backend)
 
 All endpoints below live under `/api/v1/copilot/channels`, require the normal
