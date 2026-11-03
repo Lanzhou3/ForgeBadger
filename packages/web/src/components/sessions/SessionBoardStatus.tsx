@@ -12,11 +12,11 @@ export function SessionStatusDot({ status }: { status: string }) {
       className={cn(
         "size-2 shrink-0 rounded-full",
         normalized === "running"
-          ? "motion-safe:animate-pulse bg-emerald-400"
+          ? "motion-safe:animate-pulse bg-success"
           : normalized === "error"
-            ? "bg-red-400"
+            ? "bg-destructive"
             : normalized === "lost"
-              ? "bg-amber-400"
+              ? "bg-warning"
               : "bg-muted-foreground/40"
       )}
     />
