@@ -1513,6 +1513,7 @@ export const copilotConversations = sqliteTable("copilot_conversations", {
   channelOwned: integer('channel_owned').notNull().default(0),
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id"),
   title: text("title"),
   status: text("status").notNull().default("active"),
   // Rolling context-compression summary (see migration 0042): accumulated digest
@@ -1524,7 +1525,11 @@ export const copilotConversations = sqliteTable("copilot_conversations", {
   dshSessionId: text("dsh_session_id"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-}, (table) => ({ userLookup: index("idx_copilot_conversations_user_updated").on(table.userId, table.updatedAt), tenant: uniqueIndex("idx_copilot_conversation_tenant").on(table.userId,table.id) }));
+}, (table) => ({
+  userLookup: index("idx_copilot_conversations_user_updated").on(table.userId, table.updatedAt),
+  tenant: uniqueIndex("idx_copilot_conversation_tenant").on(table.userId,table.id),
+  projectLookup: index("idx_copilot_conversation_project").on(table.userId,table.projectId)
+}));
 
 export const copilotMessages = sqliteTable("copilot_messages", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -1883,12 +1888,11 @@ export const channelIdentities = sqliteTable('channel_identities', {
   peer: uniqueIndex('idx_channel_identity_peer').on(t.userId, t.channel, t.accountId, t.accountRevision, t.externalUserId, t.chatId).where(sql`${t.status} = 'active'`) }));
 export const channelRoutes = sqliteTable('channel_routes', {
   id: text('id').primaryKey(), userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  identityId: text('identity_id').notNull(), projectId: text('project_id').notNull(),
+  identityId: text('identity_id').notNull(),
   conversationId: text('conversation_id').notNull(), status: text('status').notNull().default('active'),
   revision: integer('revision').notNull().default(1), createdAt: integer('created_at').notNull()
 }, t => ({
   identity: foreignKey({ columns: [t.userId, t.identityId], foreignColumns: [channelIdentities.userId, channelIdentities.id] }).onDelete('cascade'),
-  project: foreignKey({ columns: [t.userId, t.projectId], foreignColumns: [projects.userId, projects.id] }).onDelete('cascade'),
   conversation: foreignKey({ columns: [t.userId, t.conversationId], foreignColumns: [copilotConversations.userId, copilotConversations.id] }).onDelete('cascade'),
   tenant: uniqueIndex('idx_channel_route_tenant').on(t.userId,t.id),
   active: uniqueIndex('idx_channel_route_active').on(t.userId, t.identityId).where(sql`${t.status} = 'active'`),
@@ -2279,4 +2283,110 @@ export const feishuTypingReactions = sqliteTable('feishu_typing_reactions', {
   key: primaryKey({ columns: [t.userId, t.inboxId] }),
   due: index('idx_feishu_typing_due').on(t.userId, t.state, t.nextAttemptAt),
   validState: check('feishu_typing_state', sql`${t.state} IN ('pending','adding','active','uncertain','done')`)
+}));
+
+export const companionHost = sqliteTable('companion_host', {
+  id: text('id').primaryKey(),
+  hostId: text('host_id').notNull().unique(),
+  relayUrl: text('relay_url').notNull(),
+  signingPublicKey: text('signing_public_key').notNull(),
+  encryptionPublicKey: text('encryption_public_key').notNull(),
+  signingPrivateKeyEncrypted: text('signing_private_key_encrypted').notNull(),
+  encryptionPrivateKeyEncrypted: text('encryption_private_key_encrypted').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+  revision: integer('revision').notNull().default(1),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull()
+});
+
+export const companionPairings = sqliteTable('companion_pairings', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  hostId: text('host_id').notNull().references(() => companionHost.hostId, { onDelete: 'cascade' }),
+  hostRevision: integer('host_revision').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  status: text('status').notNull().default('pending'),
+  revision: integer('revision').notNull().default(1),
+  projectIdsJson: text('project_ids_json').notNull(),
+  capabilitiesJson: text('capabilities_json').notNull(),
+  deviceName: text('device_name'),
+  deviceSigningPublicKey: text('device_signing_public_key'),
+  deviceEncryptionPublicKey: text('device_encryption_public_key'),
+  claimNonce: text('claim_nonce'),
+  sas: text('sas'),
+  deviceId: text('device_id'),
+  expiresAt: integer('expires_at').notNull(),
+  createdAt: integer('created_at').notNull()
+}, table => ({
+  owner: index('idx_companion_pairing_owner').on(table.userId, table.createdAt),
+  tenant: uniqueIndex('idx_companion_pairing_tenant').on(table.userId, table.id),
+  validState: check('companion_pairing_state', sql`${table.status} IN ('pending','claimed','confirmed','cancelled')`)
+}));
+
+export const companionDevices = sqliteTable('companion_devices', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  hostId: text('host_id').notNull().references(() => companionHost.hostId, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  signingPublicKey: text('signing_public_key').notNull(),
+  encryptionPublicKey: text('encryption_public_key').notNull(),
+  keyFingerprint: text('key_fingerprint').notNull(),
+  projectIdsJson: text('project_ids_json').notNull(),
+  capabilitiesJson: text('capabilities_json').notNull(),
+  authorityRevision: integer('authority_revision').notNull().default(1),
+  status: text('status').notNull().default('active'),
+  pairedAt: integer('paired_at').notNull(),
+  lastSeenAt: integer('last_seen_at'),
+  revokedAt: integer('revoked_at'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull()
+}, table => ({
+  tenant: uniqueIndex('idx_companion_device_tenant').on(table.userId, table.id),
+  activeKey: uniqueIndex('idx_companion_device_active_key').on(table.signingPublicKey).where(sql`${table.status} = 'active'`),
+  owner: index('idx_companion_device_owner').on(table.userId, table.createdAt),
+  validState: check('companion_device_state', sql`${table.status} IN ('active','revoked')`)
+}));
+
+export const companionOutbox = sqliteTable('companion_outbox', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  deviceId: text('device_id').notNull(),
+  sequence: integer('sequence').notNull(),
+  eventType: text('event_type').notNull(),
+  payloadJson: text('payload_json').notNull(),
+  createdAt: integer('created_at').notNull()
+}, table => ({
+  identity: uniqueIndex('idx_companion_outbox_identity').on(table.deviceId, table.sequence),
+  deviceSequence: index('idx_companion_outbox_device_sequence').on(table.userId, table.deviceId, table.sequence),
+  created: index('idx_companion_outbox_created').on(table.createdAt),
+  device: foreignKey({
+    columns: [table.userId, table.deviceId],
+    foreignColumns: [companionDevices.userId, companionDevices.id]
+  }).onDelete('cascade')
+}));
+
+export const companionCommands = sqliteTable('companion_commands', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  deviceId: text('device_id').notNull(),
+  commandType: text('command_type').notNull(),
+  payloadEncrypted: text('payload_encrypted').notNull(),
+  payloadDigest: text('payload_digest').notNull(),
+  status: text('status').notNull().default('accepted'),
+  effectStatus: text('effect_status').notNull().default('none'),
+  authorityRevision: integer('authority_revision').notNull(),
+  resultReference: text('result_reference'),
+  errorCode: text('error_code'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull()
+}, table => ({
+  identity: uniqueIndex('idx_companion_commands_identity').on(table.deviceId, table.id),
+  deviceUpdated: index('idx_companion_commands_device_updated').on(table.userId, table.deviceId, table.updatedAt),
+  recovery: index('idx_companion_commands_recovery').on(table.status, table.updatedAt),
+  device: foreignKey({
+    columns: [table.userId, table.deviceId],
+    foreignColumns: [companionDevices.userId, companionDevices.id]
+  }).onDelete('cascade'),
+  validState: check('companion_command_state', sql`${table.status} IN ('accepted','running','succeeded','rejected','failed','unknown')`),
+  validEffect: check('companion_command_effect', sql`${table.effectStatus} IN ('none','confirmed','unknown')`)
 }));

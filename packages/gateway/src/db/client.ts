@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 
 import type { Database } from "./types.js";
+import { recoverCompanionMigrationGap } from "./companion-migration-recovery.js";
 import { expandUserPath } from "../lib/user-path.js";
 
 let dbInstance: Database | null = null;
@@ -27,10 +28,14 @@ export function initializeDatabase(dbPath: string): Database {
 
   db.pragma("foreign_keys = OFF");
   try {
+    recoverCompanionMigrationGap(db, migrationsFolder);
     migrate(drizzleDb, { migrationsFolder });
+  } catch (error) {
+    db.close();
+    throw error;
   } finally {
     // Drizzle wraps migrations in a transaction, so this must happen outside it.
-    db.pragma("foreign_keys = ON");
+    if (db.open) db.pragma("foreign_keys = ON");
   }
 
   const foreignKeyViolations = db.prepare("PRAGMA foreign_key_check").all();

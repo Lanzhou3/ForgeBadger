@@ -141,5 +141,9 @@
   "0140_copilot_goal_workspaces.sql": "dad635dc2963973376b185b53ef4860f3a1cff0d43e91b4c5e267d0720ac74bb",
   "0141_copilot_goal_board_links.sql": "d32a5beea5b465f93b57f5fd9dacad9a3b33e723d3b6fd620d6f2907c9dbd729",
   "0142_telegram_notifications.sql": "0e84748cb5223f8da78203bc6c38caaf8764958e78975e9ce4eef16fe153d2fd",
-  "0143_claude_route_failover.sql": "bdddf1fc4003a0d72717320fb70eb0578f75de506e9fedbce271cf7b40c581ed"
+  "0143_claude_route_failover.sql": "bdddf1fc4003a0d72717320fb70eb0578f75de506e9fedbce271cf7b40c581ed",
+  "0144_companion_foundation.sql": "6035fd7d2a5544a54389c9d8b6e5eebda78cdf4b298f617de330021fa78fd9ca",
+  "0145_companion_readonly_sync.sql": "053c79f0ab967e9d6c1f0023bf98aff30465b550b837bb6763fcde5f9e59f629",
+  "0146_companion_commands.sql": "3b56fbcf2e143930a4c12991b13f3cca6d4ed09f40dafdb58c4620ca14d0b4c3",
+  "0147_conversation_project_context.sql": "df023e46d5129710c9d72dd9f5d691551f28e6db54300494d81396a5cbdb683f"
 }
