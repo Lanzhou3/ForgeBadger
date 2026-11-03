@@ -279,6 +279,21 @@ describe("mcp endpoint", () => {
     // takeover_session requires interactive owner authority and is not part of
     // the external surface at all, so it never reaches the annotation path.
     assert.equal(byToken(operator).some((tool) => tool.name === "takeover_session"), false);
+    // openWorldHint follows the spec default (true) and is narrowed by an
+    // explicit closed-domain list, so an unclassified tool stays conservative.
+    const openWorld = (tools: Array<{ name: string; annotations?: Record<string, boolean> }>, name: string) =>
+      tools.find((tool) => tool.name === name)?.annotations?.openWorldHint;
+    for (const name of ["create_session", "start_session", "dispatch_task_to_session", "pm_execute_task_packet"]) {
+      assert.equal(openWorld(byToken(cli), name), true, `${name} drives an external CLI`);
+    }
+    for (const name of ["list_projects", "list_sessions", "pm_get_plan", "preview_project_config"]) {
+      assert.equal(openWorld(byToken(cli), name), false, `${name} stays inside this Gateway`);
+    }
+    // Global operate tools are only offered to `operate` without cli_dispatch.
+    for (const name of ["write_memory", "update_project"]) {
+      assert.equal(openWorld(byToken(operator), name), false, `${name} stays inside this Gateway`);
+    }
+    assert.equal(openWorld(byToken(cli), "get_mcp_operation"), false);
   });
 
   it("executes read tools with tenant-scoped results", async () => {

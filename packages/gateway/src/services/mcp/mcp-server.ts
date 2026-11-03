@@ -404,7 +404,32 @@ function toolResultContent(output: unknown): {
 // MCP tool annotations let external hosts tier trust (e.g. auto-approve
 // read-only tools, flag destructive ones). They are advisory: derived from the
 // platform tool's risk class, and hosts still confirm before invoking.
-const MCP_OPEN_WORLD_TOOLS = new Set(["start_session", "stop_session", "dispatch_task_to_session", "pm_execute_task_packet", "create_session"]);
+//
+// `openWorldHint` follows the spec default (`true`: the tool may reach an "open
+// world" of external entities) and is narrowed by an explicit closed-domain
+// list. Listing the closed tools — rather than the open ones — keeps an
+// unclassified new tool on the conservative side: a host that sees `true`
+// prompts more, never less.
+const MCP_CLOSED_WORLD_TOOLS = new Set([
+  // Reads confined to this Gateway's own database.
+  "list_projects", "get_project", "list_sessions", "get_session", "get_session_writer",
+  "get_usage_summary", "list_memory", "search_memory", "pm_overview", "pm_get_plan",
+  "pm_get_handoff", "pm_get_work_item", "pm_get_management", "pm_list_ledger",
+  "pm_get_task_packet", "pm_list_task_packets", "pm_get_task_progress", "get_mcp_operation",
+  "list_playbooks", "load_playbook", "read_skill_resource", "list_templates",
+  // Reads confined to the project working tree / its code graph.
+  "get_project_git_status", "read_project_diff", "list_project_files", "read_project_file",
+  "search_project_files", "project_graph_search", "project_graph_symbol_detail",
+  "project_graph_impact", "project_graph_affected_paths", "list_development_tasks",
+  "get_development_task",
+  // Writes confined to this Gateway's own records.
+  "write_memory", "update_project", "pm_create_work_item", "pm_update_work_item",
+  "pm_update_management", "create_project", "import_project", "apply_project_config",
+  "preview_project_config", "pm_prepare_task_packet", "pm_close_task",
+  // Project-manager lifecycle writes: planning records only, no external driver.
+  "pm_set_goal", "pm_update_task_plan", "pm_manage_stage", "pm_manage_dependency",
+  "pm_attach_evidence", "pm_review_task", "pm_delete_work_item", "pm_get_goal"
+]);
 
 /**
  * Writes that are NOT safe to replay, expressed positively so a newly added
@@ -429,7 +454,7 @@ function mcpToolAnnotations(tool: AgentTool): { readOnlyHint: boolean; destructi
     readOnlyHint: tool.risk === "read",
     destructiveHint: tool.risk === "operate",
     idempotentHint: tool.risk === "read" || !MCP_NON_IDEMPOTENT_WRITES.has(tool.name),
-    openWorldHint: MCP_OPEN_WORLD_TOOLS.has(tool.name)
+    openWorldHint: !MCP_CLOSED_WORLD_TOOLS.has(tool.name)
   };
 }
 
