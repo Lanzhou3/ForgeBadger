@@ -71,9 +71,6 @@ export function SessionBoard({
   const [liveWidth, setLiveWidth] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [edgeFade, setEdgeFade] = useState({ left: false, right: false });
-  // The entrance runs exactly once per mount: filters, polling refetches, and
-  // session actions re-render this component but must not replay it.
-  const entrancePlayedRef = useRef(false);
   const dragSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor)
@@ -81,12 +78,11 @@ export function SessionBoard({
 
   const width = liveWidth ?? columnWidth;
 
+  // One entrance per mount: useGSAP's empty-config effect runs once per mount
+  // (recreated in Strict Mode after its cleanup revert, which is what we want),
+  // so filters, polling refetches, and session actions never replay it.
   useGSAP(
     () => {
-      if (entrancePlayedRef.current) {
-        return;
-      }
-      entrancePlayedRef.current = true;
       const root = scrollRef.current;
       if (!root || window.matchMedia?.(REDUCED_MOTION)?.matches) {
         return;
@@ -99,11 +95,15 @@ export function SessionBoard({
       }
       const timeline = gsap.timeline({ defaults: { ease: "power2.out" } });
       columnEls.forEach((columnEl, columnIndex) => {
+        // Animate the inner wrapper, never the section: the section's inline
+        // transform is owned by dnd-kit while dragging.
+        const entranceEl = columnEl.querySelector<HTMLElement>("[data-board-entrance]");
+        if (!entranceEl) {
+          return;
+        }
         const columnAt = columnIndex * 0.07;
-        // clearProps hands the column back to dnd-kit/React once the tween
-        // completes so no inline transform ever competes with drag transforms.
         timeline.fromTo(
-          columnEl,
+          entranceEl,
           { autoAlpha: 0, y: 10 },
           {
             autoAlpha: 1,
@@ -114,7 +114,7 @@ export function SessionBoard({
           columnAt
         );
         const cardEls = Array.from(
-          columnEl.querySelectorAll<HTMLElement>("[data-session-id]")
+          entranceEl.querySelectorAll<HTMLElement>("[data-session-id]")
         ).slice(0, ENTRANCE_CARDS_PER_COLUMN);
         if (cardEls.length > 0) {
           timeline.fromTo(

@@ -37,16 +37,13 @@ export function AuthShell({
 }: AuthShellProps) {
   const { language, setLanguage, t } = useLanguage();
   const shellRef = useRef<HTMLElement | null>(null);
-  // One short entrance per mount; language switches and re-renders must not
-  // replay it, and there is deliberately no ambient or parallax motion.
-  const entrancePlayedRef = useRef(false);
 
+  // One short entrance per mount (useGSAP's empty-config effect re-runs after
+  // Strict Mode cleanup, deliberately recreating the reverted entrance);
+  // language switches and re-renders never replay it, and there is no ambient
+  // or parallax motion.
   useGSAP(
     () => {
-      if (entrancePlayedRef.current) {
-        return;
-      }
-      entrancePlayedRef.current = true;
       if (!shellRef.current || window.matchMedia?.(REDUCED_MOTION)?.matches) {
         return;
       }
