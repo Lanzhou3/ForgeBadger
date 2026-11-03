@@ -221,6 +221,11 @@ describe("mcp endpoint", () => {
     assert.ok(operatorNames.includes("stop_session"));
     assert.ok(cliNames.includes("dispatch_task_to_session"));
     assert.ok(cliNames.includes("pm_execute_task_packet"));
+    // Creating a new session is a CLI-control capability: operate alone never
+    // gains it, and read-only tokens never see it.
+    assert.ok(cliNames.includes("create_session"));
+    assert.equal(operatorNames.includes("create_session"), false);
+    assert.equal(readerNames.includes("create_session"), false);
   });
 
   it('does not expand old account tokens to raw Shell execution', async () => {
@@ -253,11 +258,27 @@ describe("mcp endpoint", () => {
       }
     }
     const listProjects = byToken(reader).find((tool) => tool.name === "list_projects");
-    assert.deepEqual(listProjects?.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false });
+    assert.deepEqual(listProjects?.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
     const stopSession = byToken(operator).find((tool) => tool.name === "stop_session");
-    assert.deepEqual(stopSession?.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
+    assert.deepEqual(stopSession?.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true });
+    const createSession = byToken(cli).find((tool) => tool.name === "create_session");
+    assert.deepEqual(createSession?.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true });
+    for (const token of [readToken, operateToken]) {
+      const attempt = await mcpRpc(port, token, "tools/call", { name: "create_session", arguments: { projectId: "fixture", aiTool: "terminal", operationId: "create-session-denied" } });
+      assert.equal(attempt.messages[0]?.result?.isError, true);
+    }
     const receipt = byToken(cli).find((tool) => tool.name === "get_mcp_operation");
     assert.deepEqual(receipt?.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+    // Replay safety follows the durable-receipt guarantee, not the risk class:
+    // a write whose effect is typed into a live CLI stays non-idempotent even
+    // though the intent id is stable.
+    for (const name of ["dispatch_task_to_session", "pm_execute_task_packet"]) {
+      const tool = byToken(cli).find((candidate) => candidate.name === name);
+      assert.equal(tool?.annotations?.idempotentHint, false, `${name} must not advertise replay safety`);
+    }
+    // takeover_session requires interactive owner authority and is not part of
+    // the external surface at all, so it never reaches the annotation path.
+    assert.equal(byToken(operator).some((tool) => tool.name === "takeover_session"), false);
   });
 
   it("executes read tools with tenant-scoped results", async () => {

@@ -25,6 +25,7 @@ import {
   CliConfigApplyError,
   previewCliConfigApply,
   rollbackCliConfigApply,
+  normalizeProviderKey,
   type ClaudeModelSlot
 } from "../services/cli-config-apply.js";
 import { listCliConfigFields } from "../services/cli-config-fields.js";
@@ -85,7 +86,9 @@ const applyProviderBodySchema = z.object({
   // Codex only: model_reasoning_effort.
   reasoningEffort: z.enum(["minimal", "low", "medium", "high"]).optional(),
   // Claude only: apply through the Gateway route (OpenAI-protocol providers).
-  routeThroughGateway: z.boolean().optional()
+  routeThroughGateway: z.boolean().optional(),
+  // Kimi only: default_permission_mode for new sessions.
+  permissionMode: z.enum(["manual", "yolo", "auto"]).optional()
 }).strict();
 
 const rollbackBodySchema = z.object({
@@ -540,6 +543,7 @@ function applyInput(
     ...(body.modelMapping ? { modelMapping: compactModelMapping(body.modelMapping) } : {}),
     ...(body.reasoningEffort ? { reasoningEffort: body.reasoningEffort } : {}),
     ...(body.routeThroughGateway !== undefined ? { routeThroughGateway: body.routeThroughGateway } : {}),
+    ...(body.permissionMode ? { permissionMode: body.permissionMode } : {}),
     ...(options.resolveHost ? { resolveHost: options.resolveHost } : {})
   };
 }

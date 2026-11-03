@@ -760,11 +760,18 @@ function describeKimi(doc: ConfigDoc) {
       name: id,
       protocol: stringValue(entry.type),
       baseUrl: stringValue(entry.base_url),
-      hasApiKey: Boolean(stringValue(entry.api_key)),
+      hasApiKey: kimiProviderHasCredential(entry),
       isActive: id === activeProvider
     };
   });
   return { providers, models, defaultModel };
+}
+
+function kimiProviderHasCredential(entry: ConfigDoc): boolean {
+  if (stringValue(entry.api_key) || stringValue(entry.api_key_env) || asRecord(entry.oauth)) return true;
+  const env = asRecord(entry.env) ?? {};
+  return ["KIMI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY"]
+    .some((key) => Boolean(stringValue(env[key])));
 }
 
 /**

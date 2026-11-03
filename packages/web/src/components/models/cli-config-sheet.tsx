@@ -30,6 +30,7 @@ import {
   getCliConfigFields,
   getCliConfigFieldValues,
   getCliConfigFile,
+  updateCliConfigFields,
   writeCliConfigFile,
   type CliConfigFieldSpec,
   type RuntimeAdapterId,
@@ -142,6 +143,21 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
     },
   });
 
+  const fieldMutation = useMutation({
+    mutationFn: (updates: Record<string, unknown>) => updateCliConfigFields(adapter, updates),
+    onSuccess: async () => {
+      toast.success(t("cliConfig.saved"));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["cli-config", adapter] }),
+        queryClient.invalidateQueries({ queryKey: ["cli-config-file", adapter, mainFile?.relativePath] }),
+        queryClient.invalidateQueries({ queryKey: ["cli-config-field-values", adapter] }),
+      ]);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : t("cliConfig.saveFailed"));
+    },
+  });
+
   const commonFields = fieldsQuery.data?.fields ?? [];
 
   return (
@@ -182,9 +198,13 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
                   {commonFields.map((field) => (
                     <FieldMetadata
                       key={field.key}
+                      adapter={adapter}
                       field={field}
                       value={valuesQuery.data?.values[field.key]}
                       valuesLoading={valuesQuery.isLoading}
+                      isAdmin={isAdmin}
+                      pending={fieldMutation.isPending}
+                      onEnumChange={(key, value) => fieldMutation.mutate({ [key]: value })}
                       t={t}
                     />
                   ))}
@@ -375,14 +395,22 @@ function HighlightedConfigContent({ fileName, content }: { fileName: string; con
 }
 
 function FieldMetadata({
+  adapter,
   field,
   value,
   valuesLoading,
+  isAdmin,
+  pending,
+  onEnumChange,
   t,
 }: {
+  adapter: RuntimeAdapterId;
   field: CliConfigFieldSpec;
   value: unknown;
   valuesLoading: boolean;
+  isAdmin: boolean;
+  pending: boolean;
+  onEnumChange: (key: string, value: string | null) => void;
   t: (key: any) => string;
 }) {
   const displayed = valuesLoading
@@ -398,9 +426,38 @@ function FieldMetadata({
     <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2">
       <div className="text-sm font-medium">{field.label}</div>
       <div className="mt-1 font-mono text-xs text-muted-foreground">{field.path}</div>
-      <div className="mt-2 text-xs">{displayed}</div>
+      {field.type === "enum" && isAdmin ? (
+        <select
+          aria-label={field.label}
+          className="mt-2 h-8 w-full rounded-md border bg-background px-2 text-xs"
+          value={typeof value === "string" ? value : ""}
+          disabled={valuesLoading || pending}
+          onChange={(event) => onEnumChange(field.key, event.target.value || null)}
+        >
+          <option value="">{t("cliConfig.fieldNotSet")}</option>
+          {(field.values ?? []).map((option) => (
+            <option key={option} value={option}>{enumValueLabel(t, adapter, field.key, option)}</option>
+          ))}
+        </select>
+      ) : (
+        <div className="mt-2 text-xs">{displayed}</div>
+      )}
     </div>
   );
+}
+
+function enumValueLabel(
+  t: (key: any) => string,
+  adapter: RuntimeAdapterId,
+  fieldKey: string,
+  value: string
+): string {
+  if (adapter === "kimi" && fieldKey === "defaultPermissionMode") {
+    if (value === "manual") return t("models.kimiPermissionManual");
+    if (value === "yolo") return t("models.kimiPermissionYolo");
+    if (value === "auto") return t("models.kimiPermissionAuto");
+  }
+  return value;
 }
 
 function Metadata({ label, value }: { label: string; value: string }) {

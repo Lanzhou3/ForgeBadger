@@ -11,12 +11,14 @@ const {
   getCliConfigFileMock,
   getCliConfigFieldsMock,
   getCliConfigFieldValuesMock,
+  updateCliConfigFieldsMock,
   writeCliConfigFileMock,
 } = vi.hoisted(() => ({
   getCliConfigMock: vi.fn(),
   getCliConfigFileMock: vi.fn(),
   getCliConfigFieldsMock: vi.fn(),
   getCliConfigFieldValuesMock: vi.fn(),
+  updateCliConfigFieldsMock: vi.fn(),
   writeCliConfigFileMock: vi.fn(),
 }));
 
@@ -28,6 +30,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getCliConfigFile: getCliConfigFileMock,
     getCliConfigFields: getCliConfigFieldsMock,
     getCliConfigFieldValues: getCliConfigFieldValuesMock,
+    updateCliConfigFields: updateCliConfigFieldsMock,
     writeCliConfigFile: writeCliConfigFileMock,
   };
 });
@@ -43,7 +46,7 @@ vi.mock("@/components/projects/workspace/highlight", () => ({
 
 vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
-function renderSheet() {
+function renderSheet(adapter: "claude" | "kimi" = "claude") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onOpenChange = vi.fn();
   return {
@@ -51,7 +54,7 @@ function renderSheet() {
     ...render(
       <LanguageProvider>
         <QueryClientProvider client={client}>
-          <CliConfigSheet open adapter="claude" onOpenChange={onOpenChange} />
+          <CliConfigSheet open adapter={adapter} onOpenChange={onOpenChange} />
         </QueryClientProvider>
       </LanguageProvider>
     ),
@@ -79,6 +82,28 @@ describe("CliConfigSheet raw editor", () => {
   });
 
   afterEach(cleanup);
+
+  it("saves Kimi Ask When Needed as the yolo permission mode", async () => {
+    getCliConfigFieldsMock.mockResolvedValue({
+      fields: [{
+        key: "defaultPermissionMode",
+        path: "default_permission_mode",
+        label: "Default permission mode",
+        type: "enum",
+        values: ["manual", "yolo", "auto"],
+      }],
+    });
+    getCliConfigFieldValuesMock.mockResolvedValue({ values: { defaultPermissionMode: "manual" } });
+    updateCliConfigFieldsMock.mockResolvedValue({});
+    renderSheet("kimi");
+
+    const select = await screen.findByLabelText("Default permission mode");
+    fireEvent.change(select, { target: { value: "yolo" } });
+    await waitFor(() => expect(updateCliConfigFieldsMock).toHaveBeenCalledWith("kimi", { defaultPermissionMode: "yolo" }));
+
+    fireEvent.change(select, { target: { value: "" } });
+    await waitFor(() => expect(updateCliConfigFieldsMock).toHaveBeenCalledWith("kimi", { defaultPermissionMode: null }));
+  });
 
   it("disables save until the draft differs from the loaded file", async () => {
     renderSheet();

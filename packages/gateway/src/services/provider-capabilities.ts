@@ -30,9 +30,9 @@ const capabilities: readonly ProviderAdapterCapability[] = Object.freeze([
     projectionScope: "user-global", modelSelection: "argument", remoteModelList: true
   },
   {
-    adapter: "kimi", apiFormats: ["openai-responses", "openai-compatible"],
-    authModes: ["managed_credential", "host_environment", "none"], scopes: ["global", "project"],
-    projectionScope: "project-or-user-global", modelSelection: "native-config", remoteModelList: false
+    adapter: "kimi", apiFormats: ["anthropic", "openai-responses", "openai-compatible", "google"],
+    authModes: ["managed_credential", "host_environment", "none"], scopes: ["global"],
+    projectionScope: "user-global", modelSelection: "native-config", remoteModelList: false
   },
   {
     adapter: "pi", apiFormats: ["anthropic", "openai-responses", "openai-compatible", "google"],

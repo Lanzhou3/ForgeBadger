@@ -2053,6 +2053,17 @@ export async function writeCliConfigFile(
   return snapshot;
 }
 
+export async function deleteCliProvider(
+  adapter: RuntimeAdapterId,
+  providerId: string
+): Promise<CliConfigSnapshot> {
+  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(
+    cliConfigPath(adapter, `/providers/${encodeURIComponent(providerId)}`),
+    { method: "DELETE" }
+  );
+  return snapshot;
+}
+
 export async function setCliDefaultModel(
   adapter: RuntimeAdapterId,
   model: string,
@@ -2091,10 +2102,22 @@ export async function getCliConfigFieldValues(
   return fetchJson(cliConfigPath(adapter, "/field-values")) as Promise<{ values: Record<string, unknown> }>;
 }
 
+export async function updateCliConfigFields(
+  adapter: RuntimeAdapterId,
+  updates: Record<string, unknown>
+): Promise<CliConfigSnapshot> {
+  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(cliConfigPath(adapter, "/fields"), {
+    method: "PATCH",
+    body: JSON.stringify({ updates }),
+  });
+  return snapshot;
+}
+
 // ---- CLI config apply (provider application to CLI global config) ----
 
 export type ClaudeModelSlot = "opus" | "sonnet" | "haiku" | "fable" | "subagent";
 export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";
+export type KimiPermissionMode = "manual" | "yolo" | "auto";
 
 export interface CliConfigApplyInput {
   providerProfileId: string;
@@ -2106,6 +2129,8 @@ export interface CliConfigApplyInput {
   reasoningEffort?: CodexReasoningEffort;
   /** Claude only: apply through the Gateway route (OpenAI-protocol providers). */
   routeThroughGateway?: boolean;
+  /** Kimi only: default_permission_mode for new sessions. */
+  permissionMode?: KimiPermissionMode;
 }
 
 export interface CliConfigApplyFilePreview {

@@ -102,6 +102,19 @@ describe("Claude endpoint routing", () => {
   });
 });
 
+describe("Kimi permission mode", () => {
+  it("applies Ask When Needed as yolo and leaves the setting untouched by default", async () => {
+    setup({ supportedAdapters: ["kimi"] }, [makeModel()]);
+    fireEvent.click(screen.getByRole("button", { name: "models.applyConfig" }));
+    await waitFor(() => expect(applyCliConfigToAdapter).toHaveBeenCalledWith("kimi", expect.not.objectContaining({ permissionMode: expect.anything() })));
+
+    fireEvent.click(screen.getByRole("button", { name: "models.applyAdvancedOptions" }));
+    fireEvent.change(screen.getByLabelText("models.kimiDefaultPermissionMode"), { target: { value: "yolo" } });
+    fireEvent.click(screen.getByRole("button", { name: "models.applyConfig" }));
+    await waitFor(() => expect(applyCliConfigToAdapter).toHaveBeenCalledWith("kimi", expect.objectContaining({ permissionMode: "yolo" })));
+  });
+});
+
 describe("PI apply model selection semantics", () => {
   it("labels the single selection as the startup default and explains all models are applied", () => {
     setup(

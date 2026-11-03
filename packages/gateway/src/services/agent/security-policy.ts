@@ -112,7 +112,7 @@ const ROUTINE_PLATFORM_TOOLS = new Set([
   "pm_update_task_plan"
 ]);
 const SUPERVISED_CLI_TOOLS = new Set([
-  "start_session", "pm_execute_task_packet", "dispatch_task_to_session"
+  "start_session", "create_session", "pm_execute_task_packet", "dispatch_task_to_session"
 ]);
 
 // Only these exact fields on known platform tools contain inert prose. Keep
@@ -128,7 +128,8 @@ const DESCRIPTIVE_FIELDS: Record<string, readonly string[]> = {
   pm_set_goal: ['summary', 'constraints', 'acceptanceCriteria'],
   pm_update_task_plan: ['title', 'description', 'acceptanceCriteria'],
   pm_manage_stage: ['name', 'description'],
-  pm_review_task: ['note']
+  pm_review_task: ['note'],
+  create_session: ['name']
 };
 
 const DESCRIPTIVE_LIST_FIELDS = new Set(['acceptanceCriteria', 'constraints']);

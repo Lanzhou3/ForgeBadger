@@ -51,8 +51,9 @@ import { resolveTaskPacketSession } from "../project-manager/task-packets.js";
 import { assertMcpTokenAuthority } from "./token-authority.js";
 import { createMcpLifecycleTools } from "./lifecycle-tools.js";
 import { MCP_LIFECYCLE_WRITE_TOOLS, assertLifecycleAuthority } from "./lifecycle.js";
+import { createMcpSessionTools } from "./session-tools.js";
 
-const MCP_CLI_TOOLS = new Set(["pm_execute_task_packet", "dispatch_task_to_session", "import_project", "apply_project_config", "list_templates", "preview_project_config"]);
+const MCP_CLI_TOOLS = new Set(["pm_execute_task_packet", "dispatch_task_to_session", "import_project", "apply_project_config", "list_templates", "preview_project_config", "create_session"]);
 const MCP_SCOPED_TOOLS = new Set([
   ...MCP_LIFECYCLE_WRITE_TOOLS, 'pm_get_plan', 'pm_get_handoff',
   'get_project_git_status', 'read_project_diff', 'list_development_tasks', 'get_development_task',
@@ -64,7 +65,8 @@ const MCP_SCOPED_TOOLS = new Set([
   "pm_get_goal", "pm_get_work_item", "pm_get_management", "pm_list_ledger", "pm_update_management",
   "list_project_files", "read_project_file", "project_graph_search",
   "project_graph_symbol_detail", "project_graph_impact", "project_graph_affected_paths",
-  "start_session", "stop_session", "dispatch_task_to_session", "update_project"
+  "start_session", "stop_session", "dispatch_task_to_session", "update_project",
+  "create_session"
 ]);
 // Existing-project grants cannot create new project identities or read global catalogs.
 const MCP_SELECTED_PROJECT_EXCLUDED = new Set(["create_project", "import_project", "list_templates"]);
@@ -94,8 +96,41 @@ export interface McpBridgeDeps {
   adapterCommandRunner?: CommandRunner | undefined;
 }
 
+/**
+ * The single capability decision shared by `tools/list`, tool lookup, and the
+ * `availableToolNames` a tool sees about itself. Keeping one function matters:
+ * a capability that lists but cannot execute (or vice versa) is a silent
+ * authorization bug, and the three call sites previously spelled the same
+ * predicate out by hand.
+ */
+interface McpCapabilityInput {
+  scopes: readonly McpTokenScope[];
+  allowedProjects: unknown;
+  /** Names the owner explicitly disabled; read once per request, never per tool. */
+  disabled: ReadonlySet<string>;
+  hasSessionManager: boolean;
+  /** Resolved on the token, not the scope list: a stale grant must not widen this. */
+  canLifecycle: boolean;
+}
+
+function createMcpToolFilter(input: McpCapabilityInput): (tool: AgentTool) => boolean {
+  const canOperate = input.scopes.includes("operate");
+  const canDispatch = canOperate && input.scopes.includes("cli_dispatch");
+  const canLifecycle = input.canLifecycle;
+  const selectedProjects = input.allowedProjects != null;
+  const scoped = canDispatch || selectedProjects;
+  return (tool) =>
+    MCP_ALLOWED_TOOLS.has(tool.name) &&
+    (tool.risk === "read" || canOperate) &&
+    (!MCP_LIFECYCLE_WRITE_TOOLS.has(tool.name) || canLifecycle) &&
+    !input.disabled.has(tool.name) &&
+    !toolUnavailableReason(tool.name, input.hasSessionManager) &&
+    (!MCP_CLI_TOOLS.has(tool.name) || canDispatch) &&
+    (!scoped || MCP_SCOPED_TOOLS.has(tool.name)) &&
+    (!selectedProjects || !MCP_SELECTED_PROJECT_EXCLUDED.has(tool.name));
+}
+
 export function buildMcpServer(deps: McpBridgeDeps): Server {
-  const preferences = new CopilotToolPreferenceRepository(deps.db, deps.userId);
   const canOperate = deps.scopes.includes("operate");
   const canDispatch = canOperate && deps.scopes.includes("cli_dispatch");
   let canLifecycle = canOperate && deps.scopes.includes("lifecycle");
@@ -104,12 +139,18 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
     catch { canLifecycle = false; }
   }
   const hasWriteReceipts = canDispatch || canLifecycle;
-  const selectedProjects = usesSelectedProjects(deps);
-  const scoped = canDispatch || selectedProjects;
-  const candidates = [...createPlatformTools(), ...createMcpProjectTools(), ...createMcpLifecycleTools()];
-  const tools = candidates.filter(
-    (tool) => MCP_ALLOWED_TOOLS.has(tool.name) && (tool.risk === "read" || canOperate) && (!MCP_LIFECYCLE_WRITE_TOOLS.has(tool.name) || canLifecycle) && preferences.isEnabled(tool.name) && !toolUnavailableReason(tool.name, !!deps.sessionManager) && (!MCP_CLI_TOOLS.has(tool.name) || canDispatch) && (!scoped || MCP_SCOPED_TOOLS.has(tool.name)) && (!selectedProjects || !MCP_SELECTED_PROJECT_EXCLUDED.has(tool.name))
-  );
+  const token = new McpTokenRepository(deps.db).findActiveById(deps.tokenId, deps.userId);
+  const disabled = new Set(new CopilotToolPreferenceRepository(deps.db, deps.userId).listDisabled());
+  const isAvailable = createMcpToolFilter({
+    scopes: deps.scopes,
+    allowedProjects: token?.allowedProjects,
+    disabled,
+    hasSessionManager: !!deps.sessionManager,
+    canLifecycle
+  });
+  const candidates = [...createPlatformTools(), ...createMcpProjectTools(), ...createMcpLifecycleTools(), ...createMcpSessionTools()];
+  const tools = candidates.filter(isAvailable);
+  const availableToolNames = tools.map(tool => tool.name);
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
 
   const server = new Server(
@@ -120,10 +161,11 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [...tools.map((tool) => ({
       name: tool.name,
+      title: mcpToolTitle(tool.name),
       description: tool.description,
       inputSchema: mcpInputSchema(tool, hasWriteReceipts),
       annotations: mcpToolAnnotations(tool)
-    })), ...(hasWriteReceipts ? [{ name: "get_mcp_operation", description: "Read the durable receipt for a prior MCP operationId without replaying it.", inputSchema: { type: "object", properties: { operationId: { type: "string" } }, required: ["operationId"], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }] : [])]
+    })), ...(hasWriteReceipts ? [{ name: "get_mcp_operation", title: "Read MCP operation receipt", description: "Read the durable receipt for a prior MCP operationId without replaying it.", inputSchema: { type: "object", properties: { operationId: { type: "string" } }, required: ["operationId"], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }] : [])]
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -150,7 +192,7 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
       };
     }
     try {
-      const output = redactAgentValue(await executeMcpTool(tool, request.params.arguments ?? {}, deps));
+      const output = redactAgentValue(await executeMcpTool(tool, request.params.arguments ?? {}, deps, availableToolNames));
       return toolResultContent(output);
     } catch (error) {
       return {
@@ -163,7 +205,7 @@ export function buildMcpServer(deps: McpBridgeDeps): Server {
   return server;
 }
 
-async function executeMcpTool(tool: AgentTool, rawInput: unknown, deps: McpBridgeDeps): Promise<unknown> {
+async function executeMcpTool(tool: AgentTool, rawInput: unknown, deps: McpBridgeDeps, availableToolNames: readonly string[]): Promise<unknown> {
   assertMcpTokenAuthority(deps.db, deps.userId, deps.tokenId);
   // Include operationId and raw field names before normalization; both can
   // reach durable intent records. Match native Copilot's admission boundary.
@@ -195,16 +237,7 @@ async function executeMcpTool(tool: AgentTool, rawInput: unknown, deps: McpBridg
       if (MCP_LIFECYCLE_WRITE_TOOLS.has(tool.name)) assertLifecycleAuthority({ db: deps.db, userId: deps.userId, mcpTokenId: deps.tokenId });
       assertMcpTokenAuthority(deps.db, deps.userId, deps.tokenId, resources);
     },
-    availableToolNames: [...createPlatformTools(), ...createMcpProjectTools(), ...createMcpLifecycleTools()].filter(candidate =>
-      (candidate.risk === "read" || deps.scopes.includes("operate")) &&
-      (!MCP_LIFECYCLE_WRITE_TOOLS.has(candidate.name) || (deps.scopes.includes("operate") && deps.scopes.includes("lifecycle"))) &&
-      new CopilotToolPreferenceRepository(deps.db, deps.userId).isEnabled(candidate.name) &&
-      !toolUnavailableReason(candidate.name, !!deps.sessionManager) &&
-      MCP_ALLOWED_TOOLS.has(candidate.name) &&
-      (!MCP_CLI_TOOLS.has(candidate.name) || (deps.scopes.includes("operate") && hasCliScope)) &&
-      (!scoped || MCP_SCOPED_TOOLS.has(candidate.name)) &&
-      (!selectedProjects || !MCP_SELECTED_PROJECT_EXCLUDED.has(candidate.name))
-    ).map(candidate=>candidate.name),
+    availableToolNames,
     ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}),
     ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {})
   };
@@ -371,15 +404,53 @@ function toolResultContent(output: unknown): {
 // MCP tool annotations let external hosts tier trust (e.g. auto-approve
 // read-only tools, flag destructive ones). They are advisory: derived from the
 // platform tool's risk class, and hosts still confirm before invoking.
-const MCP_OPEN_WORLD_TOOLS = new Set(["start_session", "stop_session", "dispatch_task_to_session", "pm_execute_task_packet"]);
+const MCP_OPEN_WORLD_TOOLS = new Set(["start_session", "stop_session", "dispatch_task_to_session", "pm_execute_task_packet", "create_session"]);
+
+/**
+ * Writes that are NOT safe to replay, expressed positively so a newly added
+ * tool defaults to `idempotentHint: false` until someone reviews it.
+ *
+ * - `dispatch_task_to_session` / `pm_execute_task_packet` paste input into a
+ *   live CLI: replaying the effect types the prompt twice, so even a durable
+ *   receipt is not a licence to retry.
+ * - `takeover_session` invalidates whatever automatic writer holds the
+ *   terminal right now; it is about the current moment, not a restorable value.
+ *
+ * Every other operate tool runs through a platform command with a
+ * caller-supplied operationId and a durable receipt, which is replayed instead
+ * of re-executed — that is exactly the guarantee idempotentHint advertises.
+ */
+const MCP_NON_IDEMPOTENT_WRITES = new Set([
+  "dispatch_task_to_session", "pm_execute_task_packet", "takeover_session"
+]);
 
 function mcpToolAnnotations(tool: AgentTool): { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean } {
   return {
     readOnlyHint: tool.risk === "read",
     destructiveHint: tool.risk === "operate",
-    idempotentHint: false,
+    idempotentHint: tool.risk === "read" || !MCP_NON_IDEMPOTENT_WRITES.has(tool.name),
     openWorldHint: MCP_OPEN_WORLD_TOOLS.has(tool.name)
   };
+}
+
+/**
+ * Human-readable title for hosts that render one (MCP clients show it in
+ * permission prompts and tool pickers). Derived from the name so no tool has
+ * to be maintained twice; the snake_case family prefixes stay visible.
+ */
+const MCP_TOOL_TITLES: Record<string, string> = {
+  create_session: "Create session", start_session: "Start session", stop_session: "Stop session",
+  dispatch_task_to_session: "Send task to session", get_session: "Get session",
+  get_session_output: "Read session screen", get_session_writer: "Check session writer",
+  list_sessions: "List sessions", pm_execute_task_packet: "Execute task packet",
+  pm_prepare_task_packet: "Prepare task packet", get_mcp_operation: "Read MCP operation receipt"
+};
+
+function mcpToolTitle(name: string): string {
+  const explicit = MCP_TOOL_TITLES[name];
+  if (explicit) return explicit;
+  const words = name.replace(/^pm_/, "").split("_");
+  return words.map((word, index) => (index === 0 ? word[0]!.toUpperCase() + word.slice(1) : word)).join(" ");
 }
 
 function mcpInputSchema(tool: AgentTool, hasCliScope: boolean): Record<string, unknown> {

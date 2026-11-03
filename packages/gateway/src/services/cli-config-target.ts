@@ -39,7 +39,9 @@ export function cliConfigTargetPath(input: {
     if (!input.projectRoot) throw new Error("Project root is required");
     const root = path.resolve(input.projectRoot);
     if (input.adapter === "claude") return path.join(root, ".claude", "settings.local.json");
-    if (input.adapter === "kimi") return path.join(root, ".kimi-code", "config.toml");
+    if (input.adapter === "kimi") {
+      throw new Error("Kimi Code providers and models are global-only; project .kimi-code/local.toml only stores workspace settings");
+    }
     if (input.adapter === "pi") {
       // PI has no project-level provider config; its global config lives in
       // $PI_CODING_AGENT_DIR (default ~/.pi/agent). Refuse instead of
