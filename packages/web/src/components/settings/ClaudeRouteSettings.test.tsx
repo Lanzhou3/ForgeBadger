@@ -5,10 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ClaudeRouteSettings } from "./ClaudeRouteSettings";
 import {
-  resetClaudeRouteState,
   setClaudeRouteAssignments,
   type ClaudeRouteState,
 } from "@/lib/api";
+
+const { resetClaudeRouteState } = vi.hoisted(() => ({ resetClaudeRouteState: vi.fn() }));
 
 vi.mock("@/hooks/use-language", () => ({
   useLanguage: () => ({ t: (key: string) => key }),
@@ -69,12 +70,10 @@ vi.mock("@/lib/api", () => {
       apiFormat: "openai-compatible", supportedAdapters: ["claude"], status: "inactive",
     },
   ];
+  resetClaudeRouteState.mockImplementation(() => { state = initialState(); });
   return {
     getClaudeRoute: vi.fn(async () => state),
     setClaudeRoute: vi.fn(async () => state),
-    resetClaudeRouteState: () => {
-      state = initialState();
-    },
     setClaudeRouteAssignments: vi.fn(async (assignments: Array<{ providerProfileId: string }>) => {
       state = {
         ...state,
@@ -121,7 +120,7 @@ describe("Claude route failover order", () => {
     const upButtons = await screen.findAllByRole("button", {
       name: "settings.claudeRouteFailoverUp",
     });
-    expect(upButtons[0]?.disabled).toBe(true, "the primary cannot move up");
+    expect(upButtons[0]?.hasAttribute("disabled"), "the primary cannot move up").toBe(true);
     fireEvent.click(upButtons[1]!);
     await waitFor(() =>
       expect(setClaudeRouteAssignments).toHaveBeenCalledWith([
@@ -145,7 +144,7 @@ describe("Claude route failover order", () => {
     );
     // The single remaining candidate cannot be removed.
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "settings.claudeRouteFailoverRemove" }).disabled).toBe(true),
+      expect(screen.getByRole("button", { name: "settings.claudeRouteFailoverRemove" }).hasAttribute("disabled")).toBe(true),
     );
   });
 
@@ -155,7 +154,7 @@ describe("Claude route failover order", () => {
     const options = Array.from(select.options)
       .map((option) => option.value)
       .filter((value) => value !== "");
-    expect(options).toEqual(["provider-3"], "inactive and non-claude providers are hidden");
+    expect(options, "inactive and non-claude providers are hidden").toEqual(["provider-3"]);
   });
 
   it("adds the selected provider as the last candidate", async () => {
@@ -165,7 +164,7 @@ describe("Claude route failover order", () => {
     const addButton = screen.getByRole("button", {
       name: "settings.claudeRouteFailoverAdd",
     });
-    expect(addButton.disabled).toBe(false);
+    expect(addButton.hasAttribute("disabled")).toBe(false);
     fireEvent.click(addButton);
     await waitFor(() =>
       expect(setClaudeRouteAssignments).toHaveBeenCalledWith([
