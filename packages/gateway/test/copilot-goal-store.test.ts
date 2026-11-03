@@ -43,6 +43,18 @@ describe("CopilotGoalStore", () => {
     } finally { db.close(); }
   });
 
+  it("inherits conversation project context and rejects an explicit conflicting project", () => {
+    const { db, user, conversation, store } = fixture();
+    try {
+      db.prepare("INSERT INTO projects(id,user_id,name,path,ai_tool,status) VALUES(?,?,?,?,?,?)")
+        .run("goal-project", user.id, "Goal project", "/private/tmp/goal-project", "claude", "active");
+      new CopilotConversationLog(db, user.id).setConversationProject(conversation.id, "goal-project");
+      const goal = createGoal(store, conversation.id);
+      assert.equal(goal.project_id, "goal-project");
+      assert.throws(() => store.createGoal({ conversationId: conversation.id, projectId: null, title: "Conflict", spec: "Conflict" }), { code: "COPILOT_GOAL_PROJECT_MISMATCH" });
+    } finally { db.close(); }
+  });
+
   it("rejects unknown conversations", () => {
     const { db, store } = fixture();
     try {

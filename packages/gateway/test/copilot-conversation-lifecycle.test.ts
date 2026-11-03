@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -89,4 +92,41 @@ it("cannot rename hidden conversations or hide another tenant's conversation", (
     assert.equal(ledger.log.renameConversation(conversation.id, "Unexpected title"), false);
     assert.equal(db.prepare("SELECT title FROM copilot_conversations WHERE id=?").get(conversation.id)?.title, "Original title");
   } finally { db.close(); }
+});
+
+it("persists project context on the conversation and applies it to subsequent runs", () => {
+  const { db, ledger, conversation, input } = fixture();
+  const root = mkdtempSync(join(tmpdir(), "fb-conversation-project-"));
+  try {
+    const now = Date.now();
+    for (const id of ["project-a", "project-b"]) {
+      db.prepare("INSERT INTO projects(id,user_id,name,path,ai_tool,status,is_imported,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
+        .run(id, ledger.userId, id, join(root, id), "claude", "active", 0, now, now);
+    }
+    ledger.log.setConversationProject(conversation.id, "project-a");
+    assert.equal(ledger.log.getConversation(conversation.id)?.project_id, "project-a");
+
+    const runId = ledger.admit(input, 2);
+    assert.equal(JSON.parse(ledger.get(runId)!.input_json).projectId, "project-a");
+    assert.throws(() => ledger.admit({ ...input, projectId: "project-b" }, 2), { code: "COPILOT_CONVERSATION_PROJECT_MISMATCH" });
+    assert.throws(() => ledger.log.setConversationProject(conversation.id, "project-b"), { code: "COPILOT_CONVERSATION_BUSY" });
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("rejects another tenant's project when binding conversation context", () => {
+  const { db, ledger, conversation } = fixture();
+  const root = mkdtempSync(join(tmpdir(), "fb-conversation-project-tenant-"));
+  try {
+    const other = new UserRepository(db).create("other-project-context@example.com", "hash");
+    db.prepare("INSERT INTO projects(id,user_id,name,path,ai_tool,status,is_imported,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run("foreign-project", other.id, "Foreign", root, "claude", "active", 0, Date.now(), Date.now());
+    assert.throws(() => ledger.log.setConversationProject(conversation.id, "foreign-project"), { code: "COPILOT_PROJECT_NOT_FOUND" });
+    assert.equal(ledger.log.getConversation(conversation.id)?.project_id, null);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

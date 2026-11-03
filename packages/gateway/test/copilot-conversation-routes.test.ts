@@ -54,6 +54,7 @@ interface ConversationResponseBody {
     conversation?: {
       id: string;
       title: string | null;
+      project_id: string | null;
     };
     conversations?: Array<{
       id: string;
@@ -67,9 +68,10 @@ describe("copilot conversation routes", () => {
   let server: ReturnType<typeof createGatewayApp>["server"];
   let runtime: ReturnType<typeof createGatewayApp>;
   let baseUrl: string;
+  let db: Database;
 
   before(async () => {
-    const db = createTestDb();
+    db = createTestDb();
     const app = runtime = createGatewayApp({
       sessionServerIpcPath: "/tmp/forgebadger-test-session-server.sock",
       jwtSecret,
@@ -109,6 +111,34 @@ describe("copilot conversation routes", () => {
     const body = (await res.json()) as ConversationResponseBody;
     assert.equal(res.status, 200, JSON.stringify(body));
     assert.equal(body.data?.conversation?.title, "重构计划");
+  });
+
+  it("persists project context through create, patch, and read contracts", async () => {
+    const email = "copilot-project-context@test.com";
+    const token = await register(email);
+    const user = db.prepare("SELECT id FROM users WHERE email=?").get(email) as { id: string };
+    db.prepare("INSERT INTO projects(id,user_id,name,path,ai_tool,status,is_imported,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run("conversation-project", user.id, "Conversation project", "/private/tmp/conversation-project", "claude", "active", 0, Date.now(), Date.now());
+    const created = await fetch(`${baseUrl}/api/v1/copilot/conversations`, {
+      method: "POST", headers: authenticated(token), body: JSON.stringify({ projectId: "conversation-project" })
+    });
+    const createdBody = await created.json() as ConversationResponseBody;
+    assert.equal(created.status, 201, JSON.stringify(createdBody));
+    const conversationId = createdBody.data!.conversation!.id;
+    assert.equal(createdBody.data?.conversation?.project_id, "conversation-project");
+
+    const cleared = await fetch(`${baseUrl}/api/v1/copilot/conversations/${conversationId}`, {
+      method: "PATCH", headers: authenticated(token), body: JSON.stringify({ projectId: null })
+    });
+    assert.equal(cleared.status, 200);
+    assert.equal((await cleared.json() as ConversationResponseBody).data?.conversation?.project_id, null);
+
+    const restored = await fetch(`${baseUrl}/api/v1/copilot/conversations/${conversationId}`, {
+      method: "PATCH", headers: authenticated(token), body: JSON.stringify({ projectId: "conversation-project" })
+    });
+    assert.equal(restored.status, 200);
+    const read = await fetch(`${baseUrl}/api/v1/copilot/conversations/${conversationId}`, { headers: authenticated(token) });
+    assert.equal((await read.json() as ConversationResponseBody).data?.conversation?.project_id, "conversation-project");
   });
 
   it("rejects an empty or oversized rename title", async () => {

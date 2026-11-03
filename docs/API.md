@@ -9,6 +9,11 @@ Older sections mentioning `/copilot/grants`, `grantId` or Grant-bound scope are
 historical references, not active API contracts. Current authorization uses
 tenant scope, tool policy, run origin and exact platform-action receipts.
 
+Conversation context (2026-11-02): migration 0147 moved channel project context
+from `channel_routes` to `copilot_conversations`. Channels only map external
+chats to Copilot conversations; Web and channel runs share conversation project
+scope, tool preferences, security policy and exact approvals.
+
 ## 1. Base Rules
 
 - Base path: `/api/v1`
@@ -488,9 +493,15 @@ Applied Portfolio migrations and historical schema declarations remain for migra
 
 All responses use the standard `{code,data,message}` envelope and authenticated tenant ownership.
 
+`POST /copilot/conversations` accepts `{title?,projectId?}`. Conversation create,
+list and detail responses include `project_id`. `PATCH /copilot/conversations/:id`
+accepts `{title?,projectId?}` with at least one field; `projectId: null` clears
+the context. Project changes require an owned project and no active run,
+unresolved write or queued follow-up.
+
 | Endpoint | Contract |
 |---|---|
-| `POST /api/v1/copilot/conversations/:id/messages` | `{content,modelId?,projectId?,grantId?,clientRequestId?}`; returns 201 `{runId}` after durable admission, before model completion. A new request during an active run returns 409 `COPILOT_CONVERSATION_BUSY`. Matching request-key retries return the original run, including after completion; conflicting payloads return 409 `COPILOT_REQUEST_CONFLICT`. |
+| `POST /api/v1/copilot/conversations/:id/messages` | `{content,modelId?,projectId?,clientRequestId?}`; returns 201 `{runId}` after durable admission, before model completion. `projectId` may initialize an unbound conversation and must match its existing project. A new request during an active run returns 409 `COPILOT_CONVERSATION_BUSY`. Matching request-key retries return the original run, including after completion; conflicting payloads return 409 `COPILOT_REQUEST_CONFLICT`. |
 | `GET /api/v1/copilot/conversations/:id/runs` | `{runs,activeRun,repairRunIds}`; latest 50 runs and current active run, or null. `repairRunIds` lists unrevoked user repair opt-ins for the conversation, including completed origins older than the latest 50 runs; revoke each through `DELETE /api/v1/copilot/runs/:id/repairs`. |
 | `GET /api/v1/copilot/runs/:id` | `{run,pendingActions,steps}`; run includes revision and stopReason, actions include full inputJson/inputDigest, stepId and toolCallId. Steps retain execution receipts. |
 | `GET /api/v1/copilot/runs/:id/trace` | `{events}`; tenant-scoped per-run decision timeline ordered by `created_at,seq` (admission, claims/recovery, step start/complete, tool gates, approval parking/decisions, sub-run admissions, follow-up promotions, terminal states). Metadata only: rows carry monotonic `seq` (UNIQUE per run), the run-instance `fence`, optional `step_id` and whitelisted scalar `detail_json`; message contents, tool input plaintext and secrets are never stored. Unknown or foreign runs return 404. |
@@ -2343,8 +2354,8 @@ The former DeepSeek Harness bridge under `/api/internal/v1/copilot-bridge/**` an
 
 All endpoints below live under `/api/v1/copilot/channels`, require the normal
 active-user authentication, return the standard API envelope, and set
-`Cache-Control: no-store`. This backend supports Feishu private chats only.
-The default Gateway runtime connects enabled/configured accounts; these management
+`Cache-Control: no-store`. The native runtimes support Feishu and Telegram
+private chats, allowlisted group chats and topics. The default Gateway connects enabled/configured accounts; these management
 endpoints do not themselves expose a public inbound relay.
 
 | Method | Path | Body / result |
@@ -2355,24 +2366,26 @@ endpoints do not themselves expose a public inbound relay.
 | POST | `/pairings/:id/cancel` | `{}` â `{ cancelled: true }` |
 | GET | `/identities` | `{ identities }`; latest 100 |
 | POST | `/identities/:id/revoke` | `{}` â `{ revoked: true }`; also revokes identity routes and outstanding account pairings |
-| POST | `/routes` | `{ identityId, grantId }` â `{ route }`; 201, creates a fresh native grant-bound conversation atomically |
-| GET | `/routes` | `{ routes }`; latest 100; each includes read-only `authorityValid` |
+| POST | `/routes` | `{ identityId, conversationId?, projectId? }` â `{ route }`; 201, maps the identity to a new or existing Copilot conversation. `projectId` is a compatibility input that only initializes conversation context and is never stored on the route |
+| GET | `/routes` | `{ routes }`; latest 100; each includes read-only `authorityValid` and the conversation's current nullable `projectId` |
 | POST | `/routes/:id/revoke` | `{}` â `{ revoked: true }` |
 
 A trusted SDK transport must first claim a pairing using the private sender/chat
 and current account revision; there is deliberately no public claim/admission
 HTTP endpoint. The owner then confirms the exact claimed identifiers and
-revision. Pairing alone grants no project authority. One pending/claimed pairing
-per account is retained as actionable; issuing another cancels its predecessor.
+revision. Pairing authenticates the external identity but does not select a
+project or create a channel mapping. One pending/claimed pairing per account is
+retained as actionable; issuing another cancels its predecessor.
 
-Routes are immutable and one may be active per identity. Replacement uses a new
-conversation. Admission rechecks active user, identity, route, account revision,
-account/config enabled flags, emergency stop, chat allowlist, grant status,
-revision/expiry, project ownership and conversation grant binding. Native run admission, recovery, approval resumption, model output and platform
-action effect fences recheck this authority. Result access also rechecks it; a
-future delivery worker must check again immediately before sending. Resource
-resolution and action budgets remain enforced by native platform commands.
-Identity/account/grant mismatch does not fall back to unrestricted owner access.
+Routes are immutable conversation mappings and one may be active per identity.
+Replacement uses a new conversation. Project context belongs to the conversation
+and is selected through the normal Copilot API or `/project`. Admission rechecks
+active user, identity, route, account revision, account/config enabled flags,
+emergency stop, chat allowlist and the conversation's project ownership. Native
+run admission, recovery, approval resumption, model output and platform action
+effect fences recheck this authority. Result access and delivery recheck it too.
+Identity/account/conversation mismatch does not fall back to unrestricted owner
+access.
 
 Invalid input returns 400 (`CHANNEL_INPUT_INVALID`); authority mismatch returns
 403 and database conflict returns 409 (`CHANNEL_AUTHORITY_REJECTED`). Responses
@@ -2553,11 +2566,12 @@ the current revision. Candidate changes invalidate previous acknowledgement.
 Secrets and one-time pairing tokens stay out of query/mutation cache, URL and
 local storage. Identical account saves preserve the revision, connection state and pairing. Credential or enablement changes increment the revision and require new pairing/binding; existing stale identities are never reactivated automatically.
 
-The page selects an owned project and binds the
-confirmed private identity to it. Invalid identities are not selectable. Route
-status reflects account, identity and project authorization even when the stored
-route remains active. Owners can revoke identities/routes or open the bound
-Copilot conversation using its existing `?c=` navigation for Web approvals.
+The page attaches a confirmed private identity to a Copilot conversation without
+a separate project-authorization step. Invalid identities are not selectable.
+Owners choose or change the project in that conversation or with `/project`.
+Route status reflects account, identity and current conversation context. Owners
+can revoke identities/routes or open the conversation using its existing `?c=`
+navigation for Web approvals.
 
 `GET /api/v1/copilot/channels/deliveries` requires active-user authentication and
 returns `{ deliveries }` (standard envelope, `Cache-Control: no-store`). It lists
@@ -2574,13 +2588,15 @@ groups and topics receive separate histories. Every execution revalidates the
 parent route, identity, account and chat allowlist. Telegram
 retains `message_thread_id`; Feishu uses actual `thread_id` and replies to the
 persisted inbound message. A Feishu quote `root_id` alone does not create a topic.
-Admission persists a trusted snapshot of the route/identity revisions, original
-allowed projects and canonical roots. Followups and research/review/repair children
-inherit it. Reading, memory recall, notifications, artifacts, approvals, execution
-and result delivery recheck that snapshot against current authority; changes do
-not expand an existing run. Resource lists contain only the original project set.
-Global memory/usage, raw Shell and unreviewed extension tools are unavailable to
-channel runs. Legacy runs and derived children without trustworthy snapshots are
+Admission persists a trusted snapshot of the conversation project and canonical
+root, plus route/identity revisions for channel-owned conversations. Followups
+and research/review/repair children inherit it. Reading, memory recall,
+notifications, artifacts, approvals, execution and result delivery recheck that
+snapshot against current authority; changes do not expand an existing run.
+Resource lists contain only the original project set. Web and channel runs use
+the same tool catalog, owner switches, security policy and approvals; global
+memory and cross-project resources remain outside a project-scoped conversation.
+Legacy channel runs and derived children without trustworthy snapshots are
 fenced; unknown write outcomes remain indeterminate rather than being replayed.
 Deleting the parent route conversation revokes all child conversation authority,
 including Web admission, approval resumption and development effects; rejection

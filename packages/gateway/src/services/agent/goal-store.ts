@@ -68,18 +68,21 @@ export function normalizeTaskInputs(tasks: ReadonlyArray<string | GoalTaskInput>
 export class CopilotGoalStore {
   constructor(private db: Database, private userId: string) {}
 
-  createGoal(input: { conversationId: string; projectId?: string | null; title: string; spec: string; grants?: readonly string[] | undefined }): GoalRow {
-    const conversation = this.db.prepare("SELECT id FROM copilot_conversations WHERE user_id=? AND id=?").get(this.userId, input.conversationId);
+  createGoal(input: { id?: string; conversationId: string; projectId?: string | null; title: string; spec: string; grants?: readonly string[] | undefined }): GoalRow {
+    const conversation = this.db.prepare("SELECT id,project_id FROM copilot_conversations WHERE user_id=? AND id=?").get(this.userId, input.conversationId) as { id: string; project_id: string | null } | undefined;
     if (!conversation) throw new AgentError('COPILOT_NOT_FOUND', 'Conversation not found');
-    if (input.projectId && !this.db.prepare('SELECT id FROM projects WHERE user_id=? AND id=?').get(this.userId, input.projectId))
+    const projectId = input.projectId === undefined ? conversation.project_id : input.projectId;
+    if (conversation.project_id && projectId !== conversation.project_id)
+      throw new AgentError('COPILOT_GOAL_PROJECT_MISMATCH', 'Goal project must match the conversation project');
+    if (projectId && !this.db.prepare('SELECT id FROM projects WHERE user_id=? AND id=?').get(this.userId, projectId))
       throw new AgentError('COPILOT_PROJECT_NOT_FOUND', 'Project not found');
     const grants = parseGoalGrants(JSON.stringify(input.grants ?? []));
-    const id = randomUUID();
+    const id = input.id ?? randomUUID();
     const now = Date.now();
     // The budget columns are legacy (no longer enforced); defaults keep rows populated.
     this.db.prepare(`INSERT INTO copilot_goals(id,user_id,conversation_id,project_id,title,spec,status,token_budget,max_duration_ms,max_runs,grants_json,created_at,updated_at)
       VALUES(?,?,?,?,?,?,'active',5000000,28800000,50,?,?,?)`)
-      .run(id, this.userId, input.conversationId, input.projectId ?? null, input.title, input.spec,
+      .run(id, this.userId, input.conversationId, projectId, input.title, input.spec,
         JSON.stringify(grants), now, now);
     return this.getGoal(id)!;
   }

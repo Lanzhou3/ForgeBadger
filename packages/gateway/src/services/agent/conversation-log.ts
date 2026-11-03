@@ -21,6 +21,7 @@ import { redactAgentText } from "./redaction.js";
 interface ConversationRow {
   id: string;
   user_id: string;
+  project_id: string | null;
   title: string | null;
   status: string;
   summary: string | null;
@@ -86,14 +87,37 @@ export class CopilotConversationLog {
     this.userId = userId;
   }
 
-  createConversation(title?: string): { id: string; title: string | null } {
+  createConversation(title?: string, projectId: string | null = null): { id: string; title: string | null; project_id: string | null } {
+    if (projectId) this.assertProject(projectId);
     const id = randomUUID();
     const now = Date.now();
-    this.db.prepare(`
-      INSERT INTO copilot_conversations (id, user_id, title, status, created_at, updated_at)
-      VALUES (?, ?, ?, 'active', ?, ?)
-    `).run(id, this.userId, title ?? null, now, now);
-    return { id, title: title ?? null };
+    if (projectId) {
+      this.db.prepare(`INSERT INTO copilot_conversations (id, user_id, project_id, title, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'active', ?, ?)`).run(id, this.userId, projectId, title ?? null, now, now);
+    } else {
+      this.db.prepare(`INSERT INTO copilot_conversations (id, user_id, title, status, created_at, updated_at)
+        VALUES (?, ?, ?, 'active', ?, ?)`).run(id, this.userId, title ?? null, now, now);
+    }
+    return { id, title: title ?? null, project_id: projectId };
+  }
+
+  setConversationProject(id: string, projectId: string | null): boolean {
+    return this.db.transaction(() => {
+      if (!this.getConversation(id)) return false;
+      this.assertEditable(id);
+      const queued = this.db.prepare("SELECT 1 FROM copilot_followups WHERE user_id=? AND conversation_id=? AND status='queued' LIMIT 1")
+        .get(this.userId, id);
+      if (queued) throw new AgentError("COPILOT_CONVERSATION_BUSY", "Cancel queued follow-ups before changing project context");
+      if (projectId) this.assertProject(projectId);
+      const result = this.db.prepare("UPDATE copilot_conversations SET project_id=?,updated_at=? WHERE id=? AND user_id=? AND status!='deleted'")
+        .run(projectId, Date.now(), id, this.userId);
+      return result.changes > 0;
+    }).immediate();
+  }
+
+  private assertProject(projectId: string): void {
+    if (!this.db.prepare("SELECT 1 FROM projects WHERE user_id=? AND id=?").get(this.userId, projectId))
+      throw new AgentError("COPILOT_PROJECT_NOT_FOUND", "Project not found");
   }
 
   listConversations(): ConversationRow[] {

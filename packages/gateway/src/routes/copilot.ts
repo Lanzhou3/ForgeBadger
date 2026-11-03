@@ -37,10 +37,11 @@ import { domainError, idSchema, invalid, notFound, ok, parseId, userId, withBody
 import { listSlashCommands } from "../services/agent/slash-commands.js";
 
 const titleSchema = z.string().trim().min(1).max(200).optional();
-const renameConversationSchema = z.object({ title: z.string().trim().min(1).max(200) }).strict();
+const updateConversationSchema = z.object({ title: titleSchema, projectId: idSchema.nullable().optional() }).strict()
+  .refine(value => value.title !== undefined || value.projectId !== undefined);
 const modelIdSchema = z.string().trim().min(1).max(128).optional();
 const preferencesSchema = z.object({ modelId: z.string().trim().min(1).max(128).nullish(), thinkingEffort: z.enum(["off", "low", "medium", "high"]).optional() }).strict();
-const createConversationSchema = z.object({ title: titleSchema }).strict();
+const createConversationSchema = z.object({ title: titleSchema, projectId: idSchema.optional() }).strict();
 const sendMessageSchema = z.object({
   content: z.string().trim().min(1).max(32 * 1024),
   modelId: modelIdSchema,
@@ -136,7 +137,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   router.post("/conversations", (req, res) => withBody(req.body, createConversationSchema, res, (value) => {
     const { log } = buildAgentStack(deps, userId(req));
     try {
-      const conversation = log.createConversation(value.title);
+      const conversation = log.createConversation(value.title, value.projectId ?? null);
       res.status(201).json(ok({ conversation }));
     } catch(error) { domainError(res,error); }
   }));
@@ -144,6 +145,13 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   router.get("/conversations", (_req, res) => {
     const { log } = buildAgentStack(deps, userId(_req));
     res.json(ok({ conversations: log.listConversations() }));
+  });
+
+  router.get("/conversations/:id", (req, res) => {
+    const id = parseId(req.params.id, res); if (!id) return;
+    const conversation = buildAgentStack(deps, userId(req)).log.getConversation(id);
+    if (!conversation) return notFound(res);
+    res.json(ok({ conversation }));
   });
 
   router.get("/conversations/:id/messages", (req, res) => {
@@ -156,10 +164,18 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
 
   router.patch("/conversations/:id", (req, res) => {
     const id = parseId(req.params.id, res); if (!id) return;
-    withBody(req.body, renameConversationSchema, res, (value) => {
+    withBody(req.body, updateConversationSchema, res, (value) => {
       const { log } = buildAgentStack(deps, userId(req));
-      if (!log.renameConversation(id, value.title)) return notFound(res);
-      res.json(ok({ conversation: log.getConversation(id) }));
+      try {
+        const updated = deps.db.transaction(() => {
+          if (!log.getConversation(id)) return false;
+          if (value.title !== undefined && !log.renameConversation(id, value.title)) return false;
+          if (value.projectId !== undefined && !log.setConversationProject(id, value.projectId ?? null)) return false;
+          return true;
+        }).immediate();
+        if (!updated) return notFound(res);
+        res.json(ok({ conversation: log.getConversation(id) }));
+      } catch(error) { domainError(res,error); }
     });
   });
 

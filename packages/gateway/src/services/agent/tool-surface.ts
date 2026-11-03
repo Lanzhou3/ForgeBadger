@@ -5,7 +5,7 @@ import type { TurnInput } from './run-ledger.js';
 /**
  * Plane A of the tool surface: one named, ordered layer computation that both
  * the model-visible catalog and the execution-time gate project from. Layers
- * run retired → scheduled-readonly → channel-catalog → restricted-mode →
+ * run retired → scheduled-readonly → restricted-mode →
  * session-runtime → mcp-source → owner-disabled; each exclusion records its
  * layer so rejection provenance (e.g. the run-trace tool_gate reason) names
  * the plane that closed the tool. The execution gate in orchestrator.toolStep
@@ -34,17 +34,8 @@ export const CODING_READS: ReadonlySet<string> = new Set([...PROJECT_READS,
  * decides visibility.
  */
 export const CODING_OPERATES: ReadonlySet<string> = new Set(['goal_run_checks']);
-/** Explicit channel catalog: global data and new/extension tools remain closed until audited. */
-export const CHANNEL_TOOLS = new Set(['list_projects', 'get_project', 'list_sessions', 'get_session', 'get_session_output', 'get_session_writer',
-  'pm_overview', 'pm_get_goal', 'pm_get_work_item', 'pm_list_ledger', 'pm_get_management', 'pm_list_task_packets', 'pm_get_task_packet',
-  'pm_get_task_progress', 'pm_close_task', 'pm_create_work_item', 'pm_update_work_item', 'pm_update_management', 'update_project', 'start_session', 'stop_session',
-  'dispatch_task_to_session', 'pm_prepare_task_packet', 'pm_execute_task_packet', 'search_memory', 'list_memory', 'write_memory',
-  'list_project_files', 'read_project_file', 'search_project_files', 'get_project_git_status', 'read_project_diff',
-  'project_graph_search', 'project_graph_symbol_detail', 'project_graph_impact', 'project_graph_affected_paths',
-  'list_development_tasks', 'get_development_task', 'research_project', 'discover_tools', 'read_tool_result']);
-
 /** Layer names in evaluation order. */
-export const TOOL_SURFACE_LAYERS = ['retired', 'scheduled-readonly', 'channel-catalog', 'restricted-mode', 'session-runtime', 'mcp-source', 'owner-disabled', 'goal-catalog'] as const;
+export const TOOL_SURFACE_LAYERS = ['retired', 'scheduled-readonly', 'restricted-mode', 'session-runtime', 'mcp-source', 'owner-disabled', 'goal-catalog'] as const;
 export type ToolSurfaceLayer = (typeof TOOL_SURFACE_LAYERS)[number];
 
 export interface ToolSurfaceInput { source?: TurnInput['source']; executionMode?: TurnInput['executionMode']; channelScope?: TurnInput['channelScope']; goalId?: TurnInput['goalId']; toolDiscovery?: TurnInput['toolDiscovery'] }
@@ -83,7 +74,6 @@ function exclusionReasons(input: ToolSurfaceInput, context: ToolSurfaceContext, 
   if (RETIRED_TOOLS.has(name)) verdicts.push({ layer: 'retired', reason: 'TOOL_RETIRED' });
   if (nonUser && (NON_USER_HIDDEN_TOOLS.includes(name) || name.startsWith('mcp_'))) verdicts.push({ layer: 'scheduled-readonly', reason: 'NON_USER_SOURCE_HIDDEN' });
   if (scheduled && risk !== 'read') verdicts.push({ layer: 'scheduled-readonly', reason: 'SCHEDULED_READ_ONLY' });
-  if (input.channelScope && !CHANNEL_TOOLS.has(name) && !repairSubmit) verdicts.push({ layer: 'channel-catalog', reason: 'CHANNEL_CATALOG' });
   const codingOperate = input.executionMode === 'coding' && CODING_OPERATES.has(name);
   if (input.executionMode && !repairSubmit && (!(input.executionMode === 'coding' ? CODING_READS : PROJECT_READS).has(name) || (risk !== 'read' && !codingOperate))) verdicts.push({ layer: 'restricted-mode', reason: 'RESTRICTED_MODE' });
   if (SESSION_RUNTIME_TOOLS.has(name) && !context.hasSessionManager) verdicts.push({ layer: 'session-runtime', reason: 'SESSION_RUNTIME_UNAVAILABLE' });
@@ -92,11 +82,6 @@ function exclusionReasons(input: ToolSurfaceInput, context: ToolSurfaceContext, 
   if (GOAL_TOOLS.has(name) && !input.goalId && input.executionMode !== 'coding') verdicts.push({ layer: 'goal-catalog', reason: 'GOAL_CATALOG' });
   if (BOARD_PLANNING_TOOLS.has(name) && !input.goalId && input.toolDiscovery !== true) verdicts.push({ layer: 'goal-catalog', reason: 'GOAL_CATALOG' });
   return verdicts;
-}
-
-/** Channel catalog gate: the channel-catalog layer of computeToolSurface. */
-export function channelToolAllowed(input: ToolSurfaceInput, name: string): boolean {
-  return !input.channelScope || CHANNEL_TOOLS.has(name) || input.executionMode === 'repair' && name === 'submit_development_task';
 }
 
 export function computeToolSurface(input: ToolSurfaceInput, context: ToolSurfaceContext): ToolSurface {

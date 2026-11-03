@@ -16,7 +16,8 @@ import { TelegramChannelRepository } from '../src/db/repositories/telegram-chann
 import { TelegramIntegrationRepository } from '../src/db/repositories/telegram-integration-repository.js';
 import { ChannelIdentityService } from '../src/services/channels/channel-identity-service.js';
 import { NativeChannelInbox } from '../src/services/channels/native-channel-inbox.js';
-import { channelToolAllowed } from '../src/services/channels/channel-run-scope.js';
+import { assertChannelRunScope } from '../src/services/channels/channel-run-scope.js';
+import { computeToolSurface } from '../src/services/agent/tool-surface.js';
 import { CopilotRunLedger, type TurnInput } from '../src/services/agent/run-ledger.js';
 import { CopilotFollowups } from '../src/services/agent/followups.js';
 import { createCopilotOrchestrator } from '../src/services/agent/orchestrator.js';
@@ -134,7 +135,8 @@ it('real orchestrator excludes global recall, unknown tools and other-project re
     const llm: AgentLlmClient = {
       async stream(request) {
         contexts.push(JSON.stringify(request.messages));
-        assert.equal(request.tools.some(tool => tool.name === 'get_usage_summary' || tool.name.startsWith('terminal_')), false);
+        assert.equal(request.tools.some(tool => tool.name === 'get_usage_summary'), true);
+        assert.equal(request.tools.some(tool => tool.name.startsWith('terminal_')), false);
         if (calls++ === 0) request.onEvent({ type: 'tool_call', toolCall: { id: 'cross-project', name: 'get_project', arguments: JSON.stringify({ projectId: f.b.id }) } });
         else request.onEvent({ type: 'text_delta', text: 'scope done' });
         return { message: calls === 1 ? '' : 'scope done' };
@@ -151,7 +153,7 @@ it('real orchestrator excludes global recall, unknown tools and other-project re
 
 it('channel operations require all requested resources in scope, not just one included project', () => {
   const f = fixture(); try {
-    assert.throws(() => f.service.admit(f.route.id, f.group, { capability: 'read', projectIds: [f.a.id, f.b.id] }), /CHANNEL_AUTHORITY_REJECTED/);
+    assert.throws(() => assertChannelRunScope(f.db, f.user.id, f.turn(), { projectIds: [f.a.id, f.b.id] }), /CHANNEL_AUTHORITY_REJECTED/);
   } finally { f.cleanup(); }
 });
 
@@ -214,15 +216,15 @@ it('owner web follow-ups in a channel-owned conversation inherit channel scope b
     assert.equal(input.source, 'user');
     assert.deepEqual(input.channelScope, f.turn().channelScope);
     assert.equal(input.projectId, f.a.id);
-    // Restrictions follow the run, not the origin: output may be relayed to
-    // the channel, so non-channel tools and unscoped projects stay closed.
-    assert.equal(channelToolAllowed(input, 'terminal_run'), false);
-    assert.equal(channelToolAllowed(input, 'get_usage_summary'), false);
-    assert.equal(channelToolAllowed(input, 'list_projects'), true);
+    // The conversation project still limits resources, not the tool catalog.
+    const surface = computeToolSurface(input, { registry: f.registry, hasSessionManager: true });
+    assert.equal(surface.visible.some(tool => tool.name === 'terminal_run'), true);
+    assert.equal(surface.visible.some(tool => tool.name === 'get_usage_summary'), true);
+    assert.equal(surface.visible.some(tool => tool.name === 'list_projects'), true);
   } finally { f.cleanup(); }
 });
 
-it('global memory, unreviewed extensions and raw Shell stay closed while bound project/session memory succeeds', async () => {
+it('global and cross-project memory stay closed while ordinary project tools use the shared catalog', async () => {
   const f = fixture(); try {
     assert.equal((await f.call('list_memory', {})).ok, false);
     assert.equal((await f.call('search_memory', { query: 'scope-marker', scope: 'project', projectId: f.b.id })).ok, false);
@@ -230,8 +232,8 @@ it('global memory, unreviewed extensions and raw Shell stay closed while bound p
     assert.equal((await f.call('terminal_run', { projectId: f.a.id, command: 'pwd' })).ok, false);
     let externalCalls = 0;
     const extension = { ...f.registry.tools.get('get_project')!, name: 'extension_reader', async execute() { externalCalls++; return { secret: 'private' }; } };
-    assert.equal((await executeAgentTool(extension, { projectId: f.a.id }, f.context())).ok, false);
-    assert.equal(externalCalls, 0);
+    assert.equal((await executeAgentTool(extension, { projectId: f.a.id }, f.context())).ok, true);
+    assert.equal(externalCalls, 1);
     for (const scope of ['project', 'session'] as const) {
       const input = { scope, ...(scope === 'project' ? { projectId: f.a.id } : {}), kind: 'fact', text: `scope-marker ${scope}` };
       const step = f.ledger.addStep(f.runId, { kind: 'tool', toolName: 'write_memory', toolCallId: scope, inputJson: JSON.stringify(input), effect: 'write' });

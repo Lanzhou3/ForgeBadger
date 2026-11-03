@@ -124,20 +124,20 @@ function routeCheck(db: Database, userId: string, records: ChannelIdentityReposi
     if (!owner || owner.status !== 'active') { problem = problem ?? 'identity'; continue; }
     if (owner.accountId !== account.id || owner.accountRevision !== account.config_revision) { problem = problem ?? 'revision'; continue; }
     if (account.enabled !== 1) { problem = problem ?? 'disabled'; continue; }
-    const project = projects.getById(route.projectId);
     const conversation = conversations.getConversation(route.conversationId);
+    const project = conversation?.project_id ? projects.getById(conversation.project_id) : undefined;
     if (!project) { problem = problem ?? 'project'; problemRouteId = problemRouteId ?? route.id; continue; }
     if (conversation?.status !== 'active') { problem = problem ?? 'conversation'; problemRouteId = problemRouteId ?? route.id; continue; }
-    return { key: 'route', ok: true, detail: '存在有效的渠道授权路由。', fixHint: '' };
+    return { key: 'route', ok: true, detail: '存在有效的渠道会话映射。', fixHint: '' };
   }
   return {
     key: 'route', ok: false,
-    detail: problem === 'project' ? `路由 ${problemRouteId} 指向的项目不存在。`
-      : problem === 'revision' ? '渠道授权与当前配置版本不匹配（需重新绑定）。'
-      : problem === 'disabled' ? '渠道已停用，授权路由不可用。'
-      : problem === 'identity' ? '渠道授权绑定的身份已失效。'
+    detail: problem === 'project' ? `会话 ${problemRouteId} 尚未选择项目，或项目已不可用。`
+      : problem === 'revision' ? '渠道会话与当前配置版本不匹配（需重新连接）。'
+      : problem === 'disabled' ? '渠道已停用，会话映射不可用。'
+      : problem === 'identity' ? '渠道会话绑定的身份已失效。'
       : problem === 'conversation' ? '路由绑定的会话已失效。'
-      : '尚无渠道授权路由。',
+      : '尚无渠道会话映射。',
     fixHint: routeHint(problem ?? 'missing')
   };
 }

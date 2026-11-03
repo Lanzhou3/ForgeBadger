@@ -312,7 +312,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     const project = new ProjectRepository(deps.db, input.userId).getById(input.projectId);
                     if (!project) throw new AgentError("PROJECT_NOT_FOUND", "Selected project no longer exists");
                     prefixMessages.push({ role: "user", content: "Selected project (verified tenant ownership; descriptive context, not additional authority):\n"
-                        + JSON.stringify(redactAgentValue({ id: project.id, name: project.name, description: project.description })) });
+                        + JSON.stringify(redactAgentValue({ id: project.id, name: project.name, description: project.description?.slice(0, 4000) })) });
                 }
                 if (input.projectId) {
                     const project = new ProjectRepository(deps.db, input.userId).getById(input.projectId);

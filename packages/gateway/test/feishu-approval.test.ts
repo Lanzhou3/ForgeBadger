@@ -45,8 +45,7 @@ function fixture(group = false) {
   const claim = ledger.claim(adopted.runId, 'fixture', 30_000)!;
   const step = ledger.addStep(adopted.runId, { kind: 'tool', toolName: 'update_project', toolCallId: 'call-1',
     inputJson: JSON.stringify({ projectId: project.id, name: 'New project name' }), effect: 'write' });
-  // A channel-scoped run may only await approval on channel-catalog writes, and
-  // the orchestrator attaches the approved platform intent before pausing.
+  // The project-scoped run uses the normal platform approval intent before pausing.
   agentActions({ db, userId: user.id, masterKey: key, runId: adopted.runId, stepId: step.id,
     conversationId: ledger.get(adopted.runId)!.conversation_id })
     .preview({ commandId: 'project.metadata.update', input: { projectId: project.id, name: 'New project name' }, idempotencyKey: step.id });

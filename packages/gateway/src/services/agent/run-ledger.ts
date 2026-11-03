@@ -16,7 +16,7 @@ import { runDuration, settleApprovalWait } from './approval-clock.js';
 import { traceRunEvent } from './run-trace.js';
 import { PARENT_CHAIN_MAX_DEPTH, parseRunInput } from './run-authorization.js';
 export interface TurnInput {
-    /** Server-derived authority; never accepted from HTTP/model JSON. */
+    /** Server-derived conversation project scope plus optional channel authority; historical JSON field name, never accepted from HTTP/model JSON. */
     channelScope?: ChannelRunScope;
     executionMode?: 'research' | 'review' | 'repair' | 'coding';
     delegateTaskId?: string;
@@ -144,20 +144,21 @@ export class CopilotRunLedger {
             this.validateScopeCommon(level);
         }
     }
+    validateConversationOrigin(input: TurnInput): void {
+        if (input.userId !== this.userId || !this.log.getConversation(input.conversationId))
+            throw new AgentError("COPILOT_NOT_FOUND", "Conversation not found");
+        const user = this.db.prepare("SELECT status FROM users WHERE id=?").get(this.userId) as { status: string } | undefined;
+        if (user?.status !== "active") throw new AgentError("COPILOT_USER_INACTIVE", "User is not active");
+        if (input.projectId && !this.db.prepare("SELECT id FROM projects WHERE user_id=? AND id=?").get(this.userId, input.projectId))
+            throw new AgentError("COPILOT_PROJECT_NOT_FOUND", "Project not found");
+    }
+
     /** Conversation/user/channel/project invariants, per chain level, deepest first. */
     private validateScopeCommon(input: TurnInput): void {
         if (input.toolDiscovery !== undefined && typeof input.toolDiscovery !== 'boolean')
             throw new AgentError('COPILOT_TOOL_DISCOVERY_INVALID', 'Tool discovery must be a boolean');
-        if (input.userId !== this.userId || !this.log.getConversation(input.conversationId))
-            throw new AgentError("COPILOT_NOT_FOUND", "Conversation not found");
-        const user = this.db.prepare("SELECT status FROM users WHERE id=?").get(this.userId) as {
-            status: string;
-        } | undefined;
-        if (user?.status !== "active")
-            throw new AgentError("COPILOT_USER_INACTIVE", "User is not active");
+        this.validateConversationOrigin(input);
         assertChannelRunScope(this.db, this.userId, input);
-        if (input.projectId && !this.db.prepare("SELECT id FROM projects WHERE user_id=? AND id=?").get(this.userId, input.projectId))
-            throw new AgentError("COPILOT_PROJECT_NOT_FOUND", "Project not found");
     }
     findRequest(input: TurnInput): string | undefined {
         input = prepareChannelAdmission(this.db, this.userId, input);

@@ -237,6 +237,22 @@ Copilot runtime 在启动及周期扫描中恢复已派发任务，并向原对�
 
 项目级 `copilot_autonomy` 开关已整体移除（迁移 0134 删除列，`COPILOT_PROJECT_AUTONOMY_OFF` 不再出现）：程序化下发对 owner 名下所有项目默认开放，不再需要逐项目开启。上文中涉及“项目自治开关/允许新派发开关”的描述是历史快照，以本节为准。剩余授权轴：owner 级工具开关（Copilot tool preferences）、安全策略（命令/路径黑名单与终端写保护）、run origin 与 exact receipt、租户作用域；非项目全局动作仍只能在 Web 执行，交互式工具仍要求 `source === 'user'`。渠道绑定也不再过滤项目，只要求项目存在且归属 owner。
 
+### 0.5.12 渠道收敛为 Copilot 交互入口（2026-11-02）
+
+迁移 0147 将 `channel_routes.project_id` 的历史值回填到
+`copilot_conversations.project_id`，随后删除路由项目列。渠道身份和
+`channel_route_sessions` 只负责外部聊天到 Copilot 会话的映射，不再形成独立
+项目授权。项目上下文由会话持有，Web 项目选择器与渠道 `/project` 调用同一
+会话更新边界；活跃 run、未决写入和排队 follow-up 阻止切换，`/new` 可继承
+当前项目。
+
+所有项目会话的 run admission 都固化项目与规范化根目录快照；渠道会话额外
+固化路由和身份 revision。Web 与渠道共享工具目录、owner 工具开关、安全策略
+和精确审批，项目资源、记忆与结果回传仍在执行前复核快照。历史无快照渠道
+run 继续失败关闭，路由撤销只切断渠道权限，不会把会话恢复成不受限 owner
+会话。旧 `POST /channels/routes` 的 `projectId` 仅作为新会话初始上下文的
+兼容输入，不写入路由。
+
 ## 零、架构总览
 
 ### 架构模式

@@ -15,6 +15,7 @@ import { z } from "zod";
 import { authenticate } from "../auth/middleware.js";
 import { buildAgentStack, type AgentStackDeps } from "../services/agent/agent-stack.js";
 import { clearGoalFailureCooldown, evaluateGoalContinuation } from "../services/agent/goal-driver.js";
+import { applyGoalTransition } from "../services/agent/goal-lifecycle.js";
 import { diffGoalWorkspace, existingGoalWorkspace, mergeGoalWorkspace } from "../services/agent/goal-workspace.js";
 import { CopilotGoalStore, type GoalJournalRow, type GoalListRow, type GoalRow, type GoalTaskRow } from "../services/agent/goal-store.js";
 import { GOAL_GRANTS, parseGoalGrants } from "../services/agent/goal-grants.js";
@@ -85,20 +86,6 @@ function journalDto(row: GoalJournalRow) {
   return { id: row.id, goalId: row.goal_id, runId: row.run_id, note: row.note, createdAt: row.created_at };
 }
 
-/** Lifecycle transitions: pause/resume are active↔paused only; cancel is the idempotent terminal reachable from any non-completed status. */
-function applyTransition(store: CopilotGoalStore, goal: GoalRow, action: 'pause' | 'resume' | 'cancel'): GoalRow {
-  const current = goal.status;
-  const allowed =
-    action === 'pause' ? current === 'active' :
-    action === 'resume' ? current === 'paused' :
-    current === 'active' || current === 'paused' || current === 'blocked' || current === 'cancelled';
-  if (!allowed)
-    throw new AgentError('COPILOT_GOAL_STATE', `Cannot ${action} a goal in status '${current}'`);
-  if (action === 'cancel' && current === 'cancelled') return goal;
-  const next = action === 'pause' ? 'paused' : action === 'resume' ? 'active' : 'cancelled';
-  return store.setStatus(goal.id, next)!;
-}
-
 export function createCopilotGoalRoutes(deps: AgentStackDeps): Router {
   const router = Router();
   router.use(authenticate);
@@ -119,6 +106,7 @@ export function createCopilotGoalRoutes(deps: AgentStackDeps): Router {
           userId: actingUser,
           conversationId: value.conversationId,
           goalId: goal.id,
+          ...(goal.project_id ? { projectId: goal.project_id } : {}),
           userText: value.spec,
           source: "user",
           clientRequestId: randomUUID()
@@ -228,7 +216,7 @@ export function createCopilotGoalRoutes(deps: AgentStackDeps): Router {
       const goal = store.getGoal(id);
       if (!goal) return notFound(res);
       try {
-        const updated = applyTransition(store, goal, action);
+        const updated = applyGoalTransition(store, goal, action);
         if (action === 'resume' && updated.status === 'active') {
           clearGoalFailureCooldown(id);
           evaluateGoalContinuation(deps, actingUser, id);

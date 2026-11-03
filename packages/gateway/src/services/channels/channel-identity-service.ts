@@ -4,7 +4,6 @@ import type { Database } from '../../db/types.js';
 import { ChannelIdentityRepository, type ChannelIdentity } from '../../db/repositories/channel-identity-repository.js';
 import { FeishuIntegrationRepository } from '../../db/repositories/feishu-integration-repository.js';
 import { TelegramIntegrationRepository } from '../../db/repositories/telegram-integration-repository.js';
-import { ProjectRepository } from '../../db/repositories/project-repository.js';
 import { AuditLogRepository } from '../../db/repositories/audit-log-repository.js';
 import { CopilotConversationLog } from '../agent/conversation-log.js';
 
@@ -13,7 +12,7 @@ export const channelPlatforms = ['feishu', 'telegram'] as const;
 export type ChannelPlatform = typeof channelPlatforms[number];
 export const channelPairingInput = z.object({ channel: z.enum(channelPlatforms), accountId: id }).strict();
 export const channelConfirmationInput = z.object({ revision: z.number().int().positive(), externalUserId: id, chatId: id }).strict();
-export const channelRouteInput = z.object({ identityId: id, projectId: id }).strict();
+export const channelRouteInput = z.object({ identityId: id, conversationId: id.optional(), projectId: id.optional() }).strict();
 const peerBase = { channel: z.enum(channelPlatforms), accountId: id, accountRevision: z.number().int().positive(), externalUserId: id, chatId: id, threadId: id.optional(), replyToMessageId: id.optional() };
 const peerSchema = z.discriminatedUnion('chatType', [
   z.object({ ...peerBase, chatType: z.literal('p2p') }).strict(),
@@ -24,7 +23,7 @@ export type TrustedChannelPeer = z.infer<typeof peerSchema>;
 export class ChannelIdentityError extends Error {
   constructor() { super('CHANNEL_AUTHORITY_REJECTED'); }
 }
-const requireAuthority = (condition: unknown): void => { if (!condition) throw new ChannelIdentityError(); };
+function requireAuthority(condition: unknown): asserts condition { if (!condition) throw new ChannelIdentityError(); }
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 
 /** Integration-config gate shared by every channel platform. */
@@ -105,10 +104,17 @@ export class ChannelIdentityService {
     const value = channelRouteInput.parse(raw);
     return this.records.transaction(() => {
       this.currentIdentity(value.identityId);
-      const project = new ProjectRepository(this.db, this.userId).getById(value.projectId);
-      requireAuthority(project !== undefined);
-      const conversation = this.conversations.createConversation('Channel Copilot');
-      const route = this.records.createRoute({ identityId: value.identityId, projectId: value.projectId, conversationId: conversation.id });
+      const conversation = value.conversationId
+        ? this.conversations.getConversation(value.conversationId)
+        : this.conversations.createConversation('Channel Copilot', value.projectId ?? null);
+      requireAuthority(conversation);
+      if ('status' in conversation) requireAuthority(conversation.status === 'active');
+      if (value.conversationId && value.projectId && conversation.project_id !== value.projectId) {
+        requireAuthority(conversation.project_id === null);
+        this.conversations.setConversationProject(conversation.id, value.projectId);
+      }
+      this.conversations.assertEditable(conversation.id);
+      const route = this.records.createRoute({ identityId: value.identityId, conversationId: conversation!.id });
       this.audit('channel.route.create', route.id);
       return route;
     });
@@ -125,12 +131,13 @@ export class ChannelIdentityService {
   /** Read-only base route authority, not proof of chat allowlist access or live delivery. */
   listRouteStatuses() {
     return this.records.listRoutes().map(route => {
+      const projectId = this.conversations.getConversation(route.conversationId)?.project_id ?? null;
       try {
         this.admitRoute(route.id);
-        return { ...route, authorityValid: true };
+        return { ...route, projectId, authorityValid: true };
       } catch (error) {
         if (!(error instanceof ChannelIdentityError)) throw error;
-        return { ...route, authorityValid: false };
+        return { ...route, projectId, authorityValid: false };
       }
     });
   }
@@ -152,15 +159,14 @@ export class ChannelIdentityService {
       requireAuthority(this.conversations.getConversation(targetConversation)?.status === 'active');
       return { userId: this.userId, actorUserId: this.userId, routeId: route!.id, routeRevision: route!.revision,
         identityId: identity.id, identityRevision: identity.revision,
-        conversationId: targetConversation, projectIds: [route!.projectId] };
+        conversationId: targetConversation };
     });
   }
 
   /** Point-in-time routing decision, not an execution or disclosure permit. Revalidate before each effect/delivery. */
-  admit(routeId: string, rawPeer: TrustedChannelPeer, operation?: { capability: string; projectIds: string[] }) {
+  admit(routeId: string, rawPeer: TrustedChannelPeer) {
     id.parse(routeId);
     const peer = peerSchema.parse(rawPeer);
-    const scope = operation === undefined ? undefined : z.object({ capability: id, projectIds: z.array(id).max(100) }).strict().parse(operation);
     return this.records.transaction(() => {
       this.checkPeer(peer);
       const route = this.currentRoute(routeId);
@@ -168,27 +174,25 @@ export class ChannelIdentityService {
       requireAuthority(identity.channel === peer.channel && identity.accountId === peer.accountId
         && identity.accountRevision === peer.accountRevision && identity.externalUserId === peer.externalUserId
         && (peer.chatType === 'group' || identity.chatId === peer.chatId));
-      if (scope) requireAuthority(scope.projectIds.every(projectId => projectId === route.projectId));
       let session = this.records.session(routeId, peer);
       if (!session) {
-        const conversation = this.conversations.createConversation(peer.chatType === 'group' ? 'Channel group' : 'Channel topic');
+        const projectId = this.conversations.getConversation(route!.conversationId)?.project_id ?? null;
+        const conversation = this.conversations.createConversation(peer.chatType === 'group' ? 'Channel group' : 'Channel topic', projectId);
         this.records.createSession(routeId, peer, conversation.id);
         session = this.records.session(routeId, peer)!;
       }
       requireAuthority(this.conversations.getConversation(session.conversationId)?.status === 'active');
       return { userId: this.userId, actorUserId: this.userId, routeId: route!.id, routeRevision: route!.revision,
         identityId: identity.id, identityRevision: identity.revision,
-        conversationId: session.conversationId, projectIds: [route!.projectId] };
+        conversationId: session.conversationId };
     });
   }
 
-  /** Every descendant inherits its parent route's conversation and project authority. */
+  /** Every descendant inherits its parent route's conversation authority. */
   private currentRoute(routeId: string) {
     const route = this.records.route(routeId);
     requireAuthority(route?.status === 'active');
-    const project = new ProjectRepository(this.db, this.userId).getById(route!.projectId);
-    requireAuthority(this.conversations.getConversation(route!.conversationId)?.status === 'active'
-      && !!project);
+    requireAuthority(this.conversations.getConversation(route!.conversationId)?.status === 'active');
     return route!;
   }
 
