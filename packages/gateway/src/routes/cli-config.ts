@@ -375,9 +375,19 @@ export function createCliConfigRoutes(
       return;
     }
     observe(options, "provider.delete");
-    await handle(res, async () => ({
-      snapshot: await removeCliProvider(adapter, req.params.providerId)
-    }));
+    await handle(res, async () => {
+      const snapshot = await removeCliProvider(adapter, req.params.providerId);
+      const userId = (req as unknown as AuthenticatedRequest).userId;
+      const appliedRepository = new CliConfigAppliedProviderRepository(db, userId);
+      const pointer = appliedRepository.get(adapter);
+      const appliedProvider = pointer
+        ? new ModelProviderRepository(db, userId, masterKey).getProviderProfile(pointer.providerProfileId)
+        : undefined;
+      if (appliedProvider && normalizeProviderKey(appliedProvider.providerKey) === req.params.providerId) {
+        appliedRepository.clear(adapter);
+      }
+      return { snapshot };
+    });
   });
 
   router.put("/:adapter/models", async (req, res) => {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileCode2, Pencil, ShieldAlert } from "lucide-react";
+import { FileCode2, Pencil, ShieldAlert, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import type { ThemedToken } from "shiki";
 
@@ -30,6 +30,7 @@ import {
   getCliConfigFields,
   getCliConfigFieldValues,
   getCliConfigFile,
+  deleteCliProvider,
   updateCliConfigFields,
   writeCliConfigFile,
   type CliConfigFieldSpec,
@@ -93,10 +94,12 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [removeCandidate, setRemoveCandidate] = useState<string | null>(null);
   useEffect(() => {
     setEditing(false);
     setDraft("");
     setCloseConfirmOpen(false);
+    setRemoveCandidate(null);
   }, [adapter, open]);
 
   const loadedContent = mainFileQuery.data?.content ?? "";
@@ -158,6 +161,24 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
     },
   });
 
+  const removeMutation = useMutation({
+    mutationFn: (providerId: string) => deleteCliProvider(adapter, providerId),
+    onSuccess: async () => {
+      setRemoveCandidate(null);
+      toast.success(t("cliConfig.providerRemoved"));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["cli-config", adapter] }),
+        queryClient.invalidateQueries({ queryKey: ["cli-config-file", adapter, mainFile?.relativePath] }),
+        queryClient.invalidateQueries({ queryKey: ["cli-config-field-values", adapter] }),
+        queryClient.invalidateQueries({ queryKey: ["applied-providers"] }),
+        queryClient.invalidateQueries({ queryKey: ["applied-provider"] }),
+      ]);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : t("cliConfig.removeProviderFailed"));
+    },
+  });
+
   const commonFields = fieldsQuery.data?.fields ?? [];
 
   return (
@@ -213,6 +234,42 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
               {valuesQuery.error ? (
                 <StateLine destructive text={message(valuesQuery.error, t("cliConfig.loadFieldValuesFailed"))} />
               ) : null}
+            </section>
+          ) : null}
+
+          {snapshot && snapshot.providers.length > 0 ? (
+            <section className="space-y-2">
+              <h3 className="text-sm font-medium">{t("cliConfig.providers")}</h3>
+              <div className="space-y-2">
+                {snapshot.providers.map((provider) => (
+                  <div key={provider.id} className="flex items-center gap-3 rounded-md border border-border/70 px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium">{provider.name}</span>
+                        {provider.isActive ? <Badge variant="secondary">{t("models.cliStatusActiveHere")}</Badge> : null}
+                      </div>
+                      <div className="mt-1 truncate font-mono text-xs text-muted-foreground">{provider.id} · {provider.protocol}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {t("cliConfig.modelCount").replace("{count}", String(snapshot.models.filter((model) => model.provider === provider.id).length))}
+                      </div>
+                    </div>
+                    {isAdmin && canDeleteProviderId(provider.id) ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="shrink-0 text-destructive"
+                        disabled={removeMutation.isPending}
+                        aria-label={t("cliConfig.removeProviderWithName").replace("{provider}", provider.name)}
+                        onClick={() => setRemoveCandidate(provider.id)}
+                      >
+                        <Trash2 className="size-4" />
+                        {t("cliConfig.removeProvider")}
+                      </Button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             </section>
           ) : null}
 
@@ -336,8 +393,24 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
         onOpenChange={setCloseConfirmOpen}
         onConfirm={discardAndClose}
       />
+      <ConfirmDialog
+        open={removeCandidate !== null}
+        title={t("cliConfig.removeProviderTitle")}
+        description={t("cliConfig.removeProviderDescription")
+          .replace("{adapter}", adapter)
+          .replace("{provider}", snapshot?.providers.find((provider) => provider.id === removeCandidate)?.name ?? removeCandidate ?? "—")}
+        confirmLabel={t("cliConfig.removeProvider")}
+        destructive
+        pending={removeMutation.isPending}
+        onOpenChange={(open) => { if (!open) setRemoveCandidate(null); }}
+        onConfirm={() => { if (removeCandidate) removeMutation.mutate(removeCandidate); }}
+      />
     </Sheet>
   );
+}
+
+function canDeleteProviderId(providerId: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(providerId);
 }
 
 function HighlightedConfigContent({ fileName, content }: { fileName: string; content: string }) {

@@ -1838,6 +1838,7 @@ describe("api client", () => {
     await getCliConfigFile("kimi", "config.toml");
     await writeCliConfigFile("kimi", "config.toml", "default_model = \"k2\"");
     await setCliDefaultModel("kimi", "moonshot/kimi-k2.5");
+    await apiModule.deleteCliProvider("kimi", "relay");
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -1864,6 +1865,11 @@ describe("api client", () => {
         method: "PUT",
         body: JSON.stringify({ model: "moonshot/kimi-k2.5" }),
       })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:18332/api/v1/cli-config/kimi/providers/relay",
+      expect.objectContaining({ method: "DELETE" })
     );
   });
 });

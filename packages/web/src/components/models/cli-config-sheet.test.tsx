@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LanguageProvider } from "@/hooks/use-language";
@@ -12,6 +12,7 @@ const {
   getCliConfigFieldsMock,
   getCliConfigFieldValuesMock,
   updateCliConfigFieldsMock,
+  deleteCliProviderMock,
   writeCliConfigFileMock,
 } = vi.hoisted(() => ({
   getCliConfigMock: vi.fn(),
@@ -19,6 +20,7 @@ const {
   getCliConfigFieldsMock: vi.fn(),
   getCliConfigFieldValuesMock: vi.fn(),
   updateCliConfigFieldsMock: vi.fn(),
+  deleteCliProviderMock: vi.fn(),
   writeCliConfigFileMock: vi.fn(),
 }));
 
@@ -31,6 +33,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getCliConfigFields: getCliConfigFieldsMock,
     getCliConfigFieldValues: getCliConfigFieldValuesMock,
     updateCliConfigFields: updateCliConfigFieldsMock,
+    deleteCliProvider: deleteCliProviderMock,
     writeCliConfigFile: writeCliConfigFileMock,
   };
 });
@@ -103,6 +106,34 @@ describe("CliConfigSheet raw editor", () => {
 
     fireEvent.change(select, { target: { value: "" } });
     await waitFor(() => expect(updateCliConfigFieldsMock).toHaveBeenCalledWith("kimi", { defaultPermissionMode: null }));
+  });
+
+  it("lists coexisting providers and removes only the selected third-party provider", async () => {
+    getCliConfigMock.mockResolvedValue({
+      adapter: "kimi",
+      configRoot: "/home/u/.kimi-code",
+      configFile: "config.toml",
+      defaultModel: "relay/model-a",
+      providers: [
+        { id: "managed:kimi-code", name: "Kimi Login", protocol: "kimi", baseUrl: "https://api.kimi.com/coding/v1", hasApiKey: true, isActive: false },
+        { id: "relay", name: "Relay", protocol: "openai", baseUrl: "https://relay.example.com/v1", hasApiKey: true, isActive: true },
+      ],
+      models: [
+        { alias: "kimi-code/k3", provider: "managed:kimi-code", modelId: "k3" },
+        { alias: "relay/model-a", provider: "relay", modelId: "model-a" },
+      ],
+      files: [{ relativePath: "config.toml", fileType: "toml", exists: true, sizeBytes: 100 }],
+    });
+    deleteCliProviderMock.mockResolvedValue({});
+    renderSheet("kimi");
+
+    expect(await screen.findByText("Kimi Login")).toBeTruthy();
+    expect(screen.getByText("Relay")).toBeTruthy();
+    expect(screen.queryByLabelText("删除 Kimi Login")).toBeNull();
+    fireEvent.click(screen.getByLabelText("删除 Relay"));
+    const confirmation = await screen.findByRole("dialog", { name: "删除这个服务商的应用配置？" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "删除应用" }));
+    await waitFor(() => expect(deleteCliProviderMock).toHaveBeenCalledWith("kimi", "relay"));
   });
 
   it("disables save until the draft differs from the loaded file", async () => {

@@ -562,6 +562,57 @@ describe("cli-config apply service", () => {
       assert.equal(entry.default_effort, undefined);
     });
 
+    it("keeps multiple Kimi, PI, and OpenCode providers side by side and removes only the selected one", async () => {
+      for (const { adapter, envVar } of [
+        { adapter: "kimi", envVar: "KIMI_CODE_HOME" },
+        { adapter: "pi", envVar: "PI_CODING_AGENT_DIR" },
+        { adapter: "opencode", envVar: "OPENCODE_CONFIG_DIR" }
+      ] as const) {
+        const db = createTestDb();
+        const user = new UserRepository(db).create(`apply-multiple-${adapter}@example.com`, "hash");
+        await useConfigRoot(envVar, `forgebadger-apply-multiple-${adapter}-`);
+        const first = createFixture(db, user.id, adapter);
+        const secondProvider = first.repo.createProviderProfile({
+          name: "Second Provider",
+          providerKey: "second-provider",
+          baseUrl: "https://relay.example.com/v1",
+          openaiBaseUrl: "https://relay.example.com/v1",
+          anthropicBaseUrl: "https://relay.example.com/anthropic",
+          authType: "api_key",
+          apiFormat: adapter === "kimi" ? "anthropic" : "openai-compatible",
+          supportedAdapters: [adapter]
+        });
+        const secondModel = first.repo.createModelProfile({
+          providerProfileId: secondProvider.id,
+          name: "Second Model",
+          modelId: "second-model",
+          isDefault: true
+        });
+        first.repo.createCredential({ providerProfileId: secondProvider.id, plaintextSecret: "sk-second" });
+
+        await applyCliConfigToAdapter({
+          db, userId: user.id, masterKey, adapter,
+          providerProfileId: first.providerId, resolveHost: publicResolver
+        });
+        await applyCliConfigToAdapter({
+          db, userId: user.id, masterKey, adapter,
+          providerProfileId: secondProvider.id, modelProfileId: secondModel.id, resolveHost: publicResolver
+        });
+
+        const coexist = await readCliConfig(adapter);
+        assert.deepEqual(coexist.providers.map((provider) => provider.id).sort(), [`${adapter}-provider`, "second-provider"]);
+        assert.equal(coexist.models.some((model) => model.modelId === `${adapter}-model-1`), true);
+        assert.equal(coexist.models.some((model) => model.modelId === "second-model"), true);
+
+        const removed = await removeCliProvider(adapter, "second-provider");
+        assert.deepEqual(removed.providers.map((provider) => provider.id), [`${adapter}-provider`]);
+        assert.equal(removed.models.some((model) => model.modelId === `${adapter}-model-1`), true);
+        assert.equal(removed.models.some((model) => model.modelId === "second-model"), false);
+        if (adapter !== "opencode") assert.equal(removed.defaultModel, "");
+        db.close();
+      }
+    });
+
     it("removes a stale ANTHROPIC_API_KEY when applying a token-based provider", async () => {
       const db = createTestDb();
       const user = new UserRepository(db).create("apply-claude-stale@example.com", "hash");

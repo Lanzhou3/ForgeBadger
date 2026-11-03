@@ -157,6 +157,23 @@ describe("cli-config apply-provider route", () => {
     assert.equal(pointers.get("claude"), undefined);
   });
 
+  it("clears the applied-provider pointer when that provider is removed", async () => {
+    const { provider, model } = createProvider();
+    const pointers = new CliConfigAppliedProviderRepository(db, userIdFromToken());
+    const applied = await post("/api/v1/cli-config/claude/apply-provider", {
+      providerProfileId: provider.id, modelProfileId: model.id
+    });
+    assert.equal(applied.status, 200, JSON.stringify(applied.json));
+    assert.equal(pointers.get("claude")?.providerProfileId, provider.id);
+
+    const response = await fetch(`${baseUrl}/api/v1/cli-config/claude/providers/deepseek`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    assert.equal(response.status, 200);
+    assert.equal(pointers.get("claude"), undefined);
+  });
+
   it("redacts credential-shaped provider names before broadcasting apply notifications", async () => {
     const { provider, model } = createProvider();
     const marker = "sk-FAKEPROVIDERNAME123456";
