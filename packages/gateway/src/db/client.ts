@@ -3,11 +3,10 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 
 import type { Database } from "./types.js";
 import { recoverCompanionMigrationGap } from "./companion-migration-recovery.js";
+import { migrateDatabase } from "./migrate-database.js";
 import { expandUserPath } from "../lib/user-path.js";
 
 let dbInstance: Database | null = null;
@@ -23,13 +22,12 @@ export function initializeDatabase(dbPath: string): Database {
 
   const db = new BetterSqlite3(resolvedPath);
   db.pragma("journal_mode = WAL");
-  const drizzleDb = drizzle(db);
   const migrationsFolder = path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations");
 
   db.pragma("foreign_keys = OFF");
   try {
     recoverCompanionMigrationGap(db, migrationsFolder);
-    migrate(drizzleDb, { migrationsFolder });
+    migrateDatabase(db, migrationsFolder);
   } catch (error) {
     db.close();
     throw error;

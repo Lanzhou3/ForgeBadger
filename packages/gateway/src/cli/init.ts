@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -14,6 +14,7 @@ import {
   writeConfigPlan
 } from "../config-generation/index.js";
 import type { CredentialMode, RenderPlan } from "../config-generation/types.js";
+import { migrateDatabase } from "../db/migrate-database.js";
 import { TemplateRepository } from "../db/repositories/template-repository.js";
 import type { Template, TemplateFile } from "../db/repositories/template-repository.js";
 import type { Database } from "../db/types.js";
@@ -224,16 +225,17 @@ function openTemplateDb(env: NodeJS.ProcessEnv): Database {
     return createTemplateDb();
   }
 
-  mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new BetterSqlite3(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = OFF");
   try {
-    migrate(drizzle(db), { migrationsFolder: migrationsFolder() });
-  } finally {
+    db.pragma("journal_mode = WAL");
+    db.pragma("foreign_keys = OFF");
+    migrateDatabase(db, migrationsFolder());
     db.pragma("foreign_keys = ON");
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
   }
-  return db;
 }
 
 // Mirrors the gateway's own env normalization (src/config/env.ts) so the CLI
