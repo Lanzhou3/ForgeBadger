@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { revealProviderCredential, type ProviderCredentialSummary } from "@/lib/api";
 import { toast } from "@/lib/toast";
 
-import { EmptyLine, type CredentialForm, type Translate } from "./shared";
+import { credentialDisplayName, EmptyLine, type CredentialForm, type Translate } from "./shared";
 
 interface CredentialTabProps {
   credentials: ProviderCredentialSummary[];
@@ -139,16 +139,7 @@ export function CredentialTab({
 
   return (
     <div className="space-y-4">
-      <form className="grid items-end gap-3 md:grid-cols-[1fr_1fr_auto]" onSubmit={onSubmitCredential}>
-        <div className="space-y-2">
-          <Label htmlFor="credential-label">{t("models.credentialLabel")}</Label>
-          <Input
-            id="credential-label"
-            placeholder={t("models.defaultCredentialLabel")}
-            value={credentialForm.label}
-            onChange={(event) => onCredentialFormChange({ ...credentialForm, label: event.target.value })}
-          />
-        </div>
+      <form className="grid items-end gap-3 md:grid-cols-[1fr_auto]" onSubmit={onSubmitCredential}>
         <div className="space-y-2">
           <Label htmlFor="credential-secret">{t("models.apiKey")}</Label>
           <Input
@@ -186,7 +177,7 @@ export function CredentialTab({
                 onClick={() => onSelectCredential(credential.id)}
               >
                 <div className="truncate text-sm font-medium">
-                  {credential.label ?? t("models.unnamedCredential")}
+                  {credentialDisplayName(credential, t("models.apiKey"))}
                 </div>
                 <div
                   className={
@@ -280,15 +271,6 @@ export function CredentialTab({
             <DialogHeader>
               <DialogTitle>{t("models.rotateApiKey")}</DialogTitle>
             </DialogHeader>
-            <div className="space-y-2">
-              <Label htmlFor="rotate-credential-label">{t("models.credentialLabel")}</Label>
-              <Input
-                id="rotate-credential-label"
-                placeholder={t("models.defaultCredentialLabel")}
-                value={credentialForm.label}
-                onChange={(event) => onCredentialFormChange({ ...credentialForm, label: event.target.value })}
-              />
-            </div>
             <div className="space-y-2">
               <Label htmlFor="rotate-credential-secret">{t("models.apiKey")}</Label>
               <Input

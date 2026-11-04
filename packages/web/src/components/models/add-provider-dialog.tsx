@@ -209,6 +209,7 @@ export function AddProviderDialog({
                 disabled={editing}
                 required
               />
+              <p className="text-xs text-muted-foreground">{t("models.providerKeyHint")}</p>
               {editing && (
                 <p className="text-xs text-muted-foreground">{t("models.providerKeyLocked")}</p>
               )}
@@ -329,17 +330,6 @@ export function AddProviderDialog({
 
           {!editing && (requiresCredential ? (
             <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-3">
-              <div className="space-y-2">
-                <Label htmlFor="setup-credential-label">{t("models.credentialLabel")}</Label>
-                <Input
-                  id="setup-credential-label"
-                  value={setupCredential.label}
-                  onChange={(event) =>
-                    onSetupCredentialChange({ ...setupCredential, label: event.target.value })
-                  }
-                  placeholder={t("models.defaultCredentialLabel")}
-                />
-              </div>
               <div className="space-y-2">
                 <Label htmlFor="setup-api-key">{t("models.apiKey")}</Label>
                 <Input

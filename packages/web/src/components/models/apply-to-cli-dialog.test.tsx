@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApplyToCliDialog, maskSecrets } from "./apply-to-cli-dialog";
 import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
-import { applyCliConfigToAdapter, getClaudeRoute, previewCliConfigApply, setClaudeRoute, type AdapterDiscovery, type ModelProfile, type ProviderProfile } from "@/lib/api";
+import { applyCliConfigToAdapter, getClaudeRoute, previewCliConfigApply, setClaudeRoute, type AdapterDiscovery, type ModelProfile, type ProviderCredentialSummary, type ProviderProfile } from "@/lib/api";
 
 vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) => key }), useUiLocale: () => "en-US" }));
 vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
@@ -36,14 +36,15 @@ function setup(
   overrides: Partial<ProviderProfile> = {},
   models: ModelProfile[] = [],
   adapters: AdapterDiscovery[] = [],
-  initialAdapter?: string
+  initialAdapter?: string,
+  credentials: ProviderCredentialSummary[] = []
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(ADAPTER_DISCOVERY_QUERY_KEY, { adapters });
   const invalidate = vi.spyOn(client, "invalidateQueries");
   render(
     <QueryClientProvider client={client}>
-      <ApplyToCliDialog provider={{ ...provider, ...overrides }} models={models} credentials={[]} open onOpenChange={vi.fn()} initialAdapter={initialAdapter} />
+      <ApplyToCliDialog provider={{ ...provider, ...overrides }} models={models} credentials={credentials} open onOpenChange={vi.fn()} initialAdapter={initialAdapter} />
     </QueryClientProvider>
   );
   return invalidate;
@@ -51,6 +52,28 @@ function setup(
 
 beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
+
+it("distinguishes unnamed API keys and previews the selected credential", async () => {
+  const credentials = ["credential-1", "credential-2", "credential-3"].map((id, index) => ({
+    id,
+    providerProfileId: provider.id,
+    label: index === 2 ? "Legacy key" : null,
+    status: "active",
+    secretPreview: "********",
+    generation: 1,
+  }));
+  setup({ apiFormat: "anthropic" }, [], [], undefined, credentials);
+
+  const select = screen.getByRole<HTMLSelectElement>("combobox", { name: "models.credentials" });
+  expect(Array.from(select.options).slice(1).map((option) => option.text)).toEqual([
+    "models.apiKey · credential-1", "models.apiKey · credential-2", "Legacy key",
+  ]);
+  fireEvent.change(select, { target: { value: "credential-2" } });
+  fireEvent.click(screen.getByRole("button", { name: "models.applyChangeSummary" }));
+  await waitFor(() => expect(previewCliConfigApply).toHaveBeenCalledWith("claude", expect.objectContaining({
+    credentialId: "credential-2",
+  })));
+});
 
 describe("Claude endpoint routing", () => {
   it.each([

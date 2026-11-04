@@ -14,6 +14,7 @@ import { DeleteConfirmDialog } from "@/components/models/delete-confirm-dialog";
 import { ProviderList } from "@/components/models/provider-list";
 import { ProviderWorkspace } from "@/components/models/provider-workspace";
 import {
+  credentialDisplayName,
   customProviderPrimaryBaseUrl,
   emptyCredential,
   emptyCustomProvider,
@@ -128,10 +129,6 @@ export default function ModelsPage() {
     () => providerModels.find((model) => model.id === selectedModelId),
     [providerModels, selectedModelId]
   );
-  const selectedCredential = useMemo(
-    () => providerCredentials.find((credential) => credential.id === selectedCredentialId),
-    [providerCredentials, selectedCredentialId]
-  );
   const modelCountsByProvider = useMemo(() => {
     const counts = new Map<string, number>();
     for (const model of models) {
@@ -166,12 +163,6 @@ export default function ModelsPage() {
     }
   }, [selectedModel]);
 
-  useEffect(() => {
-    if (selectedCredential) {
-      setCredentialForm((form) => ({ ...form, label: selectedCredential.label ?? "" }));
-    }
-  }, [selectedCredential]);
-
   const createProviderMutation = useMutation({
     mutationFn: async () => {
       const anthropicBaseUrl = customProvider.anthropicBaseUrl.trim();
@@ -193,7 +184,6 @@ export default function ModelsPage() {
         created.provider.authType === "none" || !secret
           ? undefined
           : (await createProviderCredential(created.provider.id, {
-              label: setupCredentialForm.label.trim() || undefined,
               plaintextSecret: secret,
             })).credential;
       // Model sync always fetches the provider's live model list; a failure
@@ -275,7 +265,6 @@ export default function ModelsPage() {
   const credentialMutation = useMutation({
     mutationFn: () =>
       createProviderCredential(selectedProviderId, {
-        label: credentialForm.label.trim() || undefined,
         plaintextSecret: credentialForm.plaintextSecret,
       }),
     onSuccess: async (result) => {
@@ -291,7 +280,6 @@ export default function ModelsPage() {
     mutationFn: () => {
       if (!selectedCredentialId) throw new Error(t("models.credentialRequired"));
       return rotateProviderCredential(selectedProviderId, selectedCredentialId, {
-        label: credentialForm.label.trim() || undefined,
         plaintextSecret: credentialForm.plaintextSecret,
       });
     },
@@ -617,9 +605,10 @@ export default function ModelsPage() {
                   openDeleteDialog({
                     kind: "credential",
                     credentialId,
-                    name:
-                      providerCredentials.find((credential) => credential.id === credentialId)?.label ??
-                      credentialId,
+                    name: credentialDisplayName(
+                      providerCredentials.find((credential) => credential.id === credentialId) ?? { id: credentialId, label: null },
+                      t("models.apiKey"),
+                    ),
                   }),
               }}
               t={t}

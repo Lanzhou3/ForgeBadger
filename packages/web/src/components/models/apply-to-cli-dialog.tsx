@@ -36,6 +36,7 @@ import {
   type ProviderSupportedAdapter,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { credentialDisplayName } from "./shared";
 
 const CLAUDE_PRIMARY_SLOTS: Array<{ slot: ClaudeModelSlot; label: string }> = [
   { slot: "opus", label: "Opus" },
@@ -297,7 +298,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
             >
               <option value="">{t("models.applyToCliNoCredential")}</option>
               {activeCredentials.map((credential) => (
-                <option key={credential.id} value={credential.id}>{credential.label ?? t("models.unnamedCredential")}</option>
+                <option key={credential.id} value={credential.id}>{credentialDisplayName(credential, t("models.apiKey"))}</option>
               ))}
             </select>
           </div>

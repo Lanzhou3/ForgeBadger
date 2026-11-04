@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
 import ModelsPage from "./page";
@@ -86,5 +86,17 @@ describe("ModelsPage query state", () => {
     expect(await screen.findByText("请选择一个服务商。")).toBeTruthy();
     // The right-hand placeholder must not repeat the left column's message.
     expect(screen.queryByText("暂无服务商，请手动添加一个服务商。")).toBeNull();
+  });
+
+  it("distinguishes the provider identifier from the API key and omits credential names", async () => {
+    listModelProvidersMock.mockResolvedValue({ providers: [], models: [], credentials: [] });
+    renderPage();
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "添加服务商" }))[0]!);
+
+    expect(await screen.findByLabelText("服务商标识")).toBeTruthy();
+    expect(screen.getByText("用于内部识别和 CLI 配置，例如 openai；不是 API 密钥。")).toBeTruthy();
+    expect(screen.queryByLabelText("API Key 名称")).toBeNull();
+    expect(screen.getByLabelText("API Key")).toBeTruthy();
   });
 });

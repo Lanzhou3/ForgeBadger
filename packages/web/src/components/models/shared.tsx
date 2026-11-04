@@ -3,6 +3,7 @@ import type {
   ProviderApiFormat,
   ProviderAuthType,
   ProviderBalanceEntry,
+  ProviderCredentialSummary,
   ProviderProfile,
   ProviderSupportedAdapter,
 } from "@/lib/api";
@@ -22,8 +23,11 @@ export interface CustomProviderForm {
 }
 
 export interface CredentialForm {
-  label: string;
   plaintextSecret: string;
+}
+
+export function credentialDisplayName(credential: Pick<ProviderCredentialSummary, "id" | "label">, apiKeyLabel: string): string {
+  return credential.label?.trim() || `${apiKeyLabel} · ${credential.id}`;
 }
 
 export interface ModelForm {
@@ -137,7 +141,6 @@ export function customProviderHasPrivateNetworkUrl(form: CustomProviderForm): bo
 }
 
 export const emptyCredential: CredentialForm = {
-  label: "",
   plaintextSecret: "",
 };
 

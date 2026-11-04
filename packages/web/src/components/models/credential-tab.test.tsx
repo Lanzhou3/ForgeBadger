@@ -50,7 +50,7 @@ function renderTab(overrides: Partial<Parameters<typeof CredentialTab>[0]> = {})
       <CredentialTab
         credentials={[activeCredential]}
         selectedCredentialId="cred-1"
-        credentialForm={{ label: "", plaintextSecret: "" }}
+        credentialForm={{ plaintextSecret: "" }}
         rotateDialogOpen={false}
         isSaving={false}
         isRotating={false}
@@ -76,6 +76,17 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("credential-tab secret reveal", () => {
+  it("only asks for the API key when adding or rotating a credential", () => {
+    const { rerenderTab } = renderTab();
+
+    expect(screen.queryByLabelText("models.credentialLabel")).toBeNull();
+    expect(screen.getAllByLabelText("models.apiKey")).toHaveLength(1);
+
+    rerenderTab({ rotateDialogOpen: true });
+    expect(screen.queryByLabelText("models.credentialLabel")).toBeNull();
+    expect(screen.getByRole("dialog").querySelectorAll('input[type="password"]')).toHaveLength(1);
+  });
+
   it('clears a displayed secret when rotation advances the generation with the same masked preview', async () => {
     vi.mocked(revealProviderCredential).mockResolvedValue({ secret: 'old-generation-secret' });
     const { rerenderTab } = renderTab();
