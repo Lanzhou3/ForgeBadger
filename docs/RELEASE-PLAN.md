@@ -433,6 +433,8 @@ to move a dist-tag back; do not unpublish as an automatic rollback.
 - Copilot conversations retain their project context and channel bindings
   through database upgrades. The dashboard, session board, and auth screens
   have updated layouts and motion.
+- The npm build bundles the Web workspace's complete React and React DOM
+  packages so the standalone server can start in a multi-version workspace.
 
 ## 7. Release Acceptance
 

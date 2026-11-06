@@ -91,6 +91,18 @@ describe("verifyNpmPackage", () => {
     assert.match(result.errors.join("\n"), /\.next\/BUILD_ID/);
   });
 
+  it("rejects a Web runtime with a partial React package", async () => {
+    const root = await createPackageTree();
+    const reactPackage = "dist/web/standalone/node_modules/react";
+    await writeFile(await ensureFile(root, `${reactPackage}/package.json`), "{}\n");
+    await rm(path.join(root, reactPackage, "index.js"));
+
+    const result = await verifyNpmPackage({ cliPackageRoot: root });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /node_modules\/react\/index\.js/);
+  });
+
   it("rejects Web framework dependencies that are bundled in the standalone runtime", async () => {
     const root = await createPackageTree({
       packageJson: {
@@ -256,6 +268,8 @@ async function createPackageTree(options = {}) {
     await writeFile(await ensureFile(root, "dist/web/standalone/packages/web/.next/static/chunks/app.js"), "");
   }
   await writeFile(await ensureFile(root, "dist/web/standalone/packages/web/node_modules/next/package.json"), "{}\n");
+  await writeFile(await ensureFile(root, "dist/web/standalone/node_modules/react/index.js"), "");
+  await writeFile(await ensureFile(root, "dist/web/standalone/node_modules/react-dom/index.js"), "");
   await writeFile(await ensureFile(root, "dist/web/standalone/node_modules/@swc/helpers/package.json"), "{}\n");
   await writeFile(await ensureFile(root, "dist/web/standalone/packages/web/public/forgebadger-runtime.js"), "");
 
