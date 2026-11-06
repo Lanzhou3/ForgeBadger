@@ -420,6 +420,20 @@ to move a dist-tag back; do not unpublish as an automatic rollback.
   AI-provider automatic execution remain unverified. This focused review does
   not rerun the full workspace test suite or clear earlier release caveats.
 
+### 2026-11-07 candidate refresh: 0.2.0-beta.1
+
+- Source baseline: `c17a10fbdcdc07b2cb1185e619363f7136db2f2f` on `dev`.
+  Publish from the merged `master` candidate on the `beta` channel.
+- Added ordered Claude Route failover, retry handling, and circuit breaking.
+  Updated MCP tool annotations and the Model Center's API key and applied
+  provider controls.
+- Added encrypted Companion pairing and sync, typed Goal and approval
+  commands, and the optional Relay service. The npm CLI bundles the Gateway
+  and Web runtime. Companion and Relay run separately.
+- Copilot conversations retain their project context and channel bindings
+  through database upgrades. The dashboard, session board, and auth screens
+  have updated layouts and motion.
+
 ## 7. Release Acceptance
 
 A release candidate is acceptable only when:
