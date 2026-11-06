@@ -14,6 +14,8 @@ export interface ClaudeRouteAssignment {
   userId: string;
   providerProfileId: string;
   credentialId: string;
+  /** 1-based priority: 1 is the primary target, later positions are failover candidates. */
+  position: number;
   updatedAt: number;
 }
 
@@ -27,6 +29,7 @@ interface AssignmentRow {
   user_id: string;
   provider_profile_id: string;
   credential_id: string;
+  position: number;
   updated_at: number;
 }
 
@@ -84,31 +87,82 @@ export class ClaudeRouteRepository {
     return { userId: this.userId, enabled, token: current.token };
   }
 
-  getAssignment(): ClaudeRouteAssignment | undefined {
-    const row = this.db.prepare(`
-      SELECT user_id, provider_profile_id, credential_id, updated_at
+  listAssignments(): ClaudeRouteAssignment[] {
+    const rows = this.db.prepare(`
+      SELECT user_id, provider_profile_id, credential_id, position, updated_at
       FROM claude_route_assignments
       WHERE user_id = ?
-    `).get(this.userId) as AssignmentRow | undefined;
-    if (!row) return undefined;
-    return {
+      ORDER BY position
+    `).all(this.userId) as AssignmentRow[];
+    return rows.map((row) => ({
       userId: row.user_id,
       providerProfileId: row.provider_profile_id,
       credentialId: row.credential_id,
+      position: row.position,
       updatedAt: row.updated_at
-    };
+    }));
   }
 
+  getAssignment(): ClaudeRouteAssignment | undefined {
+    return this.listAssignments()[0];
+  }
+
+  /**
+   * Pins the provider as the PRIMARY target (position 1), shifting existing
+   * candidates down. Used by apply: the most recently applied provider is
+   * what Claude Code talks to first. (Rewritten via setOrderedAssignments:
+   * an in-place position +1 shift would trip the unique(user, position)
+   * constraint mid-statement in SQLite.)
+   */
   upsertAssignment(providerProfileId: string, credentialId: string): void {
+    const others = this.listAssignments()
+      .filter((assignment) => assignment.providerProfileId !== providerProfileId)
+      .map((assignment) => ({
+        providerProfileId: assignment.providerProfileId,
+        credentialId: assignment.credentialId
+      }));
+    this.setOrderedAssignments([{ providerProfileId, credentialId }, ...others]);
+  }
+
+  /**
+   * Replaces the whole ordered candidate list (positions renumbered 1..N in
+   * the given order). Empty list clears the assignments.
+   */
+  setOrderedAssignments(entries: Array<{ providerProfileId: string; credentialId: string }>): void {
     const now = Date.now();
-    this.db.prepare(`
-      INSERT INTO claude_route_assignments (user_id, provider_profile_id, credential_id, updated_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET
-        provider_profile_id = excluded.provider_profile_id,
-        credential_id = excluded.credential_id,
-        updated_at = excluded.updated_at
-    `).run(this.userId, providerProfileId, credentialId, now);
+    this.db.transaction(() => {
+      this.db.prepare(`
+        DELETE FROM claude_route_assignments
+        WHERE user_id = ?
+      `).run(this.userId);
+      const insert = this.db.prepare(`
+        INSERT INTO claude_route_assignments (user_id, provider_profile_id, credential_id, position, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      entries.forEach((entry, index) => {
+        insert.run(this.userId, entry.providerProfileId, entry.credentialId, index + 1, now);
+      });
+    }).immediate();
+  }
+
+  /** Removes a candidate and renumbers the rest to stay contiguous. */
+  removeAssignment(providerProfileId: string): void {
+    const row = this.db.prepare(`
+      SELECT position FROM claude_route_assignments
+      WHERE user_id = ? AND provider_profile_id = ?
+    `).get(this.userId, providerProfileId) as { position: number } | undefined;
+    if (!row) return;
+    this.db.transaction(() => {
+      this.db.prepare(`
+        DELETE FROM claude_route_assignments
+        WHERE user_id = ? AND provider_profile_id = ?
+      `).run(this.userId, providerProfileId);
+      this.db.prepare(`
+        UPDATE claude_route_assignments
+        SET position = position - 1
+        WHERE user_id = ? AND position > ?
+      `).run(this.userId, row.position);
+    }).immediate();
   }
 
   clearAssignment(): void {

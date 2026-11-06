@@ -48,7 +48,7 @@ it('preserves all follow-up request options through the actual API after a lost 
   await act(async()=>{expect(await result.current.enqueue('continue')).toBe(false);});
   rerender({modelId:'m2',reviewTaskResults:false,repairFailedChecks:false});
   await act(async()=>{expect(await result.current.enqueue('continue')).toBe(true);});
-  expect(bodies[0]).toMatchObject({content:'continue',projectId:'p1',modelId:'m1',reviewTaskResults:true,repairFailedChecks:true,clientRequestId:expect.any(String)});
+  expect(bodies[0]).toMatchObject({content:'continue',modelId:'m1',reviewTaskResults:true,repairFailedChecks:true,clientRequestId:expect.any(String)});
   expect(bodies[1]).toEqual(bodies[0]);
   client.clear();
 });

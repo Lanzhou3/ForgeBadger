@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { createHash } from "node:crypto";
 
 import {
   buildClaudeAccountOverview,
@@ -10,6 +11,7 @@ import {
   observeClaudeQuota,
   resetClaudeAccountProbeCache
 } from "../src/services/cli-account/claude-account.js";
+import { claudeKeychainAccount, claudeKeychainServiceName } from "../src/services/cli-account/claude-keychain.js";
 
 const secretToken = "claude-oauth-token-material";
 // Isolated config root for login-probe tests: the check for a routed
@@ -194,13 +196,13 @@ describe("claude cli-account login probe", () => {
       return { exitCode: 0, stdout: JSON.stringify({ loggedIn: true }), stderr: "" };
     };
     const [first, second] = await Promise.all([
-      buildClaudeAccountOverview("user-claude", { run, env: {}, homeDir: "/nonexistent-home" }),
-      buildClaudeAccountOverview("user-claude", { run, env: {}, homeDir: "/nonexistent-home" })
+      buildClaudeAccountOverview("user-claude", { run, env: {}, homeDir: "/nonexistent-home", readKeychain: async () => ({ status: "missing" }) }),
+      buildClaudeAccountOverview("user-claude", { run, env: {}, homeDir: "/nonexistent-home", readKeychain: async () => ({ status: "missing" }) })
     ]);
     assert.equal(first.login.state, "ready");
     assert.deepEqual(first.login, second.login);
     assert.equal(calls, 1);
-    await buildClaudeAccountOverview("user-claude", { run, env: {}, homeDir: "/nonexistent-home" });
+    await buildClaudeAccountOverview("user-claude", { run, env: {}, homeDir: "/nonexistent-home", readKeychain: async () => ({ status: "missing" }) });
     assert.equal(calls, 1);
   });
 
@@ -241,17 +243,23 @@ describe("claude cli-account login probe", () => {
 });
 
 describe("claude cli-account quota probe", () => {
-  it("degrades to no_native_login when the credentials file is absent", async () => {
+  it("degrades to no_native_login off macOS when no token source exists", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-account-"));
     try {
-      const quota = await observeClaudeQuota({ homeDir: home });
+      let keychainCalls = 0;
+      const quota = await observeClaudeQuota({
+        env: {},
+        homeDir: home,
+        platform: "linux",
+        readKeychain: async () => {
+          keychainCalls += 1;
+          return { status: "missing" };
+        }
+      });
       assert.equal(quota.supported, false);
-      if (process.platform === "darwin") {
-        assert.equal(quota.unsupportedReason, "keychain");
-      } else {
-        assert.equal(quota.unsupportedReason, "no_native_login");
-      }
+      assert.equal(quota.unsupportedReason, "no_native_login");
       assert.deepEqual(quota.entries, []);
+      assert.equal(keychainCalls, 0);
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -264,6 +272,7 @@ describe("claude cli-account quota probe", () => {
     try {
       const seen: Array<{ url: string; auth: string | null; beta: string | null }> = [];
       const quota = await observeClaudeQuota({
+        env: {},
         homeDir: home,
         fetchImpl: async (url, init) => {
           const headers = new Headers(init?.headers);
@@ -296,6 +305,7 @@ describe("claude cli-account quota probe", () => {
     const home = await makeHomeWithCredentials({ claudeAiOauth: { accessToken: secretToken } });
     try {
       const quota = await observeClaudeQuota({
+        env: {},
         homeDir: home,
         fetchImpl: async () => jsonResponse({
           planType: "max",
@@ -322,6 +332,7 @@ describe("claude cli-account quota probe", () => {
     const home = await makeHomeWithCredentials({ claudeAiOauth: { accessToken: secretToken } });
     try {
       const unauthorized = await observeClaudeQuota({
+        env: {},
         homeDir: home,
         fetchImpl: async () => jsonResponse({ error: "unauthorized" }, 401)
       });
@@ -332,6 +343,7 @@ describe("claude cli-account quota probe", () => {
         fetchedAt: unauthorized.fetchedAt
       });
       const serverError = await observeClaudeQuota({
+        env: {},
         homeDir: home,
         fetchImpl: async () => jsonResponse({ error: "boom" }, 500)
       });
@@ -348,12 +360,221 @@ describe("claude cli-account quota probe", () => {
     await mkdir(root, { recursive: true });
     await writeFile(path.join(root, ".credentials.json"), "{not json", { mode: 0o600 });
     try {
-      const quota = await observeClaudeQuota({ homeDir: home });
+      const quota = await observeClaudeQuota({
+        env: {},
+        homeDir: home,
+        platform: "darwin",
+        readKeychain: async () => ({ status: "missing" })
+      });
       assert.equal(quota.supported, false);
-      assert.equal(quota.unsupportedReason, process.platform === "darwin" ? "keychain" : "no_native_login");
+      assert.equal(quota.unsupportedReason, "no_native_login");
     } finally {
       await rm(home, { recursive: true, force: true });
     }
+  });
+});
+
+describe("claude cli-account quota token sources", () => {
+  async function makeHome(settings?: unknown): Promise<string> {
+    const home = await mkdtemp(path.join(tmpdir(), "forgebadger-claude-account-"));
+    const root = path.join(home, ".claude");
+    await mkdir(root, { recursive: true });
+    if (settings !== undefined) await writeFile(path.join(root, "settings.json"), JSON.stringify(settings));
+    return home;
+  }
+
+  function recordingFetch(response: () => Response): { fetchImpl: typeof fetch; auths: Array<string | null> } {
+    const auths: Array<string | null> = [];
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      auths.push(new Headers(init?.headers).get("authorization"));
+      return response();
+    };
+    return { fetchImpl, auths };
+  }
+
+  const usageBody = { five_hour: { utilization: 7 } };
+
+  it("uses CLAUDE_CODE_OAUTH_TOKEN from the settings env block before the process env and stored login", async () => {
+    const home = await makeHome({ env: { CLAUDE_CODE_OAUTH_TOKEN: "settings-setup-token" } });
+    await writeFile(
+      path.join(home, ".claude", ".credentials.json"),
+      JSON.stringify({ claudeAiOauth: { accessToken: secretToken } }),
+      { mode: 0o600 }
+    );
+    try {
+      const { fetchImpl, auths } = recordingFetch(() => jsonResponse(usageBody));
+      const quota = await observeClaudeQuota({
+        env: { CLAUDE_CODE_OAUTH_TOKEN: "process-setup-token" },
+        homeDir: home,
+        fetchImpl
+      });
+      assert.equal(quota.supported, true);
+      assert.deepEqual(auths, ["Bearer settings-setup-token"]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to CLAUDE_CODE_OAUTH_TOKEN from the process env", async () => {
+    const home = await makeHome();
+    try {
+      const { fetchImpl, auths } = recordingFetch(() => jsonResponse(usageBody));
+      const quota = await observeClaudeQuota({
+        env: { CLAUDE_CODE_OAUTH_TOKEN: "process-setup-token" },
+        homeDir: home,
+        platform: "darwin",
+        readKeychain: async () => assert.fail("keychain must not be read when a setup token exists"),
+        fetchImpl
+      });
+      assert.deepEqual(quota.entries, [{ label: "5h window", unit: "percent", usedPercent: 7 }]);
+      assert.deepEqual(auths, ["Bearer process-setup-token"]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("reports setup_token_scope on 403 for a setup token and token_expired on 401", async () => {
+    const home = await makeHome({ env: { CLAUDE_CODE_OAUTH_TOKEN: "settings-setup-token" } });
+    try {
+      const forbidden = await observeClaudeQuota({
+        env: {},
+        homeDir: home,
+        fetchImpl: async () => jsonResponse({ error: "insufficient scope" }, 403)
+      });
+      assert.equal(forbidden.supported, false);
+      assert.equal(forbidden.unsupportedReason, "setup_token_scope");
+      const unauthorized = await observeClaudeQuota({
+        env: {},
+        homeDir: home,
+        fetchImpl: async () => jsonResponse({ error: "unauthorized" }, 401)
+      });
+      assert.equal(unauthorized.unsupportedReason, "token_expired");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps 403 as token_expired for a stored login", async () => {
+    const home = await makeHomeWithCredentials({ claudeAiOauth: { accessToken: secretToken } });
+    try {
+      const quota = await observeClaudeQuota({
+        env: {},
+        homeDir: home,
+        fetchImpl: async () => jsonResponse({ error: "forbidden" }, 403)
+      });
+      assert.equal(quota.unsupportedReason, "token_expired");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("reads the stored login from the macOS Keychain when the credentials file is absent", async () => {
+    const home = await makeHome();
+    try {
+      const lookups: Array<{ service: string; account: string }> = [];
+      const { fetchImpl, auths } = recordingFetch(() => jsonResponse(usageBody));
+      const quota = await observeClaudeQuota({
+        env: { USER: "dev-user" },
+        homeDir: home,
+        platform: "darwin",
+        readKeychain: async (service, account) => {
+          lookups.push({ service, account });
+          return { status: "found", secret: JSON.stringify({ claudeAiOauth: { accessToken: secretToken } }) };
+        },
+        fetchImpl
+      });
+      assert.equal(quota.supported, true);
+      assert.deepEqual(lookups, [{ service: "Claude Code-credentials", account: "dev-user" }]);
+      assert.deepEqual(auths, [`Bearer ${secretToken}`]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("decodes hex-encoded macOS Keychain credentials", async () => {
+    const home = await makeHome();
+    try {
+      const { fetchImpl, auths } = recordingFetch(() => jsonResponse(usageBody));
+      const secret = Buffer.from(JSON.stringify({ claudeAiOauth: { accessToken: secretToken } }), "utf8")
+        .toString("hex").toUpperCase();
+      const quota = await observeClaudeQuota({
+        env: {},
+        homeDir: home,
+        platform: "darwin",
+        readKeychain: async () => ({ status: "found", secret }),
+        fetchImpl
+      });
+      assert.equal(quota.supported, true);
+      assert.deepEqual(auths, [`Bearer ${secretToken}`]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("treats malformed Keychain payloads as no native login", async () => {
+    const home = await makeHome();
+    try {
+      for (const secret of ["abc", "not-hex", Buffer.from("{broken", "utf8").toString("hex")]) {
+        const quota = await observeClaudeQuota({
+          env: {},
+          homeDir: home,
+          platform: "darwin",
+          readKeychain: async () => ({ status: "found", secret }),
+          fetchImpl: async () => assert.fail("no token means no usage request")
+        });
+        assert.equal(quota.unsupportedReason, "no_native_login");
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a Keychain item without claudeAiOauth as no native login", async () => {
+    const home = await makeHome();
+    try {
+      const quota = await observeClaudeQuota({
+        env: {},
+        homeDir: home,
+        platform: "darwin",
+        readKeychain: async () => ({ status: "found", secret: JSON.stringify({ mcpOAuth: {} }) }),
+        fetchImpl: async () => assert.fail("no token means no usage request")
+      });
+      assert.equal(quota.unsupportedReason, "no_native_login");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("reports keychain when the Keychain read fails", async () => {
+    const home = await makeHome();
+    try {
+      const quota = await observeClaudeQuota({
+        env: {},
+        homeDir: home,
+        platform: "darwin",
+        readKeychain: async () => ({ status: "error" })
+      });
+      assert.equal(quota.unsupportedReason, "keychain");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("claude keychain naming", () => {
+  it("matches Claude Code's default and config-dir-hashed service names", () => {
+    assert.equal(claudeKeychainServiceName({}), "Claude Code-credentials");
+    const hash = createHash("sha256").update("/tmp/claude-alt").digest("hex").slice(0, 8);
+    assert.equal(claudeKeychainServiceName({ CLAUDE_CONFIG_DIR: "/tmp/claude-alt" }), `Claude Code-credentials-${hash}`);
+    assert.equal(
+      claudeKeychainServiceName({ CLAUDE_CONFIG_DIR: "/tmp/claude-alt", CLAUDE_SECURESTORAGE_CONFIG_DIR: "" }),
+      "Claude Code-credentials"
+    );
+  });
+
+  it("falls back to a safe account name for unexpected USER values", () => {
+    assert.equal(claudeKeychainAccount({ USER: "dev.user-1" }), "dev.user-1");
+    assert.equal(claudeKeychainAccount({ USER: "bad user;rm" }), "claude-code-user");
   });
 });
 

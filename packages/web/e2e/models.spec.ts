@@ -152,7 +152,7 @@ test("Models CLI status grid shows per-CLI applied state", async ({ page }) => {
 
   const grid = page.getByTestId("cli-status-section");
   await expect(grid).toBeVisible();
-  for (const adapter of ["claude", "opencode", "codex", "kimi", "pi"]) {
+  for (const adapter of ["claude", "opencode", "codex", "kimi", "pi", "mcode", "grok"]) {
     await expect(page.getByTestId(`cli-status-${adapter}`)).toBeVisible();
   }
   // The mocked applied pointer puts this provider in effect on Claude Code.

@@ -237,6 +237,27 @@ Copilot runtime 在启动及周期扫描中恢复已派发任务，并向原对�
 
 项目级 `copilot_autonomy` 开关已整体移除（迁移 0134 删除列，`COPILOT_PROJECT_AUTONOMY_OFF` 不再出现）：程序化下发对 owner 名下所有项目默认开放，不再需要逐项目开启。上文中涉及“项目自治开关/允许新派发开关”的描述是历史快照，以本节为准。剩余授权轴：owner 级工具开关（Copilot tool preferences）、安全策略（命令/路径黑名单与终端写保护）、run origin 与 exact receipt、租户作用域；非项目全局动作仍只能在 Web 执行，交互式工具仍要求 `source === 'user'`。渠道绑定也不再过滤项目，只要求项目存在且归属 owner。
 
+### 0.5.12 渠道收敛为 Copilot 交互入口（2026-11-02）
+
+迁移 0147 将 `channel_routes.project_id` 的历史值回填到
+`copilot_conversations.project_id`，随后删除路由项目列。渠道身份和
+`channel_route_sessions` 只负责外部聊天到 Copilot 会话的映射，不再形成独立
+项目授权。项目上下文由会话持有，Web 项目选择器与渠道 `/project` 调用同一
+会话更新边界；活跃 run、未决写入和排队 follow-up 阻止切换，`/new` 可继承
+当前项目。
+
+Gateway 启动和 CLI 模板命令在事务外关闭外键检查后迁移持久库。0147 重建路由表时，
+已有渠道会话映射不会被级联删除。`db/migrate-database.ts` 对该迁移的
+确切 hash 和恢复语句做执行期兼容，仅恢复复合主键尚不存在的会话映射。
+历史 SQL、校验和与迁移账本 hash 保持原样，事务和回滚仍由 Drizzle 管理。
+
+所有项目会话的 run admission 都固化项目与规范化根目录快照；渠道会话额外
+固化路由和身份 revision。Web 与渠道共享工具目录、owner 工具开关、安全策略
+和精确审批，项目资源、记忆与结果回传仍在执行前复核快照。历史无快照渠道
+run 继续失败关闭，路由撤销只切断渠道权限，不会把会话恢复成不受限 owner
+会话。旧 `POST /channels/routes` 的 `projectId` 仅作为新会话初始上下文的
+兼容输入，不写入路由。
+
 ## 零、架构总览
 
 ### 架构模式
@@ -776,7 +797,11 @@ live 代码不再读写。Provider 只保存服务商元数据、模型与加密
 （及 `/apply-provider/preview`、`/apply-provider/rollback`）把选中的
 `providerProfileId`、`modelProfileId?`、`credentialId?` 按各 CLI 原生格式写入全局
 配置文件（claude `~/.claude/settings.json`、codex `~/.codex/config.toml`、
-opencode `opencode.json`、kimi `~/.kimi-code/config.toml`）。
+opencode `opencode.json`、kimi `~/.kimi-code/config.toml`、
+grok `$GROK_HOME/config.toml`，默认 `~/.grok/config.toml`）。
+Grok 启动计划显式传递 Gateway 解析后的 `GROK_HOME`，保证已运行的 Session
+Server daemon 与模型中心使用同一配置目录；已应用状态通过 catalog key
+解析实际模型 ID 后再判断是否过期。
 
 凭据明文写入 CLI 配置文件：写前对现有配置做 AES-256-GCM 加密
 备份，使用原子 `0600` 写入，失败可 rollback；preview 掩码密钥且不落盘。
@@ -786,15 +811,19 @@ opencode `opencode.json`、kimi `~/.kimi-code/config.toml`）。
 并删除官方已废弃的 `ANTHROPIC_SMALL_FAST_MODEL`）；codex 支持
 `reasoningEffort`（写入 `model_reasoning_effort`，未传则清理）；opencode 为
 additive 语义，apply 把供应商全部 active 模型写入 models map 且不触碰用户自有的
-顶层 `model`；kimi 仍为单一 `default_model`。
+顶层 `model`；kimi 仍为单一 `default_model`；grok 写入 `[models].default`
+与一个托管的 `[model.<key>]`（`chat_completions` / `responses` 用 `api_key`，
+`messages` 只用 `extra_headers` 的 `x-api-key` 与 `anthropic-version`），保留
+`[ui]`、`[mcp_servers]` 和用户自己的 `[model.*]`，切换 provider 时只删除上一次
+托管的 catalog key，不读写 `auth.json`。
 具体到各 CLI 的写入语义：claude 写入 `ANTHROPIC_AUTH_TOKEN` 时同步删除残留的
-`ANTHROPIC_API_KEY`，并对目录外模型 id 注入上下文窗口覆盖
-（`CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 两个键
-必须同时写，且仅对非 `claude-` 前缀模型 id 生效）：优先取模型 profile 的
-`contextWindow`，未设置时 Kimi For Coding 端点回落 256k、MiniMax
-`/anthropic` 端点回落 512k 保底；不覆盖用户显式值，切走时依据
-`cli_config_applied_providers` 指针仅剥离上一次 apply 注入的值（Kimi 的
-256k 默认值对指针建立前的历史 apply 也始终视为托管值）；codex 采用 0.149+ 布局，把 key 写入
+`ANTHROPIC_API_KEY`。上下文窗口处理：仅当模型 profile 显式配置了
+`contextWindow` 时注入 `CLAUDE_CODE_MAX_CONTEXT_TOKENS`（填充式，不覆盖用户
+显式值；`claude-` 前缀的目录内模型 id 跳过）；`CLAUDE_CODE_AUTO_COMPACT_WINDOW`
+一律不写——Claude Code 本身按窗口百分比触发自动压缩，压低窗口只会浪费可用
+上下文；历史版本注入的值（256k Kimi 默认值、512k MiniMax 保底、或
+`cli_config_applied_providers` 指针记录的上次注入值）会在下一次 apply 时被
+剥离；codex 采用 0.149+ 布局，把 key 写入
 `model_providers.<id>.experimental_bearer_token`，并从 `~/.codex/auth.json`
 移除遗留 `OPENAI_API_KEY`（保留 ChatGPT 登录 tokens 等其它字段，若因此清空则
 直接删除该文件——Codex 对空 auth.json 报错、缺文件才显示登录页）；opencode
@@ -1929,14 +1958,13 @@ to Copilot Grants describe retired behavior; migration 0105 removed that model.
 Repository instructions and Skills are descriptive context, never executable
 authority.
 
-Migrations 0108/0109 add durable execution phase, per-run budgets, model-call
-accounting, follow-up queues and linked research/review jobs. The default run
-limit is 500,000 charged tokens and 30 minutes from first execution, including
-approval/restart elapsed time. Every model call reserves estimated usage before
-sending; missing usage or interrupted responses retain a conservative charge.
-Titles and summaries are also charged. This is approximate governance, not a
-billing or strict tokenizer guarantee; a provider response can exceed its
-reservation, after which further model/tool work is refused. HTTP retries are
+Migrations 0108/0109 add durable execution phase, budget and model-call
+accounting columns, follow-up queues and linked research/review jobs. Neither
+execution budgets nor model-call metering are tracked anymore: the historical
+per-run token ceiling, the 30-minute wall-clock limit, the goal-level
+ceilings and the `copilot_model_calls` accounting are no longer written or
+enforced, and runs end on completion, step limit, failure or an explicit user
+stop. The columns remain for historical rows. HTTP retries are
 limited to two retries for 429/502/503/504 with Retry-After and cancellation;
 accepted streams, ambiguous network failures and tool effects are not replayed.
 
@@ -1958,9 +1986,8 @@ state and reconciles durable phases through the existing event/REST path.
 conversations are isolated from global memory and retain the original explicit
 model selection. Persisted executionMode and an execution-time project read
 whitelist block write tools, external MCP, cross-project reads and recursion,
-even when a model forges a hidden tool call. Children allow at most 6 model steps,
-120,000 charged tokens and 5 minutes, sharing the parent's aggregate token limit.
-Synchronous research also inherits the remaining parent time and cancellation.
+even when a model forges a hidden tool call. Children allow at most 6 model
+steps. Synchronous research inherits the parent's cancellation.
 Cross-worker recovery waits for the same durable child instead of spawning a
 replacement or claiming a pending analysis is complete.
 
@@ -1997,7 +2024,7 @@ returns at most 20 changed files and can return an empty intermediate page.
 Read-only research inherits the same current project and cancellation checks.
 
 
-#### Streaming, read concurrency, metering and repair (third delivery)
+#### Streaming, read concurrency and repair (third delivery)
 
 Public text is provisional and identified by run/model-step/fence/sequence.
 `PublicTextStream` buffers incomplete identifiers and shares credential-field
@@ -2012,12 +2039,9 @@ Each operation retains authorization and lease fencing; all in-flight reads
 settle before advancing. Asynchronous receipts are reconstructed in original
 model tool-call order. Cancelled/superseded workers cannot publish or advance.
 
-Migration 0111 extends model-call receipts with model identity, immutable
-owner-configured per-million-token pricing, and integer nano-USD costs. Main,
-summary, title, memory and linked-child calls share the ledger. Cache and
-reasoning details are normalized without double charging; unavailable counts or
-rates remain explicitly unknown. Reservations remain conservative estimates;
-provider-reported completion usage supplies measured counts. There is no universal
+Model-call receipts from migration 0111 (model identity, owner-configured
+per-million-token pricing, integer nano-USD costs) are no longer recorded;
+the columns are retained for historical rows. There is no universal
 exact preflight tokenizer or provider invoice reconciliation.
 
 Migration 0112 adds tenant-bound repair jobs and an explicit root revocation
@@ -2027,8 +2051,7 @@ fixed original source/check scope, fresh patch approval and independent retestin
 Current parent conversation/message provenance, owner/tool/project authority,
 receipt identity and source digests are rechecked at admission, approval and
 sandbox execution. Edits, including identical-text edits, revoke old authority.
-The existing durable child relation supplies aggregate token budgets and
-cancellation. Recovery and reporting use bounded rotating cursors; transactional
+The existing durable child relation supplies cancellation. Recovery and reporting use bounded rotating cursors; transactional
 uniqueness prevents duplicate admission. No candidate is applied or accepted.
 
 The reproducible evaluation script is
@@ -2098,8 +2121,8 @@ or improved real-model benchmark scores follows from these regression tests.
   Anthropic serializer uses an ephemeral cache marker on the system text block;
   OpenAI wire messages remain unchanged. Savings require provider measurements.
 - `context-recovery.ts` owns one bounded attempt after a structured rejected
-  overflow. It fixes the model profile for context assembly, summary and retry,
-  preserves the run deadline and meters auxiliary calls. The ledger increments
+  overflow. It fixes the model profile for context assembly, summary and
+  retry and threads the run's abort signal through. The ledger increments
   the existing attempt and writes a recovery marker before summary/inference.
   Crash retries conservatively consume the allowance; an interrupted recovery
   marker stops the resumed run. No historical tool replay or source mutation.

@@ -8,14 +8,15 @@ export function SessionStatusDot({ status }: { status: string }) {
   const normalized = normalizeSessionStatus(status);
   return (
     <span
+      aria-hidden
       className={cn(
         "size-2 shrink-0 rounded-full",
         normalized === "running"
-          ? "animate-pulse bg-emerald-400"
+          ? "motion-safe:animate-pulse bg-success"
           : normalized === "error"
-            ? "bg-red-400"
+            ? "bg-destructive"
             : normalized === "lost"
-              ? "bg-amber-400"
+              ? "bg-warning"
               : "bg-muted-foreground/40"
       )}
     />
@@ -26,18 +27,7 @@ export function SessionStatusText({ status }: { status: string }) {
   const { t } = useLanguage();
   const normalized = normalizeSessionStatus(status);
   return (
-    <span
-      className={cn(
-        "shrink-0 text-xs",
-        normalized === "running"
-          ? "text-emerald-400"
-          : normalized === "error"
-            ? "text-red-400"
-            : normalized === "lost"
-              ? "text-amber-400"
-              : "text-muted-foreground"
-      )}
-    >
+    <span className="shrink-0 text-xs text-muted-foreground">
       {normalized === "running"
         ? t("sessions.running")
         : normalized === "error"

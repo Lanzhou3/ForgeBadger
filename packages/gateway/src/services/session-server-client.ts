@@ -25,7 +25,8 @@ import type {
   LaunchPlanPayload,
   PaneSnapshot,
   SessionInfo,
-  SessionNotificationMessage
+  SessionNotificationMessage,
+  SessionIdleMessage
 } from "./session-server/index.js";
 import { isRecord } from "./session-server/ipc-validation.js";
 import {
@@ -88,6 +89,11 @@ export class SessionServerClient implements TerminalBackendClient {
    * on a PTY, relayed by the daemon over the management socket.
    */
   onSessionNotification: ((sessionId: string, notification: TerminalNotification) => void) | undefined;
+  /**
+   * Fired when the daemon reports a session's PTY went quiet after activity.
+   * Work-state recovery only — never a user-facing notification.
+   */
+  onSessionIdle: ((sessionId: string) => void) | undefined;
 
   /** Maps runtime session name → sessionId (the names are identical today;
    *  the map keeps the historical fb-{user8}-{sessionId} naming contract). */
@@ -279,10 +285,11 @@ export class SessionServerClient implements TerminalBackendClient {
 
   private handleMessage(line: string): void {
     // The management socket also receives unsolicited `session_notification`
-    // pushes, so the parsed line is wider than the request/response union.
-    let msg: ManagementResponse | SessionNotificationMessage;
+    // and `session_idle` pushes, so the parsed line is wider than the
+    // request/response union.
+    let msg: ManagementResponse | SessionNotificationMessage | SessionIdleMessage;
     try {
-      msg = JSON.parse(line) as ManagementResponse | SessionNotificationMessage;
+      msg = JSON.parse(line) as ManagementResponse | SessionNotificationMessage | SessionIdleMessage;
     } catch {
       return;
     }
@@ -294,6 +301,11 @@ export class SessionServerClient implements TerminalBackendClient {
       && isTerminalNotification(msg.notification)
     ) {
       this.onSessionNotification?.(msg.sessionId, msg.notification);
+      return;
+    }
+
+    if (isRecord(msg) && msg.type === "session_idle" && typeof msg.sessionId === "string") {
+      this.onSessionIdle?.(msg.sessionId);
       return;
     }
 

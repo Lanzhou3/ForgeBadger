@@ -16,9 +16,10 @@ import { runDuration, settleApprovalWait } from './approval-clock.js';
 import { traceRunEvent } from './run-trace.js';
 import { PARENT_CHAIN_MAX_DEPTH, parseRunInput } from './run-authorization.js';
 export interface TurnInput {
-    /** Server-derived authority; never accepted from HTTP/model JSON. */
+    /** Server-derived conversation project scope plus optional channel authority; historical JSON field name, never accepted from HTTP/model JSON. */
     channelScope?: ChannelRunScope;
-    executionMode?: 'research' | 'review' | 'repair';
+    executionMode?: 'research' | 'review' | 'repair' | 'coding';
+    delegateTaskId?: string;
     repairOrigin?: RepairOrigin;
     repairFailedChecks?: boolean;
     reviewOrigin?: TaskReviewOrigin;
@@ -29,6 +30,7 @@ export interface TurnInput {
     userText: string;
     modelId?: string;
     projectId?: string;
+    goalId?: string;
     source?: "user" | "reactive" | "scheduled";
     skipUserMessage?: boolean;
     clientRequestId?: string;
@@ -51,6 +53,7 @@ export interface RunRecord {
     stop_reason: string | null;
     error: string | null;
     runtime_version: number;
+    goal_id?: string | null;
 }
 export interface RunStep {
     id: string;
@@ -84,6 +87,7 @@ function requestDigest(input: TurnInput): string {
         ...(input.reviewTaskResults ? { reviewTaskResults: true } : {}),
         ...(input.repairFailedChecks ? { repairFailedChecks: true } : {}),
         ...(input.repairOrigin ? { repairOrigin: input.repairOrigin } : {}),
+        ...(input.goalId ? { goalId: input.goalId } : {}),
         ...(input.editMessageId ? { editMessageId: input.editMessageId } : {}) }));
 }
 /** All writes are tenant scoped; no transaction spans asynchronous work. */
@@ -107,7 +111,7 @@ export class CopilotRunLedger {
         for (let depth = 0; ; depth += 1) {
             if (!current.executionMode) { levels.push(current); break; }
             const parent = current.parentRunId ? this.get(current.parentRunId) : undefined;
-            if (!current.projectId || !['research', 'review', 'repair'].includes(current.executionMode) || !parent
+            if (!current.projectId || !['research', 'review', 'repair', 'coding'].includes(current.executionMode) || !parent
                 || ['cancelled', 'failed', 'indeterminate'].includes(parent.status))
                 throw new AgentError('COPILOT_RESTRICTED_ORIGIN', 'Read-only task origin is no longer valid');
             if (depth >= PARENT_CHAIN_MAX_DEPTH - 1)
@@ -140,20 +144,21 @@ export class CopilotRunLedger {
             this.validateScopeCommon(level);
         }
     }
+    validateConversationOrigin(input: TurnInput): void {
+        if (input.userId !== this.userId || !this.log.getConversation(input.conversationId))
+            throw new AgentError("COPILOT_NOT_FOUND", "Conversation not found");
+        const user = this.db.prepare("SELECT status FROM users WHERE id=?").get(this.userId) as { status: string } | undefined;
+        if (user?.status !== "active") throw new AgentError("COPILOT_USER_INACTIVE", "User is not active");
+        if (input.projectId && !this.db.prepare("SELECT id FROM projects WHERE user_id=? AND id=?").get(this.userId, input.projectId))
+            throw new AgentError("COPILOT_PROJECT_NOT_FOUND", "Project not found");
+    }
+
     /** Conversation/user/channel/project invariants, per chain level, deepest first. */
     private validateScopeCommon(input: TurnInput): void {
         if (input.toolDiscovery !== undefined && typeof input.toolDiscovery !== 'boolean')
             throw new AgentError('COPILOT_TOOL_DISCOVERY_INVALID', 'Tool discovery must be a boolean');
-        if (input.userId !== this.userId || !this.log.getConversation(input.conversationId))
-            throw new AgentError("COPILOT_NOT_FOUND", "Conversation not found");
-        const user = this.db.prepare("SELECT status FROM users WHERE id=?").get(this.userId) as {
-            status: string;
-        } | undefined;
-        if (user?.status !== "active")
-            throw new AgentError("COPILOT_USER_INACTIVE", "User is not active");
+        this.validateConversationOrigin(input);
         assertChannelRunScope(this.db, this.userId, input);
-        if (input.projectId && !this.db.prepare("SELECT id FROM projects WHERE user_id=? AND id=?").get(this.userId, input.projectId))
-            throw new AgentError("COPILOT_PROJECT_NOT_FOUND", "Project not found");
     }
     findRequest(input: TurnInput): string | undefined {
         input = prepareChannelAdmission(this.db, this.userId, input);
@@ -174,15 +179,21 @@ export class CopilotRunLedger {
             const existing = this.findRequest(input);
             if (existing) return existing;
             const digest = requestDigest(input);
+            if (input.goalId) {
+                const goal = this.db.prepare('SELECT conversation_id FROM copilot_goals WHERE user_id=? AND id=?').get(this.userId, input.goalId) as { conversation_id: string } | undefined;
+                if (!goal || goal.conversation_id !== input.conversationId)
+                    throw new AgentError("COPILOT_NOT_FOUND", "Goal not found for this conversation");
+            }
             if (this.log.listRuns(input.conversationId).some(r => ACTIVE_RUN_STATES.includes(r.status)))
                 throw new AgentError("COPILOT_CONVERSATION_BUSY", "Conversation already has an active run");
             const run = this.log.createRun(input.conversationId, input.modelId ? { model: input.modelId } : {});
             this.db.prepare("UPDATE copilot_runs SET runtime_version=1, input_json=?, source=?, max_steps=?,client_request_id=?,request_digest=? WHERE user_id=? AND id=?")
                 .run(JSON.stringify({ ...input, userText: redactAgentText(input.userText) }), input.source ?? "user", maxSteps,
                     input.clientRequestId ?? null, input.clientRequestId ? digest : null, this.userId, run.id);
+            if (input.goalId)
+                this.db.prepare("UPDATE copilot_runs SET goal_id=? WHERE user_id=? AND id=?").run(input.goalId, this.userId, run.id);
             if (!input.skipUserMessage)
                 this.append(run.id, { role: "user", kind: "text", content: input.userText });
-            if (input.executionMode) this.db.prepare('UPDATE copilot_runs SET token_budget=120000,max_duration_ms=300000 WHERE user_id=? AND id=?').run(this.userId, run.id);
             const created = this.get(run.id)!;
             traceRunEvent(this.db, this.userId, run.id, created.fence, 'admitted',
                 { source: input.source ?? 'user', parentRunId: !!input.parentRunId, ...(input.executionMode ? { executionMode: input.executionMode } : {}) });
@@ -331,7 +342,7 @@ export class CopilotRunLedger {
                 // Stale claims never reach this commit (owns() gates it), so an
                 // inconsistent stored step is terminal: settle the run loudly
                 // instead of leaving the recovery pump to re-drive the identical
-                // mismatch until the run's time budget exhausts. A step from
+                // mismatch on every recovery sweep. A step from
                 // another run is never touched; only this run is settled.
                 const reason = 'COPILOT_APPROVAL_CHECKPOINT_MISMATCH';
                 if (current)

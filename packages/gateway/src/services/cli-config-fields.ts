@@ -72,7 +72,15 @@ const codexFields: CliConfigFieldSpec[] = [
 ];
 
 const kimiFields: CliConfigFieldSpec[] = [
-  { key: "defaultModel", path: "default_model", label: "Default model", type: "string" }
+  { key: "defaultModel", path: "default_model", label: "Default model", type: "string" },
+  {
+    key: "defaultPermissionMode",
+    path: "default_permission_mode",
+    label: "Default permission mode",
+    type: "enum",
+    values: ["manual", "yolo", "auto"],
+    description: "manual = Always Ask, yolo = Ask When Needed, auto = Never Ask."
+  }
 ];
 
 // PI's models.json is a provider/model registry (like OpenCode's), and its
@@ -81,6 +89,19 @@ const kimiFields: CliConfigFieldSpec[] = [
 // Curated scalar fields would render as misleading empties, so the fields
 // card is omitted; the provider + model views cover the real content.
 const piFields: CliConfigFieldSpec[] = [];
+
+// Grok's config.toml model table is owned by apply-provider. The only scalar
+// surfaced here is the catalog key of the default model. api_key and
+// extra_headers stay out of the generic field editor.
+const grokFields: CliConfigFieldSpec[] = [
+  {
+    key: "defaultModel",
+    path: "models.default",
+    type: "string",
+    label: "Default model",
+    description: "Catalog key of the model used for new sessions."
+  }
+];
 
 /**
  * MiniMax Code scalar knobs that are safe to surface. The provider/model
@@ -117,7 +138,8 @@ export const cliConfigFieldCatalog: Record<AdapterId, CliConfigFieldSpec[]> = {
   codex: codexFields,
   kimi: kimiFields,
   pi: piFields,
-  mcode: mcodeFields
+  mcode: mcodeFields,
+  grok: grokFields
 };
 
 const maxFieldValueChars = 512;

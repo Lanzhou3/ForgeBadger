@@ -15,7 +15,7 @@ import { getCliBrand, type CliBrandId } from "@/lib/cli-brand";
  */
 describe("runtimeAdapterIds", () => {
   it("covers every adapter the gateway ships", () => {
-    expect([...runtimeAdapterIds]).toEqual(["claude", "opencode", "codex", "kimi", "pi", "mcode"]);
+    expect([...runtimeAdapterIds]).toEqual(["claude", "opencode", "codex", "kimi", "pi", "mcode", "grok"]);
   });
 
   it("is assignable to the unions that model adapter ids", () => {
@@ -23,9 +23,9 @@ describe("runtimeAdapterIds", () => {
     const asProvider: ProviderSupportedAdapter[] = [...runtimeAdapterIds];
     const asBrand: CliBrandId[] = [...runtimeAdapterIds];
 
-    expect(asRuntime).toHaveLength(6);
-    expect(asProvider).toHaveLength(6);
-    expect(asBrand).toHaveLength(6);
+    expect(asRuntime).toHaveLength(7);
+    expect(asProvider).toHaveLength(7);
+    expect(asBrand).toHaveLength(7);
   });
 
   it("resolves a brand for every adapter", () => {
@@ -40,6 +40,12 @@ describe("runtimeAdapterIds", () => {
     // Accent is the product's own brand blue (#68C0FF, from the CLI's
     // built-in TUI "minimax" theme), not a placeholder.
     expect(brand.color).toBe("#68c0ff");
+  });
+
+  it("resolves Grok by its adapter id", () => {
+    const brand = getCliBrand("grok");
+    expect(brand.label).toBe("Grok");
+    expect(brand.color).toBe("#f5f5f5");
   });
 
   it("still falls back for an unknown adapter instead of throwing", () => {

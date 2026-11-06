@@ -9,8 +9,14 @@ import type { CommandRunner } from "../src/lib/dependency-check.js";
 const publicResolver = async () => [{ address: "8.8.8.8", family: 4 }];
 const versionFetcher: typeof fetch = async () => new Response(JSON.stringify({ version: "2.0.0" }));
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 describe("adapter updates", () => {
-  it("checks all five local versions against the official npm packages", async () => {
+  it("checks every local version against the official npm packages", async () => {
     const urls: string[] = [];
     const fetcher: typeof fetch = async (url) => {
       urls.push(String(url));
@@ -24,12 +30,13 @@ describe("adapter updates", () => {
 
     const results = await checkAdapterUpdates({ runner, fetcher, resolveHost: publicResolver });
 
-    assert.deepEqual(results.map((result) => result.id), ["claude", "opencode", "codex", "kimi", "pi", "mcode"]);
+    assert.deepEqual(results.map((result) => result.id), ["claude", "opencode", "codex", "kimi", "pi", "mcode", "grok"]);
     assert.deepEqual(results.map((result) => result.state), [
-      "update_available", "update_available", "update_available", "missing", "update_available", "update_available"
+      "update_available", "update_available", "update_available", "missing", "update_available", "update_available", "update_available"
     ]);
-    assert.equal(urls.length, 5);
+    assert.equal(urls.length, 6);
     assert.ok(urls.includes("https://registry.npmjs.org/@earendil-works%2Fpi-coding-agent/latest"));
+    assert.ok(urls.includes("https://registry.npmjs.org/@xai-official%2Fgrok/latest"));
     assert.ok(urls.includes("https://registry.npmjs.org/@minimax-ai%2Fcode/latest"));
     assert.equal(results.find((result) => result.id === "pi")?.command, "pi update --self");
   });
@@ -184,7 +191,14 @@ describe("adapter updates", () => {
       opencode: ["upgrade"],
       codex: ["update"],
       kimi: ["upgrade", "--yes"],
-      pi: ["update", "--self"]
+      pi: ["update", "--self"],
+      mcode: [
+        "install", "-g", "@minimax-ai/code@latest",
+        "--registry=https://registry.npmjs.org/",
+        "--ignore-scripts=false", "--include=optional",
+        "--allow-scripts=@minimax-ai/code,better-sqlite3"
+      ],
+      grok: ["update"]
     };
     for (const id of Object.keys(expected) as AdapterId[]) {
       let installed = "1.0.0";
@@ -195,9 +209,12 @@ describe("adapter updates", () => {
         return { exitCode: 0, stdout: `${command} ${installed}`, stderr: "" };
       };
 
-      const result = await updateAdapter(id, { runner, fetcher: versionFetcher, resolveHost: publicResolver });
+      const result = await updateAdapter(id, { runner, fetcher: versionFetcher, resolveHost: publicResolver, nodeVersion: "22.19.0" });
 
-      assert.deepEqual(commands[1], [id, expected[id]]);
+      assert.deepEqual(commands.filter(([, args]) => args[0] !== "--version"), [
+        [id === "mcode" ? "npm" : id, expected[id]]
+      ]);
+      assert.equal(result.command, [id === "mcode" ? "npm" : id, ...expected[id]].join(" "));
       assert.equal(result.previousVersion, "1.0.0");
       assert.equal(result.installedVersion, "2.0.0");
       assert.equal(result.versionStillBehind, false);
@@ -208,6 +225,20 @@ describe("adapter updates", () => {
     const runner: CommandRunner = async (command) => ({ exitCode: 0, stdout: `${command} 1.0.0`, stderr: "" });
     const result = await updateAdapter("claude", { runner, fetcher: versionFetcher, resolveHost: publicResolver });
     assert.equal(result.versionStillBehind, true);
+  });
+
+  it("checks Node and npm before a non-interactive MiniMax update without invoking its TTY-only updater", async () => {
+    const commands: string[] = [];
+    const runner: CommandRunner = async (command, args) => {
+      commands.push(`${command} ${args.join(" ")}`);
+      return { exitCode: command === "npm" ? 127 : 0, stdout: "1.0.0", stderr: "" };
+    };
+    const dependencies = { runner, fetcher: versionFetcher, resolveHost: publicResolver };
+    await assert.rejects(updateAdapter("mcode", { ...dependencies, nodeVersion: "22.18.0" }), { statusCode: 409 });
+    assert.deepEqual(commands, ["mcode --version"]);
+    commands.length = 0;
+    await assert.rejects(updateAdapter("mcode", { ...dependencies, nodeVersion: "22.19.0" }), { statusCode: 503 });
+    assert.deepEqual(commands, ["mcode --version", "npm --version"]);
   });
 
   it("rejects failed official commands without exposing their output", async () => {
@@ -240,10 +271,22 @@ describe("adapter updates", () => {
   it("offers and runs fixed official npm install commands for every missing CLI", async () => {
     const expected: Record<AdapterId, string[]> = {
       claude: ["install", "-g", "@anthropic-ai/claude-code"],
-      opencode: ["install", "-g", "opencode-ai"],
+      opencode: [
+        "install", "-g", "@opencode/cli",
+        "--ignore-scripts=false",
+        "--include=optional",
+        "--allow-scripts=@opencode/cli"
+      ],
       codex: ["install", "-g", "@openai/codex"],
       kimi: ["install", "-g", "@moonshot-ai/kimi-code"],
-      pi: ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"]
+      pi: ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"],
+      mcode: [
+        "install", "-g", "@minimax-ai/code@latest",
+        "--registry=https://registry.npmjs.org/",
+        "--ignore-scripts=false", "--include=optional",
+        "--allow-scripts=@minimax-ai/code,better-sqlite3"
+      ],
+      grok: ["install", "-g", "@xai-official/grok"]
     };
     for (const id of Object.keys(expected) as AdapterId[]) {
       let installed = false;
@@ -309,7 +352,66 @@ describe("adapter updates", () => {
     assert.equal(result.installedVersion, undefined);
   });
 
-  it("blocks further updates when timed-out tree cleanup is uncertain", async () => {
+  for (const firstAction of ["install", "update"] as const) {
+    for (const secondAction of ["install", "update"] as const) {
+      it(`allows concurrent ${firstAction}/${secondAction} for different CLIs while locking the same CLI`, async () => {
+        const operations = { install: installAdapter, update: updateAdapter };
+        const installed = { claude: firstAction === "update", codex: secondAction === "update" };
+        const versions = { claude: "1.0.0", codex: "1.0.0" };
+        const enteredFirst = deferred();
+        const enteredSecond = deferred();
+        const release = deferred();
+        const runner: CommandRunner = async (command, args) => {
+          if (command === "npm" && args[0] === "--version") {
+            return { exitCode: 0, stdout: "12.0.0", stderr: "" };
+          }
+          const id = command === "npm"
+            ? (args.includes("@openai/codex") ? "codex" : "claude")
+            : command as "claude" | "codex";
+          if (args[0] === "--version") {
+            return { exitCode: installed[id] ? 0 : 127, stdout: installed[id] ? versions[id] : "", stderr: "" };
+          }
+          (id === "claude" ? enteredFirst : enteredSecond).resolve();
+          await release.promise;
+          installed[id] = true;
+          versions[id] = "2.0.0";
+          return { exitCode: 0, stdout: "completed", stderr: "" };
+        };
+        const dependencies = { runner, fetcher: versionFetcher, resolveHost: publicResolver };
+        const first = operations[firstAction]("claude", dependencies);
+        let second: Promise<{ id: AdapterId }> | undefined;
+        try {
+          await enteredFirst.promise;
+          await assert.rejects(installAdapter("claude", dependencies), { statusCode: 409 });
+          await assert.rejects(updateAdapter("claude", dependencies), { statusCode: 409 });
+          second = operations[secondAction]("codex", dependencies);
+          await Promise.race([enteredSecond.promise, second]);
+          await assert.rejects(updateAdapter("codex", dependencies), { statusCode: 409 });
+        } finally {
+          release.resolve();
+          await Promise.allSettled([first, second]);
+        }
+        assert.equal((await first).id, "claude");
+        assert.equal((await second)?.id, "codex");
+      });
+    }
+  }
+
+  it("releases the CLI lock after a failed install or update so it can be retried", async () => {
+    const installed = { value: false };
+    const failing: CommandRunner = async (command, args) => {
+      if (args[0] !== "--version") return { exitCode: 1, stdout: "", stderr: "failed" };
+      return { exitCode: command === "npm" || installed.value ? 0 : 127, stdout: "1.0.0", stderr: "" };
+    };
+    const dependencies = { runner: failing, fetcher: versionFetcher, resolveHost: publicResolver };
+    await assert.rejects(installAdapter("claude", dependencies), { statusCode: 502 });
+    installed.value = true;
+    await assert.rejects(updateAdapter("claude", dependencies), { statusCode: 502 });
+    const runner: CommandRunner = async () => ({ exitCode: 0, stdout: "1.0.0", stderr: "" });
+    assert.equal((await updateAdapter("claude", { ...dependencies, runner })).id, "claude");
+  });
+
+  it("blocks only the affected CLI when timed-out tree cleanup is uncertain", async () => {
     let commandsRun = 0;
     const runner: CommandRunner = async (_command, args) => {
       if (args[0] === "--version") return { exitCode: 0, stdout: "1.0.0", stderr: "" };
@@ -318,7 +420,10 @@ describe("adapter updates", () => {
     };
     const dependencies = { runner, fetcher: versionFetcher, resolveHost: publicResolver };
     await assert.rejects(updateAdapter("codex", dependencies), { statusCode: 503 });
-    await assert.rejects(updateAdapter("claude", dependencies), { statusCode: 409 });
+    await assert.rejects(updateAdapter("codex", dependencies), { statusCode: 409 });
+    await assert.rejects(installAdapter("codex", dependencies), { statusCode: 409 });
+    const healthy: CommandRunner = async () => ({ exitCode: 0, stdout: "1.0.0", stderr: "" });
+    assert.equal((await updateAdapter("claude", { ...dependencies, runner: healthy })).id, "claude");
     assert.equal(commandsRun, 1);
   });
 });

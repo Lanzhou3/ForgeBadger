@@ -27,7 +27,9 @@ interface CodexHookGroup {
 const kimiHookEvents = [
   "UserPromptSubmit",
   "TurnStarted",
+  "TaskStarted",
   "PostToolUse",
+  "PostToolUseFailure",
   "PermissionRequest",
   "Stop",
   "Interrupt",

@@ -114,6 +114,26 @@ api_key = "${apiKey}"
     }
   });
 
+  it("recognizes current OAuth references and environment-based provider credentials", async () => {
+    const oauthHome = await makeKimiHome({
+      configToml: '[providers."managed:kimi-code"]\ntype = "kimi"\n[providers."managed:kimi-code".oauth]\nstorage = "file"\nkey = "kimi-code"\n'
+    });
+    const envHome = await makeKimiHome({
+      configToml: '[providers.relay]\ntype = "openai"\napi_key_env = "RELAY_API_KEY"\n'
+    });
+    try {
+      assert.deepEqual(await observeKimiLogin({ homeDir: oauthHome }), {
+        adapter: "kimi", state: "ready", method: "oauth"
+      });
+      assert.deepEqual(await observeKimiLogin({ homeDir: envHome }), {
+        adapter: "kimi", state: "ready", method: "api_key"
+      });
+    } finally {
+      await rm(oauthHome, { recursive: true, force: true });
+      await rm(envHome, { recursive: true, force: true });
+    }
+  });
+
   it("reports not_authenticated when neither credentials nor provider keys exist", async () => {
     const home = await makeKimiHome({});
     try {

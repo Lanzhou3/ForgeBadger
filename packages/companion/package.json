@@ -1,0 +1,42 @@
+{
+  "name": "@forgebadger/companion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "dev": "expo start --dev-client",
+    "android": "expo start --android --dev-client",
+    "ios": "expo start --ios --dev-client",
+    "build": "expo export --platform android --output-dir dist",
+    "test": "node --test --import tsx",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit"
+  },
+  "dependencies": {
+    "@craftzdog/react-native-buffer": "^6.1.2",
+    "expo": "~58.0.22",
+    "expo-camera": "~58.0.14",
+    "expo-file-system": "~58.0.13",
+    "expo-local-authentication": "~58.0.2",
+    "expo-router": "~58.0.29",
+    "expo-secure-store": "~58.0.2",
+    "react": "19.3.1",
+    "react-native": "0.88.1",
+    "react-native-nitro-modules": "0.37.1",
+    "react-native-quick-base64": "3.0.1",
+    "react-native-quick-crypto": "1.1.9",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.2",
+    "@types/react": "19.3.0",
+    "@types/ws": "^8.5.13",
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "^0.36.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "ws": "^8.18.0"
+  }
+}

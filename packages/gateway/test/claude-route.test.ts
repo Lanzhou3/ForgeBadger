@@ -8,7 +8,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 
 import { signJwt } from "../src/auth/jwt.js";
 import { ClaudeRouteRepository } from "../src/db/repositories/claude-route-repository.js";
@@ -26,6 +26,11 @@ import {
   type SseResponseLike
 } from "../src/services/claude-route/forwarder.js";
 import { gatewayLoopbackUrl } from "../src/services/claude-route/gateway-url.js";
+import {
+  circuitBreakerFor,
+  defaultCircuitBreakerConfig,
+  resetAllCircuitBreakers
+} from "../src/services/claude-route/circuit-breaker.js";
 import { anthropicToOpenaiRequest } from "../src/services/claude-route/transform-request.js";
 import { estimateInputTokens, openaiToAnthropicResponse } from "../src/services/claude-route/transform-response.js";
 import { openaiSseToAnthropicSse } from "../src/services/claude-route/transform-stream.js";
@@ -169,6 +174,27 @@ async function createRouteFixture(enabled = true): Promise<RouteFixture> {
   });
   const routeRepo = new ClaudeRouteRepository(db, user.id, masterKey);
   const settings = routeRepo.setEnabled(enabled);
+  routeRepo.upsertAssignment(provider.id, credential.id);
+  return { db, userId: user.id, providerId: provider.id, credentialId: credential.id, token: settings.token ?? "" };
+}
+
+/** Anthropic-protocol relay routed through an enabled Claude route. */
+async function createAnthropicRouteFixture(): Promise<RouteFixture> {
+  const db = createTestDb();
+  const user = new UserRepository(db).create("anthropic-route@example.com", "hash");
+  const repo = new ModelProviderRepository(db, user.id, masterKey);
+  const provider = repo.createProviderProfile({
+    name: "Relay",
+    providerKey: "relay",
+    baseUrl: "https://relay.example.com/anthropic",
+    authType: "api_key",
+    apiFormat: "anthropic",
+    supportedAdapters: ["claude"]
+  });
+  repo.createModelProfile({ providerProfileId: provider.id, name: "M", modelId: "relay-model", isDefault: true });
+  const credential = repo.createCredential({ providerProfileId: provider.id, label: "K", plaintextSecret: "sk-relay" });
+  const routeRepo = new ClaudeRouteRepository(db, user.id, masterKey);
+  const settings = routeRepo.setEnabled(true);
   routeRepo.upsertAssignment(provider.id, credential.id);
   return { db, userId: user.id, providerId: provider.id, credentialId: credential.id, token: settings.token ?? "" };
 }
@@ -713,17 +739,162 @@ describe("claude route forwarder", () => {
 
   it("maps upstream failures to a 502 anthropic error", async () => {
     const fixture = await createRouteFixture();
-    const { fetchImpl } = stubFetch(() => new Response("bad gateway", { status: 502 }));
+    const { calls, fetchImpl } = stubFetch(() => new Response("bad gateway", { status: 502 }));
     const res = fakeRes();
     await forwardClaudeMessages(
-      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl },
+      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async () => {} },
       res,
       fixture.token,
       { model: "deepseek-chat", messages: [] },
       {}
     );
+    // 502 is retryable: the attempt budget is used up before the failure is
+    // passed through with the upstream's own status code.
+    assert.equal(calls.length, 3);
     assert.equal(res.statusCode, 502);
-    assert.match(String((res.jsonBody as Record<string, any>).error.message), /Upstream HTTP 502/u);
+    assert.match(String((res.jsonBody as Record<string, any>).error.message), /Upstream HTTP 502: bad gateway/u);
+  });
+
+  it("retries a 429 and honors Retry-After, then succeeds on the second attempt", async () => {
+    const fixture = await createRouteFixture();
+    const delays: number[] = [];
+    const { calls, fetchImpl } = stubFetch(() =>
+      calls.length === 1
+        ? new Response(
+            JSON.stringify({ type: "error", error: { type: "rate_limit_error", message: "Rate limited" } }),
+            { status: 429, headers: { "content-type": "application/json", "retry-after": "2" } }
+          )
+        : new Response(
+            JSON.stringify({
+              id: "cmpl-1",
+              choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+              usage: { prompt_tokens: 1, completion_tokens: 1 }
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
+    );
+
+    const res = fakeRes();
+    await forwardClaudeMessages(
+      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async (ms) => { delays.push(ms); } },
+      res,
+      fixture.token,
+      { model: "deepseek-chat", messages: [{ role: "user", content: "hi" }] },
+      {}
+    );
+
+    assert.equal(calls.length, 2);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(delays, [2000]);
+    assert.equal((res.jsonBody as Record<string, any>).role, "assistant");
+  });
+
+  it("passes a rate-limited 429 through with its status, body, and Retry-After when attempts run out", async () => {
+    const fixture = await createRouteFixture();
+    const upstreamError = { type: "error", error: { type: "rate_limit_error", message: "Too many tokens" } };
+    const { calls, fetchImpl } = stubFetch(() =>
+      new Response(JSON.stringify(upstreamError), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "7" }
+      })
+    );
+
+    const res = fakeRes();
+    await forwardClaudeMessages(
+      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async () => {} },
+      res,
+      fixture.token,
+      { model: "deepseek-chat", messages: [] },
+      {}
+    );
+
+    assert.equal(calls.length, 3);
+    assert.equal(res.statusCode, 429);
+    assert.equal(res.headers["retry-after"], "7");
+    // The relay's own well-formed error body is forwarded verbatim.
+    assert.deepEqual(res.jsonBody, upstreamError);
+  });
+
+  it("retries an early connection failure and then succeeds", async () => {
+    const fixture = await createRouteFixture();
+    const { calls, fetchImpl } = stubFetch(() => {
+      if (calls.length === 1) throw new Error("socket hang up");
+      return new Response(
+        JSON.stringify({
+          id: "cmpl-1",
+          choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    });
+
+    const res = fakeRes();
+    await forwardClaudeMessages(
+      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async () => {} },
+      res,
+      fixture.token,
+      { model: "deepseek-chat", messages: [{ role: "user", content: "hi" }] },
+      {}
+    );
+
+    assert.equal(calls.length, 2);
+    assert.equal(res.statusCode, 200);
+    assert.equal((res.jsonBody as Record<string, any>).role, "assistant");
+  });
+
+  it("does not retry a connection failure that happens late in the request window", async () => {
+    const fixture = await createRouteFixture();
+    const { calls, fetchImpl } = stubFetch(() => {
+      throw new Error("aborted after long run");
+    });
+    const realNow = Date.now;
+    let now = realNow();
+    const originalDateNow = Date.now;
+    // The first failure already happened 40s into the window: past the
+    // quick-failure retry boundary.
+    Date.now = () => (now += 40_000);
+    const res = fakeRes();
+    try {
+      await forwardClaudeMessages(
+        { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async () => {} },
+        res,
+        fixture.token,
+        { model: "deepseek-chat", messages: [] },
+        {}
+      );
+    } finally {
+      Date.now = originalDateNow;
+    }
+    assert.equal(calls.length, 1);
+    assert.equal(res.statusCode, 502);
+    assert.match(String((res.jsonBody as Record<string, any>).error.message), /Upstream request failed/u);
+  });
+
+  it("retries a stalled streaming start (headers, then no data) and succeeds", async () => {
+    const fixture = await createRouteFixture();
+    const sse = sseStream([
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] })}`,
+      "data: [DONE]"
+    ]);
+    const { calls, fetchImpl } = stubFetch(() =>
+      calls.length === 1
+        ? new Response(delayedSseStream(200, []), { status: 200, headers: { "content-type": "text/event-stream" } })
+        : new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } })
+    );
+
+    const res = fakeRes();
+    await forwardClaudeMessages(
+      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, streamFirstByteTimeoutMs: 50, sleepFn: async () => {} },
+      res,
+      fixture.token,
+      { model: "deepseek-chat", messages: [{ role: "user", content: "hi" }], stream: true },
+      {}
+    );
+
+    assert.equal(calls.length, 2);
+    assert.equal(res.statusCode, 200);
+    assert.match(res.written.join(""), /"text_delta","text":"ok"/u);
   });
 
   it("streams an OpenAI provider SSE response as Anthropic SSE", async () => {
@@ -760,7 +931,7 @@ describe("claude route forwarder", () => {
 
   it("answers a stuck upstream (headers but no data) with a 502 before committing the stream", async () => {
     const fixture = await createRouteFixture();
-    const { fetchImpl } = stubFetch(() => new Response(
+    const { calls, fetchImpl } = stubFetch(() => new Response(
       delayedSseStream(300, [
         `data: ${JSON.stringify({ choices: [{ delta: { content: "never" } }] })}`
       ]),
@@ -769,14 +940,16 @@ describe("claude route forwarder", () => {
 
     const res = fakeRes();
     await forwardClaudeMessages(
-      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, streamFirstByteTimeoutMs: 60 },
+      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, streamFirstByteTimeoutMs: 60, sleepFn: async () => {} },
       res,
       fixture.token,
       { model: "deepseek-chat", messages: [{ role: "user", content: "hi" }], stream: true },
       {}
     );
 
-    // Not 200, and nothing was written to the (never-committed) SSE stream.
+    // Not 200, nothing was written to the (never-committed) SSE stream, and
+    // the stall burned through the attempt budget before the 502.
+    assert.equal(calls.length, 3);
     assert.equal(res.statusCode, 502);
     assert.equal(res.written.length, 0);
     assert.match(String((res.jsonBody as Record<string, any>).error.message), /no data within/u);
@@ -796,6 +969,365 @@ describe("claude route forwarder", () => {
     const models = listClaudeRouteModels(fixture.db, masterKey, fixture.token);
     assert.equal((models.data as Array<Record<string, unknown>>).length, 1);
     assert.equal((models.data as Array<Record<string, unknown>>)[0]?.id, "deepseek-chat");
+  });
+});
+
+describe("claude route forwarder: anthropic rectifiers and error pass-through", () => {
+  interface AnthropicFixture {
+    db: Database.Database;
+    token: string;
+  }
+
+  async function createAnthropicFixture(): Promise<AnthropicFixture> {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("rectify@example.com", "hash");
+    const repo = new ModelProviderRepository(db, user.id, masterKey);
+    const provider = repo.createProviderProfile({
+      name: "Relay",
+      providerKey: "relay",
+      baseUrl: "https://relay.example.com/anthropic",
+      authType: "api_key",
+      apiFormat: "anthropic",
+      supportedAdapters: ["claude"]
+    });
+    repo.createModelProfile({ providerProfileId: provider.id, name: "M", modelId: "relay-model", isDefault: true });
+    const credential = repo.createCredential({ providerProfileId: provider.id, label: "K", plaintextSecret: "sk-relay" });
+    const routeRepo = new ClaudeRouteRepository(db, user.id, masterKey);
+    const settings = routeRepo.setEnabled(true);
+    routeRepo.upsertAssignment(provider.id, credential.id);
+    return { db, token: settings.token ?? "" };
+  }
+
+  function thinkingBody() {
+    return {
+      model: "relay-model",
+      max_tokens: 8000,
+      thinking: { type: "enabled", budget_tokens: 4096 },
+      messages: [
+        { role: "user", content: "hi" },
+        {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "hmm", signature: "sig_1" },
+            { type: "text", text: "answer", signature: "sig_2" },
+            { type: "tool_use", id: "toolu_1", name: "bash", input: { cmd: "ls" } }
+          ]
+        },
+        { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "ok" }] }
+      ],
+      stream: false
+    };
+  }
+
+  const okAnthropicResponse = () => new Response(
+    JSON.stringify({ id: "msg_1", type: "message", role: "assistant", content: [] }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
+
+  it("repairs a thinking-signature 400 in place and succeeds on the resubmit", async () => {
+    const fixture = await createAnthropicFixture();
+    const { calls, fetchImpl } = stubFetch(() =>
+      calls.length === 1
+        ? new Response(
+            JSON.stringify({
+              type: "error",
+              error: {
+                type: "invalid_request_error",
+                message: "messages.1.content.0: Invalid `signature` in `thinking` block"
+              }
+            }),
+            { status: 400, headers: { "content-type": "application/json" } }
+          )
+        : okAnthropicResponse()
+    );
+
+    const res = fakeRes();
+    await forwardClaudeMessages(
+      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async () => {} },
+      res,
+      fixture.token,
+      thinkingBody(),
+      {}
+    );
+
+    assert.equal(calls.length, 2);
+    assert.equal(res.statusCode, 200);
+    const resent = JSON.parse(String(calls[1]?.init?.body)) as {
+      messages: Array<{ role: string; content: Array<Record<string, unknown>> }>;
+      thinking?: Record<string, unknown>;
+    };
+    const assistant = resent.messages.find((message) => message.role === "assistant");
+    assert.ok(assistant);
+    assert.ok(
+      !assistant!.content.some((block) => block.type === "thinking" || block.type === "redacted_thinking"),
+      "thinking blocks must be stripped from the resubmission"
+    );
+    assert.ok(
+      !assistant!.content.some((block) => block.signature !== undefined),
+      "stray signature fields must be stripped from the resubmission"
+    );
+    // thinking was enabled and the repaired assistant message no longer
+    // starts with a thinking block, so the top-level parameter is dropped too.
+    assert.equal(resent.thinking, undefined);
+  });
+
+  it("repairs a thinking-budget 400 in place and succeeds on the resubmit", async () => {
+    const fixture = await createAnthropicFixture();
+    const { calls, fetchImpl } = stubFetch(() =>
+      calls.length === 1
+        ? new Response(
+            JSON.stringify({
+              type: "error",
+              error: {
+                type: "invalid_request_error",
+                message: "thinking.budget_tokens: Input should be greater than or equal to 1024"
+              }
+            }),
+            { status: 400, headers: { "content-type": "application/json" } }
+          )
+        : okAnthropicResponse()
+    );
+
+    const res = fakeRes();
+    await forwardClaudeMessages(
+      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async () => {} },
+      res,
+      fixture.token,
+      {
+        model: "relay-model",
+        max_tokens: 1024,
+        thinking: { type: "enabled", budget_tokens: 512 },
+        messages: [{ role: "user", content: "hi" }],
+        stream: false
+      },
+      {}
+    );
+
+    assert.equal(calls.length, 2);
+    assert.equal(res.statusCode, 200);
+    const resent = JSON.parse(String(calls[1]?.init?.body)) as Record<string, any>;
+    assert.deepEqual(resent.thinking, { type: "enabled", budget_tokens: 32000 });
+    assert.equal(resent.max_tokens, 64000);
+  });
+
+  it("passes a 400 that matches no rectifier straight through, unmodified", async () => {
+    const fixture = await createAnthropicFixture();
+    const upstreamError = {
+      type: "error",
+      error: { type: "invalid_request_error", message: "model 'relay-model' not found" }
+    };
+    const { calls, fetchImpl } = stubFetch(() =>
+      new Response(JSON.stringify(upstreamError), { status: 400, headers: { "content-type": "application/json" } })
+    );
+
+    const res = fakeRes();
+    await forwardClaudeMessages(
+      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async () => {} },
+      res,
+      fixture.token,
+      thinkingBody(),
+      {}
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(res.jsonBody, upstreamError);
+    // The body was sent untouched (rectifier never applied).
+    const sent = JSON.parse(String(calls[0]?.init?.body)) as Record<string, any>;
+    assert.deepEqual(sent.thinking, { type: "enabled", budget_tokens: 4096 });
+  });
+
+  it("does not rectify on the OpenAI transform path (thinking is dropped by the transform)", async () => {
+    const fixture = await createRouteFixture();
+    const upstreamError = {
+      type: "error",
+      error: { type: "invalid_request_error", message: "messages.1.content.0: Invalid `signature` in `thinking` block" }
+    };
+    const { calls, fetchImpl } = stubFetch(() =>
+      new Response(JSON.stringify(upstreamError), { status: 400, headers: { "content-type": "application/json" } })
+    );
+
+    const res = fakeRes();
+    await forwardClaudeMessages(
+      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async () => {} },
+      res,
+      fixture.token,
+      { ...thinkingBody(), model: "deepseek-chat" },
+      {}
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(res.statusCode, 400);
+    const sent = JSON.parse(String(calls[0]?.init?.body)) as Record<string, any>;
+    // The transform itself drops thinking blocks; the rectifier is not involved.
+    assert.ok(!JSON.stringify(sent).includes("thinking"));
+  });
+
+  it("forwards the client anthropic-beta and anthropic-version on the anthropic passthrough", async () => {
+    const fixture = await createAnthropicFixture();
+    const { calls, fetchImpl } = stubFetch(() => okAnthropicResponse());
+
+    const res = fakeRes();
+    await forwardClaudeMessages(
+      { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async () => {} },
+      res,
+      fixture.token,
+      { model: "relay-model", messages: [{ role: "user", content: "hi" }], stream: false },
+      {
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "claude-code-20250219,context-1m-2025-08-07"
+      }
+    );
+
+    const headers = (calls[0]?.init as RequestInit).headers as Record<string, string>;
+    assert.equal(headers["anthropic-version"], "2023-06-01");
+    assert.equal(headers["anthropic-beta"], "claude-code-20250219,context-1m-2025-08-07");
+    assert.equal(headers["x-api-key"], "sk-relay");
+  });
+});
+
+describe("claude route forwarder: circuit breaker", () => {
+  beforeEach(() => resetAllCircuitBreakers());
+
+  const noopSleep = async () => {};
+
+  it("opens after four provider failures and refuses further upstream calls with a 503", async () => {
+    const fixture = await createRouteFixture();
+    const { calls, fetchImpl } = stubFetch(() =>
+      new Response(JSON.stringify({ type: "error", error: { type: "api_error", message: "boom" } }),
+        { status: 500, headers: { "content-type": "application/json" } })
+    );
+    const deps = { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, maxAttempts: 1, sleepFn: noopSleep };
+    const body = { model: "deepseek-chat", messages: [] };
+
+    for (let i = 0; i < 4; i++) {
+      const res = fakeRes();
+      await forwardClaudeMessages(deps, res, fixture.token, body, {});
+      assert.equal(res.statusCode, 500, `request ${i + 1} passes the 500 through`);
+    }
+    assert.equal(calls.length, 4);
+    assert.equal(circuitBreakerFor(fixture.userId, fixture.providerId).getState(), "open");
+
+    // The fifth request must not reach the upstream at all.
+    const refused = fakeRes();
+    await forwardClaudeMessages(deps, refused, fixture.token, body, {});
+    assert.equal(calls.length, 4, "no upstream call while the breaker is open");
+    assert.equal(refused.statusCode, 503);
+    const refusedBody = refused.jsonBody as Record<string, any>;
+    assert.equal(refusedBody.type, "error");
+    assert.equal(refusedBody.error.type, "overloaded_error");
+  });
+
+  it("does not trip the breaker on client-side 4xx rejections (neutral outcomes)", async () => {
+    const fixture = await createAnthropicRouteFixture();
+    const upstreamError = {
+      type: "error",
+      error: { type: "invalid_request_error", message: "model 'nope' not found" }
+    };
+    const { calls, fetchImpl } = stubFetch(() =>
+      new Response(JSON.stringify(upstreamError), { status: 400, headers: { "content-type": "application/json" } })
+    );
+    const deps = { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, maxAttempts: 1, sleepFn: noopSleep };
+    const body = { model: "nope", messages: [{ role: "user", content: "hi" }], stream: false };
+
+    for (let i = 0; i < 6; i++) {
+      const res = fakeRes();
+      await forwardClaudeMessages(deps, res, fixture.token, body, {});
+      assert.equal(res.statusCode, 400);
+    }
+    const breaker = circuitBreakerFor(fixture.userId, fixture.providerId);
+    assert.equal(breaker.getState(), "closed", "4xx rejections must not pollute provider health");
+    assert.equal(breaker.getStats().failedRequests, 0);
+    assert.equal(breaker.getStats().totalRequests, 0);
+    // The next request still reaches the upstream.
+    const next = fakeRes();
+    await forwardClaudeMessages(deps, next, fixture.token, body, {});
+    assert.equal(calls.length, 7);
+    assert.equal(next.statusCode, 400);
+  });
+
+  it("re-closes after a successful half-open probe once the open window elapses", async () => {
+    const fixture = await createRouteFixture();
+    // Short real-time window so the test does not wait a minute.
+    circuitBreakerFor(fixture.userId, fixture.providerId, {
+      ...defaultCircuitBreakerConfig,
+      openTimeoutMs: 50,
+      successThreshold: 1
+    });
+    let upstreamCalls = 0;
+    const { calls, fetchImpl } = stubFetch(() => {
+      upstreamCalls += 1;
+      return upstreamCalls <= 4
+        ? new Response(JSON.stringify({ type: "error", error: { type: "api_error", message: "down" } }),
+            { status: 500, headers: { "content-type": "application/json" } })
+        : new Response(
+            JSON.stringify({
+              id: "cmpl-1",
+              choices: [{ message: { role: "assistant", content: "up" }, finish_reason: "stop" }],
+              usage: { prompt_tokens: 1, completion_tokens: 1 }
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+    });
+    const deps = { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, maxAttempts: 1, sleepFn: noopSleep };
+    const body = { model: "deepseek-chat", messages: [{ role: "user", content: "hi" }] };
+
+    for (let i = 0; i < 4; i++) {
+      await forwardClaudeMessages(deps, fakeRes(), fixture.token, body, {});
+    }
+    const breaker = circuitBreakerFor(fixture.userId, fixture.providerId);
+    assert.equal(breaker.getState(), "open");
+
+    // Immediately: refused without an upstream call.
+    const refused = fakeRes();
+    await forwardClaudeMessages(deps, refused, fixture.token, body, {});
+    assert.equal(refused.statusCode, 503);
+    assert.equal(upstreamCalls, 4);
+
+    // After the open window: the probe reaches the upstream, succeeds, and
+    // closes the breaker (successThreshold 1).
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const probe = fakeRes();
+    await forwardClaudeMessages(deps, probe, fixture.token, body, {});
+    assert.equal(probe.statusCode, 200);
+    assert.equal(upstreamCalls, 5);
+    assert.equal(breaker.getState(), "closed");
+
+    // Traffic flows normally again.
+    const normal = fakeRes();
+    await forwardClaudeMessages(deps, normal, fixture.token, body, {});
+    assert.equal(normal.statusCode, 200);
+    assert.equal(upstreamCalls, 6);
+  });
+
+  it("records an internally-retried success as a success, not a failure", async () => {
+    const fixture = await createRouteFixture();
+    const { calls, fetchImpl } = stubFetch(() =>
+      calls.length % 2 === 1
+        ? new Response(JSON.stringify({ type: "error", error: { type: "rate_limit_error", message: "slow down" } }),
+            { status: 429, headers: { "content-type": "application/json", "retry-after": "0" } })
+        : new Response(
+            JSON.stringify({
+              id: "cmpl-1",
+              choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+              usage: { prompt_tokens: 1, completion_tokens: 1 }
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
+    );
+    const deps = { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: noopSleep };
+    const body = { model: "deepseek-chat", messages: [{ role: "user", content: "hi" }] };
+
+    for (let i = 0; i < 5; i++) {
+      const res = fakeRes();
+      await forwardClaudeMessages(deps, res, fixture.token, body, {});
+      assert.equal(res.statusCode, 200);
+    }
+    const stats = circuitBreakerFor(fixture.userId, fixture.providerId).getStats();
+    assert.equal(stats.state, "closed");
+    assert.equal(stats.totalRequests, 5);
+    assert.equal(stats.failedRequests, 0, "internal retries are not provider failures");
+    assert.equal(calls.length, 10);
   });
 });
 
@@ -874,6 +1406,249 @@ describe("claude route data-plane routes", () => {
   });
 });
 
+describe("claude route forwarder: failover", () => {
+  beforeEach(() => resetAllCircuitBreakers());
+
+  interface FailoverFixture {
+    db: Database.Database;
+    userId: string;
+    token: string;
+    primary: { providerId: string; credentialId: string };
+    backup: { providerId: string; credentialId: string };
+  }
+
+  /**
+   * Two providers hosting "shared-model" by default; primary is position 1,
+   * backup position 2. Anthropic mode switches both to the Anthropic protocol.
+   */
+  async function createFailoverFixture(options: {
+    primaryModels?: string[];
+    backupModels?: string[];
+    apiFormat?: "openai-compatible" | "anthropic";
+  } = {}): Promise<FailoverFixture> {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("failover@example.com", "hash");
+    const repo = new ModelProviderRepository(db, user.id, masterKey);
+    const apiFormat = options.apiFormat ?? "openai-compatible";
+    const mk = (name: string, key: string, host: string, models: string[]) => {
+      const provider = repo.createProviderProfile({
+        name,
+        providerKey: key,
+        baseUrl: apiFormat === "anthropic" ? `https://${host}` : `https://${host}/v1`,
+        authType: "api_key",
+        apiFormat,
+        supportedAdapters: ["claude"]
+      });
+      models.forEach((modelId, index) => {
+        repo.createModelProfile({ providerProfileId: provider.id, name: modelId, modelId, isDefault: index === 0 });
+      });
+      const credential = repo.createCredential({ providerProfileId: provider.id, label: "K", plaintextSecret: `sk-${key}` });
+      return { providerId: provider.id, credentialId: credential.id };
+    };
+    const primary = mk("Primary", "primary", "primary.example.com", options.primaryModels ?? ["shared-model"]);
+    const backup = mk("Backup", "backup", "backup.example.com", options.backupModels ?? ["shared-model"]);
+    const routeRepo = new ClaudeRouteRepository(db, user.id, masterKey);
+    const settings = routeRepo.setEnabled(true);
+    routeRepo.setOrderedAssignments([
+      { providerProfileId: primary.providerId, credentialId: primary.credentialId },
+      { providerProfileId: backup.providerId, credentialId: backup.credentialId }
+    ]);
+    return { db, userId: user.id, token: settings.token ?? "", primary, backup };
+  }
+
+  const okOpenAi = () => new Response(
+    JSON.stringify({ id: "cmpl-1", choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
+  const okAnthropic = () => new Response(
+    JSON.stringify({
+      id: "msg_1", type: "message", role: "assistant", model: "shared-model",
+      content: [{ type: "text", text: "ok" }],
+      stop_reason: "end_turn", stop_sequence: null,
+      usage: { input_tokens: 1, output_tokens: 1 }
+    }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
+  const upstreamError = (status: number, message: string, type = "api_error") => new Response(
+    JSON.stringify({ type: "error", error: { type, message } }),
+    { status, headers: { "content-type": "application/json" } }
+  );
+
+  it("fails over to the backup when the primary exhausts its attempts", async () => {
+    const fixture = await createFailoverFixture();
+    const { calls, fetchImpl } = stubFetch((call) =>
+      call.url.includes("primary.example.com") ? upstreamError(500, "primary down") : okOpenAi()
+    );
+    const deps = { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, maxAttempts: 1, sleepFn: async () => {} };
+    const res = fakeRes();
+    await forwardClaudeMessages(deps, res, fixture.token, { model: "shared-model", messages: [{ role: "user", content: "hi" }] }, {});
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 2);
+    assert.ok(calls[0]?.url.includes("primary.example.com"), "primary tried first");
+    assert.ok(calls[1]?.url.includes("backup.example.com"), "backup served the request");
+    // Per-candidate circuit accounting: the primary failure is recorded, the
+    // backup success is recorded.
+    assert.equal(circuitBreakerFor(fixture.userId, fixture.primary.providerId).getStats().failedRequests, 1);
+    assert.equal(circuitBreakerFor(fixture.userId, fixture.backup.providerId).getStats().totalRequests, 1);
+    assert.equal(circuitBreakerFor(fixture.userId, fixture.backup.providerId).getStats().failedRequests, 0);
+  });
+
+  it("passes the last candidate's own error through when every candidate fails", async () => {
+    const fixture = await createFailoverFixture();
+    const { calls, fetchImpl } = stubFetch(() => upstreamError(503, "backup overloaded", "overloaded_error"));
+    const deps = { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, maxAttempts: 1, sleepFn: async () => {} };
+    const res = fakeRes();
+    await forwardClaudeMessages(deps, res, fixture.token, { model: "shared-model", messages: [{ role: "user", content: "hi" }] }, {});
+
+    assert.equal(calls.length, 2, "both candidates were tried");
+    assert.equal(res.statusCode, 503);
+    // The LAST candidate's well-formed error body is what the client sees.
+    assert.equal((res.jsonBody as Record<string, any>).error.message, "backup overloaded");
+  });
+
+  it("stops the failover on a client-side 400 and passes it through", async () => {
+    const fixture = await createFailoverFixture();
+    const { calls, fetchImpl } = stubFetch((call) =>
+      call.url.includes("primary.example.com")
+        ? upstreamError(400, "model 'shared-model' not found", "invalid_request_error")
+        : okOpenAi()
+    );
+    const deps = { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, maxAttempts: 3, sleepFn: async () => {} };
+    const res = fakeRes();
+    await forwardClaudeMessages(deps, res, fixture.token, { model: "shared-model", messages: [{ role: "user", content: "hi" }] }, {});
+
+    assert.equal(calls.length, 1, "the backup must not be called for a client-side rejection");
+    assert.equal(res.statusCode, 400);
+    assert.equal((res.jsonBody as Record<string, any>).error.message, "model 'shared-model' not found");
+    // Neutral: the primary's health was not affected.
+    assert.equal(circuitBreakerFor(fixture.userId, fixture.primary.providerId).getStats().totalRequests, 0);
+  });
+
+  it("skips a circuit-open primary without calling it", async () => {
+    const fixture = await createFailoverFixture();
+    circuitBreakerFor(fixture.userId, fixture.primary.providerId, {
+      ...defaultCircuitBreakerConfig,
+      failureThreshold: 1
+    }).recordFailure(false);
+    const { calls, fetchImpl } = stubFetch((call) =>
+      call.url.includes("primary.example.com") ? upstreamError(500, "primary down") : okOpenAi()
+    );
+    const deps = { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async () => {} };
+    const res = fakeRes();
+    await forwardClaudeMessages(deps, res, fixture.token, { model: "shared-model", messages: [{ role: "user", content: "hi" }] }, {});
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0]?.url.includes("backup.example.com"), "the open primary is not called");
+  });
+
+  it("answers 503 without upstream calls when every candidate's breaker is open", async () => {
+    const fixture = await createFailoverFixture();
+    const { calls, fetchImpl } = stubFetch(() => upstreamError(500, "down"));
+    const deps = { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, maxAttempts: 1, sleepFn: async () => {} };
+    const body = { model: "shared-model", messages: [{ role: "user", content: "hi" }] };
+
+    for (let i = 0; i < 4; i++) {
+      const res = fakeRes();
+      await forwardClaudeMessages(deps, res, fixture.token, body, {});
+      assert.equal(res.statusCode, 500);
+    }
+    assert.equal(calls.length, 8, "each request tried both candidates once");
+    assert.equal(circuitBreakerFor(fixture.userId, fixture.primary.providerId).getState(), "open");
+    assert.equal(circuitBreakerFor(fixture.userId, fixture.backup.providerId).getState(), "open");
+
+    const refused = fakeRes();
+    await forwardClaudeMessages(deps, refused, fixture.token, body, {});
+    assert.equal(calls.length, 8, "no upstream call while every breaker is open");
+    assert.equal(refused.statusCode, 503);
+    assert.equal((refused.jsonBody as Record<string, any>).error.type, "overloaded_error");
+  });
+
+  it("tries only candidates that host the requested model", async () => {
+    const fixture = await createFailoverFixture({
+      primaryModels: ["only-primary"],
+      backupModels: ["shared-model"]
+    });
+    const { calls, fetchImpl } = stubFetch((call) =>
+      call.url.includes("primary.example.com") ? okOpenAi() : okOpenAi()
+    );
+    const deps = { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async () => {} };
+
+    // The primary does not host "shared-model": it must be skipped even though
+    // it is healthy and first in the order.
+    const res = fakeRes();
+    await forwardClaudeMessages(deps, res, fixture.token, { model: "shared-model", messages: [{ role: "user", content: "hi" }] }, {});
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0]?.url.includes("backup.example.com"));
+
+    // And "only-primary" goes to the primary.
+    const second = fakeRes();
+    await forwardClaudeMessages(deps, second, fixture.token, { model: "only-primary", messages: [{ role: "user", content: "hi" }] }, {});
+    assert.equal(second.statusCode, 200);
+    assert.ok(calls[1]?.url.includes("primary.example.com"));
+  });
+
+  it("falls back to priority order when no candidate hosts the model", async () => {
+    const fixture = await createFailoverFixture();
+    const { calls, fetchImpl } = stubFetch((call) =>
+      call.url.includes("primary.example.com") ? upstreamError(500, "primary down") : okOpenAi()
+    );
+    const deps = { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, maxAttempts: 1, sleepFn: async () => {} };
+    const res = fakeRes();
+    // Neither provider lists "alias-model": the request goes through as-is in
+    // priority order (legacy single-assignment behavior).
+    await forwardClaudeMessages(deps, res, fixture.token, { model: "alias-model", messages: [{ role: "user", content: "hi" }] }, {});
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 2);
+    assert.ok(calls[0]?.url.includes("primary.example.com"), "the primary is still tried first");
+  });
+
+  it("passes the sanitized (rectified) body to the next candidate", async () => {
+    const fixture = await createFailoverFixture({ apiFormat: "anthropic" });
+    const { calls, fetchImpl } = stubFetch((call) => {
+      if (!call.url.includes("primary.example.com")) return okAnthropic();
+      return calls.length === 1
+        ? upstreamError(400, "messages.1.content.0: Invalid `signature` in `thinking` block", "invalid_request_error")
+        : upstreamError(400, "custom relay field rejected", "invalid_request_error");
+    });
+    const deps = { db: fixture.db, masterKey, resolveHost: publicResolver, fetchImpl, sleepFn: async () => {} };
+    const body = {
+      model: "shared-model",
+      max_tokens: 2048,
+      thinking: { type: "enabled", budget_tokens: 4096 },
+      messages: [
+        { role: "user", content: "hi" },
+        {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "hmm", signature: "sig-abc" },
+            { type: "text", text: "hello" }
+          ]
+        },
+        { role: "user", content: "more" }
+      ],
+      stream: false
+    };
+    const res = fakeRes();
+    await forwardClaudeMessages(deps, res, fixture.token, body, {});
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 3, "primary: original + rectified resubmit, then backup");
+    assert.ok(calls[2]?.url.includes("backup.example.com"));
+    const backupBody = JSON.parse(String(calls[2]?.init?.body)) as {
+      messages: Array<{ role: string; content: Array<Record<string, unknown>> }>
+    };
+    const assistant = backupBody.messages.find((message) => message.role === "assistant");
+    assert.ok(assistant);
+    assert.ok(
+      !assistant!.content.some((block) => block.type === "thinking" || block.type === "redacted_thinking"),
+      "the backup must receive the sanitized body"
+    );
+  });
+});
+
 describe("claude route management API", () => {
   function makeApp(db: Database.Database, jwt: string): express.Express {
     const app = express();
@@ -927,6 +1702,7 @@ describe("claude route management API", () => {
       enabled: false,
       hasToken: false,
       gatewayUrl: gatewayLoopbackUrl(),
+      assignments: [],
       assignment: null
     });
 
@@ -975,6 +1751,72 @@ describe("claude route management API", () => {
     assert.equal(state.status, 200);
     assert.equal(state.json.data.routing.assignment.providerProfileId, provider.id);
     assert.equal(state.json.data.routing.assignment.providerName, "Admin Routed");
+    const list = state.json.data.routing.assignments;
+    assert.equal(list.length, 1);
+    assert.equal(list[0].position, 1);
+    assert.equal(list[0].providerProfileId, provider.id);
+    assert.deepEqual(list[0].modelIds, ["m-1"]);
+  });
+
+  it("replaces the ordered failover list and validates entries", async () => {
+    const db = createTestDb();
+    const admin = new UserRepository(db).create("route-admin-3@example.com", "hash", { role: "admin" });
+    const app = makeApp(db, jwtSecret);
+    const adminAuth = { authorization: `Bearer ${signJwt({ userId: admin.id, email: admin.email }, jwtSecret)}` };
+    const repo = new ModelProviderRepository(db, admin.id, masterKey);
+    const mkProvider = (name: string, key: string, host: string, modelId: string) => {
+      const provider = repo.createProviderProfile({
+        name,
+        providerKey: key,
+        baseUrl: `https://${host}/v1`,
+        authType: "api_key",
+        apiFormat: "openai-compatible",
+        supportedAdapters: ["claude"]
+      });
+      repo.createModelProfile({ providerProfileId: provider.id, name: modelId, modelId, isDefault: true });
+      return { provider, credential: repo.createCredential({ providerProfileId: provider.id, label: "K", plaintextSecret: `sk-${key}` }) };
+    };
+    const first = mkProvider("Primary", "primary", "primary.example.com", "m-1");
+    const second = mkProvider("Backup", "backup", "backup.example.com", "m-2");
+
+    const empty = await request(app, "PUT", "/api/v1/cli-config/routing/claude/assignments", { assignments: [] }, adminAuth);
+    assert.equal(empty.status, 400);
+
+    const unknown = await request(app, "PUT", "/api/v1/cli-config/routing/claude/assignments", { assignments: [{ providerProfileId: "nope" }] }, adminAuth);
+    assert.equal(unknown.status, 404);
+
+    const duplicate = await request(app, "PUT", "/api/v1/cli-config/routing/claude/assignments", {
+      assignments: [{ providerProfileId: first.provider.id }, { providerProfileId: first.provider.id }]
+    }, adminAuth);
+    assert.equal(duplicate.status, 400);
+
+    const ok = await request(app, "PUT", "/api/v1/cli-config/routing/claude/assignments", {
+      assignments: [
+        { providerProfileId: second.provider.id },
+        { providerProfileId: first.provider.id, credentialId: first.credential.id }
+      ]
+    }, adminAuth);
+    assert.equal(ok.status, 200);
+    const list = ok.json.data.routing.assignments;
+    assert.equal(list.length, 2);
+    assert.equal(list[0].position, 1);
+    assert.equal(list[0].providerProfileId, second.provider.id);
+    assert.equal(list[0].credentialId, second.credential.id, "credential defaults to the oldest active one");
+    assert.equal(list[1].position, 2);
+    assert.equal(list[1].providerProfileId, first.provider.id);
+    // The legacy single-assignment view is the primary entry.
+    assert.equal(ok.json.data.routing.assignment.providerProfileId, second.provider.id);
+
+    // A later apply (upsert) pins that provider back to the top, shifting the
+    // previous primary down instead of dropping it.
+    new ClaudeRouteRepository(db, admin.id, masterKey).upsertAssignment(first.provider.id, first.credential.id);
+    const after = await request(app, "GET", "/api/v1/cli-config/routing/claude", undefined, adminAuth);
+    const afterList = after.json.data.routing.assignments;
+    assert.equal(afterList.length, 2);
+    assert.equal(afterList[0].providerProfileId, first.provider.id);
+    assert.equal(afterList[0].position, 1);
+    assert.equal(afterList[1].providerProfileId, second.provider.id);
+    assert.equal(afterList[1].position, 2);
   });
 });
 
@@ -1071,7 +1913,7 @@ describe("cli-config apply: claude route branches", () => {
 
   for (const openaiBaseUrl of [null, "https://api.deepseek.com/v1"]) {
     for (const routeThroughGateway of [false, true]) {
-      it(`directly applies an explicit Anthropic endpoint with OpenAI metadata (${openaiBaseUrl !== null}, ${routeThroughGateway})`, async () => {
+      it(`applies an explicit Anthropic endpoint with OpenAI metadata (openai=${openaiBaseUrl !== null}, route=${routeThroughGateway})`, async () => {
         await withClaudeConfigRoot("forgebadger-claude-explicit-anthropic-", async (root) => {
           const fixture = await createOpenAiClaudeFixture();
           fixture.repo.updateProviderProfile(fixture.providerId, {
@@ -1079,6 +1921,8 @@ describe("cli-config apply: claude route branches", () => {
             openaiBaseUrl,
             anthropicBaseUrl: "https://api.deepseek.com/anthropic"
           });
+          const routeRepo = new ClaudeRouteRepository(fixture.db, fixture.user.id, masterKey);
+          const routeSettings = routeThroughGateway ? routeRepo.setEnabled(true) : null;
           const input = {
             db: fixture.db, userId: fixture.user.id, masterKey,
             adapter: "claude" as const, providerProfileId: fixture.providerId,
@@ -1086,16 +1930,74 @@ describe("cli-config apply: claude route branches", () => {
           };
           const preview = await previewCliConfigApply(input);
           assert.ok(!preview.warnings.includes("OPENAI_PROTOCOL_REQUIRES_ROUTE"));
-          assert.ok(preview.files[0]?.proposed.includes("https://api.deepseek.com/anthropic"));
+          assert.ok(preview.files[0]?.proposed.includes(routeThroughGateway
+            ? `"ANTHROPIC_BASE_URL": "${gatewayLoopbackUrl()}"`
+            : "https://api.deepseek.com/anthropic"));
           await applyCliConfigToAdapter(input);
           const written = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8"));
-          assert.equal(written.env.ANTHROPIC_BASE_URL, "https://api.deepseek.com/anthropic");
-          assert.equal(written.env.ANTHROPIC_AUTH_TOKEN, "sk-route-secret");
-          assert.equal(new ClaudeRouteRepository(fixture.db, fixture.user.id, masterKey).getSettings().enabled, false);
+          if (routeThroughGateway) {
+            // The explicit flag routes even a provider with an Anthropic endpoint.
+            assert.equal(written.env.ANTHROPIC_BASE_URL, gatewayLoopbackUrl());
+            assert.equal(written.env.ANTHROPIC_AUTH_TOKEN, routeSettings?.token);
+            assert.equal(routeRepo.getAssignment()?.providerProfileId, fixture.providerId);
+          } else {
+            assert.equal(written.env.ANTHROPIC_BASE_URL, "https://api.deepseek.com/anthropic");
+            assert.equal(written.env.ANTHROPIC_AUTH_TOKEN, "sk-route-secret");
+            assert.equal(routeRepo.getAssignment(), undefined);
+            assert.equal(routeRepo.getSettings().enabled, false);
+          }
         });
       });
     }
   }
+
+  it("routes an Anthropic-protocol relay through the Gateway when explicitly requested", async () => {
+    await withClaudeConfigRoot("forgebadger-claude-anthropic-relay-route-", async (root) => {
+      const db = createTestDb();
+      const user = new UserRepository(db).create("relay-route@example.com", "hash");
+      const repo = new ModelProviderRepository(db, user.id, masterKey);
+      const provider = repo.createProviderProfile({
+        name: "Kimi Relay",
+        providerKey: "kimi-relay",
+        baseUrl: "https://api.kimi.com/coding",
+        authType: "api_key",
+        apiFormat: "anthropic",
+        supportedAdapters: ["claude"]
+      });
+      const model = repo.createModelProfile({ providerProfileId: provider.id, name: "K2", modelId: "k2", isDefault: true });
+      const credential = repo.createCredential({ providerProfileId: provider.id, label: "K", plaintextSecret: "sk-relay-key" });
+      const routeRepo = new ClaudeRouteRepository(db, user.id, masterKey);
+      const settings = routeRepo.setEnabled(true);
+
+      // Without the flag the relay applies directly (default behavior).
+      await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: provider.id, resolveHost: publicResolverFn
+      });
+      let written = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8"));
+      assert.equal(written.env.ANTHROPIC_BASE_URL, "https://api.kimi.com/coding");
+      assert.equal(written.env.ANTHROPIC_AUTH_TOKEN, "sk-relay-key");
+      assert.equal(routeRepo.getAssignment(), undefined);
+
+      // With the flag the same relay is routed: gateway URL + loopback token,
+      // the provider key stays in the vault, and the assignment is recorded.
+      const result = await applyCliConfigToAdapter({
+        db, userId: user.id, masterKey, adapter: "claude",
+        providerProfileId: provider.id,
+        modelProfileId: model.id,
+        credentialId: credential.id,
+        routeThroughGateway: true,
+        resolveHost: publicResolverFn
+      });
+      written = JSON.parse(await readFile(path.join(root, "settings.json"), "utf8"));
+      assert.equal(result.changed, true);
+      assert.equal(written.env.ANTHROPIC_BASE_URL, gatewayLoopbackUrl());
+      assert.equal(written.env.ANTHROPIC_AUTH_TOKEN, settings.token);
+      assert.notEqual(written.env.ANTHROPIC_AUTH_TOKEN, "sk-relay-key");
+      assert.equal(routeRepo.getAssignment()?.providerProfileId, provider.id);
+      assert.equal(routeRepo.getAssignment()?.credentialId, credential.id);
+    });
+  });
 
   it("requires routing when only an explicit OpenAI endpoint is configured", async () => {
     await withClaudeConfigRoot("forgebadger-claude-openai-only-", async () => {

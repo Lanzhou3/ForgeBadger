@@ -12,10 +12,14 @@ const ATTACH_TOKEN = process.env.FORGEBADGER_ATTACH_TOKEN || "";
 
 function permissionText(props) {
   if (!props || typeof props !== "object") return "OpenCode permission request";
-  const name = typeof props.permission === "string" ? props.permission : "permission";
-  const paths = Array.isArray(props.patterns) && props.patterns.length > 0
-    ? " " + props.patterns.join(", ")
-    : "";
+  // V1 carries {permission, patterns}; V2 carries {action, resources}.
+  const name = typeof props.permission === "string" ? props.permission
+    : typeof props.action === "string" ? props.action
+    : "permission";
+  const list = Array.isArray(props.patterns) ? props.patterns
+    : Array.isArray(props.resources) ? props.resources
+    : [];
+  const paths = list.length > 0 ? " " + list.join(", ") : "";
   return \`\${name}\${paths}\`;
 }
 
@@ -52,6 +56,18 @@ function lifecyclePayload(event) {
       message: "OpenCode task failed",
       ...(typeof event.properties?.error?.name === "string" ? { error_type: event.properties.error.name } : {}),
       ...(typeof event.properties?.error?.data?.message === "string" ? { error_message: event.properties.error.data.message } : {})
+    };
+  }
+  // OpenCode 2.x replaces session.error with session.execution.failed and
+  // flattens the error to { type, message }.
+  if (event.type === "session.execution.failed") {
+    const failure = event.properties?.error;
+    return {
+      hook_event_name: "StopFailure",
+      notification_type: "task_failed",
+      message: "OpenCode task failed",
+      ...(typeof failure?.type === "string" ? { error_type: failure.type } : {}),
+      ...(typeof failure?.message === "string" ? { error_message: failure.message } : {})
     };
   }
   return null;
@@ -211,6 +227,159 @@ export const ForgeBadgerPermissionNotify = async ({ client } = {}) => {
     if (generations.get(id) !== generation && (!turn || !rounds.get(id))) return;
     await notify({ ...event, session_id: id, summaryFields });
   } };
+};
+
+// OpenCode 2.x entrypoint. V2 events carry their payload under "data" instead
+// of "properties", the public event stream replaces the returned "event" hook,
+// and session/permission lookups live on the plugin context.
+async function setupOpenCodeV2(ctx) {
+  const active = new Set();
+  const pending = new Map();
+  const prompts = new Map();
+  const texts = new Map();
+  const generations = new Map();
+  let disposed = false;
+  const deliver = async (event) => { if (!disposed) await notify(event); };
+  const boundedSet = (map, key, value, max) => {
+    map.set(key, value);
+    if (map.size > (max || 128)) map.delete(map.keys().next().value);
+  };
+  const remember = (id) => {
+    active.add(id);
+    if (active.size > 256) active.delete(active.values().next().value);
+  };
+  const rootSession = async (id) => {
+    try {
+      const response = await ctx.session.get({ sessionID: id });
+      const info = response && response.data ? response.data : response;
+      return Boolean(info) && info.id === id && !info.parentID;
+    } catch { return false; }
+  };
+  // The prompt hook is the only V2 surface that carries user prompt text.
+  // Without it the engine still reports lifecycle, just without prompt cards.
+  try {
+    await ctx.session.hook("prompt", (event) => {
+      if (disposed) return;
+      const id = event && event.sessionID;
+      const text = event && event.prompt && event.prompt.text;
+      if (typeof id !== "string" || typeof text !== "string") return;
+      // Oversized prompts are omitted whole, before any Gateway-side redaction.
+      if (Buffer.byteLength(text, "utf8") > 32 * 1024) return;
+      boundedSet(prompts, id, {
+        messageID: typeof event.messageID === "string" ? event.messageID : "",
+        text: text
+      });
+    });
+  } catch { /* Prompt hook unavailable: continue event-only. */ }
+
+  const onEvent = async (event) => {
+    if (disposed) return;
+    const type = event && event.type;
+    const props = event && event.data;
+    if (typeof type !== "string" || !props || typeof props !== "object") return;
+    const id = props.sessionID;
+    if (typeof id !== "string") return;
+
+    if (type === "session.text.ended") {
+      if (typeof props.text !== "string" || typeof props.assistantMessageID !== "string") return;
+      if (Buffer.byteLength(props.text, "utf8") > 32 * 1024) { texts.delete(id); return; }
+      boundedSet(texts, id, { messageID: props.assistantMessageID, text: props.text });
+      return;
+    }
+
+    if (type === "session.status" && props.status && ["busy", "retry"].includes(props.status.type)) {
+      const first = !active.has(id);
+      const generation = first ? {} : generations.get(id);
+      if (first) boundedSet(generations, id, generation);
+      const prompt = first ? prompts.get(id) : undefined;
+      const fields = prompt && prompt.messageID ? { turn_id: prompt.messageID } : {};
+      remember(id);
+      if (await rootSession(id)) {
+        if (!active.has(id) || generations.get(id) !== generation) return;
+        if (first && prompt && prompt.text) {
+          await deliver({ session_id: id, summaryFields: fields,
+            hookPayload: { hook_event_name: "UserPromptSubmit", prompt: prompt.text } });
+        }
+        if (!active.has(id) || generations.get(id) !== generation) return;
+        await deliver({ type: type, properties: props, session_id: id, summaryFields: fields });
+      }
+      return;
+    }
+
+    if (type === "permission.replied") {
+      const timer = pending.get(props.requestID);
+      if (timer) clearTimeout(timer);
+      pending.delete(props.requestID);
+      return;
+    }
+
+    if (type === "permission.asked") {
+      if (typeof props.id !== "string" || pending.has(props.id) || pending.size >= 128) return;
+      const timer = setTimeout(async () => {
+        try {
+          if (disposed) return;
+          const response = await ctx.permission.list({ sessionID: id });
+          const requests = Array.isArray(response) ? response : response && response.data;
+          // An auto responder may have consumed the request without a reply
+          // event reaching this plugin. Check the current server pending list.
+          if (disposed || pending.get(props.id) !== timer || !Array.isArray(requests)
+            || !requests.some((request) => request && request.id === props.id && request.sessionID === id)) return;
+          await deliver({ type: type, properties: props, session_id: id });
+        } catch { /* No confirmed pending request: do not invent an approval. */ }
+        finally { if (pending.get(props.id) === timer) pending.delete(props.id); }
+      }, 1000);
+      if (typeof timer.unref === "function") timer.unref();
+      pending.set(props.id, timer);
+      return;
+    }
+
+    const failed = type === "session.execution.failed";
+    const idle = type === "session.idle"
+      || (type === "session.status" && props.status && props.status.type === "idle");
+    if (!failed && !idle) return;
+    if (!active.delete(id)) return;
+    const generation = generations.get(id);
+    const prompt = prompts.get(id);
+    const final = texts.get(id);
+    const summaryFields = { ...(prompt && prompt.messageID ? { turn_id: prompt.messageID } : {}),
+      ...(idle && final && final.text ? { last_assistant_message: final.text } : {}) };
+    // Freeze before awaiting network I/O. A new round cannot change this card.
+    prompts.delete(id);
+    texts.delete(id);
+    if (!(await rootSession(id))) return;
+    // A newer round started while identifying; its own lifecycle owns the card.
+    if (generations.get(id) !== generation) return;
+    await deliver({ type: idle ? "session.idle" : type, properties: props, session_id: id, summaryFields: summaryFields });
+  };
+
+  const controller = new AbortController();
+  void (async () => {
+    try {
+      for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+        await onEvent(event).catch(() => {});
+      }
+    } catch { /* Subscription aborted or failed; notifications stop. */ }
+  })();
+  return () => {
+    disposed = true;
+    controller.abort();
+    for (const timer of pending.values()) clearTimeout(timer);
+    pending.clear();
+    active.clear();
+    prompts.clear();
+    texts.clear();
+    generations.clear();
+  };
+}
+
+// Dual entrypoint: OpenCode 2.x loads the default export and calls setup(ctx);
+// OpenCode 1.x (>= 1.15) calls server(input) on the same object. V2 ignores
+// extra keys on the default export, and V1 ignores named exports once the
+// default export carries id/server.
+export default {
+  id: "forgebadger-permission-notify",
+  server: (input) => ForgeBadgerPermissionNotify(input),
+  setup: setupOpenCodeV2
 };
 
 `;

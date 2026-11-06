@@ -1,5 +1,6 @@
 import { ARCHIVABLE_TOOLS, MAX_ARTIFACT_BYTES } from './tool-artifact-policy.js';
 import { assertRestrictedTool } from "./restricted-runs.js";
+import { CODING_OPERATES } from "./tool-surface.js";
 import { zodToJsonSchema } from "./tool-schema.js";
 import { redactAgentErrorMessage, redactAgentValue } from "./redaction.js";
 import { checkAgentScope } from "../platform-commands/agent-scope.js";
@@ -56,6 +57,18 @@ export class AgentToolValidationError extends Error {
   }
 }
 
+/**
+ * Model tool-calling contracts (Anthropic `input_schema`, OpenAI `parameters`,
+ * and MCP `inputSchema`) require the top-level JSON Schema to declare
+ * type: "object". A top-level union input (e.g. pm_manage_stage) serializes
+ * as a bare anyOf, which strict providers and clients reject for the whole
+ * tool list; the call arguments are an object either way, so restore the
+ * required type without touching the branches.
+ */
+export function modelObjectSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  return schema.type === "object" ? schema : { type: "object", ...schema };
+}
+
 export function createAgentToolRegistry(tools: AgentTool[]): AgentToolRegistry {
   const map = new Map(tools.map((t) => [t.name, t]));
   return {
@@ -64,7 +77,7 @@ export function createAgentToolRegistry(tools: AgentTool[]): AgentToolRegistry {
       return tools.map((t) => ({
         name: t.name,
         description: t.description,
-        inputSchema: t.modelInputSchema ?? zodToJsonSchema(t.inputSchema)
+        inputSchema: modelObjectSchema(t.modelInputSchema ?? zodToJsonSchema(t.inputSchema))
       }));
     }
   };
@@ -90,7 +103,9 @@ export async function executeAgentTool(
   }
   try {
     context = channelToolContext(context);
-    if (context.executionMode && tool.risk !== 'read' && !(context.executionMode === 'repair' && tool.name === 'submit_development_task')) throw new Error('COPILOT_RESTRICTED_TOOL: read-only tools required');
+    if (context.executionMode && tool.risk !== 'read'
+      && !(context.executionMode === 'repair' && tool.name === 'submit_development_task')
+      && !(context.executionMode === 'coding' && CODING_OPERATES.has(tool.name))) throw new Error('COPILOT_RESTRICTED_TOOL: read-only tools required');
     assertRestrictedTool(context, tool.name, parsed.data);
     checkAgentScope(context, tool.name, parsed.data);
     const output = tool.risk === "operate" && TOOL_COMMANDS[tool.name]

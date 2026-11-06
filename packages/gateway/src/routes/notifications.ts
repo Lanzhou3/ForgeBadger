@@ -6,6 +6,7 @@ import { NotificationRepository, type Notification } from "../db/repositories/no
 import { SessionRepository, type Session } from "../db/repositories/session-repository.js";
 import type { Database } from "../db/types.js";
 import { createFeishuNotificationRoutes } from './feishu-notifications.js';
+import { createTelegramNotificationRoutes } from './telegram-notifications.js';
 
 const listQuerySchema = z.object({
   category: z.enum(["session_event", "app_action"]).optional()
@@ -15,6 +16,7 @@ export function createNotificationRoutes(db: Database, notificationOptions?: imp
   const router = Router();
   router.use(authenticate);
   router.use('/feishu',createFeishuNotificationRoutes(db,notificationOptions));
+  router.use('/telegram',createTelegramNotificationRoutes(db));
 
   router.get("/", (req, res) => {
     const query = listQuerySchema.safeParse(req.query ?? {});

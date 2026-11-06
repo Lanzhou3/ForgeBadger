@@ -81,10 +81,21 @@ describe("resolveLocalCommandReply", () => {
     assert.equal(invoked, false);
   });
 
-  it("returns null for anything that is not exactly /playbooks after trimming", () => {
-    for (const input of ["hello", "/playbooks list", "/skillz", "look /playbooks", "/", "//playbooks"]) {
+  it("applies registry matching semantics: line-start /name, args allowed, unknown commands get suggestions", () => {
+    // Not a command (does not start with '/'): still goes to the model.
+    for (const input of ["hello", "look /playbooks"]) {
       assert.equal(resolveLocalCommandReply(input, () => []), null, `expected null for ${JSON.stringify(input)}`);
     }
+    // Unknown commands (including a bare '/') reply locally with suggestions.
+    for (const input of ["/", "/skillz", "//playbooks"]) {
+      const reply = resolveLocalCommandReply(input, () => []);
+      assert.ok(reply?.startsWith("未知命令"), `expected unknown-command reply for ${JSON.stringify(input)}`);
+      assert.ok(reply?.includes("/help"), `expected /help hint for ${JSON.stringify(input)}`);
+    }
+    assert.match(resolveLocalCommandReply("/skillz", () => []) ?? "", /\/skills/);
+    // Args after the command name are passed through ("/playbooks list" matches /playbooks).
+    const withArgs = resolveLocalCommandReply("/playbooks list", () => [{ id: "x", name: "n", description: "d" }]);
+    assert.match(withArgs ?? "", /^Available Copilot playbooks \(1\):/);
   });
 });
 

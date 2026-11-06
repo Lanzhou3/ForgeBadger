@@ -66,19 +66,24 @@ it('requires claim and exact owner confirmation; hashes tokens and rejects repla
   } finally { f.db.close(); }
 });
 
-it('creates a fresh project-bound route and rolls back duplicate route history', () => {
+it('creates a conversation-only route and uses the conversation project for runs', () => {
   const f = fixture();
   try {
     const identity = f.pair();
-    const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
-    assert.equal(f.service.records.route(route.id)?.projectId, f.project.id);
-    assert.throws(() => f.service.createRoute({ identityId: identity.id, projectId: f.project.id }));
+    const route = f.service.createRoute({ identityId: identity.id });
+    assert.equal('projectId' in route, false);
+    assert.equal(f.db.prepare('SELECT project_id FROM copilot_conversations WHERE id=?').get(route.conversationId)?.project_id, null);
+    assert.throws(() => f.service.createRoute({ identityId: identity.id }));
     assert.equal(f.db.prepare('SELECT count(*) AS n FROM copilot_conversations').get().n, 1);
-    const admitted = f.service.admit(route.id, f.peer, { capability: 'project.update', projectIds: [f.project.id] });
+    const admitted = f.service.admit(route.id, f.peer);
     assert.equal(admitted.actorUserId, f.user.id);
-    assert.throws(() => f.service.admit(route.id, f.peer, { capability: 'project.update', projectIds: ['foreign'] }));
+    const ledger = new CopilotRunLedger(f.db, f.user.id);
+    assert.throws(() => ledger.admit({ userId: f.user.id, conversationId: route.conversationId, userText: 'project required' }, 2), { code: 'COPILOT_CONVERSATION_PROJECT_REQUIRED' });
+    ledger.log.setConversationProject(route.conversationId, f.project.id);
+    const runId = ledger.admit({ userId: f.user.id, conversationId: route.conversationId, userText: 'use conversation project' }, 2);
+    assert.equal(JSON.parse(ledger.get(runId)!.input_json).projectId, f.project.id);
     f.service.revokeRoute(route.id);
-    const replacement = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
+    const replacement = f.service.createRoute({ identityId: identity.id });
     assert.notEqual(replacement.conversationId, route.conversationId);
     assert.throws(() => f.service.admit(route.id, f.peer));
   } finally { f.db.close(); }

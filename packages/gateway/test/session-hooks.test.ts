@@ -413,6 +413,44 @@ describe("Claude Code session hook route", () => {
     assert.equal(shutdownEvents.filter(event => event.type === "session_notification").length, 0);
     assert.equal(eventBus.getSessionWorkState(session.userId, session.id)?.state, "idle");
   });
+
+  for (const [adapter, label] of [["pi", "PI"], ["grok", "Grok"]] as const) {
+    it(`labels adapter-less ${adapter} payloads with the session's own aiTool`, async () => {
+      const user = new UserRepository(db).create("pi-fallback@example.com", "hash");
+      const project = new ProjectRepository(db, user.id).create({
+        name: "PI Fallback Project",
+        path: "/tmp/pi-fallback-project",
+        aiTool: adapter
+      });
+      const session = new SessionRepository(db, user.id).create({
+        projectId: project.id,
+        name: "PI fallback session",
+        aiTool: adapter,
+        workingDir: project.path,
+        attachToken: "pi-fallback-token",
+        runtimeSessionName: "of-pi-fallback-session"
+      });
+
+      // Hooks installed by older Gateway versions never send an adapter field;
+      // the label must come from the session, not a hardcoded default.
+      const eventPromise = waitForEvent(eventBus);
+      const res = handleSessionNotificationHook(
+        db,
+        eventBus,
+        { hook_event_name: "Stop" },
+        "pi-fallback-token",
+        session.id
+      );
+      assert.equal(res.status, 200);
+      const event = await eventPromise;
+      assert.equal(event.type, "session_notification");
+      if (event.type === "session_notification") {
+        assert.equal(event.notificationType, "task_completed");
+        assert.equal(event.adapter, adapter);
+        assert.equal(event.message, `${label} task completed`);
+      }
+    });
+  }
 });
 
 describe("Claude Code session hook route: session identity precedence", () => {

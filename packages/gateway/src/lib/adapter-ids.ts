@@ -17,7 +17,8 @@ export const adapterIds = [
   "codex",
   "kimi",
   "pi",
-  "mcode"
+  "mcode",
+  "grok"
 ] as const;
 
 export type CanonicalAdapterId = (typeof adapterIds)[number];

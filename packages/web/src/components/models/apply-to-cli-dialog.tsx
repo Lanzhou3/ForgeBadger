@@ -8,6 +8,7 @@ import { toast } from "@/lib/toast";
 import { AdapterSelect, ADAPTER_DISCOVERY_QUERY_KEY, chooseDefaultAdapter, isAdapterSelectable } from "@/components/adapter-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -22,17 +23,20 @@ import {
   applyCliConfigToAdapter,
   discoverAdapters,
   getClaudeRoute,
+  isAdapterLaunchable,
   previewCliConfigApply,
   setClaudeRoute,
   type AdapterDiscovery,
   type ClaudeModelSlot,
   type CodexReasoningEffort,
+  type KimiPermissionMode,
   type ModelProfile,
   type ProviderCredentialSummary,
   type ProviderProfile,
   type ProviderSupportedAdapter,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { credentialDisplayName } from "./shared";
 
 const CLAUDE_PRIMARY_SLOTS: Array<{ slot: ClaudeModelSlot; label: string }> = [
   { slot: "opus", label: "Opus" },
@@ -46,6 +50,7 @@ const CLAUDE_ADVANCED_SLOTS: Array<{ slot: ClaudeModelSlot; label: string }> = [
 ];
 
 const CODEX_REASONING_EFFORTS: CodexReasoningEffort[] = ["minimal", "low", "medium", "high"];
+const KIMI_PERMISSION_MODES: KimiPermissionMode[] = ["manual", "yolo", "auto"];
 const EMPTY_ADAPTERS: AdapterDiscovery[] = [];
 
 interface ApplyToCliDialogProps {
@@ -67,15 +72,22 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
   const defaultModel = activeModels.find((model) => model.isDefault) ?? activeModels[0];
 
   const [adapter, setAdapter] = useState<ProviderSupportedAdapter | "">(targets[0] ?? "");
-  // Prefer a native Anthropic endpoint, including legacy Anthropic baseUrl.
-  // Only providers without one need protocol translation through the Gateway.
-  const needsRoute = adapter === "claude" && !provider.anthropicBaseUrl && provider.apiFormat !== "anthropic";
-  const routeSupported = needsRoute && (provider.apiFormat === "openai-responses" || provider.apiFormat === "openai-compatible");
-  const routeUnsupported = needsRoute && !routeSupported;
+  // Providers with only an OpenAI endpoint cannot speak the Anthropic protocol
+  // directly, so Claude Code must connect through the Gateway route. Providers
+  // with an Anthropic endpoint (apiFormat "anthropic" or an explicit
+  // anthropicBaseUrl) can connect directly, but may optionally be routed for
+  // the Gateway's retry/compatibility layer.
+  const routeRequired = adapter === "claude" && !provider.anthropicBaseUrl && provider.apiFormat !== "anthropic";
+  const routeOptionalSupported = adapter === "claude" && !routeRequired
+    && (provider.apiFormat === "anthropic" || Boolean(provider.anthropicBaseUrl));
+  const routeSupported = routeRequired && (provider.apiFormat === "openai-responses" || provider.apiFormat === "openai-compatible");
+  const routeUnsupported = routeRequired && !routeSupported;
+  const [routeOptional, setRouteOptional] = useState(false);
+  const routeEffective = routeRequired || (routeOptionalSupported && routeOptional);
   const routeQuery = useQuery({
     queryKey: ["claude-route"],
     queryFn: getClaudeRoute,
-    enabled: open && needsRoute,
+    enabled: open && (routeRequired || routeOptionalSupported),
     retry: false,
     staleTime: 30_000,
   });
@@ -85,6 +97,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
   const [credentialId, setCredentialId] = useState("");
   const [modelMapping, setModelMapping] = useState<Partial<Record<ClaudeModelSlot, string>>>({});
   const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort | "">("");
+  const [permissionMode, setPermissionMode] = useState<KimiPermissionMode | "">("");
   const adaptersQuery = useQuery({
     queryKey: ADAPTER_DISCOVERY_QUERY_KEY,
     queryFn: discoverAdapters,
@@ -95,25 +108,40 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
     () => adaptersQuery.data?.adapters ?? EMPTY_ADAPTERS,
     [adaptersQuery.data]
   );
+  // Selected adapter's live detection. Unknown (discovery still loading) is
+  // optimistic, mirroring chooseDefaultAdapter's behavior; a known-missing
+  // CLI blocks the apply even though the value was preset programmatically.
+  const selectedDetection = useMemo(
+    () => (adapter ? detectedAdapters.find((entry) => entry.id === adapter) : undefined),
+    [adapter, detectedAdapters]
+  );
+  const selectedCliMissing = selectedDetection !== undefined && !isAdapterLaunchable(selectedDetection);
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
   // Track the route requirement across renders so the open effect can default
   // the advanced section open when the banner carries a blocking decision.
-  const needsRouteRef = useRef(needsRoute);
-  needsRouteRef.current = needsRoute;
+  const routeRequiredRef = useRef(routeRequired);
+  routeRequiredRef.current = routeRequired;
 
   useEffect(() => {
     if (!open) return;
     // An explicit entry point (CLI status cell) wins; otherwise default to a
     // locally installed, provider-supported CLI when possible, falling back to
     // the first supported CLI so the dialog still renders.
+    const detected = new Map(detectedAdapters.map((adapter) => [adapter.id, adapter]));
+    // The preset entry point (a CLI status cell) must pass the same
+    // selectability check as the default path: preselecting an uninstalled
+    // CLI otherwise leaves a disabled dropdown value the user can confirm
+    // without ever opening the menu.
     const preset = initialAdapter && targets.includes(initialAdapter as ProviderSupportedAdapter)
       ? (initialAdapter as ProviderSupportedAdapter)
       : undefined;
-    const fallback = preset ?? chooseDefaultAdapter(detectedAdapters, targets) ?? targets[0] ?? "";
-    const detected = new Map(detectedAdapters.map((adapter) => [adapter.id, adapter]));
+    const presetDetected = preset ? detected.get(preset) : undefined;
+    const usablePreset =
+      preset && (presetDetected ? isAdapterSelectable(presetDetected, targets) : true) ? preset : undefined;
+    const fallback = usablePreset ?? chooseDefaultAdapter(detectedAdapters, targets) ?? targets[0] ?? "";
     setAdapter((current) =>
-      current !== "" && !preset && targets.includes(current) && (detected.get(current) ? isAdapterSelectable(detected.get(current)!, targets) : true)
+      current !== "" && !usablePreset && targets.includes(current) && (detected.get(current) ? isAdapterSelectable(detected.get(current)!, targets) : true)
         ? current
         : fallback
     );
@@ -121,7 +149,9 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
     setCredentialId(activeCredentials[0]?.id ?? "");
     setModelMapping({});
     setReasoningEffort("");
-    setAdvancedOpen(needsRouteRef.current);
+    setPermissionMode("");
+    setRouteOptional(false);
+    setAdvancedOpen(routeRequiredRef.current);
     setPreviewExpanded(false);
   }, [open, targets, defaultModel?.id, activeCredentials, detectedAdapters, initialAdapter]);
 
@@ -137,12 +167,13 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
         ...(credentialId ? { credentialId } : {}),
         ...(adapter === "claude" && Object.keys(mapping).length > 0 ? { modelMapping: mapping } : {}),
         ...(adapter === "codex" && reasoningEffort ? { reasoningEffort } : {}),
+        ...(adapter === "kimi" && permissionMode ? { permissionMode } : {}),
         // Preview the routed document (Gateway URL + masked token) so the diff
         // matches what "enable route and apply" will write.
-        ...(needsRoute ? { routeThroughGateway: true } : {}),
+        ...(routeEffective ? { routeThroughGateway: true } : {}),
       };
     },
-    [adapter, credentialId, modelMapping, modelProfileId, needsRoute, provider.id, reasoningEffort]
+    [adapter, credentialId, modelMapping, modelProfileId, permissionMode, routeEffective, provider.id, reasoningEffort]
   );
 
   // The change summary is pulled lazily: only while the section is expanded,
@@ -172,13 +203,17 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
   const applyMutation = useMutation({
     mutationFn: async () => {
       if (!adapter) throw new Error("No CLI selected");
+      // Defense in depth behind the disabled button: never fire an apply for
+      // a CLI the live detection says is missing.
+      const detection = detectedAdapters.find((entry) => entry.id === adapter);
+      if (detection && !isAdapterLaunchable(detection)) throw new Error(t("models.applyToCliCliMissing"));
       // One-tap path: enable the route first, then apply through it.
-      if (needsRoute && !routeEnabled) {
+      if (routeEffective && !routeEnabled) {
         await setClaudeRoute(true);
       }
       return applyCliConfigToAdapter(adapter, {
         ...previewInput,
-        ...(needsRoute ? { routeThroughGateway: true } : {}),
+        ...(routeEffective ? { routeThroughGateway: true } : {}),
       });
     },
     onSuccess: async (result) => {
@@ -263,7 +298,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
             >
               <option value="">{t("models.applyToCliNoCredential")}</option>
               {activeCredentials.map((credential) => (
-                <option key={credential.id} value={credential.id}>{credential.label ?? t("models.unnamedCredential")}</option>
+                <option key={credential.id} value={credential.id}>{credentialDisplayName(credential, t("models.apiKey"))}</option>
               ))}
             </select>
           </div>
@@ -275,7 +310,7 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
           </p>
         )}
 
-        {(adapter === "claude" || adapter === "codex" || needsRoute) && (
+        {(adapter === "claude" || adapter === "codex" || adapter === "kimi" || routeRequired) && (
           <div className="rounded-md border border-border/70">
             <button
               type="button"
@@ -334,6 +369,49 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
                       ))}
                     </select>
                   </div>
+                )}
+
+                {adapter === "kimi" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="apply-cli-permission-mode">{t("models.kimiDefaultPermissionMode")}</Label>
+                    <select
+                      id="apply-cli-permission-mode"
+                      aria-label={t("models.kimiDefaultPermissionMode")}
+                      className="h-9 w-full rounded-md border bg-background px-3 text-sm md:max-w-xs"
+                      value={permissionMode}
+                      onChange={(event) => setPermissionMode(event.target.value as KimiPermissionMode | "")}
+                    >
+                      <option value="">{t("models.kimiPermissionKeepCurrent")}</option>
+                      {KIMI_PERMISSION_MODES.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {mode === "manual"
+                            ? t("models.kimiPermissionManual")
+                            : mode === "yolo"
+                              ? t("models.kimiPermissionYolo")
+                              : t("models.kimiPermissionAuto")}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {adapter === "claude" && routeOptionalSupported && (
+                  <label className="flex items-start gap-2 rounded-md border border-border/70 px-3 py-2">
+                    <Checkbox
+                      id="apply-cli-route-optional"
+                      aria-label={t("models.claudeRouteOptional")}
+                      checked={routeOptional}
+                      onCheckedChange={(value) => setRouteOptional(value === true)}
+                      className="mt-0.5"
+                    />
+                    <span className="text-xs">
+                      <span className="font-medium text-sm">{t("models.claudeRouteOptional")}</span>
+                      <span className="block text-muted-foreground">{t("models.claudeRouteOptionalDescription")}</span>
+                      {routeOptional && !routeEnabled && (
+                        <span className="mt-1 block text-amber-700 dark:text-amber-300">{t("models.claudeRouteWillEnable")}</span>
+                      )}
+                    </span>
+                  </label>
                 )}
 
                 {routeUnsupported && (
@@ -410,6 +488,12 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
           )}
         </div>
 
+        {selectedCliMissing && (
+          <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive" data-testid="apply-cli-missing">
+            {t("models.applyToCliCliMissing")}
+          </p>
+        )}
+
         <DialogFooter>
           <Button type="button" variant="outline" disabled={applyMutation.isPending} onClick={() => onOpenChange(false)}>
             {t("common.cancel")}
@@ -421,16 +505,17 @@ export function ApplyToCliDialog({ provider, models, credentials, open, initialA
               applyMutation.isPending ||
               routeUnsupported ||
               codexWireApiBlocked ||
-              (needsRoute && routeQuery.isLoading)
+              selectedCliMissing ||
+              (routeEffective && routeQuery.isLoading)
             }
             onClick={() => applyMutation.mutate()}
           >
             <ShieldCheck className="size-4" />
             {applyMutation.isPending
               ? t("models.applyingToCli")
-              : routeEnabled && needsRoute
+              : routeEnabled && routeEffective
                 ? t("models.claudeRouteApply")
-                : needsRoute
+                : routeEffective
                   ? t("models.claudeRouteEnableAndApply")
                   : t("models.applyConfig")}
           </Button>

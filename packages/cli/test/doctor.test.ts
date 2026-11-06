@@ -268,7 +268,7 @@ describe("runDoctor", () => {
     assert.match(stdout.text, /ok better-sqlite3\n/);
     assert.match(stdout.text, /ok claude claude 1\.2\.3\n/);
     assert.match(stdout.text, /optional-missing opencode - not found\n/);
-    assert.match(stdout.text, / {2}install: npm install -g opencode-ai\n/);
+    assert.match(stdout.text, / {2}install: npm install -g @opencode\/cli --ignore-scripts=false --include=optional --allow-scripts=@opencode\/cli\n/);
     assert.match(stdout.text, /optional-missing codegraph - not found\n/);
     assert.match(stdout.text, / {2}install: npm install -g @colbymchenry\/codegraph\n/);
     assert.doesNotMatch(stdout.text, /No supported AI CLI found/);

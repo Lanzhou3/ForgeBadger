@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -54,6 +54,28 @@ describe("createLaunchPlan TERM_PROGRAM", () => {
         assert.equal("TERM_PROGRAM" in plan.env, false, `adapter ${adapter} must not get TERM_PROGRAM`);
       }
     });
+  });
+});
+
+describe("createLaunchPlan GROK_HOME", () => {
+  it("pins the current config directory even when a daemon has an older environment", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "forgebadger-grok-launch-"));
+    await withEnv({ GROK_HOME: root }, async () => {
+      const plan = createLaunchPlan({ adapter: "grok", projectRoot: root, sessionId: "grok-1" });
+      assert.equal(plan.env.GROK_HOME, root);
+      const terminalEnv = { GROK_HOME: "/old/daemon/config", ...plan.env };
+      assert.equal(terminalEnv.GROK_HOME, root);
+      assert.deepEqual(plan.secretEnvNames, []);
+    });
+  });
+
+  it("pins the default directory when the host override is blank or missing", async () => {
+    for (const value of [undefined, "   "]) {
+      await withEnv({ GROK_HOME: value }, async () => {
+        const plan = createLaunchPlan({ adapter: "grok", projectRoot: tmpdir(), sessionId: "grok-1" });
+        assert.equal(plan.env.GROK_HOME, path.join(homedir(), ".grok"));
+      });
+    }
   });
 });
 

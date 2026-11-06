@@ -3,7 +3,7 @@
  * state (OAuth / subscription) and subscription quota. opencode and pi are
  * reserved for a later phase — they have no native account/quota surface yet.
  */
-export type CliAccountAdapter = "claude" | "codex" | "kimi" | "mcode";
+export type CliAccountAdapter = "claude" | "codex" | "kimi" | "mcode" | "grok";
 
 /**
  * `custom_endpoint` (claude): the effective global config points
@@ -33,6 +33,7 @@ export type CliQuotaUnsupportedReason =
   | "no_native_login"
   | "api_key_mode"
   | "token_expired"
+  | "setup_token_scope"
   | "upstream_error";
 
 export interface CliQuotaEntry {

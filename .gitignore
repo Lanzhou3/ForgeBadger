@@ -13,6 +13,7 @@ dist/
 .github/
 coverage/
 *.tsbuildinfo
+*.log
 package-lock.json
 playwright-report/
 test-results/
@@ -66,6 +67,8 @@ docs/adr/*
 !docs/superpowers/specs/
 docs/superpowers/specs/*
 !docs/superpowers/specs/2026-08-13-portfolio-operations-architecture.md
+!docs/superpowers/specs/2026-11-01-companion-relay-design.md
+!docs/superpowers/specs/2026-11-01-companion-relay-threat-model.md
 !docs/superpowers/plans/
 docs/superpowers/plans/*
 !docs/superpowers/plans/2026-08-13-portfolio-operations-clean-break.md
@@ -114,6 +117,12 @@ packages/gateway/pty-attach-e2e.mts
 # Local scratch / one-off debug scripts kept in the workspace but never shipped.
 packages/gateway/scratch-*.ts
 
+# One-off local port-fix debug scripts (never tracked).
+logs/portfix*.ps1
+
 !docs/PERSONAL-TEAM-WORKFLOWS.md
 !docs/adr/0002-personal-team-delivery.md
 !docs/COPILOT-AUTONOMY-REVIEW.md
+
+# Local video production workspace (assets, audio, renders) — never shipped.
+/video/

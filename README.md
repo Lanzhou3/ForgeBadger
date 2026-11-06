@@ -14,7 +14,7 @@
 
 [简体中文](docs/README.zh-CN.md) · [繁體中文](docs/README.zh-TW.md)
 
-**Claude Code · Codex · OpenCode · Kimi Code · Pi · MiniMax Code**
+**Claude Code · Codex · OpenCode · Kimi Code · Pi · MiniMax Code · Grok**
 
 ForgeBadger is a local workspace for your AI coding CLIs. Manage projects and
 terminals, get help from Copilot, and connect your own agents through MCP.
@@ -86,6 +86,7 @@ build toolchain when a compatible prebuilt binary is unavailable.
 | Kimi Code | `kimi` |
 | Pi | `pi` |
 | MiniMax Code | `mcode` |
+| Grok | `grok` |
 
 Sessions use each CLI's existing host configuration and credentials. Model Center
 changes are explicit: applying a provider writes that CLI's user-level config;

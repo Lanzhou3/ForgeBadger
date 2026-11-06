@@ -219,7 +219,7 @@ export function createAgentLlmClient(input: {
   }
 
   /** Fold a message list into a concise summary (non-streaming; used for context compression). */
-  async function summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal; onUsage?: (usage: import("./llm-response.js").LlmUsage | undefined) => void }): Promise<string> {
+  async function summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal }): Promise<string> {
     let text = "";
     const response = await streamInternal({
       messages: input.messages.map(withoutPrivateReplay),
@@ -231,7 +231,6 @@ export function createAgentLlmClient(input: {
         if (event.type === "text_delta") text += event.text ?? "";
       }
     }, false);
-    input.onUsage?.(response.usage);
     return text.trim();
   }
 
@@ -242,7 +241,7 @@ export function createAgentLlmClient(input: {
    * the model returned nothing usable. Never throws — failures fall through to
    * the empty result and the conversation keeps its null title.
    */
-  async function generateTitle(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal; onUsage?: (usage: import("./llm-response.js").LlmUsage | undefined) => void }): Promise<string> {
+  async function generateTitle(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<string> {
     let text = "";
     const response = await streamInternal({
       messages: [
@@ -257,7 +256,6 @@ export function createAgentLlmClient(input: {
         if (event.type === "text_delta") text += event.text ?? "";
       }
     }, false);
-    input.onUsage?.(response.usage);
     return sanitizeTitle(text);
   }
 
@@ -266,7 +264,7 @@ export function createAgentLlmClient(input: {
    * array on parse failure or an unusable model response — curation is always
    * best-effort and never throws.
    */
-  async function proposeMemory(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal; onUsage?: (usage: import("./llm-response.js").LlmUsage | undefined) => void }): Promise<Array<{
+  async function proposeMemory(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<Array<{
     kind: "fact" | "preference" | "decision" | "project_note";
     scope: "global" | "project" | "session";
     text: string;
@@ -286,7 +284,6 @@ export function createAgentLlmClient(input: {
         if (event.type === "text_delta") text += event.text ?? "";
       }
     }, false);
-    input.onUsage?.(response.usage);
     return parseMemoryProposals(text);
   }
 

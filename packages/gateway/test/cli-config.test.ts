@@ -461,12 +461,25 @@ describe("cli-config service", () => {
       assert.equal(doc.env.ANTHROPIC_BASE_URL, "https://api.anthropic.com");
     });
 
-    it("patches kimi default_model", async () => {
+    it("patches kimi default model and permission mode", async () => {
       const root = await useConfigRoot("KIMI_CODE_HOME", "forgebadger-fields-kimi-patch-");
-      const snapshot = await applyCliConfigFieldPatch("kimi", { defaultModel: "moonshot/kimi-k2.5" });
+      const snapshot = await applyCliConfigFieldPatch("kimi", {
+        defaultModel: "moonshot/kimi-k2.5",
+        defaultPermissionMode: "yolo"
+      });
 
       assert.equal(snapshot.defaultModel, "moonshot/kimi-k2.5");
-      assert.match(await readFile(path.join(root, "config.toml"), "utf8"), /default_model = /);
+      const raw = await readFile(path.join(root, "config.toml"), "utf8");
+      assert.match(raw, /default_model = /);
+      assert.match(raw, /default_permission_mode = "yolo"/);
+      assert.equal((await readCliConfigFieldValues("kimi")).defaultPermissionMode, "yolo");
+
+      await applyCliConfigFieldPatch("kimi", { defaultPermissionMode: null });
+      assert.doesNotMatch(await readFile(path.join(root, "config.toml"), "utf8"), /default_permission_mode/);
+      await assert.rejects(
+        applyCliConfigFieldPatch("kimi", { defaultPermissionMode: "ask-when-needed" }),
+        /defaultPermissionMode must be one of: manual, yolo, auto/
+      );
     });
 
     it("writes secret field values while reads report presence only", async () => {

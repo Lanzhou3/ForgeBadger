@@ -1,0 +1,23 @@
+{
+  "name": "@forgebadger/relay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test --import tsx",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node ../../scripts/run-with-root-env.mjs node dist/src/index.js",
+    "dev": "node ../../scripts/run-with-root-env.mjs tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

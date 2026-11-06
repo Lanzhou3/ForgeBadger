@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getUser,
@@ -17,8 +18,14 @@ import {
 
 export function useAuth() {
   const queryClient = useQueryClient();
+  // The placeholder below must only apply after hydration: the server render
+  // has no localStorage (no token, no cached user), so applying it on the
+  // first client render would diverge from the server HTML and trip React's
+  // hydration-mismatch recovery.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
-  const { data: user, isLoading } = useQuery({
+  const { data: user, isLoading, isFetching } = useQuery({
     queryKey: ["auth", "me"],
     queryFn: async () => {
       if (!isAuthenticated()) return null;
@@ -40,6 +47,13 @@ export function useAuth() {
       doLogout();
       return null;
     },
+    // Paint the console instantly with the locally cached user while the
+    // server validation above runs in the background. placeholderData never
+    // lands in the cache and the queryFn still runs, so an expired token is
+    // still rejected on the same pass (user flips to null and the layout
+    // redirects to /login). Without a cached user there is no placeholder and
+    // the loading gate behaves as before.
+    placeholderData: () => (mounted && isAuthenticated() ? (getUser() ?? undefined) : undefined),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -78,6 +92,7 @@ export function useAuth() {
   return {
     user,
     isLoading,
+    isFetching,
     isAuthenticated: !!user,
     login: loginMutation.mutateAsync,
     register: registerMutation.mutateAsync,

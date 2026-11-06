@@ -46,7 +46,18 @@ function fixture(folder=migrationsFolder) {
   const issued = service.createPairing({ channel: 'feishu', accountId: account.id });
   const claimed = service.claimPairing(issued.token, peer);
   const identity = service.confirmPairing(claimed.id, { revision: claimed.revision, externalUserId: 'sender', chatId: 'chat' });
-  const route = service.createRoute({ identityId: identity.id, projectId: project.id });
+  const route = folder === migrationsFolder
+    ? service.createRoute({ identityId: identity.id, projectId: project.id })
+    : (() => {
+      const now = Date.now();
+      db.prepare("INSERT INTO copilot_conversations(id,user_id,title,status,channel_owned,created_at,updated_at) VALUES (?,?,?,?,?,?,?)")
+        .run('legacy-conversation',user.id,'Legacy','active',1,now,now);
+      db.prepare("INSERT INTO channel_routes(id,user_id,identity_id,project_id,conversation_id,created_at) VALUES (?,?,?,?,?,?)")
+        .run('legacy-route',user.id,identity.id,project.id,'legacy-conversation',now);
+      db.prepare("INSERT INTO channel_route_sessions(user_id,route_id,chat_type,chat_id,thread_id,conversation_id) VALUES (?,?,?,?,?,?)")
+        .run(user.id,'legacy-route','p2p',peer.chatId,'','legacy-conversation');
+      return service.records.route('legacy-route')!;
+    })();
   const inbox = new NativeChannelInbox(db, user.id, key);
   const receive = () => inbox.receive(peer, { eventId: 'event', messageId: 'original', text: 'hello' });
   let sequence = 0;
@@ -244,7 +255,8 @@ it('Telegram uses the shared durable control path with its own paired account an
     const issued=f.service.createPairing({channel:'telegram',accountId:account.id});
     const claim=f.service.claimPairing(issued.token,peer);
     const identity=f.service.confirmPairing(claim.id,{revision:claim.revision,externalUserId:'123',chatId:'123'});
-    f.service.createRoute({identityId:identity.id,projectId:f.route.projectId});
+    const projectId=f.db.prepare('SELECT project_id FROM copilot_conversations WHERE id=?').get(f.route.conversationId)?.project_id as string;
+    f.service.createRoute({identityId:identity.id,projectId});
     const ingress=createTelegramNativeIngress({db:f.db,userId:f.user.id,masterKey:f.key,accountId:account.id,accountRevision:account.configRevision});
     const event=normalizeTelegramUpdate({update_id:10,message:{message_id:10,message_thread_id:42,text:'/new@fixture_bot',from:{id:123},chat:{id:-100,type:'supergroup'}}},
       {id:999,username:'fixture_bot',firstName:'Fixture'});
@@ -252,6 +264,28 @@ it('Telegram uses the shared durable control path with its own paired account an
     const replies=await f.deliver();assert.equal(replies.length,1);assert.match(replies[0]!,/已开始新对话/);
     assert.equal(f.service.admit(f.route.id,f.peer).conversationId,f.route.conversationId);
     assert.equal(f.inbox.adoptNext().status,'idle');
+  }finally{f.db.close();}
+});
+
+it('switches the shared conversation project with /project and preserves it across /new',async()=>{
+  const f=fixture();
+  try {
+    const firstId=f.db.prepare('SELECT project_id FROM copilot_conversations WHERE id=?').get(f.route.conversationId)?.project_id as string;
+    const second=new ProjectRepository(f.db,f.user.id).create({name:'second',path:'/private/tmp/second-project',aiTool:'claude'});
+    f.command('/project');
+    let replies=await f.deliver();
+    assert.match(replies[0]!,new RegExp(second.id));
+    f.command(`/project ${second.id}`);
+    replies=await f.deliver();assert.match(replies[0]!,/second/);
+    f.receive();const runId=adopted(f);
+    const ledger=new CopilotRunLedger(f.db,f.user.id);
+    assert.equal(JSON.parse(ledger.get(runId)!.input_json).projectId,second.id);
+    f.command(`/project ${firstId}`);
+    replies=await f.deliver();assert.match(replies[0]!,/仍有任务/);
+    assert.equal(ledger.log.getConversation(f.route.conversationId)?.project_id,second.id);
+    f.command('/stop');await f.deliver();f.command('/new');await f.deliver();
+    const next=f.service.admit(f.route.id,f.peer).conversationId;
+    assert.equal(ledger.log.getConversation(next)?.project_id,second.id);
   }finally{f.db.close();}
 });
 
@@ -263,6 +297,7 @@ it('migration backfills adopted inputs and legacy queued scope is stopped before
   for(const entry of journal.entries)cpSync(join(migrationsFolder,entry.tag+'.sql'),join(directory,entry.tag+'.sql'));
   writeFileSync(join(directory,'meta/_journal.json'),JSON.stringify(journal));
   const f=fixture(directory);
+  const recentDirectory=mkdtempSync(join(tmpdir(),'fb-command-recent-'));
   try {
     const ledger=new CopilotRunLedger(f.db,f.user.id);
     // Seed historical rows without invoking runtime authority checks against an old schema.
@@ -274,14 +309,39 @@ it('migration backfills adopted inputs and legacy queued scope is stopped before
       f.db.prepare('INSERT INTO channel_messages(id,user_id,route_id,account_id,event_id,message_id,payload_encrypted,payload_digest,status,run_id,created_at,chat_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(id,f.user.id,f.route.id,f.account.id,id,id,payload,'fixture',status,run,Date.now(),f.peer.chatId);
     }
+    mkdirSync(join(recentDirectory,'meta'));
+    const recentJournal=JSON.parse(readFileSync(join(migrationsFolder,'meta/_journal.json'),'utf8')) as {entries:{tag:string}[]};
+    recentJournal.entries=recentJournal.entries.filter(e=>Number.parseInt(e.tag,10)<147);
+    for(const entry of recentJournal.entries)cpSync(join(migrationsFolder,entry.tag+'.sql'),join(recentDirectory,entry.tag+'.sql'));
+    writeFileSync(join(recentDirectory,'meta/_journal.json'),JSON.stringify(recentJournal));
+    migrate(drizzle(f.db),{migrationsFolder:recentDirectory});
+    f.db.prepare("UPDATE channel_route_sessions SET model_profile_id='private-model' WHERE route_id=? AND chat_type='p2p'").run(f.route.id);
+    for(const [conversationId,chatType,chatId,threadId,modelId] of [
+      ['group-conversation','group','group-chat','','group-model'],
+      ['topic-conversation','group','group-chat','topic-1','topic-model']
+    ] as const) {
+      f.db.prepare("INSERT INTO copilot_conversations(id,user_id,title,status,channel_owned,created_at,updated_at) VALUES (?,?,?,?,?,?,?)")
+        .run(conversationId,f.user.id,conversationId,'active',1,Date.now(),Date.now());
+      f.db.prepare("INSERT INTO channel_route_sessions(user_id,route_id,chat_type,chat_id,thread_id,conversation_id,model_profile_id) VALUES (?,?,?,?,?,?,?)")
+        .run(f.user.id,f.route.id,chatType,chatId,threadId,conversationId,modelId);
+    }
+    const projectId=f.db.prepare('SELECT project_id FROM channel_routes WHERE id=?').get(f.route.id)?.project_id;
     migrate(drizzle(f.db),{migrationsFolder});
+    assert.equal(ledger.log.getConversation(f.route.conversationId)?.project_id,projectId);
+    for(const conversationId of ['group-conversation','topic-conversation'])
+      assert.equal(ledger.log.getConversation(conversationId)?.project_id,projectId);
+    const sessionModels=Object.fromEntries((f.db.prepare('SELECT conversation_id,model_profile_id FROM channel_route_sessions').all() as {conversation_id:string;model_profile_id:string}[])
+      .map(row=>[row.conversation_id,row.model_profile_id]));
+    assert.deepEqual(sessionModels,{[f.route.conversationId]:'private-model','group-conversation':'group-model','topic-conversation':'topic-model'});
+    assert.equal(f.db.prepare("SELECT 1 FROM pragma_table_info('channel_routes') WHERE name='project_id'").get(),undefined);
     assert.equal(f.inbox.messages.get('old-adopted')?.conversation_id,f.route.conversationId);
     f.command('/new');assert.equal(f.service.admit(f.route.id,f.peer).conversationId,f.route.conversationId);
     f.command('/stop');assert.equal(f.inbox.messages.get('old-pending')?.status,'rejected');
     await f.deliver();f.command('/new');assert.notEqual(f.service.admit(f.route.id,f.peer).conversationId,f.route.conversationId);
     assert.equal(f.inbox.adoptNext().status,'idle');
-    assert.deepEqual(f.db.prepare('PRAGMA foreign_key_check').all(),[]);
-  }finally{f.db.close();rmSync(directory,{recursive:true,force:true});}
+    const foreignKeyErrors=f.db.prepare('PRAGMA foreign_key_check').all();
+    assert.deepEqual(foreignKeyErrors,[],JSON.stringify(foreignKeyErrors));
+  }finally{f.db.close();rmSync(directory,{recursive:true,force:true});rmSync(recentDirectory,{recursive:true,force:true});}
 });
 
 it('fixed conversation binding rejects stale pending input instead of moving it to a new conversation',()=>{

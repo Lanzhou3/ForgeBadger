@@ -11,6 +11,9 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { createGatewayApp } from "../src/server.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
+import { isolateLocalSkillSources } from "./helpers/local-skill-sources.js";
+
+isolateLocalSkillSources();
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";

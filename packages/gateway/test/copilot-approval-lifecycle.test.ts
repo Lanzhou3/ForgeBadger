@@ -185,20 +185,21 @@ it('writes current session memory through the real orchestrator without project 
   } finally { f.db.close(); }
 });
 
-it('gives research started after approval the parent remaining execution budget', async t => {
+it('research started after a long approval wait still runs to completion', async t => {
   const f = fixture(false, true);
   try {
     const runId = await f.run();
     const { action } = awaiting(f, runId);
+    // A 35-minute approval pause used to exhaust the 30-minute run budget;
+    // with budgets removed it must not block the post-approval research.
     const delayedNow = Date.now() + 35 * 60_000;
     t.mock.method(Date, 'now', () => delayedNow);
     await f.runtime().resumeAfterApproval({ userId: f.userId, runId, actionId: action.id,
       approved: true, decisionOrigin: 'web' });
-    const child = f.db.prepare(`SELECT r.status,r.max_duration_ms FROM copilot_research_jobs j
+    const child = f.db.prepare(`SELECT r.status FROM copilot_research_jobs j
       JOIN copilot_runs r ON r.user_id=j.user_id AND r.id=j.child_run_id
-      WHERE j.user_id=? AND j.origin_run_id=?`).get(f.userId, runId) as { status: string; max_duration_ms: number };
+      WHERE j.user_id=? AND j.origin_run_id=?`).get(f.userId, runId) as { status: string };
     assert.ok(child);
-    assert.equal(child.max_duration_ms, 300_000);
     assert.equal(child.status, 'completed');
     assert.equal(f.ledger.get(runId)?.status, 'completed');
   } finally { t.mock.restoreAll(); f.db.close(); }

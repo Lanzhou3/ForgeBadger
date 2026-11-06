@@ -44,11 +44,11 @@ export interface AgentLlmClient {
     onEvent: (event: AgentLlmStreamEvent) => void;
   }): Promise<import("./llm-response.js").LlmResult>;
   /** Fold a message list into a concise summary (context compression). */
-  summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal; onUsage?: (usage: import("./llm-response.js").LlmUsage | undefined) => void }): Promise<string>;
+  summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal }): Promise<string>;
   /** Generate a short conversation title from the first user/assistant exchange. */
-  generateTitle(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal; onUsage?: (usage: import("./llm-response.js").LlmUsage | undefined) => void }): Promise<string>;
+  generateTitle(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<string>;
   /** Propose durable memory entries from a completed turn (memory curation). */
-  proposeMemory(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal; onUsage?: (usage: import("./llm-response.js").LlmUsage | undefined) => void }): Promise<Array<{
+  proposeMemory(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<Array<{
     kind: "fact" | "preference" | "decision" | "project_note";
     scope: "global" | "project" | "session";
     text: string;

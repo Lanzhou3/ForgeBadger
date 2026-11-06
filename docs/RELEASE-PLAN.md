@@ -345,6 +345,97 @@ to move a dist-tag back; do not unpublish as an automatic rollback.
 - The candidate's full-regression and physical-platform/live-host limitations
   above still apply. Install explicitly with `npm install -g forgebadger@beta`.
 
+### 2026-11-01 candidate: 0.2.0-beta.1
+
+- Source baseline: `295c9e1693e9d153ed44cc760543dd8bff3d40c5`. The candidate
+  commit adds this version and record. Target channel: `beta`; previous source
+  candidate: `0.2.0-beta.0`. This source review does not publish a package or
+  change npm dist-tags. After publication, install the prerelease with
+  `npm install -g forgebadger@beta`; publishing must leave `latest` unchanged.
+- Changes since `0.2.0-beta.0`:
+  - Telegram private-chat notifications share the Feishu delivery queue and
+    redacted plain-text body. The subscription, private-chat target, and sender
+    are independent. Group delivery and in-message approval actions are absent.
+  - Grok CLI sessions, global model configuration, account quota observation,
+    and Model Center display. Launch passes `GROK_HOME` so the Session Server
+    uses the same config directory.
+  - Copilot goal mode across runs: sandbox or git worktree, grants,
+    coding sub-runs, CLI dispatch, slash commands, and Project Manager board
+    linkage. The console adds the goal panel, a modernized chat page, and a
+    refreshed pet panel. Per-run budget limits and model-call metering have
+    been removed.
+  - OpenCode install detection and `doctor` hints use the `@opencode/cli`
+    package, with npm 12 flags that allow the platform-binary postinstall. The
+    launched command remains `opencode`. OpenCode 2.x notification lifecycle is
+    included.
+  - Claude subscription-quota credential parsing and Claude context-window
+    configuration migration. Console defaults that pointed the browser at the
+    Web port now use Gateway port `18332`. An unreachable Gateway message
+    includes that address.
+  - Session and runtime fixes: PTY silence no longer leaves a session stuck in
+    `working`; hook messages without an adapter field use the session's own
+    tool; Windows `PATH` lookup is case-insensitive; Linux session-stop identity
+    observation and Git status index races are handled; the project Git cache
+    is bounded and expired entries are removed.
+  - Usage statistics no longer race the sync write. Historical Copilot repair
+    authorization can be revoked. The Copilot composer interaction is tighter.
+  - Layout: a narrower sidebar, session tabs that drag from the whole tab, and
+    a shorter Claude context-window setting.
+  - CLI install/update operations run concurrently for different adapters and
+    serialize per adapter across users. MiniMax's non-interactive update uses
+    its official npm command; the browser waits for its five-minute deadline
+    plus cleanup and response time.
+  - The session board can clear stopped and lost sessions across projects and
+    filters. The Gateway rechecks status under the lifecycle lock and refuses
+    to delete a runtime whose leader is still running. Partial failures keep
+    their session records and tabs.
+  - Applying a provider requires the target CLI to be installed, with matching
+    API validation and Model Center availability checks. The MCP endpoint also
+    validates Origin and exposes current authentication and tool metadata.
+- Compatibility: existing databases migrate forward, including the Telegram
+  notification tables. Telegram delivery and goal execution stay off until the
+  owner enables them. Persisted Gateway ports are unchanged. OpenCode installs
+  use `@opencode/cli`. The default npm installation remains on the existing
+  `latest` channel.
+- Evidence (2026-11-01, macOS arm64, Node.js 24.16.0, pnpm 12.6.0):
+  - Focused regression: 107 Gateway tests covering adapter updates/routes,
+    discovery, session deletion, runtime confirmation, manager recovery and
+    daemon lifecycle; 92 Web tests covering sessions, settings and API calls;
+    56 root script tests covering release, package and document contracts.
+  - `pnpm -r typecheck`, `pnpm build:npm`, `pnpm verify:npm`,
+    `pnpm evidence:gates-validate`, `pnpm trial:intake-validate`,
+    `pnpm validate:brand`, and whitespace checks passed.
+  - `pnpm smoke:npm` passed outside the restricted execution sandbox,
+    including packed-tarball installation, doctor, service startup, auth,
+    project import and real daemon PTY spawn/input/output/stop. The initial
+    sandbox run failed at stop confirmation with `SESSION_STOP_UNCONFIRMED`;
+    the normal host rerun passed.
+  - Playwright against the production build at `127.0.0.1:18343` passed at
+    1440x1000 and 390x844 using mocked Gateway APIs: seven stopped sessions
+    were processed with at most five concurrent deletes, one failed record
+    and its tab were retained, and the running session was untouched. Two CLI
+    updates could run together while a third remained available. No browser
+    application errors were observed in the final run.
+- Known limitations carried forward: physical Windows/ConPTY, WSL, and live
+  AI-provider automatic execution remain unverified. This focused review does
+  not rerun the full workspace test suite or clear earlier release caveats.
+
+### 2026-11-07 candidate refresh: 0.2.0-beta.1
+
+- Source baseline: `c17a10fbdcdc07b2cb1185e619363f7136db2f2f` on `dev`.
+  Publish from the merged `master` candidate on the `beta` channel.
+- Added ordered Claude Route failover, retry handling, and circuit breaking.
+  Updated MCP tool annotations and the Model Center's API key and applied
+  provider controls.
+- Added encrypted Companion pairing and sync, typed Goal and approval
+  commands, and the optional Relay service. The npm CLI bundles the Gateway
+  and Web runtime. Companion and Relay run separately.
+- Copilot conversations retain their project context and channel bindings
+  through database upgrades. The dashboard, session board, and auth screens
+  have updated layouts and motion.
+- The npm build bundles the Web workspace's complete React and React DOM
+  packages so the standalone server can start in a multi-version workspace.
+
 ## 7. Release Acceptance
 
 A release candidate is acceptable only when:

@@ -1,12 +1,16 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
+import { gsap, useGSAP } from "@/lib/gsap-motion";
 import { useLanguage } from "@/hooks/use-language";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { brandAssets } from "@/lib/brand-assets";
 import type { Language, TranslationKey } from "@/lib/i18n";
+
+/** Total entrance stays well under one second, per the auth motion budget. */
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
 const languageOptions: Array<{ code: Language; shortLabel: string; label: string }> = [
   { code: "zh-CN", shortLabel: "简", label: "简体中文" },
@@ -32,22 +36,85 @@ export function AuthShell({
   children
 }: AuthShellProps) {
   const { language, setLanguage, t } = useLanguage();
+  const shellRef = useRef<HTMLElement | null>(null);
+
+  // One short entrance per mount (useGSAP's empty-config effect re-runs after
+  // Strict Mode cleanup, deliberately recreating the reverted entrance);
+  // language switches and re-renders never replay it, and there is no ambient
+  // or parallax motion.
+  useGSAP(
+    () => {
+      if (!shellRef.current || window.matchMedia?.(REDUCED_MOTION)?.matches) {
+        return;
+      }
+      const timeline = gsap.timeline({ defaults: { ease: "power2.out" } });
+      timeline.fromTo(
+        "[data-auth-bg],[data-auth-vignette]",
+        { autoAlpha: 0 },
+        { autoAlpha: 1, duration: 0.5, clearProps: "opacity,visibility" },
+        0
+      );
+      timeline.fromTo(
+        "[data-auth-panel]",
+        { autoAlpha: 0, y: 12 },
+        {
+          autoAlpha: 1,
+          y: 0,
+          duration: 0.4,
+          clearProps: "transform,opacity,visibility",
+        },
+        0.1
+      );
+      timeline.fromTo(
+        "[data-auth-brand]",
+        { autoAlpha: 0, y: 8 },
+        {
+          autoAlpha: 1,
+          y: 0,
+          duration: 0.3,
+          stagger: 0.08,
+          clearProps: "transform,opacity,visibility",
+        },
+        0.25
+      );
+      timeline.fromTo(
+        "[data-auth-heading]",
+        { autoAlpha: 0, y: 6 },
+        {
+          autoAlpha: 1,
+          y: 0,
+          duration: 0.28,
+          clearProps: "transform,opacity,visibility",
+        },
+        0.35
+      );
+    },
+    { scope: shellRef }
+  );
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10">
+    <main
+      ref={shellRef}
+      className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10"
+    >
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-45"
+        data-auth-bg
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-40"
         style={{ backgroundImage: `url(${brandAssets.background})` }}
       />
       <div
         aria-hidden="true"
+        data-auth-vignette
         className="absolute inset-0 bg-[radial-gradient(circle_at_center,hsl(var(--background)/0.22)_0%,hsl(var(--background)/0.72)_48%,hsl(var(--background)/0.96)_100%)]"
       />
-      <section className="forgebadger-animate-in relative z-10 w-full max-w-[420px] rounded-lg border border-border bg-card/85 p-6 text-card-foreground shadow-2xl shadow-black/40 backdrop-blur-md">
+      <section
+        data-auth-panel
+        className="relative z-10 w-full max-w-[420px] rounded-lg border border-border bg-card/85 p-6 text-card-foreground shadow-2xl shadow-black/40 backdrop-blur-md"
+      >
         <div className="mb-6 flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="size-10 shrink-0 overflow-hidden rounded-lg">
+            <div data-auth-brand className="size-10 shrink-0 overflow-hidden rounded-lg">
               <img
                 src={brandAssets.logoSvg}
                 alt=""
@@ -56,7 +123,7 @@ export function AuthShell({
                 draggable={false}
               />
             </div>
-            <div className="min-w-0">
+            <div data-auth-brand className="min-w-0">
               <div className="text-base font-semibold tracking-tight">ForgeBadger</div>
               <p className="text-xs text-muted-foreground">{t("auth.brandTagline")}</p>
             </div>
@@ -86,7 +153,7 @@ export function AuthShell({
             </div>
           ) : null}
         </div>
-        <div className="mb-5">
+        <div data-auth-heading className="mb-5">
           <h1 className="text-xl font-semibold tracking-tight">
             {titleKey ? t(titleKey) : title}
           </h1>

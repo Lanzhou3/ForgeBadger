@@ -16,6 +16,14 @@ export function formatEstimatedUsd(value: number): string {
   return `$${amount.toFixed(2)} est.`;
 }
 
+/** Actual cost with billing-like precision: two decimals at $1+, four
+ * significant digits below $1 (0.123456 -> "$0.1235"). */
+export function formatCostUsd(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "$0.00";
+  if (value >= 1) return `$${value.toFixed(2)}`;
+  return `$${parseFloat(value.toPrecision(4))}`;
+}
+
 /** Compact token count: 1200 -> "1.2k", 2500000 -> "2.5M". */
 export function formatTokens(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0";

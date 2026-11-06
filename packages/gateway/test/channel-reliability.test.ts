@@ -577,7 +577,7 @@ it('diagnostics respect integration emergency stop and do not attribute another 
  const f=fixture();try{
   bound(f);
   const feishu=runChannelDiagnostics(f.db,f.user.id,f.key,'feishu').checks.find(c=>c.key==='route')!;
-  assert.equal(feishu.detail,'尚无渠道授权路由。');
+  assert.equal(feishu.detail,'尚无渠道会话映射。');
   f.telegramAccounts.updateAccountHealth(f.telegramAccount.id,{state:'connected'});
   f.telegramConfig.upsertConfig({emergencyDisabled:true});
   const checks=runChannelDiagnostics(f.db,f.user.id,f.key,'telegram').checks;

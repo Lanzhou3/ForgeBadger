@@ -210,6 +210,7 @@ export function createProjectManagerRoutes(
   router.use('/:projectId/project-manager', (req,res,next)=>{
     try {
       const actor=userIdFor(req),context=projectManagerAccess(db,actor,req.params.projectId!);
+      res.locals.projectManagerContext=context;
       if(req.method!=='GET') {
         assertProjectManagerWrite(db,actor,req.params.projectId!,/^\/(goal|stages)(\/|$)/.test(req.path)||req.path.includes('/dependencies'));
         if(/\/task-packet(?:\/|$)/.test(req.path))assertLegacyTaskExecution(db,req.params.projectId!);
@@ -229,7 +230,9 @@ export function createProjectManagerRoutes(
     }catch(error){if(error instanceof CollaborationError&&error.status===404)return sendProjectNotFound(res);sendMutationError(res,error,'Project access denied');}
   });
   router.get('/:projectId/project-manager/context',(req,res)=>{
-    const c=projectManagerAccess(db,userIdFor(req),req.params.projectId);
+    // Reuse the middleware's access computation instead of paying for the
+    // same repository lookups twice per request.
+    const c=(res.locals.projectManagerContext ?? projectManagerAccess(db,userIdFor(req),req.params.projectId)) as ReturnType<typeof projectManagerAccess>;
     const supported=options.sessionManager?.supportsConfirmedSessionStop()===true;
     res.json({code:0,data:{project:{id:c.project.id,name:c.project.name,description:c.project.description,status:c.project.status},access:{role:c.access.role,capabilities:c.access.capabilities,teamId:c.access.teamId,logicalOwnerId:c.access.logicalOwnerId},privateDetailAllowed:c.privateDetailAllowed,shared:c.shared,revisionRequired:c.revisionRequired,managedExecution:{supported,reason:supported?null:'SESSION_SERVER_UPGRADE_REQUIRED'}},message:''});
   });

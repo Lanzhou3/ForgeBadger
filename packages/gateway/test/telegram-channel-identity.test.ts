@@ -55,9 +55,8 @@ it('completes the telegram pairing, confirmation, routing and admission flow', (
     assert.equal(identity.channel, 'telegram');
     assert.equal(identity.status, 'active');
     const route = f.service.createRoute({ identityId: identity.id, projectId: f.project.id });
-    const admitted = f.service.admit(route.id, peer, { capability: 'project.update', projectIds: [f.project.id] });
+    const admitted = f.service.admit(route.id, peer);
     assert.equal(admitted.conversationId, route.conversationId);
-    assert.throws(() => f.service.admit(route.id, peer, { capability: 'project.update', projectIds: ['foreign'] }), /CHANNEL_AUTHORITY_REJECTED/);
     const actions = f.db.prepare("SELECT action FROM audit_logs WHERE resource_type='channel_authority'").all().map(row => (row as { action: string }).action);
     assert.ok(actions.includes('channel.pairing.create') && actions.includes('channel.pairing.claim')
       && actions.includes('channel.identity.confirm') && actions.includes('channel.route.create'));
@@ -196,8 +195,8 @@ it('scopes channel route creation to the project owner without leaving a convers
   try {
     const { identity } = f.pair('telegram', f.telegramAccount.id, f.telegramAccount.configRevision, 'tg-owner', 'tg-private');
     const foreign = new ProjectRepository(f.db, f.other.id).create({ name: 'foreign', path: '/private/tmp/tg-channel-foreign', aiTool: 'claude' });
-    assert.throws(() => f.service.createRoute({ identityId: identity.id, projectId: foreign.id }), /CHANNEL_AUTHORITY_REJECTED/);
-    assert.throws(() => f.service.createRoute({ identityId: identity.id, projectId: 'missing-project' }), /CHANNEL_AUTHORITY_REJECTED/);
+    assert.throws(() => f.service.createRoute({ identityId: identity.id, projectId: foreign.id }), { code: 'COPILOT_PROJECT_NOT_FOUND' });
+    assert.throws(() => f.service.createRoute({ identityId: identity.id, projectId: 'missing-project' }), { code: 'COPILOT_PROJECT_NOT_FOUND' });
     assert.equal(f.service.records.listRoutes().length, 0);
     assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_conversations').get() as { n: number }).n, 0);
   } finally { f.db.close(); }

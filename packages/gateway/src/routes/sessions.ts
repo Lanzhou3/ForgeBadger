@@ -480,10 +480,25 @@ export function createSessionRoutes(
     // lingering process group, or the signing daemon is gone). The force gate
     // fails closed while the runtime may still be alive.
     const force = req.query.force === "true";
+    const onlyStopped = req.query.onlyStopped === "true";
+    let usedForce = false;
     try {
       await sessionManager.runExclusive(req.params.id, async () => {
-        if (force) {
+        if (onlyStopped) {
+          const current = sessionRepo.getById(req.params.id);
+          const live = sessionManager.getSession(req.params.id);
+          if (!current || !["idle", "stopped", "exited", "completed", "lost"].includes(current.status) ||
+              (live && (live.status === "running" || live.status === "detached"))) {
+            throw new Error("SESSION_NOT_STOPPED");
+          }
+          if (!await sessionManager.isSessionExecutionStopped(userId, current.id, current.runtimeSessionName ?? undefined)) {
+            if (!force) throw new Error("SESSION_RUNTIME_STOP_UNCONFIRMED");
+            await sessionManager.forceStopSession(current.id, current.runtimeSessionName ?? undefined, userId);
+            usedForce = true;
+          }
+        } else if (force) {
           await sessionManager.forceStopSession(req.params.id, dbSession.runtimeSessionName ?? undefined, userId);
+          usedForce = true;
         } else {
           // Stop any still-live runtime session regardless of DB status, so a
           // delete does not leave an orphan when the DB says idle/stopped but the
@@ -497,13 +512,17 @@ export function createSessionRoutes(
         // Keep the row and its durable stop proof on every uncertain outcome.
         db.transaction(() => {
           recordSessionActivity(db, undefined, userId, dbSession,
-            force ? "session_force_deleted" : "session_deleted", "warning",
-            `Session ${dbSession.name} deleted`, force ? { force: true } : undefined);
+            usedForce ? "session_force_deleted" : "session_deleted", "warning",
+            `Session ${dbSession.name} deleted`, usedForce ? { force: true } : undefined);
           sessionRepo.delete(req.params.id);
         })();
         sessionManager.removeSessionOutput(req.params.id);
       });
     } catch (error) {
+      if (onlyStopped && error instanceof Error && error.message === "SESSION_NOT_STOPPED") {
+        res.status(409).json({ code: 1, message: "Session is no longer stopped", details: { code: "SESSION_NOT_STOPPED" } });
+        return;
+      }
       if (force && error instanceof Error && error.message === "SESSION_FORCE_DELETE_NOT_ALLOWED") {
         res.status(409).json({ code: 1, message: "Session runtime is still running or cannot be verified; force delete requires the runtime leader to have exited", details: { code: "SESSION_FORCE_DELETE_NOT_ALLOWED" } });
         return;

@@ -141,7 +141,8 @@ const DEFAULT_PROGRAMMATIC_SETTLE_MS: Readonly<Record<AdapterId, number>> = Obje
   codex: 350,
   kimi: 150,
   pi: 150,
-  mcode: 150
+  mcode: 150,
+  grok: 150
 });
 
 /**
@@ -478,7 +479,10 @@ export class InMemorySessionManager {
    */
   async forceStopSession(id: string, runtimeSessionName: string | undefined, userId: string): Promise<GateASession> {
     const session = this.sessions.get(id);
-    const runtimeName = session?.runtimeSessionName ?? runtimeSessionName ?? '';
+    const recordedRuntimeName = this.db
+      ? new SessionRuntimeConfirmationRepository(this.db, userId).get(id)?.runtimeName
+      : undefined;
+    const runtimeName = session?.runtimeSessionName ?? runtimeSessionName ?? recordedRuntimeName ?? '';
     if (!this.backend.listSessionInfos) {
       throw new Error('SESSION_FORCE_DELETE_NOT_ALLOWED');
     }

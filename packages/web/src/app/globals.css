@@ -22,6 +22,12 @@
 }
 
 @theme inline {
+  /* Explicit system UI stack (Apple-first): renders in the platform sans —
+     SF Pro on macOS/iOS, Segoe UI on Windows, Roboto on Android — instead
+     of Tailwind's generic ui-sans-serif default. */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text",
+    "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
   --color-card: hsl(var(--card));
@@ -47,6 +53,16 @@
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
+  /* Layered, low-contrast shadows: a tight near-shadow for contact plus a
+     soft far-shadow for lift. They key off --foreground, so dark mode gets
+     the same geometry as a faint light bloom instead of an invisible blur. */
+  --shadow-card:
+    0 1px 2px hsl(var(--foreground) / 0.05), 0 1px 3px hsl(var(--foreground) / 0.04);
+  --shadow-raised:
+    0 1px 2px hsl(var(--foreground) / 0.06), 0 8px 20px hsl(var(--foreground) / 0.07);
+  --shadow-overlay:
+    0 4px 12px hsl(var(--foreground) / 0.08), 0 24px 48px hsl(var(--foreground) / 0.12);
+  --radius-xs: calc(var(--radius) - 6px);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -56,7 +72,10 @@
 @layer base {
   :root {
     color-scheme: light;
-    --background: 0 0% 100%;
+    /* Surface separation (Apple-style grouping): the app canvas drops half a
+       step below pure white so white cards/popovers read as distinct,
+       elevated surfaces. */
+    --background: 240 8% 96%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
     --card-foreground: 240 10% 3.9%;
@@ -64,18 +83,20 @@
     --popover-foreground: 240 10% 3.9%;
     --primary: 240 5.9% 10%;
     --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
+    --secondary: 240 5% 94%;
     --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
+    --muted: 240 5% 94%;
     --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
+    --accent: 240 5% 93%;
     --accent-foreground: 240 5.9% 10%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
     --success: 160 84% 39%;
     --warning: 38 92% 50%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
+    /* Soft hairline tuned to stay visible on both the gray canvas and white
+       cards without drawing a hard line. */
+    --border: 240 6% 91%;
+    --input: 240 6% 91%;
     --ring: 240 5.9% 10%;
     --brand: 187 86% 53%;
     --brand-foreground: 220 30% 6%;
@@ -83,34 +104,45 @@
     /* Matches the light xterm palette background (#f6f8fa) so the terminal
        surface blends with the frame in light mode. */
     --terminal-bg: 208 27% 97%;
-    --radius: 0.5rem;
+    /* 10px base: xs 4 / sm 6 / md 8 / lg 10 / xl 14. Buttons land on 8,
+       cards on 10 — the Apple-style hierarchy of soft corners. */
+    --radius: 0.625rem;
+    /* Restrained motion tokens: fast, quiet, ease-out. Consumed by the
+       forgebadger-motion-* utilities below. */
+    --forgebadger-motion-fast: 120ms;
+    --forgebadger-motion-base: 180ms;
+    --forgebadger-motion-slow: 260ms;
+    --forgebadger-ease-out: cubic-bezier(0.25, 0.1, 0.25, 1);
   }
 
   .dark {
-    --background: 220 27% 4%;
+    /* Elevation ladder: each surface lifts in lightness from the canvas,
+       and the terminal well stays recessed below it. */
+    --background: 220 30% 5%;
     --foreground: 210 35% 96%;
-    --card: 216 28% 7%;
+    --card: 216 24% 8.5%;
     --card-foreground: 210 35% 96%;
-    --popover: 216 28% 7%;
+    --popover: 216 24% 8.5%;
     --popover-foreground: 210 35% 96%;
     --primary: 0 0% 98%;
     --primary-foreground: 240 5.9% 10%;
-    --secondary: 214 24% 10%;
+    --secondary: 214 20% 10.5%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 214 24% 10%;
+    --muted: 214 20% 10.5%;
     --muted-foreground: 213 12% 58%;
-    --accent: 214 24% 13%;
+    --accent: 214 18% 14%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
     --success: 160 70% 45%;
     --warning: 38 92% 55%;
-    --border: 211 28% 15%;
-    --input: 211 28% 15%;
+    /* Desaturated vs the old 211 28% 15% so dark hairlines stay soft. */
+    --border: 212 16% 16%;
+    --input: 212 16% 16%;
     --ring: 240 4.9% 83.9%;
     --brand: 187 86% 53%;
     --brand-foreground: 220 30% 6%;
-    --surface-raised: 213 27% 9%;
+    --surface-raised: 213 22% 11%;
     --terminal-bg: 220 33% 3%;
   }
 
@@ -325,6 +357,36 @@
     animation: forgebadger-fade-up 0.35s ease-out both;
   }
 
+  /* Shared numeric style: tabular figures so counts, quotas and timestamps
+     align across rows without width jitter. New code should prefer this over
+     hand-rolling `tabular-nums` next to one-off sizes and tones. */
+  .forgebadger-tabular-nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  /* Restrained motion helpers keyed to the --forgebadger-motion-* tokens:
+     short, quiet, ease-out. forgebadger-motion-surface covers interactive
+     surfaces (buttons, cards, chips); the translate/rotate/scale entries
+     mirror Tailwind v4's independent transform properties so press states
+     like active:scale-[0.98] animate instead of snapping. */
+  .forgebadger-motion-fade {
+    transition: opacity var(--forgebadger-motion-fast) var(--forgebadger-ease-out);
+  }
+
+  .forgebadger-motion-surface {
+    transition:
+      background-color var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
+      border-color var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
+      color var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
+      box-shadow var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
+      opacity var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
+      transform var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
+      translate var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
+      rotate var(--forgebadger-motion-fast) var(--forgebadger-ease-out),
+      scale var(--forgebadger-motion-fast) var(--forgebadger-ease-out);
+  }
+
   /* Session board column stagger entrance (pair with an inline animation-delay). */
   .forgebadger-board-column-in {
     animation: forgebadger-board-column-in 0.15s ease-out both;
@@ -396,6 +458,11 @@
       animation: none;
     }
 
+    .forgebadger-motion-fade,
+    .forgebadger-motion-surface {
+      transition: none;
+    }
+
     .forgebadger-robot-nudge {
       animation: none;
     }
@@ -434,7 +501,7 @@
   body {
     min-height: 100dvh;
     overflow-x: hidden;
-    @apply bg-background text-foreground antialiased;
+    @apply bg-background font-sans text-foreground antialiased;
   }
 
   /* Session focus mode (see app/(dashboard)/sessions/[id]/page.tsx): the

@@ -49,8 +49,7 @@ import { cn } from "@/lib/utils";
 export function AdapterSettings() {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const [updatingAdapter, setUpdatingAdapter] = useState<RuntimeAdapterId | null>(null);
-  const [installingAdapter, setInstallingAdapter] = useState<RuntimeAdapterId | null>(null);
+  const [adapterOperations, setAdapterOperations] = useState<Partial<Record<RuntimeAdapterId, "update" | "install">>>({});
   const [refreshingUpdates, setRefreshingUpdates] = useState(false);
   const [updateRefreshError, setUpdateRefreshError] = useState(false);
   const [updateFeedback, setUpdateFeedback] = useState<Partial<Record<RuntimeAdapterId, "done" | "behind" | "failed">>>({});
@@ -141,21 +140,23 @@ export function AdapterSettings() {
   }
 
   async function handleAdapterUpdate(id: RuntimeAdapterId) {
-    setUpdatingAdapter(id);
+    if (adapterOperations[id]) return;
+    setAdapterOperations((previous) => ({ ...previous, [id]: "update" }));
     setUpdateFeedback((previous) => ({ ...previous, [id]: undefined }));
     try {
       const result = await updateAdapter(id);
       setUpdateFeedback((previous) => ({ ...previous, [id]: result.versionStillBehind ? "behind" : "done" }));
-      await Promise.all([refetchAdapters(), refetchDependencies(), refetchUpdates()]);
+      await Promise.allSettled([refetchAdapters(), refetchDependencies(), refetchUpdates()]);
     } catch {
       setUpdateFeedback((previous) => ({ ...previous, [id]: "failed" }));
     } finally {
-      setUpdatingAdapter(null);
+      setAdapterOperations((previous) => ({ ...previous, [id]: undefined }));
     }
   }
 
   async function handleAdapterInstall(id: RuntimeAdapterId) {
-    setInstallingAdapter(id);
+    if (adapterOperations[id]) return;
+    setAdapterOperations((previous) => ({ ...previous, [id]: "install" }));
     setInstallFeedback((previous) => ({ ...previous, [id]: undefined }));
     try {
       const result = await installAdapter(id);
@@ -164,7 +165,7 @@ export function AdapterSettings() {
     } catch {
       setInstallFeedback((previous) => ({ ...previous, [id]: "failed" }));
     } finally {
-      setInstallingAdapter(null);
+      setAdapterOperations((previous) => ({ ...previous, [id]: undefined }));
     }
   }
 
@@ -312,11 +313,11 @@ export function AdapterSettings() {
                       update={updateRefreshError ? undefined : adapterUpdates?.updates.find((item) => item.id === adapter.id)}
                       canUpdate={adapterUpdates?.canUpdate ?? false}
                       canInstall={adapterUpdates?.canInstall ?? false}
-                      checkingUpdate={updatesFetching || refreshingUpdates}
+                      checkingUpdate={(!adapterUpdates && updatesFetching) || refreshingUpdates}
                       updateCheckFailed={updatesError || updateRefreshError}
-                      updating={updatingAdapter === adapter.id}
-                      installing={installingAdapter === adapter.id}
-                      operationBlocked={updatingAdapter !== null || installingAdapter !== null}
+                      updating={adapterOperations[adapter.id] === "update"}
+                      installing={adapterOperations[adapter.id] === "install"}
+                      operationBlocked={!!adapterOperations[adapter.id]}
                       feedback={updateFeedback[adapter.id]}
                       installFeedback={installFeedback[adapter.id]}
                       onUpdate={() => void handleAdapterUpdate(adapter.id)}

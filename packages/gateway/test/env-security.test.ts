@@ -64,6 +64,21 @@ describe("loadEnv security configuration", () => {
     assert.equal(env.FORGEBADGER_MASTER_KEY, masterKey);
     assert.equal(env.FORGEBADGER_SESSION_PREFIX, "fb-");
     assert.equal(env.FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED, false);
+    assert.equal(env.FORGEBADGER_COMPANION_ENABLED, false);
+  });
+
+  it("only enables Companion with an explicit boolean value", () => {
+    const enabled = loadEnv({
+      FORGEBADGER_JWT_SECRET: jwtSecret,
+      FORGEBADGER_MASTER_KEY: masterKey,
+      FORGEBADGER_COMPANION_ENABLED: "true"
+    });
+    assert.equal(enabled.FORGEBADGER_COMPANION_ENABLED, true);
+    assert.throws(() => loadEnv({
+      FORGEBADGER_JWT_SECRET: jwtSecret,
+      FORGEBADGER_MASTER_KEY: masterKey,
+      FORGEBADGER_COMPANION_ENABLED: "yes"
+    }), /FORGEBADGER_COMPANION_ENABLED|Invalid/i);
   });
 
   it("uses the ForgeBadger database name inside an explicit state directory", () => {

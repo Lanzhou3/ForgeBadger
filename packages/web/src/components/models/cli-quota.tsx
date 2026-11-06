@@ -23,6 +23,7 @@ export const LOGIN_HINT_KEYS: Record<CliAccountAdapter, TranslationKey> = {
   codex: "models.cliAccountLoginHintCodex",
   kimi: "models.cliAccountLoginHintKimi",
   mcode: "models.cliAccountLoginHintMcode",
+  grok: "models.cliAccountLoginHintGrok",
 };
 
 export const QUOTA_REASON_KEYS: Record<CliQuotaUnsupportedReason, TranslationKey> = {
@@ -30,6 +31,7 @@ export const QUOTA_REASON_KEYS: Record<CliQuotaUnsupportedReason, TranslationKey
   no_native_login: "models.cliAccountQuotaNoNativeLogin",
   api_key_mode: "models.cliAccountQuotaApiKeyMode",
   token_expired: "models.cliAccountQuotaTokenExpired",
+  setup_token_scope: "models.cliAccountQuotaSetupTokenScope",
   upstream_error: "models.cliAccountQuotaUpstreamError",
 };
 

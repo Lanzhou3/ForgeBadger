@@ -6,6 +6,7 @@ import {
 import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
 import type { AdapterId } from "./adapter-discovery.js";
 import { readCliConfig, type CliConfigSnapshot } from "./cli-config.js";
+import { normalizeProviderKey } from "./cli-config-apply.js";
 
 export interface AppliedProviderSummary {
   providerProfileId: string;
@@ -31,7 +32,7 @@ export interface AppliedProvidersOverviewOptions {
   readSnapshot?: ((adapter: AdapterId) => Promise<CliConfigSnapshot>) | undefined;
 }
 
-const ADAPTER_IDS: AdapterId[] = ["claude", "opencode", "codex", "kimi", "pi"];
+const ADAPTER_IDS: AdapterId[] = ["claude", "opencode", "codex", "kimi", "pi", "grok"];
 
 export async function buildAppliedProvidersOverview(
   db: Database,
@@ -46,12 +47,13 @@ export async function buildAppliedProvidersOverview(
     ADAPTER_IDS.map(async (adapter) => {
       const pointer = appliedRepo.get(adapter);
       const resolved = pointer ? resolvePointer(pointer, providerRepo) : null;
-      const configDefaultModel = options.isAdmin ? await readDefaultModel(readSnapshot, adapter) : null;
+      const snapshot = options.isAdmin ? await readConfigSnapshot(readSnapshot, adapter) : null;
+      const configDefaultModel = snapshot?.defaultModel.trim() || null;
       return {
         adapter,
         applied: resolved?.summary ?? null,
         configDefaultModel,
-        stale: isStale(adapter, resolved, configDefaultModel)
+        stale: isStale(adapter, resolved, snapshot)
       };
     })
   );
@@ -60,7 +62,7 @@ export async function buildAppliedProvidersOverview(
 function resolvePointer(
   pointer: CliConfigAppliedProvider,
   providerRepo: ModelProviderRepository
-): { summary: AppliedProviderSummary; dangling: boolean } {
+): { summary: AppliedProviderSummary; dangling: boolean; providerKey: string | null } {
   const provider = providerRepo.getProviderProfile(pointer.providerProfileId);
   const model = pointer.modelProfileId
     ? providerRepo.getModelProfile(pointer.modelProfileId)
@@ -75,18 +77,17 @@ function resolvePointer(
       modelName: model?.name ?? null,
       appliedAt: new Date(pointer.appliedAt).toISOString()
     },
-    dangling: !provider || (pointer.modelProfileId !== null && !model)
+    dangling: !provider || (pointer.modelProfileId !== null && !model),
+    providerKey: provider ? normalizeProviderKey(provider.providerKey) : null
   };
 }
 
-async function readDefaultModel(
+async function readConfigSnapshot(
   readSnapshot: (adapter: AdapterId) => Promise<CliConfigSnapshot>,
   adapter: AdapterId
-): Promise<string | null> {
+): Promise<CliConfigSnapshot | null> {
   try {
-    const snapshot = await readSnapshot(adapter);
-    const value = snapshot.defaultModel.trim();
-    return value || null;
+    return await readSnapshot(adapter);
   } catch {
     return null;
   }
@@ -94,18 +95,35 @@ async function readDefaultModel(
 
 function isStale(
   adapter: AdapterId,
-  resolved: { summary: AppliedProviderSummary; dangling: boolean } | null,
-  configDefaultModel: string | null
+  resolved: { summary: AppliedProviderSummary; dangling: boolean; providerKey: string | null } | null,
+  snapshot: CliConfigSnapshot | null
 ): boolean {
   if (!resolved) return false;
   if (resolved.dangling) return true;
   // A missing/unparseable snapshot cannot prove drift; stay conservative.
-  if (configDefaultModel === null) return false;
-  return configModelId(adapter, configDefaultModel) !== resolved.summary.modelId;
+  if (!snapshot) return false;
+  if (adapter === "kimi") {
+    // Kimi login and /model legitimately change default_model while keeping the
+    // applied third-party provider available. Drift means that provider, its
+    // credential, or the exact applied alias disappeared — not another default.
+    if (!resolved.providerKey || !resolved.summary.modelId) return true;
+    const provider = snapshot.providers.find((entry) => entry.id === resolved.providerKey);
+    const alias = `${resolved.providerKey}/${resolved.summary.modelId}`;
+    const model = snapshot.models.find((entry) =>
+      entry.alias === alias && entry.provider === resolved.providerKey && entry.modelId === resolved.summary.modelId
+    );
+    return !provider?.hasApiKey || !model;
+  }
+  if (!snapshot.defaultModel.trim()) return false;
+  return configModelId(adapter, snapshot) !== resolved.summary.modelId;
 }
 
-function configModelId(adapter: AdapterId, configDefaultModel: string): string {
-  if (adapter !== "kimi") return configDefaultModel;
-  const slash = configDefaultModel.lastIndexOf("/");
-  return slash === -1 ? configDefaultModel : configDefaultModel.slice(slash + 1);
+function configModelId(adapter: AdapterId, snapshot: CliConfigSnapshot): string | null {
+  const configDefaultModel = snapshot.defaultModel.trim();
+  if (adapter === "grok") {
+    // [models].default selects a catalog entry, not a wire model ID.
+    // A readable config with no matching entry proves the selection drifted.
+    return snapshot.models.find((model) => model.alias === configDefaultModel)?.modelId ?? null;
+  }
+  return configDefaultModel;
 }

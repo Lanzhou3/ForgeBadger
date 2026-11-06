@@ -65,7 +65,7 @@ export function MessageRow({
     // Live execution state is shown by the run indicator, not inferred here.
     const status = pairedResult ? deriveToolStatus(pairedResult.content) : "unknown";
     return (
-      <details className="rounded-md border border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+      <details className="rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
         <summary className="flex cursor-pointer items-center gap-1.5 font-medium">
           <ToolStatusIcon status={status} />
           <Wrench className="size-3" />
@@ -82,7 +82,7 @@ export function MessageRow({
   }
   if (message.kind === "tool_result") {
     return (
-      <details className="max-w-[85%] rounded-md bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
+      <details className="max-w-[85%] rounded-lg bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
         <summary className="cursor-pointer break-all font-medium">
           {t("copilot.toolResult")} — {truncateContent(message.content)}
         </summary>
@@ -130,9 +130,9 @@ export function MessageRow({
   if (isUser) {
     const time = formatMessageTime(message.createdAt, language);
     return (
-      <div className="group flex justify-end">
-        <div className="relative flex max-w-[85%] flex-col items-end gap-0.5">
-          <div className="whitespace-pre-wrap rounded-lg bg-brand px-3 py-1.5 text-sm text-brand-foreground [overflow-wrap:anywhere]">
+      <div className="forgebadger-animate-in group flex justify-end">
+        <div className="relative flex max-w-[75%] flex-col items-end gap-0.5">
+          <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-brand px-3.5 py-2 text-sm text-brand-foreground [overflow-wrap:anywhere]">
             {message.content}
           </div>
           {time ? (
@@ -167,9 +167,9 @@ function AssistantBody({ content, createdAt, streaming = false }: { content: str
   const bodyText = streaming ? closeOpenMarkdown(parsed.text) : parsed.text;
   const time = !streaming && createdAt ? formatMessageTime(createdAt, language) : "";
   return (
-    <div className="flex gap-2.5">
-      <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md border border-border/60 bg-muted/60">
-        <Bot className="size-3.5 text-muted-foreground" />
+    <div className="forgebadger-animate-in flex gap-2.5">
+      <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-brand/10">
+        <Bot className="size-3.5 text-brand" />
       </span>
       <div className="min-w-0 flex-1 space-y-2 text-sm leading-relaxed">
         {parsed.thinking ? (
@@ -233,7 +233,7 @@ export function ThinkingSection({ text, live = false }: { text: string; live?: b
   const [open, setOpen] = useState(false);
   const summary = summarizeThinking(text);
   return (
-    <div className="rounded-md border border-dashed border-border/60 bg-muted/30 text-xs text-muted-foreground">
+    <div className="rounded-lg border border-dashed border-border/60 bg-muted/30 text-xs text-muted-foreground">
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}

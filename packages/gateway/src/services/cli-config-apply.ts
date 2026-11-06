@@ -67,6 +67,7 @@ export class CliConfigApplyError extends Error {
 export type ClaudeModelSlot = "opus" | "sonnet" | "haiku" | "fable" | "subagent";
 
 export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";
+export type KimiPermissionMode = "manual" | "yolo" | "auto";
 
 export interface CliConfigApplyInput {
   db: Database;
@@ -82,9 +83,13 @@ export interface CliConfigApplyInput {
   reasoningEffort?: CodexReasoningEffort | undefined;
   /**
    * Claude only: point Claude Code at the Gateway route endpoint instead of
-   * the provider (required for OpenAI-protocol providers).
+   * the provider. Required for OpenAI-protocol providers; optional for
+   * Anthropic-protocol relays, where it adds the Gateway's retry/rectify
+   * layer and keeps the provider key out of the CLI config.
    */
   routeThroughGateway?: boolean | undefined;
+  /** Kimi only: default_permission_mode for new sessions. */
+  permissionMode?: KimiPermissionMode | undefined;
   /**
    * Codex only: wire protocol the provider uses. Defaults to the profile's
    * apiFormat (openai-responses→"responses", everything else→"chat"). Set
@@ -143,6 +148,7 @@ interface ApplyContext {
   /** Claude role slots resolved to model profiles; unset slots fall back to the primary model. */
   slotModels: Partial<Record<ClaudeModelSlot, ModelProfile>>;
   reasoningEffort: CodexReasoningEffort | undefined;
+  permissionMode: KimiPermissionMode | undefined;
   credential: ProviderCredentialSummary;
   providerKey: string;
   /** The provider's own endpoint (SSRF-validated); used for context-window special cases. */
@@ -150,10 +156,11 @@ interface ApplyContext {
   /** Effective ANTHROPIC_BASE_URL: the provider endpoint, or the Gateway loopback URL when routed. */
   baseUrl: string | null;
   /**
-   * Claude protocol routing state: "direct" = provider speaks Anthropic
-   * protocol; "routed" = applied through the Gateway endpoint;
-   * "route_required" = OpenAI protocol without routeThroughGateway (apply
-   * must fail; preview only).
+   * Claude protocol routing state: "direct" = the provider endpoint is
+   * written into the CLI config as-is; "routed" = applied through the
+   * Gateway endpoint (any provider, when routeThroughGateway is set);
+   * "route_required" = OpenAI-protocol provider without routeThroughGateway
+   * (apply must fail; preview only).
    */
   routeMode: "direct" | "routed" | "route_required";
   /** Loopback route token written as ANTHROPIC_AUTH_TOKEN when routed. */
@@ -162,6 +169,12 @@ interface ApplyContext {
   previousContextWindow: number | null;
   /** Codex wire API resolved from the profile's apiFormat (explicit apply input wins). */
   codexWireApi: CodexWireApi;
+  /**
+   * Catalog key the previous Grok apply wrote under `[model.*]`. Null when
+   * this apply is not for Grok or the previous provider can no longer be
+   * resolved. Only that key is removed when the selection changes.
+   */
+  previousGrokCatalogKey: string | null;
 }
 
 /**
@@ -450,6 +463,9 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
   if (input.routeThroughGateway === true && input.adapter !== "claude") {
     throw new CliConfigApplyError("CLI_CONFIG_APPLY_FIELD_UNSUPPORTED", "routeThroughGateway is only supported for the Claude adapter");
   }
+  if (input.permissionMode && input.adapter !== "kimi") {
+    throw new CliConfigApplyError("CLI_CONFIG_APPLY_FIELD_UNSUPPORTED", "permissionMode is only supported for the Kimi adapter");
+  }
   const slotModels: Partial<Record<ClaudeModelSlot, ModelProfile>> = {};
   if (input.modelMapping) {
     for (const slot of ["opus", "sonnet", "haiku", "fable", "subagent"] as const) {
@@ -481,13 +497,20 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
       error instanceof Error ? error.message : "Provider endpoint is not a public HTTPS endpoint"
     );
   }
-  // An explicit Anthropic endpoint takes precedence over the provider's
-  // default protocol, including a stale routeThroughGateway request flag.
-  // Preserve legacy Anthropic providers whose endpoint lives in baseUrl.
+  // Claude Code routing resolution:
+  // - OpenAI-protocol providers can only reach Claude Code through the
+  //   Gateway route, so the route is mandatory (route_required).
+  // - Anthropic-protocol relays default to a direct apply, but an explicit
+  //   routeThroughGateway routes them through the Gateway data plane instead:
+  //   the request gets the retry/rectify layer, and the provider key stays
+  //   in the vault instead of the CLI config. The explicit flag wins over
+  //   the provider's endpoint shape (including a legacy explicit
+  //   anthropicBaseUrl, which still resolves the upstream the Gateway calls).
   let routeMode: ApplyContext["routeMode"] = "direct";
   let routeToken: string | null = null;
-  if (input.adapter === "claude" && !provider.anthropicBaseUrl && provider.apiFormat !== "anthropic") {
-    routeMode = "route_required";
+  if (input.adapter === "claude") {
+    const openaiOnly = !provider.anthropicBaseUrl && provider.apiFormat !== "anthropic";
+    if (openaiOnly) routeMode = "route_required";
     if (input.routeThroughGateway === true) {
       const settings = new ClaudeRouteRepository(input.db, input.userId, input.masterKey).getSettings();
       if (!settings.enabled || !settings.token) {
@@ -520,6 +543,7 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
     activeModels: models,
     slotModels,
     reasoningEffort: input.reasoningEffort,
+    permissionMode: input.permissionMode,
     credential,
     providerKey: normalizeProviderKey(provider.providerKey),
     providerEndpoint,
@@ -527,7 +551,10 @@ async function resolveApplyContext(input: CliConfigApplyInput): Promise<ApplyCon
     routeMode,
     routeToken,
     previousContextWindow,
-    codexWireApi: resolveCodexWireApi(input, provider)
+    codexWireApi: resolveCodexWireApi(input, provider),
+    previousGrokCatalogKey: input.adapter === "grok" && previousProvider
+      ? grokCatalogKey(normalizeProviderKey(previousProvider.providerKey))
+      : null
   };
 }
 
@@ -625,6 +652,10 @@ function applyTargets(adapter: AdapterId): ApplyTarget[] {
       { targetPath: path.join(globalConfigRoot("pi"), "settings.json"), fileType: "json", role: "settings" }
     ];
   }
+  if (adapter === "grok") {
+    // Single user-level TOML file. auth.json is owned by `grok login`.
+    return [{ targetPath: main, fileType: "toml", role: "config" }];
+  }
   return [{
     targetPath: main,
     fileType: adapter === "claude" || adapter === "opencode" ? "json" : "toml",
@@ -673,7 +704,7 @@ function buildApplyDocument(
     const timeout = claudeTimeout(context.provider.providerKey);
     if (timeout) env.API_TIMEOUT_MS = timeout;
     else delete env.API_TIMEOUT_MS;
-    applyClaudeContextWindow(env, context.providerEndpoint, primary, context.previousContextWindow);
+    applyClaudeContextWindow(env, primary, context.previousContextWindow);
     doc.env = env;
     return;
   }
@@ -864,12 +895,23 @@ function buildApplyDocument(
     doc.defaultModel = `custom_provider:${context.providerKey}/${context.model.modelId}`;
     return;
   }
+  if (context.adapter === "grok") {
+    applyGrokModel(doc, context, secret);
+    return;
+  }
   const providers = record(doc.providers);
+  const existingProvider = record(providers[context.providerKey]);
   const definition: Record<string, unknown> = {
+    ...existingProvider,
     type: kimiProviderType(context.provider.apiFormat, context.baseUrl),
     api_key: secret
   };
+  // A managed plaintext credential replaces alternative auth declarations;
+  // user-owned custom_headers and other provider options remain intact.
+  delete definition.api_key_env;
+  delete definition.oauth;
   if (context.baseUrl) definition.base_url = context.baseUrl;
+  else delete definition.base_url;
   providers[context.providerKey] = definition;
   // Merge-style upsert (matching the opencode/PI branches): every active
   // model of the provider becomes an alias the Kimi Code /model picker can
@@ -914,6 +956,7 @@ function buildApplyDocument(
   doc.providers = providers;
   doc.models = models;
   doc.default_model = `${context.providerKey}/${context.model.modelId}`;
+  if (context.permissionMode) doc.default_permission_mode = context.permissionMode;
 }
 
 /**
@@ -938,36 +981,36 @@ function writeOptionalClaudeSlot(
 }
 
 /**
- * Claude Code assumes a 200k window for model IDs outside its built-in model
- * catalog and clamps auto-compact accordingly ("isn't described by this
- * version's model catalog"). Fill in the override pair for known coding
- * endpoints and for model profiles with an explicit context window — both
- * keys are required (either alone is clamped back to 200k), and Claude Code
- * only honors them for non-`claude-` prefixed model ids. Explicit user values
- * are never overwritten; when switching away, only values equal to what a
- * previous apply injected are stripped.
+ * Context-window handling for Claude Code applies. Only an explicit context
+ * window on the model profile is injected, and only as
+ * CLAUDE_CODE_MAX_CONTEXT_TOKENS (never CLAUDE_CODE_AUTO_COMPACT_WINDOW —
+ * Claude Code already triggers auto-compaction at a percentage of the window,
+ * so capping it would waste usable context). Fill-only: an explicit user
+ * value is never overwritten. Values injected by earlier versions (the 256k
+ * Kimi default, the 512k MiniMax floor, or the pointer-recorded value) are
+ * stripped so upgrading uninstalls ForgeBadger-managed leftovers.
  */
 function applyClaudeContextWindow(
   env: Record<string, unknown>,
-  baseUrl: string | null,
   model: ModelProfile,
   previousContextWindow: number | null
 ): void {
-  const target = claudeContextWindowTarget(baseUrl, model);
-  if (target !== null) {
-    const value = String(target);
-    env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ??= value;
-    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ??= value;
-    return;
-  }
-  // Kimi predates the applied-provider pointer, so its injected default is
-  // always treated as managed even when no pointer records it.
-  const managed = new Set<string>([kimiCodingContextTokens]);
+  // Claude Code knows the window of catalog-prefixed ids; only third-party
+  // ids need the correction.
+  const target = model.modelId.toLowerCase().startsWith("claude-")
+    ? null
+    : model.contextWindow && model.contextWindow > 0
+      ? model.contextWindow
+      : null;
+  const managed = new Set<string>([kimiCodingContextTokens, String(minimaxAnthropicContextTokens)]);
   if (previousContextWindow !== null) managed.add(String(previousContextWindow));
+  // Remove legacy managed values before filling the new MAX. AUTO has no
+  // replacement, even when the old and new model windows are identical.
   for (const key of ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"] as const) {
     const value = env[key];
     if (typeof value === "string" && managed.has(value)) delete env[key];
   }
+  if (target !== null) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ??= String(target);
 }
 
 /**
@@ -984,6 +1027,7 @@ function codexNativeReasoningModel(modelId: string): boolean {
     || lower.startsWith("codex-");
 }
 
+/** The value a legacy apply injected for this provider/model, so it can be stripped on switch. */
 function claudeContextWindowTarget(baseUrl: string | null, model: ModelProfile | null): number | null {
   // Claude Code ignores the overrides for catalog-prefixed ids.
   if (model && model.modelId.toLowerCase().startsWith("claude-")) return null;
@@ -1062,10 +1106,10 @@ export function maskSecrets(fileType: "json" | "toml" | "yaml", content: string)
 function maskSecretsDeep(value: Record<string, unknown>): void {
   for (const [key, child] of Object.entries(value)) {
     const normalized = key.replace(/[^a-z0-9]/giu, "").toLowerCase();
-    // Suffix-match instead of a fixed allowlist: api_key / auth_token /
-    // bearer_token / access_token / refresh_token and any future *-key/*-token
-    // field are all masked.
-    if ((normalized === "apikey" || normalized.endsWith("apikey") || normalized.endsWith("token"))
+    // Cover provider custom_headers as well as api_key / auth_token and other
+    // credential-shaped fields before any current or proposed file is previewed.
+    if ((normalized === "apikey" || normalized.endsWith("apikey") || normalized.endsWith("token")
+      || normalized === "authorization" || normalized === "proxyauthorization" || normalized === "cookie")
       && typeof child === "string" && child.length > 0) {
       value[key] = "[redacted]";
       continue;
@@ -1177,8 +1221,78 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function normalizeProviderKey(value: string): string {
+export function normalizeProviderKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "") || "provider";
+}
+
+/**
+ * Grok `[model.<key>]` catalog key. Normalized provider keys are usually
+ * already bare TOML keys; a key that starts with a digit is prefixed so
+ * smol-toml does not have to quote it.
+ */
+function grokCatalogKey(providerKey: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_-]*$/u.test(providerKey) ? providerKey : `fb-${providerKey}`;
+}
+
+function grokApiBackend(apiFormat: ProviderApiFormat): "chat_completions" | "responses" | "messages" {
+  if (apiFormat === "openai-responses") return "responses";
+  if (apiFormat === "anthropic") return "messages";
+  if (apiFormat === "openai-compatible") return "chat_completions";
+  throw new CliConfigApplyError(
+    "CLI_CONFIG_APPLY_FIELD_UNSUPPORTED",
+    "Grok config.toml has no API backend for the google protocol; supported backends are chat_completions, responses, and messages"
+  );
+}
+
+/**
+ * Writes one managed `[model.<key>]` block and points `[models].default` at
+ * it. Every other table (`[ui]`, user `[model.*]`, `[mcp_servers]`) is left
+ * in place. Switching providers deletes only the previous managed key.
+ */
+function applyGrokModel(
+  doc: Record<string, unknown>,
+  context: ApplyContext,
+  secret: string
+): void {
+  if (!context.baseUrl) {
+    throw new CliConfigApplyError("CLI_CONFIG_APPLY_ENDPOINT_UNSAFE", "Grok providers require a base URL");
+  }
+  const backend = grokApiBackend(context.provider.apiFormat);
+  const key = grokCatalogKey(context.providerKey);
+  const models = record(doc.model);
+  if (context.previousGrokCatalogKey && context.previousGrokCatalogKey !== key) {
+    delete models[context.previousGrokCatalogKey];
+  }
+  const existing = record(models[key]);
+  const next: Record<string, unknown> = {
+    ...existing,
+    model: context.model.modelId,
+    base_url: context.baseUrl,
+    name: context.model.name,
+    api_backend: backend
+  };
+  if (context.model.contextWindow && context.model.contextWindow > 0) {
+    next.context_window = context.model.contextWindow;
+  }
+  if (backend === "messages") {
+    delete next.api_key;
+    const headers = record(existing.extra_headers);
+    headers["x-api-key"] = secret;
+    headers["anthropic-version"] = "2023-06-01";
+    next.extra_headers = headers;
+  } else {
+    next.api_key = secret;
+    const headers = record(existing.extra_headers);
+    delete headers["x-api-key"];
+    delete headers["anthropic-version"];
+    if (Object.keys(headers).length === 0) delete next.extra_headers;
+    else next.extra_headers = headers;
+  }
+  models[key] = next;
+  doc.model = models;
+  const defaults = record(doc.models);
+  defaults.default = key;
+  doc.models = defaults;
 }
 
 export function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId): string | null {
@@ -1186,26 +1300,18 @@ export function endpointForAdapter(provider: ProviderProfile, adapter: AdapterId
     return provider.anthropicBaseUrl
       ?? (provider.apiFormat === "anthropic" ? provider.baseUrl : provider.openaiBaseUrl ?? provider.baseUrl);
   }
-  if ((adapter === "opencode" || adapter === "kimi" || adapter === "pi" || adapter === "mcode")
+  if ((adapter === "opencode" || adapter === "kimi" || adapter === "pi" || adapter === "mcode" || adapter === "grok")
     && provider.apiFormat === "anthropic") {
     return provider.anthropicBaseUrl ?? provider.baseUrl;
   }
   return provider.openaiBaseUrl ?? provider.baseUrl;
 }
 
-/**
- * Kimi Code provider types (official configuration docs): "kimi" is
- * Moonshot's OpenAI-compatible protocol (managed service + Kimi Platform
- * keys), "anthropic" speaks the Anthropic Messages protocol, and "openai"
- * covers generic Chat Completions relays.
- *
- * Kimi Code's config has a single OpenAI-family provider type ("openai"),
- * so both openai-responses and openai-compatible providers are declared
- * there; whether the endpoint actually serves the provider's wire protocol
- * is the owner's responsibility, the same as for any relay endpoint.
- */
+/** Kimi Code provider types from the 2.4.x configuration schema. */
 function kimiProviderType(apiFormat: ProviderProfile["apiFormat"], baseUrl: string | null): string {
   if (apiFormat === "anthropic") return "anthropic";
+  if (apiFormat === "openai-responses") return "openai_responses";
+  if (apiFormat === "google") return "google-genai";
   if (isMoonshotEndpoint(baseUrl)) return "kimi";
   return "openai";
 }

@@ -54,7 +54,7 @@ const OPTIONAL_CLI_DEPENDENCY_CHECKS: CliDependencyCheck[] = [
     args: ["--version"],
     required: false,
     group: "ai-cli",
-    installHint: "npm install -g opencode-ai"
+    installHint: "npm install -g @opencode/cli --ignore-scripts=false --include=optional --allow-scripts=@opencode/cli"
   },
   {
     name: "codex",

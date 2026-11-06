@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -20,6 +20,7 @@ import { QueryState } from "@/components/ui/query-state";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
+import { AnimatedStatValue } from "@/components/dashboard/animated-stat-value";
 import {
   discoverAdapters,
   getDashboardSummary,
@@ -33,6 +34,7 @@ import {
   readActivationDismissed,
   writeActivationDismissed,
 } from "@/lib/activation-dismissal";
+import { gsap, matchMotionPreference, useGSAP } from "@/lib/gsap-motion";
 import { normalizeSessionStatus } from "@/lib/session-status";
 import { formatSessionRelativeTime } from "@/components/sessions/session-board-utils";
 import {
@@ -46,6 +48,7 @@ import { cn } from "@/lib/utils";
 export default function DashboardPage() {
   const { t, language } = useLanguage();
   const dashboardCopy = useDashboardCopy();
+  const rootRef = useRef<HTMLDivElement>(null);
   // Client-only clock: relative session times must not participate in SSR
   // markup (server/client clocks diverge), so render the slot empty until
   // mount and keep it ticking once a minute.
@@ -159,6 +162,40 @@ export default function DashboardPage() {
   const showFirstRunReadiness = !activationReadiness.complete && !activationDismissed;
   const requiredSteps = activationReadiness.steps.filter((step) => !step.optional);
   const doneStepCount = requiredSteps.filter((step) => step.done).length;
+  const readinessProgress = Math.round((doneStepCount / requiredSteps.length) * 100);
+
+  // Restrained first-mount entrance: header → actions → stat cards → content
+  // sections. The empty dependency list keeps it one-shot, so React Query
+  // refetches never replay it; reduced-motion users get the laid-out page.
+  useGSAP(
+    () => {
+      matchMotionPreference({
+        full: () => {
+          gsap
+            .timeline({ defaults: { ease: "power2.out" } })
+            .from('[data-motion="dashboard-header"]', { opacity: 0, y: 8, duration: 0.3 })
+            .from('[data-motion="dashboard-actions"]', { opacity: 0, y: 8, duration: 0.3 }, "-=0.15")
+            .from('[data-motion="dashboard-stat"]', { opacity: 0, y: 10, duration: 0.35, stagger: 0.06 }, "-=0.15")
+            .from('[data-motion="dashboard-section"]', { opacity: 0, y: 12, duration: 0.4, stagger: 0.08 }, "-=0.2");
+        },
+      });
+    },
+    { scope: rootRef }
+  );
+
+  // The first-run card mounts only after localStorage is read on the client,
+  // so it gets its own one-shot entrance instead of joining the mount timeline.
+  useGSAP(
+    () => {
+      if (!showFirstRunReadiness) return;
+      matchMotionPreference({
+        full: () => {
+          gsap.from('[data-motion="dashboard-first-run"]', { opacity: 0, y: 10, duration: 0.35 });
+        },
+      });
+    },
+    { scope: rootRef, dependencies: [showFirstRunReadiness], revertOnUpdate: true }
+  );
 
   const statusItems = [
     {
@@ -206,13 +243,13 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
+    <div ref={rootRef} className="mx-auto max-w-6xl space-y-6 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("dashboard.title")}</h1>
+        <div data-motion="dashboard-header">
+          <h1 className="text-2xl font-semibold tracking-tight">{t("dashboard.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("dashboard.subtitle")}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div data-motion="dashboard-actions" className="flex flex-wrap items-center gap-2">
           <Button asChild size="sm" variant="brand">
             <Link href="/sessions">
               <Plus className="size-4" />
@@ -226,21 +263,23 @@ export default function DashboardPage() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-        {stats.map((stat, index) => (
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+        {stats.map((stat) => (
           <Link
             key={stat.label}
             href={stat.href}
-            className="group forgebadger-animate-in"
-            style={{ animationDelay: `${index * 50}ms` }}
+            data-motion="dashboard-stat"
+            className="group"
           >
             <Card className="h-full transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-brand/40 group-hover:shadow-lg group-hover:shadow-brand/5">
               <CardContent className="flex items-center gap-3 p-4">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
                   <stat.icon className="size-4" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-2xl font-semibold leading-none">{stat.value}</div>
+                  <div className="text-2xl font-semibold leading-none tracking-tight">
+                    <AnimatedStatValue value={stat.value} />
+                  </div>
                   <div className="mt-1.5 truncate text-xs text-muted-foreground">
                     {stat.label}
                     {stat.sub ? <span className="text-muted-foreground/70"> · {stat.sub}</span> : null}
@@ -254,7 +293,7 @@ export default function DashboardPage() {
       </div>
 
       {showFirstRunReadiness && (
-        <Card className="forgebadger-animate-in border-brand/30 bg-brand/5">
+        <Card data-motion="dashboard-first-run" className="border-brand/30 bg-brand/5">
           <CardHeader className="pb-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -264,12 +303,16 @@ export default function DashboardPage() {
                 </p>
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-1.5 w-24 overflow-hidden rounded-full bg-muted"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={readinessProgress}
+                >
                   <div
                     className="h-full rounded-full bg-brand transition-all duration-500"
-                    style={{
-                      width: `${Math.round((doneStepCount / requiredSteps.length) * 100)}%`,
-                    }}
+                    style={{ width: `${readinessProgress}%` }}
                   />
                 </div>
                 <span className="tabular-nums">
@@ -286,7 +329,7 @@ export default function DashboardPage() {
                   className="flex items-start gap-2.5 rounded-md border border-border/70 bg-background/60 p-3"
                 >
                   {step.done ? (
-                    <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" />
+                    <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
                   ) : (
                     <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground/40" />
                   )}
@@ -330,7 +373,7 @@ export default function DashboardPage() {
 
       <div className="grid gap-6 xl:grid-cols-5">
         {/* Recent sessions */}
-        <section className="space-y-3 xl:col-span-3">
+        <section data-motion="dashboard-section" className="space-y-3 xl:col-span-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">{t("dashboard.recentSessions")}</h2>
             <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
@@ -348,7 +391,7 @@ export default function DashboardPage() {
           ) : recentSessions.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-                <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
+                <div className="flex size-10 items-center justify-center rounded-lg bg-brand/10 text-brand">
                   <TerminalSquare className="size-5" />
                 </div>
                 <div>
@@ -367,15 +410,14 @@ export default function DashboardPage() {
             </Card>
           ) : (
             <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
-              {recentSessions.map((session, index) => {
+              {recentSessions.map((session) => {
                 const relativeTime =
                   now === null ? null : formatSessionRelativeTime(session, now, language);
                 return (
                   <Link
                     key={session.id}
                     href={`/sessions/${session.id}`}
-                    className="group flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
-                    style={{ animationDelay: `${index * 40}ms` }}
+                    className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40"
                   >
                     <SessionStatusDot status={session.status} />
                     <div className="min-w-0 flex-1">
@@ -403,7 +445,7 @@ export default function DashboardPage() {
         </section>
 
         {/* System status */}
-        <section className="space-y-3 xl:col-span-2">
+        <section data-motion="dashboard-section" className="space-y-3 xl:col-span-2">
           <h2 className="text-sm font-semibold">{t("dashboard.systemStatus")}</h2>
           <Card>
             <CardContent className="space-y-0.5 p-2">
@@ -416,7 +458,7 @@ export default function DashboardPage() {
                   <span
                     className={cn(
                       "size-1.5 shrink-0 rounded-full",
-                      item.healthy ? "bg-emerald-400" : "bg-amber-400"
+                      item.healthy ? "bg-success" : "bg-warning"
                     )}
                   />
                   <div className="min-w-0 flex-1">
@@ -441,11 +483,11 @@ function SessionStatusDot({ status }: { status: string }) {
       className={cn(
         "size-2 shrink-0 rounded-full",
         normalized === "running"
-          ? "animate-pulse bg-emerald-400"
+          ? "animate-pulse bg-success"
           : normalized === "error"
-            ? "bg-red-400"
+            ? "bg-destructive"
             : normalized === "lost"
-              ? "bg-amber-400"
+              ? "bg-warning"
               : "bg-muted-foreground/40"
       )}
     />
@@ -460,11 +502,11 @@ function SessionStatusText({ status }: { status: string }) {
       className={cn(
         "shrink-0 text-xs",
         normalized === "running"
-          ? "text-emerald-400"
+          ? "text-success"
           : normalized === "error"
-            ? "text-red-400"
+            ? "text-destructive"
             : normalized === "lost"
-              ? "text-amber-400"
+              ? "text-warning"
               : "text-muted-foreground"
       )}
     >

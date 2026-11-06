@@ -1,26 +1,18 @@
 "use client";
-import { CopilotRunOptions } from "./CopilotRunOptions";
 import { CopilotFollowupChips } from "./CopilotFollowupChips";
+import { CopilotComposerToolbar } from "./CopilotComposerToolbar";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, ListTodo, MessageSquare, PanelLeft, Square } from "lucide-react";
+import { ArrowDown, ListTodo, MessageSquare, PanelLeft, Send, Square, Target } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { CopilotStatusBar } from "@/components/copilot/copilot-runtime-panel";
 import {
   MessageRow,
   StreamingMessage,
@@ -31,10 +23,14 @@ import { CopilotWelcomeState } from "@/components/copilot/copilot-empty-state";
 import { CopilotSettings } from "@/components/copilot/copilot-settings";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
 import { CopilotApproval } from "@/components/copilot/CopilotApproval";
+import { GoalCreateDialog } from "@/components/copilot/goal-create-dialog";
+import { useGoalsCopy } from "@/components/copilot/goals-copy";
+import { CommandPalettePopup, useCommandPalette } from "@/components/copilot/command-palette-popup";
 import { GatewayApiError, listProjects, type Project } from "@/lib/api";
 import { readLastCopilotConversation, writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
+import { useAutoGrowTextarea } from "@/hooks/use-auto-grow-textarea";
 import { useTerminalCommandProgress } from "@/hooks/use-terminal-command-progress";
 import { useCopilotChatController } from "@/hooks/use-copilot-chat-controller";
 import { useCopilotFollowups } from "@/hooks/use-copilot-followups";
@@ -47,45 +43,49 @@ import {
   listConversations,
   listMessages,
   renameConversation,
+  updateConversationProject,
   type CopilotConversation,
   type CopilotMessage,
 } from "@/lib/copilot-api";
 
-// Radix Select items cannot use an empty value; this sentinel maps back to
-// "no project context" in onValueChange.
-const NO_PROJECT_VALUE = "__no_project__";
-
 /**
  * Copilot console — the primary conversational surface, laid out as a
- * ChatGPT/Claude-style two-column workbench: conversation history management
+ * ChatGPT/Claude-style full-bleed workbench: conversation history management
  * on the left (new / search / rename / delete, collapsible on desktop and a
  * Sheet on mobile), and a centered, width-capped message stream in the middle
- * with a runtime status bar, markdown rendering, collapsible tool steps,
- * approval cards, streaming tolerance, and a floating composer card. Send /
- * stop / edit / scroll-follow behavior lives in the shared
+ * with markdown rendering, collapsible tool steps, approval cards, streaming
+ * tolerance, and a floating composer card that also hosts the model/thinking
+ * pickers. Send / stop / edit / scroll-follow behavior lives in the shared
  * useCopilotChatController hook. All Copilot tool preferences live behind the
  * top-right gear button on the dedicated /copilot/settings page.
  */
 export function CopilotChat() {
   const { t } = useLanguage();
+  const goalsCopy = useGoalsCopy();
   const searchParams = useSearchParams();
   // Deep link: /copilot?c=<conversationId> (e.g. "expand to full console" from
   // the robot chat panel) selects that conversation.
   const requestedConversationId = searchParams.get("c");
 
   const [conversations, setConversations] = useState<CopilotConversation[]>([]);
+  const conversationsRef = useRef<CopilotConversation[]>([]);
+  conversationsRef.current = conversations;
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
-  const [reviewTaskResults, setReviewTaskResults] = useState(false);
-  const [repairFailedChecks, setRepairFailedChecks] = useState(false);
+  const projectIdRef = useRef("");
+  projectIdRef.current = projectId;
+  const projectMutationRef = useRef(0);
+  const [projectPendingCount, setProjectPendingCount] = useState(0);
+  const projectSaving = projectPendingCount > 0;
   const [creating, setCreating] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarSheetOpen, setSidebarSheetOpen] = useState(false);
+  const [goalDialogOpen, setGoalDialogOpen] = useState(false);
   // null = follow the server-side preference / platform default; the status
   // bar back-fills this mirror whenever the effective preference changes.
   const [modelId, setModelId] = useState<string | null>(null);
@@ -133,10 +133,17 @@ export function CopilotChat() {
 
   const refreshConversations = useCallback(async () => {
     const serial = ++listSerialRef.current;
+    const projectSerial = projectMutationRef.current;
     try {
       const { conversations: next } = await listConversations();
       if (serial !== listSerialRef.current) return;
-      setConversations(next);
+      const currentId = controllerConversationIdRef.current;
+      const merged = projectSerial === projectMutationRef.current ? next : next.map(item =>
+        item.id === currentId ? { ...item, project_id: projectIdRef.current || null } : item);
+      conversationsRef.current = merged;
+      setConversations(merged);
+      const current = merged.find(item => item.id === currentId);
+      if (current && !deepLinkPendingRef.current && projectSerial === projectMutationRef.current) setProjectId(current.project_id ?? "");
       if (!controllerConversationIdRef.current || deepLinkPendingRef.current) {
         const requested = deepLinkPendingRef.current ? requestedConversationRef.current : readLastCopilotConversation();
         const target = (requested ? next.find((item) => item.id === requested) : undefined) ?? next[0];
@@ -250,9 +257,9 @@ export function CopilotChat() {
     conversationId,
     projectId,
     modelId,
-    reviewTaskResults,
-    repairFailedChecks,
-    savingPreferences,
+    reviewTaskResults: false,
+    repairFailedChecks: false,
+    savingPreferences: savingPreferences || projectSaving,
     conversations,
     messages,
     active,
@@ -282,7 +289,7 @@ export function CopilotChat() {
     if (controller.conversationIdRef.current) return Promise.resolve(controller.conversationIdRef.current);
     if (!creatingRef.current) {
       const epoch = controllerEpochRef.current;
-      creatingRef.current = createConversation()
+      creatingRef.current = createConversation(undefined, projectId || undefined)
         .then(({ conversation }) => {
           if (epoch !== controllerEpochRef.current) return null;
           flushSync(() => {
@@ -305,9 +312,10 @@ export function CopilotChat() {
         });
     }
     return creatingRef.current;
-  }, [controller, refreshConversations, t]);
+  }, [controller, projectId, refreshConversations, t]);
 
   const selectConversation = useCallback(async (id: string) => {
+    projectMutationRef.current++;
     const epoch = controller.advanceSelectionEpoch();
     controller.conversationIdRef.current = id;
     setConversationId(id);
@@ -316,7 +324,7 @@ export function CopilotChat() {
     writeLastCopilotConversation(id);
     setLoadError(null);
     controller.resetInteractionState();
-    setProjectId("");
+    setProjectId(conversationsRef.current.find(item => item.id === id)?.project_id ?? "");
     // A user-initiated switch retires any pending deep link, so the URL can
     // no longer pull the selection back.
     deepLinkPendingRef.current = false;
@@ -330,6 +338,27 @@ export function CopilotChat() {
       if (controller.selectionEpochRef.current === epoch) setLoadingMessages(false);
     }
   }, [controller, readMessages, t]);
+
+  const changeProject = useCallback(async (next: string) => {
+    const serial = ++projectMutationRef.current;
+    const previous = projectId;
+    setProjectId(next);
+    if (!conversationId) return;
+    setProjectPendingCount(count => count + 1);
+    try {
+      const { conversation } = await updateConversationProject(conversationId, next);
+      if (serial !== projectMutationRef.current) return;
+      projectMutationRef.current++;
+      setProjectId(conversation.project_id ?? "");
+      setConversations(current => current.map(item => item.id === conversation.id ? conversation : item));
+    } catch {
+      if (serial !== projectMutationRef.current) return;
+      setProjectId(previous);
+      toast.error(t("copilot.loadError"));
+    } finally {
+      setProjectPendingCount(count => Math.max(0, count - 1));
+    }
+  }, [conversationId, projectId, t]);
 
   const newConversation = useCallback(async () => {
     setCreating(true);
@@ -391,10 +420,9 @@ export function CopilotChat() {
   // racing a competing turn; the chips render above the composer.
   const followups = useCopilotFollowups({
     conversationId,
-    ...(projectId ? { projectId } : {}),
     ...(modelId ? { modelId } : {}),
-    reviewTaskResults,
-    repairFailedChecks,
+    reviewTaskResults: false,
+    repairFailedChecks: false,
     active: isBusy,
   });
   const enqueueRef = useRef(followups.enqueue);
@@ -405,6 +433,7 @@ export function CopilotChat() {
   runningRef.current = Boolean(isRunning);
 
   const submit = useCallback(async (textOverride?: string) => {
+    if (projectSaving) return;
     // Lazy creation in flight: the controller's sending guard is not armed
     // yet, so a second Enter here would double-submit (duplicate message +
     // run). Drop the duplicate and let the user know their input was not
@@ -433,9 +462,23 @@ export function CopilotChat() {
       return;
     }
     await controller.send(textOverride, false);
-  }, [controller, conversationId, ensureConversation, t]);
+  }, [controller, conversationId, ensureConversation, projectSaving, t]);
   const inputRef = useRef(controller.input);
   inputRef.current = controller.input;
+
+  // Slash-command palette above the composer: selecting an entry fills
+  // "/name " back into the input (focus included); the next Enter submits
+  // through the normal send path, which queues behind a running turn.
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const applySlashCommand = useCallback((text: string) => {
+    controller.setInput(text);
+    composerRef.current?.focus();
+  }, [controller]);
+  const palette = useCommandPalette(controller.input, applySlashCommand);
+
+  // Multi-line input grows the composer instead of staying two lines tall;
+  // min-h/max-h on the textarea clamp the range and scroll past the max.
+  useAutoGrowTextarea(composerRef, controller.input);
 
   // Index tool_result rows by their provider toolCallId so MessageRow can pair
   // them with the corresponding tool_call row and render a single status
@@ -443,9 +486,9 @@ export function CopilotChat() {
   const toolResultById = useMemo(() => indexToolResults(messages), [messages]);
 
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-[1600px] gap-4 p-2 pt-16 md:p-6">
+    <div className="flex h-full min-h-0 w-full pt-16 md:pt-0">
       {sidebarOpen && (
-        <Card className="hidden min-h-0 w-[280px] shrink-0 flex-col gap-0 overflow-hidden py-0 md:flex">
+        <div className="hidden min-h-0 w-72 shrink-0 flex-col border-r border-border/50 bg-muted/20 md:flex">
           <ConversationSidebar
             conversations={conversations}
             activeId={conversationId}
@@ -455,11 +498,11 @@ export function CopilotChat() {
             onRename={onRename}
             onDelete={onDelete}
           />
-        </Card>
+        </div>
       )}
 
-      <Card className="flex min-h-0 min-w-0 flex-1 flex-col gap-0 overflow-hidden py-0">
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b py-2 pr-3 pl-3">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/50 pl-2 pr-3">
           <div className="flex min-w-0 items-center gap-1">
             {/* Mobile: opens the conversation Sheet; desktop: toggles the column. */}
             <Button
@@ -496,14 +539,30 @@ export function CopilotChat() {
               <ListTodo className="size-4 sm:hidden" />
               <span className="hidden sm:inline">{t("copilot.devTasks")}</span>
             </Link>
+            <Link href="/copilot/goals" aria-label={goalsCopy.title} title={goalsCopy.title} className="shrink-0 whitespace-nowrap rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+              <Target className="size-4 sm:hidden" />
+              <span className="hidden sm:inline">{goalsCopy.title}</span>
+            </Link>
+            {conversationId ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0 text-xs"
+                onClick={() => setGoalDialogOpen(true)}
+                aria-label={goalsCopy.create}
+                title={goalsCopy.create}
+              >
+                <Target className="size-4 sm:hidden" />
+                <span className="hidden sm:inline">{goalsCopy.create}</span>
+              </Button>
+            ) : null}
             <CopilotSettings />
           </div>
         </div>
 
-        <CopilotStatusBar onModelChange={onModelChange} onSavingChange={setSavingPreferences} controlsDisabled={isBusy || controller.sending} />
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <div ref={controller.scrollRef} onScroll={controller.onScroll} role="region" aria-label={t("copilot.conversations")} data-testid="copilot-message-history" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4">
-            <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+          <div ref={controller.scrollRef} onScroll={controller.onScroll} role="region" aria-label={t("copilot.conversations")} data-testid="copilot-message-history" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 sm:px-6">
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
               {loadError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
                 <p>{loadError}</p>
                 <Button size="sm" variant="outline" onClick={() => void (conversationId ? selectConversation(conversationId) : refreshConversations())}>{t("copilot.retry")}</Button>
@@ -619,90 +678,81 @@ export function CopilotChat() {
           )}
         </div>
 
-        {/* Floating composer: no docked bottom bar; the upward gradient fades
-            messages out beneath the elevated input card, which lifts on hover
-            and glows brand on focus. */}
+        {/* Configuration sits in its own compact toolbar above the message card. */}
         <div className="relative shrink-0 px-3 pb-3 pt-1">
-          <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-            <label htmlFor="copilot-project-context" className="shrink-0">{t("copilot.projectContext")}</label>
-            <Select
-              value={projectId || NO_PROJECT_VALUE}
-              disabled={isBusy || controller.sending}
-              onValueChange={(next) => setProjectId(next === NO_PROJECT_VALUE ? "" : next)}
-            >
-              <SelectTrigger
-                id="copilot-project-context"
-                aria-label={t("copilot.projectContext")}
-                size="sm"
-                className="min-w-0 max-w-60 flex-1 text-xs"
-              >
-                <SelectValue placeholder={t("copilot.noProject")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_PROJECT_VALUE}>{t("copilot.noProject")}</SelectItem>
-                {projects.map(project => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <CopilotRunOptions
-              conversationId={conversationId}
-              disabled={isBusy || controller.sending}
-              reviewTaskResults={reviewTaskResults} onReviewChange={setReviewTaskResults}
-              repairFailedChecks={repairFailedChecks} onRepairChange={setRepairFailedChecks}
-            />
-          </div>
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 bottom-full h-10 bg-gradient-to-t from-card via-card/80 to-transparent"
+            className="pointer-events-none absolute inset-x-0 bottom-full h-10 bg-gradient-to-t from-background via-background/80 to-transparent"
           />
           {conversationId && (
             <div className="mx-auto w-full max-w-3xl">
               <CopilotFollowupChips items={followups.items} onCancel={(id) => void followups.cancel(id)} />
             </div>
           )}
-          <div
-            data-testid="copilot-composer"
-            className="flex items-end gap-2 rounded-xl border border-border/70 bg-card/90 px-2.5 py-2 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
-          >
-            <Textarea
-              value={controller.input}
-              onChange={(event) => controller.setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault();
-                  void submit();
-                }
-              }}
+          <div className="relative mx-auto w-full max-w-3xl">
+            <CopilotComposerToolbar projects={projects} projectId={projectId} conversationId={conversationId}
+              onProjectChange={next => void changeProject(next)} onModelChange={onModelChange} onSavingChange={setSavingPreferences}
+              disabled={isBusy || controller.sending || projectSaving} showRuntimeBadge />
+            <CommandPalettePopup
+              view={palette.view}
+              onHoverItem={palette.hoverItem}
+              onPickItem={palette.pickItem}
+            />
+            <div
+              data-testid="copilot-composer"
+              className="rounded-xl border border-border/70 bg-card/90 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
+            >
+              <Textarea
+                ref={composerRef}
+                value={controller.input}
+                onChange={(event) => controller.setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (palette.handleTextareaKeyDown(event)) return;
+                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    void submit();
+                  }
+                }}
+                role="combobox"
+                aria-expanded={palette.view.open}
+                aria-controls="command-palette"
+                aria-activedescendant={palette.view.open && palette.view.highlighted ? `command-option-${palette.view.highlighted}` : undefined}
+                aria-autocomplete="list"
               placeholder={isRunning ? t("copilot.followups.placeholder") : t("copilot.placeholder")}
               aria-label={t("copilot.placeholder")}
-              className="min-h-[44px] max-h-40 flex-1 resize-none rounded-none border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0"
+              className="min-h-[44px] max-h-40 w-full flex-1 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-3 pb-1 pt-3 shadow-none focus-visible:ring-0 dark:bg-transparent"
               rows={2}
             />
-            {isBusy ? (
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-9 shrink-0 rounded-full"
-                onClick={() => void controller.stopRun()}
-                disabled={!active?.runId}
-                aria-label={t("copilot.stop")}
-                title={t("copilot.stop")}
-              >
-                <Square className="size-4" />
-              </Button>
-            ) : null}
-            <Button
-              size="icon"
-              className="size-9 shrink-0 rounded-full"
-              onClick={() => void submit()}
-              disabled={controller.sending || savingPreferences || followups.enqueuing || !controller.input.trim()}
-              aria-label={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
-              title={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
-            >
-              <ArrowUp className="size-4" />
-            </Button>
+            <div className="flex items-center justify-end gap-1 px-1.5 pb-1.5">
+              {isBusy ? (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="size-8 shrink-0 rounded-full"
+                  onClick={() => void controller.stopRun()}
+                  disabled={!active?.runId}
+                  aria-label={t("copilot.stop")}
+                  title={t("copilot.stop")}
+                >
+                  <Square className="size-3.5" />
+                </Button>
+              ) : (
+                <Button
+                  size="icon"
+                  className="size-8 shrink-0 rounded-full"
+                  onClick={() => void submit()}
+                  disabled={controller.sending || savingPreferences || projectSaving || followups.enqueuing || !controller.input.trim()}
+                  aria-label={t("copilot.send")}
+                  title={t("copilot.send")}
+                >
+                  <Send className="size-4" />
+                </Button>
+              )}
+            </div>
+            </div>
           </div>
         </div>
-      </Card>
+      </div>
 
       <Sheet open={sidebarSheetOpen} onOpenChange={setSidebarSheetOpen}>
         <SheetContent side="left" className="w-80 p-0" aria-describedby={undefined}
@@ -728,6 +778,15 @@ export function CopilotChat() {
           />
         </SheetContent>
       </Sheet>
+
+      {conversationId ? (
+        <GoalCreateDialog
+          open={goalDialogOpen}
+          conversationId={conversationId}
+          {...(projectId ? { projectId } : {})}
+          onOpenChange={setGoalDialogOpen}
+        />
+      ) : null}
     </div>
   );
 }

@@ -152,6 +152,49 @@ describe("api client", () => {
     });
   });
 
+  it("waits for a MiniMax npm update including its preflight and version probes", async () => {
+    vi.useFakeTimers();
+    let finish!: (response: Response) => void;
+    let signal: AbortSignal | null | undefined;
+    vi.stubGlobal("fetch", vi.fn((_url: string, options: RequestInit) => {
+      signal = options.signal;
+      return new Promise<Response>((resolve) => { finish = resolve; });
+    }));
+    const result = apiModule.updateAdapter("mcode").then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error })
+    );
+    try {
+      await vi.advanceTimersByTimeAsync(340_000);
+      expect(signal?.aborted).toBe(false);
+      finish(await mockEnvelope({ id: "mcode", versionStillBehind: false }));
+      await expect(result).resolves.toMatchObject({ value: { id: "mcode", versionStillBehind: false } });
+    } finally {
+      finish(await mockEnvelope({}));
+      await result;
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports unreachable gateways with the resolved base URL", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
+
+    await expect(apiModule.login("user@example.com", "password")).rejects.toMatchObject({
+      name: "GatewayApiError",
+      message: `Cannot reach the Gateway at ${apiModule.gatewayBaseUrl}.`,
+      details: { code: "GATEWAY_UNREACHABLE" }
+    });
+  });
+
+  it("classifies only connection-level failures as unreachable gateways", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
+
+    const caught = await apiModule.login("user@example.com", "password").catch((error: unknown) => error);
+    expect(apiModule.isGatewayUnreachable(caught)).toBe(true);
+    expect(apiModule.isGatewayUnreachable(new Error("boom"))).toBe(false);
+    expect(apiModule.isGatewayUnreachable(new apiModule.GatewayApiError("bad request", 401))).toBe(false);
+  });
+
   it("submits local account recovery credentials without an auth token", async () => {
     await resetPassword({
       email: "owner@example.com",
@@ -341,12 +384,17 @@ describe("api client", () => {
     }));
   });
 
-  it("loads CLI field schema and values separately", async () => {
+  it("loads and patches CLI field schema and values separately", async () => {
     await apiModule.getCliConfigFields("codex");
     await apiModule.getCliConfigFieldValues("codex");
+    await apiModule.updateCliConfigFields("kimi", { defaultPermissionMode: "yolo" });
 
     expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:18332/api/v1/cli-config/codex/fields", expect.objectContaining({}));
     expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:18332/api/v1/cli-config/codex/field-values", expect.objectContaining({}));
+    expect(fetch).toHaveBeenNthCalledWith(3, "http://127.0.0.1:18332/api/v1/cli-config/kimi/fields", expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ updates: { defaultPermissionMode: "yolo" } }),
+    }));
   });
 
   it("manages provider model profiles through REST", async () => {
@@ -828,6 +876,18 @@ describe("api client", () => {
     await deleteSession("session-1", { force: true });
     expect(fetch).toHaveBeenCalledWith(
       "http://127.0.0.1:18332/api/v1/sessions/session-1?force=true",
+      expect.objectContaining({ method: "DELETE" })
+    );
+
+    await deleteSession("session-1", { onlyStopped: true });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:18332/api/v1/sessions/session-1?onlyStopped=true",
+      expect.objectContaining({ method: "DELETE" })
+    );
+
+    await deleteSession("session-1", { onlyStopped: true, force: true });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:18332/api/v1/sessions/session-1?onlyStopped=true&force=true",
       expect.objectContaining({ method: "DELETE" })
     );
   });
@@ -1778,6 +1838,7 @@ describe("api client", () => {
     await getCliConfigFile("kimi", "config.toml");
     await writeCliConfigFile("kimi", "config.toml", "default_model = \"k2\"");
     await setCliDefaultModel("kimi", "moonshot/kimi-k2.5");
+    await apiModule.deleteCliProvider("kimi", "relay");
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -1804,6 +1865,11 @@ describe("api client", () => {
         method: "PUT",
         body: JSON.stringify({ model: "moonshot/kimi-k2.5" }),
       })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:18332/api/v1/cli-config/kimi/providers/relay",
+      expect.objectContaining({ method: "DELETE" })
     );
   });
 });
