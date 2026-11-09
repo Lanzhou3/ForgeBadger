@@ -46,7 +46,7 @@ test("complete MVP-0 user journey", async ({ page }) => {
   await expect(page).toHaveURL(/\/projects\/.+/);
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
 
-  // 7. Open the session launch dialog, pick the runtime CLI, and create a session
+  // 7. Pick the runtime CLI and create a session from the private project page
   const runtimeAdapterSelect = page.locator("#runtime-adapter");
   await expect(runtimeAdapterSelect).toBeEnabled({ timeout: 5000 });
   // The runtime CLI picker is a Radix-based dropdown (to show CLI logos), so
@@ -54,12 +54,6 @@ test("complete MVP-0 user journey", async ({ page }) => {
   await runtimeAdapterSelect.click();
   await page.getByRole("option", { name: /Claude Code/ }).click();
   await page.getByRole("button", { name: "New Session" }).click();
-  const launchDialog = page.getByRole("dialog");
-  await expect(launchDialog).toBeVisible();
-  // The launch dialog CLI picker is the same unified Radix dropdown, so
-  // assert the displayed brand label instead of a native select value.
-  await expect(launchDialog.locator("#launch-adapter")).toContainText("Claude Code");
-  await launchDialog.getByRole("button", { name: "New Session" }).click();
 
   // 8. Session creation navigates straight to the session terminal
   await page.waitForURL(/\/sessions\/.+/, { timeout: 5000 });
