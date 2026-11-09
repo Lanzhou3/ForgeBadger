@@ -20,7 +20,8 @@ env:
 jobs:
   verify:
     name: Workspace Static Checks, Tests, And Builds
-    runs-on: ubuntu-latest
+    # Playwright 1.59 does not support the Ubuntu 26 image behind ubuntu-latest.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       FORGEBADGER_HOST: "127.0.0.1"
