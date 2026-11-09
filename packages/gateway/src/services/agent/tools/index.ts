@@ -1,3 +1,4 @@
+import { createNativeLifecycleTools } from '../../mcp/lifecycle-tools.js';
 import { createProjectDiffTools } from './project-diff.js';
 import { createResearchTools } from "./research.js";
 import { createSourceSearchTools } from "./source-search.js";
@@ -22,6 +23,9 @@ import { createUsageTools } from "./usage.js";
 import { createProjectManagerTools } from "./project-manager.js";
 import { createSkillTools } from "./skills.js";
 import { createGraphTools } from "./graph.js";
+import { createGoalTools } from "./goals.js";
+import { createGoalSandboxTools } from "./goal-sandbox.js";
+import { createGoalDelegateTools } from "./goal-delegate.js";
 
 export function createPlatformTools(): AgentTool[] {
   return [
@@ -33,6 +37,7 @@ export function createPlatformTools(): AgentTool[] {
     ...createPlatformCoverageTools(),
     ...createToolResultTools(),
     ...createPlatformManagementTools(),
+    ...createNativeLifecycleTools(),
     ...createSkillTools(),
     ...createProjectTools(),
     ...createSessionTools(),
@@ -40,6 +45,9 @@ export function createPlatformTools(): AgentTool[] {
     ...createMemoryTools(),
     ...createUsageTools(),
     ...createProjectManagerTools(),
-    ...createGraphTools()
+    ...createGraphTools(),
+    ...createGoalTools(),
+    ...createGoalSandboxTools(),
+    ...createGoalDelegateTools()
   ];
 }

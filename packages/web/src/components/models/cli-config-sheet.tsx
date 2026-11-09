@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileCode2, Pencil, ShieldAlert } from "lucide-react";
+import { FileCode2, Pencil, ShieldAlert, Trash2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import type { ThemedToken } from "shiki";
 
@@ -30,6 +30,8 @@ import {
   getCliConfigFields,
   getCliConfigFieldValues,
   getCliConfigFile,
+  deleteCliProvider,
+  updateCliConfigFields,
   writeCliConfigFile,
   type CliConfigFieldSpec,
   type RuntimeAdapterId,
@@ -92,10 +94,12 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [removeCandidate, setRemoveCandidate] = useState<string | null>(null);
   useEffect(() => {
     setEditing(false);
     setDraft("");
     setCloseConfirmOpen(false);
+    setRemoveCandidate(null);
   }, [adapter, open]);
 
   const loadedContent = mainFileQuery.data?.content ?? "";
@@ -142,6 +146,39 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
     },
   });
 
+  const fieldMutation = useMutation({
+    mutationFn: (updates: Record<string, unknown>) => updateCliConfigFields(adapter, updates),
+    onSuccess: async () => {
+      toast.success(t("cliConfig.saved"));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["cli-config", adapter] }),
+        queryClient.invalidateQueries({ queryKey: ["cli-config-file", adapter, mainFile?.relativePath] }),
+        queryClient.invalidateQueries({ queryKey: ["cli-config-field-values", adapter] }),
+      ]);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : t("cliConfig.saveFailed"));
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (providerId: string) => deleteCliProvider(adapter, providerId),
+    onSuccess: async () => {
+      setRemoveCandidate(null);
+      toast.success(t("cliConfig.providerRemoved"));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["cli-config", adapter] }),
+        queryClient.invalidateQueries({ queryKey: ["cli-config-file", adapter, mainFile?.relativePath] }),
+        queryClient.invalidateQueries({ queryKey: ["cli-config-field-values", adapter] }),
+        queryClient.invalidateQueries({ queryKey: ["applied-providers"] }),
+        queryClient.invalidateQueries({ queryKey: ["applied-provider"] }),
+      ]);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : t("cliConfig.removeProviderFailed"));
+    },
+  });
+
   const commonFields = fieldsQuery.data?.fields ?? [];
 
   return (
@@ -182,9 +219,13 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
                   {commonFields.map((field) => (
                     <FieldMetadata
                       key={field.key}
+                      adapter={adapter}
                       field={field}
                       value={valuesQuery.data?.values[field.key]}
                       valuesLoading={valuesQuery.isLoading}
+                      isAdmin={isAdmin}
+                      pending={fieldMutation.isPending}
+                      onEnumChange={(key, value) => fieldMutation.mutate({ [key]: value })}
                       t={t}
                     />
                   ))}
@@ -193,6 +234,42 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
               {valuesQuery.error ? (
                 <StateLine destructive text={message(valuesQuery.error, t("cliConfig.loadFieldValuesFailed"))} />
               ) : null}
+            </section>
+          ) : null}
+
+          {snapshot && snapshot.providers.length > 0 ? (
+            <section className="space-y-2">
+              <h3 className="text-sm font-medium">{t("cliConfig.providers")}</h3>
+              <div className="space-y-2">
+                {snapshot.providers.map((provider) => (
+                  <div key={provider.id} className="flex items-center gap-3 rounded-md border border-border/70 px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium">{provider.name}</span>
+                        {provider.isActive ? <Badge variant="secondary">{t("models.cliStatusActiveHere")}</Badge> : null}
+                      </div>
+                      <div className="mt-1 truncate font-mono text-xs text-muted-foreground">{provider.id} · {provider.protocol}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {t("cliConfig.modelCount").replace("{count}", String(snapshot.models.filter((model) => model.provider === provider.id).length))}
+                      </div>
+                    </div>
+                    {isAdmin && canDeleteProviderId(provider.id) ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="shrink-0 text-destructive"
+                        disabled={removeMutation.isPending}
+                        aria-label={t("cliConfig.removeProviderWithName").replace("{provider}", provider.name)}
+                        onClick={() => setRemoveCandidate(provider.id)}
+                      >
+                        <Trash2 className="size-4" />
+                        {t("cliConfig.removeProvider")}
+                      </Button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             </section>
           ) : null}
 
@@ -316,8 +393,24 @@ export function CliConfigSheet({ open, adapter: initialAdapter, onOpenChange }: 
         onOpenChange={setCloseConfirmOpen}
         onConfirm={discardAndClose}
       />
+      <ConfirmDialog
+        open={removeCandidate !== null}
+        title={t("cliConfig.removeProviderTitle")}
+        description={t("cliConfig.removeProviderDescription")
+          .replace("{adapter}", adapter)
+          .replace("{provider}", snapshot?.providers.find((provider) => provider.id === removeCandidate)?.name ?? removeCandidate ?? "—")}
+        confirmLabel={t("cliConfig.removeProvider")}
+        destructive
+        pending={removeMutation.isPending}
+        onOpenChange={(open) => { if (!open) setRemoveCandidate(null); }}
+        onConfirm={() => { if (removeCandidate) removeMutation.mutate(removeCandidate); }}
+      />
     </Sheet>
   );
+}
+
+function canDeleteProviderId(providerId: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(providerId);
 }
 
 function HighlightedConfigContent({ fileName, content }: { fileName: string; content: string }) {
@@ -375,14 +468,22 @@ function HighlightedConfigContent({ fileName, content }: { fileName: string; con
 }
 
 function FieldMetadata({
+  adapter,
   field,
   value,
   valuesLoading,
+  isAdmin,
+  pending,
+  onEnumChange,
   t,
 }: {
+  adapter: RuntimeAdapterId;
   field: CliConfigFieldSpec;
   value: unknown;
   valuesLoading: boolean;
+  isAdmin: boolean;
+  pending: boolean;
+  onEnumChange: (key: string, value: string | null) => void;
   t: (key: any) => string;
 }) {
   const displayed = valuesLoading
@@ -398,9 +499,38 @@ function FieldMetadata({
     <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2">
       <div className="text-sm font-medium">{field.label}</div>
       <div className="mt-1 font-mono text-xs text-muted-foreground">{field.path}</div>
-      <div className="mt-2 text-xs">{displayed}</div>
+      {field.type === "enum" && isAdmin ? (
+        <select
+          aria-label={field.label}
+          className="mt-2 h-8 w-full rounded-md border bg-background px-2 text-xs"
+          value={typeof value === "string" ? value : ""}
+          disabled={valuesLoading || pending}
+          onChange={(event) => onEnumChange(field.key, event.target.value || null)}
+        >
+          <option value="">{t("cliConfig.fieldNotSet")}</option>
+          {(field.values ?? []).map((option) => (
+            <option key={option} value={option}>{enumValueLabel(t, adapter, field.key, option)}</option>
+          ))}
+        </select>
+      ) : (
+        <div className="mt-2 text-xs">{displayed}</div>
+      )}
     </div>
   );
+}
+
+function enumValueLabel(
+  t: (key: any) => string,
+  adapter: RuntimeAdapterId,
+  fieldKey: string,
+  value: string
+): string {
+  if (adapter === "kimi" && fieldKey === "defaultPermissionMode") {
+    if (value === "manual") return t("models.kimiPermissionManual");
+    if (value === "yolo") return t("models.kimiPermissionYolo");
+    if (value === "auto") return t("models.kimiPermissionAuto");
+  }
+  return value;
 }
 
 function Metadata({ label, value }: { label: string; value: string }) {

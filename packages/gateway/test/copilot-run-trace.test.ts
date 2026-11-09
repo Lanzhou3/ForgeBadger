@@ -8,7 +8,6 @@ import { createGatewayApp } from "../src/server.js";
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { ModelProviderRepository } from '../src/db/repositories/model-provider-repository.js';
 import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
-import { RunGovernance } from '../src/services/agent/run-governance.js';
 import { listRunTrace, sanitizeTraceDetail, traceRunEvent } from '../src/services/agent/run-trace.js';
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
@@ -29,8 +28,6 @@ it('emits a monotonic decision timeline across a run lifecycle', async () => {
     const run = f.ledger.admit(f.input, 4);
     const claim = f.ledger.claim(run, 'worker', 30000)!;
     assert.ok(claim);
-    await new RunGovernance(f.db, f.userId, run).measure('model', 'input',
-      async () => ({ usage: { inputTokens: 10, outputTokens: 5 } }), result => result.usage);
     // Simulate an interrupted owner: force the lease to expire, then reclaim.
     f.db.prepare('UPDATE copilot_runs SET lease_expires_at=1 WHERE user_id=? AND id=?').run(f.userId, run);
     const reclaimed = f.ledger.claim(run, 'worker-2', 30000)!;
@@ -45,7 +42,7 @@ it('emits a monotonic decision timeline across a run lifecycle', async () => {
 
     const events = listRunTrace(f.db, f.userId, run);
     const names = events.map(event => event.event);
-    for (const expected of ['admitted', 'claimed', 'llm_call_completed', 'run_recovered', 'approval_parked', 'approval_decided', 'run_finished'])
+    for (const expected of ['admitted', 'claimed', 'run_recovered', 'approval_parked', 'approval_decided', 'run_finished'])
       assert.ok(names.includes(expected), `missing ${expected} in ${names.join(',')}`);
     assert.deepEqual(events.map(event => event.seq), events.map((_, index) => index + 1));
     assert.deepEqual(events.map(event => event.seq), [...events.map(event => event.seq)].sort((a, b) => a - b));

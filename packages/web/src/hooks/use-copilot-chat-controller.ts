@@ -96,7 +96,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const lastSentRef = useRef<{ conversationId: string; text: string; projectId?: string; modelId?: string; clientRequestId: string; reviewTaskResults?: boolean; repairFailedChecks?: boolean } | null>(null);
+  const lastSentRef = useRef<{ conversationId: string; text: string; modelId?: string; clientRequestId: string; reviewTaskResults?: boolean; repairFailedChecks?: boolean } | null>(null);
   const lastEditRef = useRef<{ signature: string; clientRequestId: string; reviewTaskResults?: boolean; repairFailedChecks?: boolean } | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   const selectionEpochRef = useRef(0);
@@ -149,7 +149,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     if (retry && (!prior || prior.conversationId !== id)) return;
     const epoch = selectionEpochRef.current;
     messageSerialRef.current++;
-    const request = prior ?? { conversationId: id, text, ...(opts.projectId ? { projectId: opts.projectId } : {}), ...(opts.modelId ? { modelId: opts.modelId } : {}), clientRequestId: crypto.randomUUID(), reviewTaskResults: opts.reviewTaskResults, repairFailedChecks: opts.repairFailedChecks };
+    const request = prior ?? { conversationId: id, text, ...(opts.modelId ? { modelId: opts.modelId } : {}), clientRequestId: crypto.randomUUID(), reviewTaskResults: opts.reviewTaskResults, repairFailedChecks: opts.repairFailedChecks };
     lastSentRef.current = request;
     if (!retry) opts.appendUserMessage(text);
     if (!textOverride) setInputState("");
@@ -162,7 +162,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     opts.markPending(id);
     onStarted?.();
     try {
-      await opts.startRun(id, text, request.modelId, { ...(request.projectId ? { projectId: request.projectId } : {}), clientRequestId: request.clientRequestId, ...(request.repairFailedChecks ? { repairFailedChecks: true } : {}), ...(request.reviewTaskResults ? { reviewTaskResults: true } : {}) });
+      await opts.startRun(id, text, request.modelId, { clientRequestId: request.clientRequestId, ...(request.repairFailedChecks ? { repairFailedChecks: true } : {}), ...(request.reviewTaskResults ? { reviewTaskResults: true } : {}) });
       if (epoch !== selectionEpochRef.current) return;
       const wasUntitled = !opts.conversations.find((item) => item.id === id)?.title;
       if (wasUntitled) await opts.autoTitleIfUntitled(id, text.slice(0, AUTO_TITLE_MAX_CHARS));
@@ -214,14 +214,14 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     if (!id || !targetId || !content || editSubmittingRef.current || opts.savingPreferences || sendingRef.current) return;
     const epoch = selectionEpochRef.current;
     messageSerialRef.current++;
-    const signature = JSON.stringify([id, targetId, content, opts.projectId, opts.modelId]);
+    const signature = JSON.stringify([id, targetId, content, opts.modelId]);
     const request = lastEditRef.current?.signature === signature ? lastEditRef.current : { signature, clientRequestId: crypto.randomUUID(), reviewTaskResults: opts.reviewTaskResults, repairFailedChecks: opts.repairFailedChecks };
     lastEditRef.current = request;
     editSubmittingRef.current = true;
     setEditSubmitting(true);
     opts.clearActive();
     try {
-      await opts.startEditedRun(id, targetId, content, { clientRequestId: request.clientRequestId, ...(opts.projectId ? { projectId: opts.projectId } : {}), ...(opts.modelId ? { modelId: opts.modelId } : {}), ...(request.repairFailedChecks ? { repairFailedChecks: true } : {}), ...(request.reviewTaskResults ? { reviewTaskResults: true } : {}) });
+      await opts.startEditedRun(id, targetId, content, { clientRequestId: request.clientRequestId, ...(opts.modelId ? { modelId: opts.modelId } : {}), ...(request.repairFailedChecks ? { repairFailedChecks: true } : {}), ...(request.reviewTaskResults ? { reviewTaskResults: true } : {}) });
       if (epoch !== selectionEpochRef.current) return;
       setEditingMessageId(null);
       setEditDraft("");

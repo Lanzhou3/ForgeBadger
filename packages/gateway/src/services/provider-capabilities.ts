@@ -30,9 +30,9 @@ const capabilities: readonly ProviderAdapterCapability[] = Object.freeze([
     projectionScope: "user-global", modelSelection: "argument", remoteModelList: true
   },
   {
-    adapter: "kimi", apiFormats: ["openai-responses", "openai-compatible"],
-    authModes: ["managed_credential", "host_environment", "none"], scopes: ["global", "project"],
-    projectionScope: "project-or-user-global", modelSelection: "native-config", remoteModelList: false
+    adapter: "kimi", apiFormats: ["anthropic", "openai-responses", "openai-compatible", "google"],
+    authModes: ["managed_credential", "host_environment", "none"], scopes: ["global"],
+    projectionScope: "user-global", modelSelection: "native-config", remoteModelList: false
   },
   {
     adapter: "pi", apiFormats: ["anthropic", "openai-responses", "openai-compatible", "google"],
@@ -47,6 +47,14 @@ const capabilities: readonly ProviderAdapterCapability[] = Object.freeze([
     // apply time. No project-level config.yaml exists — .mcode/ holds commands
     // and agents only.
     adapter: "mcode", apiFormats: ["anthropic", "openai-responses", "openai-compatible"],
+    authModes: ["managed_credential", "host_environment", "none"], scopes: ["global"],
+    projectionScope: "user-global", modelSelection: "native-config", remoteModelList: false
+  },
+  {
+    // Grok Build's `[model.*]` table accepts chat_completions, responses, and
+    // messages. Google has no backend. Models live only in the user config;
+    // project `.grok/config.toml` cannot carry them.
+    adapter: "grok", apiFormats: ["anthropic", "openai-responses", "openai-compatible"],
     authModes: ["managed_credential", "host_environment", "none"], scopes: ["global"],
     projectionScope: "user-global", modelSelection: "native-config", remoteModelList: false
   }

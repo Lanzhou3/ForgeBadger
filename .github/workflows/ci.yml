@@ -20,7 +20,8 @@ env:
 jobs:
   verify:
     name: Workspace Static Checks, Tests, And Builds
-    runs-on: ubuntu-latest
+    # Playwright 1.59 does not support the Ubuntu 26 image behind ubuntu-latest.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       FORGEBADGER_HOST: "127.0.0.1"
@@ -52,6 +53,13 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Rebuild and verify terminal native module
+        env:
+          npm_config_build_from_source: "true"
+        run: |
+          pnpm --dir packages/gateway rebuild node-pty
+          pnpm --dir packages/gateway exec node -e "require('node-pty')"
 
       - name: Script harness tests
         run: node --test scripts/audit-feishu-bot-live-report.test.mjs scripts/create-feishu-bot-live-evidence-report.test.mjs scripts/run-with-root-env.test.mjs scripts/smoke-feishu-bot-websocket.test.mjs scripts/smoke-feishu-bot-live.test.mjs scripts/smoke-local-release.test.mjs scripts/smoke-npm-package-runner.test.mjs scripts/validate-db-migrations.test.mjs scripts/verify-npm-package.test.mjs

@@ -14,6 +14,7 @@ import { DeleteConfirmDialog } from "@/components/models/delete-confirm-dialog";
 import { ProviderList } from "@/components/models/provider-list";
 import { ProviderWorkspace } from "@/components/models/provider-workspace";
 import {
+  credentialDisplayName,
   customProviderPrimaryBaseUrl,
   emptyCredential,
   emptyCustomProvider,
@@ -128,10 +129,6 @@ export default function ModelsPage() {
     () => providerModels.find((model) => model.id === selectedModelId),
     [providerModels, selectedModelId]
   );
-  const selectedCredential = useMemo(
-    () => providerCredentials.find((credential) => credential.id === selectedCredentialId),
-    [providerCredentials, selectedCredentialId]
-  );
   const modelCountsByProvider = useMemo(() => {
     const counts = new Map<string, number>();
     for (const model of models) {
@@ -166,12 +163,6 @@ export default function ModelsPage() {
     }
   }, [selectedModel]);
 
-  useEffect(() => {
-    if (selectedCredential) {
-      setCredentialForm((form) => ({ ...form, label: selectedCredential.label ?? "" }));
-    }
-  }, [selectedCredential]);
-
   const createProviderMutation = useMutation({
     mutationFn: async () => {
       const anthropicBaseUrl = customProvider.anthropicBaseUrl.trim();
@@ -193,7 +184,6 @@ export default function ModelsPage() {
         created.provider.authType === "none" || !secret
           ? undefined
           : (await createProviderCredential(created.provider.id, {
-              label: setupCredentialForm.label.trim() || undefined,
               plaintextSecret: secret,
             })).credential;
       // Model sync always fetches the provider's live model list; a failure
@@ -275,7 +265,6 @@ export default function ModelsPage() {
   const credentialMutation = useMutation({
     mutationFn: () =>
       createProviderCredential(selectedProviderId, {
-        label: credentialForm.label.trim() || undefined,
         plaintextSecret: credentialForm.plaintextSecret,
       }),
     onSuccess: async (result) => {
@@ -291,7 +280,6 @@ export default function ModelsPage() {
     mutationFn: () => {
       if (!selectedCredentialId) throw new Error(t("models.credentialRequired"));
       return rotateProviderCredential(selectedProviderId, selectedCredentialId, {
-        label: credentialForm.label.trim() || undefined,
         plaintextSecret: credentialForm.plaintextSecret,
       });
     },
@@ -535,7 +523,7 @@ export default function ModelsPage() {
           empty={null}
         />
       ) : (
-      <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
+      <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
         <div className="min-w-0 space-y-6">
           <ProviderList
             providers={filteredProviders}
@@ -617,20 +605,21 @@ export default function ModelsPage() {
                   openDeleteDialog({
                     kind: "credential",
                     credentialId,
-                    name:
-                      providerCredentials.find((credential) => credential.id === credentialId)?.label ??
-                      credentialId,
+                    name: credentialDisplayName(
+                      providerCredentials.find((credential) => credential.id === credentialId) ?? { id: credentialId, label: null },
+                      t("models.apiKey"),
+                    ),
                   }),
               }}
               t={t}
             />
           ) : providers.length === 0 ? (
-            <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-border/70 bg-card/50 px-6 py-12 text-center forgebadger-animate-in">
-              <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-                <Cloud className="size-5" />
+            <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 rounded-2xl bg-muted/20 px-6 py-12 text-center forgebadger-animate-in">
+              <div className="flex size-12 items-center justify-center rounded-2xl bg-brand/10 text-brand">
+                <Cloud className="size-6" />
               </div>
-              <div className="space-y-1">
-                <div className="text-sm font-medium">{t("models.emptyWorkspaceTitle")}</div>
+              <div className="space-y-1.5">
+                <div className="text-sm font-semibold">{t("models.emptyWorkspaceTitle")}</div>
                 <p className="max-w-md text-sm text-muted-foreground">{t("models.emptyProviders")}</p>
               </div>
               <Button
@@ -644,9 +633,9 @@ export default function ModelsPage() {
               </Button>
             </div>
           ) : (
-            <div className="flex min-h-[280px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border/70 bg-card/50 px-6 py-10 text-center forgebadger-animate-in">
-              <div className="flex size-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                <Cloud className="size-5" />
+            <div className="flex min-h-[280px] flex-col items-center justify-center gap-3 rounded-2xl bg-muted/20 px-6 py-10 text-center forgebadger-animate-in">
+              <div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+                <Cloud className="size-6" />
               </div>
               <p className="max-w-sm text-sm text-muted-foreground">{t("models.noProviderSelected")}</p>
             </div>

@@ -3,6 +3,7 @@ import { decryptSecret, encryptSecret, type EncryptedSecret } from '../../crypto
 import { ChannelMessageRepository, type ChannelMessage } from '../../db/repositories/channel-message-repository.js';
 import { ChannelDeliveryRepository } from '../../db/repositories/channel-delivery-repository.js';
 import { ChannelCommandRepository } from '../../db/repositories/channel-command-repository.js';
+import { ProjectRepository } from '../../db/repositories/project-repository.js';
 import { ChannelIdentityService, type TrustedChannelPeer } from './channel-identity-service.js';
 import { CopilotRunLedger } from '../agent/run-ledger.js';
 import { CopilotConversationLog } from '../agent/conversation-log.js';
@@ -15,6 +16,7 @@ const help = [
   '/stop — 停止当前对话的 Copilot 任务并取消排队消息，不关闭 CLI 终端',
   '/status — 查看当前对话的执行和排队状态',
   '/model — 查看或切换当前会话模型；/model list 列出可用配置',
+  '/project — 查看当前项目并列出可选项目；/project <项目ID> 切换会话项目',
   '/playbooks — 列出可用 Copilot 操作指南',
   '/skills — 查看 Skills 管理说明',
   '/pair <配对码> — 私聊配对，随后在 Web 确认'
@@ -46,10 +48,11 @@ export class ChannelCommands {
     if (item.conversation_id !== conversationId) throw new Error('CHANNEL_COMMAND_SCOPE_CHANGED');
     const cancelled: string[] = [];
     let reply: string;
-    const supported = ['help','new','stop','status','model','skills','playbooks'].includes(command.name);
+    const busy = () => this.records.activeRuns(conversationId).length>0 || this.records.queuedFollowups(conversationId)>0 || this.pending(item,peer,conversationId).length>0;
+    const supported = ['help','new','stop','status','model','project','skills','playbooks'].includes(command.name);
     if (!supported) reply = '未知命令。请发送 /help 查看支持的命令。';
-    else if (command.name === 'model') reply = new ChannelModelCommand(this.db,this.userId,this.key).reply(conversationId,command.args,()=>
-      this.records.activeRuns(conversationId).length>0 || this.records.queuedFollowups(conversationId)>0 || this.pending(item,peer,conversationId).length>0);
+    else if (command.name === 'model') reply = new ChannelModelCommand(this.db,this.userId,this.key).reply(conversationId,command.args,busy);
+    else if (command.name === 'project') reply = this.project(conversationId,command.args,busy);
     else if (command.args) reply = `用法：/${command.name}（不接受参数）。发送 /help 查看说明。`;
     else if (command.name === 'help') reply = help;
     else {
@@ -66,7 +69,9 @@ export class ChannelCommands {
       } else if (active.length || queued || this.records.hasUnsettledReplies(conversationId,item.id)) {
         reply = '当前会话仍有任务、排队消息或待发送回复。请先 /stop 或等待回复送达，再发送 /new。';
       } else {
-        const next = new CopilotConversationLog(this.db,this.userId).createConversation('远程新对话');
+        const log = new CopilotConversationLog(this.db,this.userId);
+        const projectId = log.getConversation(conversationId)?.project_id ?? null;
+        const next = log.createConversation('远程新对话',projectId);
         authority.records.replaceSession(item.route_id,peer,conversationId,next.id);
         conversationId = next.id;
         this.messages.bindConversation(item.id,conversationId);
@@ -75,6 +80,22 @@ export class ChannelCommands {
     }
     new ChannelDeliveryRepository(this.db,this.userId).enqueue(item.id,'command',JSON.stringify(encryptSecret(reply,{key:this.key})));
     return cancelled;
+  }
+
+  private project(conversationId: string, args: string, busy: () => boolean): string {
+    const projects = new ProjectRepository(this.db,this.userId);
+    const log = new CopilotConversationLog(this.db,this.userId);
+    if (!args) {
+      const currentId = log.getConversation(conversationId)?.project_id;
+      const current = currentId ? projects.getById(currentId) : undefined;
+      const choices = projects.list().map(project => `${project.name}：${project.id}`).join('\n') || '暂无可用项目。';
+      return `当前项目：${current?.name ?? '未选择'}\n可切换项目：\n${choices}\n发送 /project <项目ID> 切换。`;
+    }
+    if (busy()) return '当前会话仍有任务或排队消息，请结束后再切换项目。';
+    const project = projects.getById(args);
+    if (!project) return '项目不存在或不可用。发送 /project 查看可选项目。';
+    log.setConversationProject(conversationId,project.id);
+    return `已将当前 Copilot 会话切换到项目：${project.name}（${project.id}）。`;
   }
 
   private pending(item: ChannelMessage, peer: TrustedChannelPeer, conversationId: string): ChannelMessage[] {

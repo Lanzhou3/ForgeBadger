@@ -143,7 +143,7 @@ export async function mockProjectDetailApis(
     }
 
     if (url.pathname === '/api/v1/adapters/order' && method === 'GET') {
-      await route.fulfill({ json: envelope({ order: ['claude', 'opencode', 'codex', 'kimi', 'pi', 'mcode'] }) });
+      await route.fulfill({ json: envelope({ order: ['claude', 'opencode', 'codex', 'kimi', 'pi', 'mcode', 'grok'] }) });
       return;
     }
 

@@ -4,6 +4,12 @@ import { readFile, stat } from "node:fs/promises";
 import type { CliAccountOverview, CliLoginStatus, CliQuotaEntry, CliQuotaResult } from "./types.js";
 import { globalConfigRoot } from "../cli-config-target.js";
 import {
+  claudeKeychainAccount,
+  claudeKeychainServiceName,
+  readMacosKeychainSecret,
+  type ClaudeKeychainReader
+} from "./claude-keychain.js";
+import {
   buildCliProbeEnv,
   createPerUserProbeCache,
   fetchCliQuotaJson,
@@ -25,6 +31,10 @@ export interface CliAccountProbeOptions {
   homeDir?: string;
   /** Login probe timeout; defaults to 2s. */
   timeoutMs?: number;
+  /** macOS Keychain reader override (tests); defaults to security(1). */
+  readKeychain?: ClaudeKeychainReader;
+  /** Platform override (tests); defaults to process.platform. */
+  platform?: NodeJS.Platform;
 }
 
 // Unofficial endpoint (reverse-engineered; community-verified). The parser
@@ -64,7 +74,7 @@ export async function observeClaudeLogin(options: CliAccountProbeOptions = {}): 
       "claude", ["auth", "status"], controller.signal,
       { env: buildCliProbeEnv() }
     );
-    const parsed = parseAuthStatusJson(result.stdout);
+    const parsed = parseJsonRecord(result.stdout);
     const method = stringField(parsed?.authMethod) ?? "claude.ai";
     const accountLabel = stringField(parsed?.email);
     // Exit code wins per the CLI contract (0 = logged in, 1 = not logged in).
@@ -89,25 +99,22 @@ export async function observeClaudeLogin(options: CliAccountProbeOptions = {}): 
 
 export async function observeClaudeQuota(options: CliAccountProbeOptions = {}): Promise<CliQuotaResult> {
   const fetchedAt = new Date().toISOString();
-  const root = globalConfigRoot("claude", probeConfigRootOptions(options));
-  const credentials = await readCliTokenFile(path.join(root, ".credentials.json"));
-  const oauth = credentials.ok ? asRecord(credentials.data.claudeAiOauth) : undefined;
-  const accessToken = stringField(oauth?.accessToken);
-  if (!accessToken) {
-    // macOS stores Claude credentials in the Keychain by default and this
-    // project never reads the OS keyring — quota is unsupported there. On
-    // other platforms a missing file simply means no native login.
-    return unsupportedQuota(fetchedAt, process.platform === "darwin" ? "keychain" : "no_native_login");
-  }
+  const lookup = await resolveClaudeQuotaToken(options);
+  if (!lookup.ok) return unsupportedQuota(fetchedAt, lookup.reason);
   const outcome = await fetchCliQuotaJson({
     url: claudeUsageUrl,
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${lookup.token}`,
       "anthropic-beta": "oauth-2025-04-20"
     },
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {})
   });
   if (!outcome.ok) {
+    // `claude setup-token` tokens carry only the user:inference scope; the
+    // usage endpoint answers 403 for them, which is not an expiry.
+    if (lookup.source === "setup_token" && outcome.httpStatus === 403) {
+      return unsupportedQuota(fetchedAt, "setup_token_scope");
+    }
     return unsupportedQuota(
       fetchedAt,
       outcome.errorCode === "token_expired" ? "token_expired" : "upstream_error"
@@ -116,6 +123,52 @@ export async function observeClaudeQuota(options: CliAccountProbeOptions = {}): 
   const entries = parseUsageBody(outcome.body);
   const planLabel = stringField(asRecord(outcome.body)?.planType) ?? stringField(asRecord(outcome.body)?.plan_type);
   return { supported: true, entries, fetchedAt, ...(planLabel ? { planLabel } : {}) };
+}
+
+type ClaudeQuotaTokenLookup =
+  | { ok: true; token: string; source: "setup_token" | "stored_login" }
+  | { ok: false; reason: "keychain" | "no_native_login" };
+
+/**
+ * Resolve the OAuth token the CLI itself would use, in Claude Code's order:
+ * CLAUDE_CODE_OAUTH_TOKEN (settings.json `env` overrides the process env),
+ * then the stored login (`.credentials.json`, or the Keychain on macOS).
+ * Token values stay in memory and are only sent to the usage endpoint.
+ */
+async function resolveClaudeQuotaToken(options: CliAccountProbeOptions): Promise<ClaudeQuotaTokenLookup> {
+  const env = options.env ?? process.env;
+  const root = globalConfigRoot("claude", probeConfigRootOptions(options));
+  const settings = await readConfigDocBounded(path.join(root, "settings.json"));
+  const setupToken =
+    stringField(asRecord(settings?.env)?.CLAUDE_CODE_OAUTH_TOKEN) ?? stringField(env.CLAUDE_CODE_OAUTH_TOKEN);
+  if (setupToken) return { ok: true, token: setupToken, source: "setup_token" };
+
+  const credentials = await readCliTokenFile(path.join(root, ".credentials.json"));
+  const fileToken = credentials.ok ? oauthAccessToken(credentials.data) : undefined;
+  if (fileToken) return { ok: true, token: fileToken, source: "stored_login" };
+
+  if ((options.platform ?? process.platform) !== "darwin") return { ok: false, reason: "no_native_login" };
+  const read = await (options.readKeychain ?? readMacosKeychainSecret)(
+    claudeKeychainServiceName(env),
+    claudeKeychainAccount(env)
+  );
+  if (read.status === "error") return { ok: false, reason: "keychain" };
+  const keychainToken = read.status === "found" ? oauthAccessToken(parseKeychainJsonRecord(read.secret)) : undefined;
+  if (keychainToken) return { ok: true, token: keychainToken, source: "stored_login" };
+  return { ok: false, reason: "no_native_login" };
+}
+
+function oauthAccessToken(data: Record<string, unknown> | undefined): string | undefined {
+  return stringField(asRecord(data?.claudeAiOauth)?.accessToken);
+}
+
+function parseKeychainJsonRecord(raw: string): Record<string, unknown> | undefined {
+  const direct = parseJsonRecord(raw);
+  if (direct) return direct;
+  const candidate = raw.trim();
+  // macOS 26 may render non-ASCII Keychain payloads as an even-length hex string.
+  if (!/^(?:[0-9a-fA-F]{2})+$/.test(candidate)) return undefined;
+  return parseJsonRecord(Buffer.from(candidate, "hex").toString("utf8"));
 }
 
 /** Claude global settings can carry plugins/marketplace metadata; cap the read. */
@@ -155,9 +208,9 @@ function isAnthropicFirstPartyBaseUrl(baseUrl: string): boolean {
   return host === "api.anthropic.com" || host.endsWith(".anthropic.com");
 }
 
-function parseAuthStatusJson(stdout: string): Record<string, unknown> | undefined {
+function parseJsonRecord(raw: string): Record<string, unknown> | undefined {
   try {
-    return asRecord(JSON.parse(stdout));
+    return asRecord(JSON.parse(raw));
   } catch {
     return undefined;
   }

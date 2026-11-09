@@ -13,6 +13,7 @@ import {
   type SessionServerIntegration
 } from "../services/session-server-integration.js";
 import { ingestTerminalNotification } from "../services/terminal-notification-ingestion.js";
+import { handleSessionIdle } from "../services/session-idle-handler.js";
 
 export interface StartedGateway extends GatewayApp {
   host: string;
@@ -90,6 +91,7 @@ export async function createGatewayRuntime(
       sessionServerIpcPath,
       sessionServerTokenPath: resolveSessionServerTokenPath(env.FORGEBADGER_STATE_DIR),
       mcpEnabled: env.FORGEBADGER_MCP_ENABLED,
+      companionEnabled: env.FORGEBADGER_COMPANION_ENABLED,
       pmAutoDispatchEnabled: env.FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED,
       // Builds the DB-backed runtime settings store (settings page) and
       // hot-applies changes; its initial apply also reconciles pre-existing
@@ -109,6 +111,15 @@ export async function createGatewayRuntime(
             ingestTerminalNotification({ db, eventBus, sessionId, notification });
           } catch (error) {
             console.warn("[gateway] terminal notification ingestion failed", error);
+          }
+        };
+        // PTY quiet transitions un-stick work state for CLI sessions whose
+        // completion hook never fires — state correction only, no notification.
+        sessionServerClient.onSessionIdle = (sessionId) => {
+          try {
+            handleSessionIdle({ db, eventBus, sessionId });
+          } catch (error) {
+            console.warn("[gateway] session idle handling failed", error);
           }
         };
       } catch (error) {

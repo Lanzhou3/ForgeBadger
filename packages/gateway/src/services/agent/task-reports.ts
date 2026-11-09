@@ -28,7 +28,10 @@ export function publishTaskReports(deps: AgentStackDeps, userId: string): void {
         const ledger = new CopilotRunLedger(deps.db, userId);
         const run = ledger.get(candidate.runId);
         if (!run || (run.status !== 'completed' && !(run.status === 'stopped' && run.stop_reason === 'step_budget_exhausted'))) return;
-        ledger.validateScope(JSON.parse(run.input_json) as TurnInput);
+        const turn = JSON.parse(run.input_json) as TurnInput;
+        const reviewConflict = turn.reviewTaskResults && turn.projectId && turn.projectId !== candidate.projectId && !turn.channelScope?.routeId;
+        ledger.validateConversationOrigin(turn);
+        if (!reviewConflict) ledger.validateScope(turn);
         const item = new ProjectManagerRepository(deps.db, userId).getWorkItem(candidate.projectId, candidate.workItemId);
         const attempt = item && readTaskDispatchAttempt(item);
         if (!item || !attempt?.consumedNotificationId || reports.alreadyReported(candidate.conversationId, attempt.id)) return;

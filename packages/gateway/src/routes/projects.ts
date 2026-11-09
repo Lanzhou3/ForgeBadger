@@ -32,7 +32,7 @@ import { listWorkspaceTree, maxFileWriteBytes, readWorkspaceFile, writeWorkspace
 import {
   checkoutProjectGitBranch,
   getProjectGitBranches,
-  getProjectGitChanges,
+  getProjectGitChangesCached,
   getProjectGitFileDiff,
   ProjectGitError
 } from "../services/project-git.js";
@@ -1013,7 +1013,7 @@ export function createProjectRoutes(
     }
 
     try {
-      const git = await getProjectGitChanges(project.path);
+      const git = await getProjectGitChangesCached(project.path);
       res.json({
         code: 0,
         data: {

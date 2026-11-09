@@ -6,7 +6,7 @@ import type { Database } from "../db/types.js";
 import { CliConfigAppliedProviderRepository } from "../db/repositories/cli-config-applied-provider-repository.js";
 import { ClaudeRouteRepository } from "../db/repositories/claude-route-repository.js";
 import { ModelProviderRepository } from "../db/repositories/model-provider-repository.js";
-import { isAdapterId, type AdapterId } from "../services/adapter-discovery.js";
+import { isAdapterId, getAdapterLaunchStatus, type AdapterDiscoveryResult, type AdapterId } from "../services/adapter-discovery.js";
 import {
   applyCliConfigFieldPatch,
   listCliConfigAdapters,
@@ -25,6 +25,7 @@ import {
   CliConfigApplyError,
   previewCliConfigApply,
   rollbackCliConfigApply,
+  normalizeProviderKey,
   type ClaudeModelSlot
 } from "../services/cli-config-apply.js";
 import { listCliConfigFields } from "../services/cli-config-fields.js";
@@ -85,7 +86,9 @@ const applyProviderBodySchema = z.object({
   // Codex only: model_reasoning_effort.
   reasoningEffort: z.enum(["minimal", "low", "medium", "high"]).optional(),
   // Claude only: apply through the Gateway route (OpenAI-protocol providers).
-  routeThroughGateway: z.boolean().optional()
+  routeThroughGateway: z.boolean().optional(),
+  // Kimi only: default_permission_mode for new sessions.
+  permissionMode: z.enum(["manual", "yolo", "auto"]).optional()
 }).strict();
 
 const rollbackBodySchema = z.object({
@@ -96,15 +99,31 @@ const claudeRouteBodySchema = z.object({
   enabled: z.boolean()
 }).strict();
 
+const claudeRouteAssignmentsBodySchema = z.object({
+  assignments: z.array(z.object({
+    providerProfileId: z.string().min(1),
+    credentialId: z.string().min(1).optional()
+  }).strict()).min(1).max(5)
+}).strict();
+
+interface CliConfigRouteOptions {
+  operationObserver?: ((operation: string) => void) | undefined;
+  /** Test seam: DNS resolver for the apply SSRF endpoint check. */
+  resolveHost?: import("../services/network-policy.js").OutboundHostResolver | undefined;
+  eventBus?: ForgeBadgerEventBus | undefined;
+  /**
+   * Test seam: adapter availability check. Defaults to probing the installed
+   * CLI (`getAdapterLaunchStatus`), which spawns the adapter's `--version`
+   * command; tests inject a fixed outcome to stay hermetic on machines
+   * without every CLI installed.
+   */
+  adapterAvailabilityCheck?: ((adapter: AdapterId) => Promise<AdapterDiscoveryResult>) | undefined;
+}
+
 export function createCliConfigRoutes(
   db: Database,
   masterKey: string,
-  options: {
-    operationObserver?: ((operation: string) => void) | undefined;
-    /** Test seam: DNS resolver for the apply SSRF endpoint check. */
-    resolveHost?: import("../services/network-policy.js").OutboundHostResolver | undefined;
-    eventBus?: ForgeBadgerEventBus | undefined;
-  } = {}
+  options: CliConfigRouteOptions = {}
 ): Router {
   const router = Router();
   router.use(authenticate);
@@ -156,6 +175,68 @@ export function createCliConfigRoutes(
     observe(options, "route.update");
     handle(res, async () => {
       new ClaudeRouteRepository(db, userId, masterKey).setEnabled(body.data.enabled);
+      return { routing: readClaudeRouteState(db, masterKey, userId) };
+    });
+  });
+
+  // Full ordered failover list for the Claude route (position 1 = primary).
+  router.put("/routing/claude/assignments", (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    if (!userIsInstanceAdmin(db, userId)) {
+      res.status(403).json({
+        code: 1,
+        message: "Instance administrator access is required",
+        details: { code: "INSTANCE_ADMIN_REQUIRED" }
+      });
+      return;
+    }
+    const body = claudeRouteAssignmentsBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ code: 1, message: "Invalid Claude route assignments payload" });
+      return;
+    }
+    const repository = new ModelProviderRepository(db, userId, masterKey);
+    const seen = new Set<string>();
+    for (const entry of body.data.assignments) {
+      if (seen.has(entry.providerProfileId)) {
+        res.status(400).json({ code: 1, message: "Duplicate provider in failover order" });
+        return;
+      }
+      seen.add(entry.providerProfileId);
+    }
+    const resolved = body.data.assignments.map((entry) => {
+      const provider = repository.getProviderProfile(entry.providerProfileId);
+      const credential = entry.credentialId
+        ? provider
+          ? repository.getCredential(entry.credentialId)
+          : undefined
+        : provider
+          ? repository.getOldestActiveCredential(provider.id)
+          : undefined;
+      return { provider, credential };
+    });
+    for (let i = 0; i < resolved.length; i++) {
+      const { provider, credential } = resolved[i]!;
+      if (!provider) {
+        res.status(404).json({ code: 1, message: "Unknown provider in failover order" });
+        return;
+      }
+      // An explicitly assigned credential may be inactive (the data plane
+      // falls back to the oldest active one); a defaulted credential must
+      // exist and be active, or the candidate could never route.
+      if (!credential || credential.providerProfileId !== provider.id) {
+        res.status(400).json({ code: 1, message: "No usable credential for provider" });
+        return;
+      }
+    }
+    observe(options, "route.assignments.update");
+    handle(res, async () => {
+      new ClaudeRouteRepository(db, userId, masterKey).setOrderedAssignments(
+        body.data.assignments.map((entry, index) => ({
+          providerProfileId: entry.providerProfileId,
+          credentialId: resolved[index]!.credential!.id
+        }))
+      );
       return { routing: readClaudeRouteState(db, masterKey, userId) };
     });
   });
@@ -294,9 +375,19 @@ export function createCliConfigRoutes(
       return;
     }
     observe(options, "provider.delete");
-    await handle(res, async () => ({
-      snapshot: await removeCliProvider(adapter, req.params.providerId)
-    }));
+    await handle(res, async () => {
+      const snapshot = await removeCliProvider(adapter, req.params.providerId);
+      const userId = (req as unknown as AuthenticatedRequest).userId;
+      const appliedRepository = new CliConfigAppliedProviderRepository(db, userId);
+      const pointer = appliedRepository.get(adapter);
+      const appliedProvider = pointer
+        ? new ModelProviderRepository(db, userId, masterKey).getProviderProfile(pointer.providerProfileId)
+        : undefined;
+      if (appliedProvider && normalizeProviderKey(appliedProvider.providerKey) === req.params.providerId) {
+        appliedRepository.clear(adapter);
+      }
+      return { snapshot };
+    });
   });
 
   router.put("/:adapter/models", async (req, res) => {
@@ -365,9 +456,12 @@ export function createCliConfigRoutes(
       return;
     }
     observe(options, "apply.preview");
-    await handle(res, async () => ({
-      preview: await previewCliConfigApply(applyInput(db, masterKey, req, adapter, body.data, options))
-    }));
+    await handle(res, async () => {
+      await assertAdapterInstalled(adapterAvailability(options), adapter);
+      return {
+        preview: await previewCliConfigApply(applyInput(db, masterKey, req, adapter, body.data, options))
+      };
+    });
   });
 
   router.post("/:adapter/apply-provider", async (req, res) => {
@@ -387,6 +481,7 @@ export function createCliConfigRoutes(
       const providerName = new ModelProviderRepository(db, userId, masterKey)
         .getProviderProfile(body.data.providerProfileId)?.name;
       try {
+        await assertAdapterInstalled(adapterAvailability(options), adapter);
         const result = await applyCliConfigToAdapter(applyInput(db, masterKey, req, adapter, body.data, options));
         emitApplyProviderNotification(options.eventBus, {
           userId,
@@ -458,6 +553,7 @@ function applyInput(
     ...(body.modelMapping ? { modelMapping: compactModelMapping(body.modelMapping) } : {}),
     ...(body.reasoningEffort ? { reasoningEffort: body.reasoningEffort } : {}),
     ...(body.routeThroughGateway !== undefined ? { routeThroughGateway: body.routeThroughGateway } : {}),
+    ...(body.permissionMode ? { permissionMode: body.permissionMode } : {}),
     ...(options.resolveHost ? { resolveHost: options.resolveHost } : {})
   };
 }
@@ -473,8 +569,34 @@ function compactModelMapping(
   return compact;
 }
 
-function observe(options: { operationObserver?: ((operation: string) => void) | undefined }, operation: string): void {
+function observe(options: CliConfigRouteOptions, operation: string): void {
   options.operationObserver?.(operation);
+}
+
+function adapterAvailability(options: CliConfigRouteOptions): (adapter: AdapterId) => Promise<AdapterDiscoveryResult> {
+  return options.adapterAvailabilityCheck ?? ((adapter) => getAdapterLaunchStatus(adapter));
+}
+
+/**
+ * Hard gate: applying a provider to a CLI that is not installed is a no-op
+ * that still pollutes the applied-provider state (the model page would show
+ * "active here" for a CLI that does not exist). Both preview and apply are
+ * refused so the API surface can never record a zombie apply. The check
+ * distinguishes "not found" from "probe misbehaved" (timeout / non-zero
+ * --version) so the message tells the user what to fix.
+ */
+async function assertAdapterInstalled(
+  check: (adapter: AdapterId) => Promise<AdapterDiscoveryResult>,
+  adapter: AdapterId
+): Promise<void> {
+  const status = await check(adapter);
+  if (status.available) return;
+  throw new CliConfigApplyError(
+    "CLI_CONFIG_APPLY_CLI_MISSING",
+    status.status === "check_failed"
+      ? `${status.label} CLI could not be verified (${status.error ?? "probe failed"}); check the installation before applying a provider.`
+      : `${status.label} CLI is not installed; install it before applying a provider.`
+  );
 }
 
 interface ApplyProviderNotificationInput {
@@ -516,20 +638,37 @@ function parseAdapter(value: string | undefined): AdapterId | undefined {
 function readClaudeRouteState(db: Database, masterKey: string, userId: string): Record<string, unknown> {
   const routeRepository = new ClaudeRouteRepository(db, userId, masterKey);
   const settings = routeRepository.getSettings();
-  const assignment = routeRepository.getAssignment();
-  const provider = assignment
-    ? new ModelProviderRepository(db, userId, masterKey).getProviderProfile(assignment.providerProfileId)
-    : undefined;
+  const providerRepository = new ModelProviderRepository(db, userId, masterKey);
+  const assignments = routeRepository.listAssignments().map((assignment) => {
+    const provider = providerRepository.getProviderProfile(assignment.providerProfileId);
+    const modelIds = provider
+      ? providerRepository.listModelProfiles(provider.id)
+        .filter((model) => model.status === "active")
+        .map((model) => model.modelId)
+      : [];
+    return {
+      position: assignment.position,
+      providerProfileId: assignment.providerProfileId,
+      providerName: provider ? provider.name : null,
+      providerStatus: provider ? provider.status : null,
+      credentialId: assignment.credentialId,
+      modelIds,
+      updatedAt: assignment.updatedAt
+    };
+  });
+  const primary = assignments[0];
   return {
     enabled: settings.enabled,
     hasToken: settings.token !== null,
     gatewayUrl: gatewayLoopbackUrl(),
-    assignment: assignment && provider
+    assignments,
+    // Legacy single-assignment view (primary candidate) kept for the current UI.
+    assignment: primary
       ? {
-          providerProfileId: assignment.providerProfileId,
-          providerName: provider.name,
-          credentialId: assignment.credentialId,
-          updatedAt: assignment.updatedAt
+          providerProfileId: primary.providerProfileId,
+          providerName: primary.providerName,
+          credentialId: primary.credentialId,
+          updatedAt: primary.updatedAt
         }
       : null
   };
@@ -539,7 +678,8 @@ function applyErrorStatus(error: CliConfigApplyError): number {
   if (error.code.endsWith("_NOT_FOUND")) return 404;
   if (error.code === "CLI_CONFIG_APPLY_ROUTE_REQUIRED"
     || error.code === "CLI_CONFIG_APPLY_ROUTE_DISABLED"
-    || error.code === "CLI_CONFIG_APPLY_CODEX_WIRE_API_UNSUPPORTED") return 409;
+    || error.code === "CLI_CONFIG_APPLY_CODEX_WIRE_API_UNSUPPORTED"
+    || error.code === "CLI_CONFIG_APPLY_CLI_MISSING") return 409;
   if (error.code === "CLI_CONFIG_APPLY_FAILED"
     || error.code === "CLI_CONFIG_APPLY_VERIFY_FAILED"
     || error.code === "CLI_CONFIG_ROLLBACK_FAILED") return 500;

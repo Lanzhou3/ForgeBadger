@@ -26,7 +26,7 @@ describe("AuthShell", () => {
       </LanguageProvider>
     );
 
-    expect(screen.getByRole("heading", { name: "登录" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "登录" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "English" }));
 
     await waitFor(() => {

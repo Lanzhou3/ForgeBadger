@@ -47,6 +47,12 @@ describe("OpenCode notification settings", () => {
     assert.match(content, /task_completed/);
     assert.match(content, /task_failed/);
     assert.match(content, /export const ForgeBadgerPermissionNotify/);
+    assert.match(content, /export default/);
+    assert.match(content, /id: "forgebadger-permission-notify"/);
+    assert.match(content, /server: \(input\) => ForgeBadgerPermissionNotify\(input\)/);
+    assert.match(content, /setup: setupOpenCodeV2/);
+    assert.match(content, /ctx\.event\.subscribe/);
+    assert.match(content, /session\.execution\.failed/);
     assert.match(content, /adapter: "opencode"/);
     assert.match(content, /"x-forgebadger-session-token"/);
     assert.match(content, /signal: AbortSignal\.timeout\(4500\)/);

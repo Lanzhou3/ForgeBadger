@@ -14,7 +14,7 @@
 
 [English](../README.md) · [繁體中文](README.zh-TW.md)
 
-**Claude Code · Codex · OpenCode · Kimi Code · Pi · MiniMax Code**
+**Claude Code · Codex · OpenCode · Kimi Code · Pi · MiniMax Code · Grok**
 
 ForgeBadger 是一个本地优先的 AI 编程工作台：统一管理项目与终端，通过 Copilot 协助开发，也支持 Agent 经 MCP 接入。部署在自己的电脑或可信私有主机上。
 
@@ -72,6 +72,7 @@ beta 不会覆盖 `latest`。已知回归问题与平台限制见[发版计划](
 | Kimi Code | `kimi` |
 | Pi | `pi` |
 | MiniMax Code | `mcode` |
+| Grok | `grok` |
 
 会话使用各 CLI 已有的宿主机配置与凭据。模型中心的修改需要明确执行：应用服务商会写入所选 CLI 的用户级配置；启动会话不会向其环境注入服务商密钥。
 

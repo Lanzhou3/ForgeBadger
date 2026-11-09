@@ -2,17 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { ArrowDown, ArrowUp, Maximize2, Square, SquarePen, XIcon } from "lucide-react";
+import { ArrowDown, Bot, Maximize2, Send, Square, SquarePen, XIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   MessageRow,
   StreamingMessage,
@@ -20,20 +13,23 @@ import {
   indexToolResults,
 } from "@/components/copilot/copilot-message-primitives";
 import { CopilotWelcomeState } from "@/components/copilot/copilot-empty-state";
-import { CopilotRunOptions } from "@/components/copilot/CopilotRunOptions";
 import { CopilotFollowupChips } from "@/components/copilot/CopilotFollowupChips";
-import { CopilotStatusBar } from "@/components/copilot/copilot-runtime-panel";
+import { CopilotComposerToolbar } from "@/components/copilot/CopilotComposerToolbar";
+import { CommandPalettePopup, useCommandPalette } from "@/components/copilot/command-palette-popup";
 import { CopilotApproval } from "@/components/copilot/CopilotApproval";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
+import { useAutoGrowTextarea } from "@/hooks/use-auto-grow-textarea";
 import { useCopilotChatController } from "@/hooks/use-copilot-chat-controller";
 import { useCopilotFollowups } from "@/hooks/use-copilot-followups";
 import { copilotPhaseLabel } from "@/lib/copilot-phase";
 import { GatewayApiError, listProjects, type Project } from "@/lib/api";
 import {
   createConversation,
+  getConversation,
   listMessages,
   renameConversation,
+  updateConversationProject,
   type CopilotMessage,
 } from "@/lib/copilot-api";
 import { cn } from "@/lib/utils";
@@ -45,10 +41,6 @@ const AUTO_TITLE_MAX_CHARS = 24;
 // Shared with the full /copilot console — keep the same storage key so both
 // surfaces resume the conversation the user last worked in.
 export const ROBOT_CONVERSATION_STORAGE_KEY = LAST_COPILOT_CONVERSATION_KEY;
-
-// Radix Select items cannot use an empty value; this sentinel maps back to
-// "no project context" in onValueChange (same pattern as the console).
-const NO_PROJECT_VALUE = "__no_project__";
 
 // Desktop anchor per robot corner. The panel keeps the same 128px (md:*-32)
 // gap off the shared edge as the classic bottom-right placement: the robot
@@ -86,9 +78,9 @@ interface RobotChatPanelProps {
  *
  * Send / stop / edit / scroll-follow behavior lives in the shared
  * useCopilotChatController hook (same as the /copilot console); this surface
- * only owns conversation restore/lazy creation plus the parity capability
- * row (project context, run options) and the model/thinking pickers from
- * CopilotStatusBar.
+ * only owns conversation restore/lazy creation plus the parity controls
+ * (project context picker and the model/thinking pickers from
+ * CopilotStatusBar).
  */
 export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" }: RobotChatPanelProps) {
   const { t } = useLanguage();
@@ -103,9 +95,10 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
+  const projectMutationRef = useRef(0);
+  const [projectPendingCount, setProjectPendingCount] = useState(0);
+  const projectSaving = projectPendingCount > 0;
   const [modelId, setModelId] = useState<string | null>(null);
-  const [reviewTaskResults, setReviewTaskResults] = useState(false);
-  const [repairFailedChecks, setRepairFailedChecks] = useState(false);
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -178,9 +171,9 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     conversationId,
     projectId,
     modelId,
-    reviewTaskResults,
-    repairFailedChecks,
-    savingPreferences,
+    reviewTaskResults: false,
+    repairFailedChecks: false,
+    savingPreferences: savingPreferences || projectSaving,
     conversations: [],
     messages,
     active,
@@ -212,13 +205,15 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     let disposed = false;
     const epoch = controllerEpochRef.current;
     const serial = ++controllerMessageSerialRef.current;
+    const projectSerial = projectMutationRef.current;
     setRestoring(true);
     controller.conversationIdRef.current = stored;
     setConversationId(stored);
-    listMessages(stored)
-      .then(({ messages: next }) => {
-        if (!disposed && serial === controllerMessageSerialRef.current && epoch === controllerEpochRef.current && controller.conversationIdRef.current === stored) {
+    Promise.all([listMessages(stored), getConversation(stored)])
+      .then(([{ messages: next }, { conversation }]) => {
+        if (!disposed && serial === controllerMessageSerialRef.current && projectSerial === projectMutationRef.current && epoch === controllerEpochRef.current && controller.conversationIdRef.current === stored) {
           setMessages(next);
+          setProjectId(conversation.project_id ?? "");
           setLoadError(null);
         }
       })
@@ -257,7 +252,7 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     if (controller.conversationIdRef.current) return Promise.resolve(controller.conversationIdRef.current);
     if (!creatingRef.current) {
       const epoch = controllerEpochRef.current;
-      creatingRef.current = createConversation()
+      creatingRef.current = createConversation(undefined, projectId || undefined)
         .then(({ conversation }) => {
           if (epoch !== controllerEpochRef.current) return null;
           flushSync(() => {
@@ -277,9 +272,31 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
         });
     }
     return creatingRef.current;
-  }, [controller, t]);
+  }, [controller, projectId, t]);
+
+  const changeProject = useCallback(async (next: string) => {
+    const serial = ++projectMutationRef.current;
+    const previous = projectId;
+    setProjectId(next);
+    if (!conversationId) return;
+    setProjectPendingCount(count => count + 1);
+    try {
+      const { conversation } = await updateConversationProject(conversationId, next);
+      if (serial === projectMutationRef.current) {
+        projectMutationRef.current++;
+        setProjectId(conversation.project_id ?? "");
+      }
+    } catch {
+      if (serial !== projectMutationRef.current) return;
+      setProjectId(previous);
+      setLoadError(t("copilot.loadError"));
+    } finally {
+      setProjectPendingCount(count => Math.max(0, count - 1));
+    }
+  }, [conversationId, projectId, t]);
 
   const send = useCallback(async (textOverride?: string, retry = false) => {
+    if (projectSaving) return;
     if (retry) {
       await controller.send(undefined, true);
       return;
@@ -308,9 +325,10 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     const id = await ensureConversation();
     if (!id) return;
     await controller.send(textOverride, false);
-  }, [controller, ensureConversation, conversationId, t]);
+  }, [controller, ensureConversation, conversationId, projectSaving, t]);
 
   const newChat = useCallback(() => {
+    projectMutationRef.current++;
     controller.advanceSelectionEpoch();
     controller.messageSerialRef.current++;
     controller.conversationIdRef.current = null;
@@ -330,10 +348,9 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
 
   const followups = useCopilotFollowups({
     conversationId,
-    ...(projectId ? { projectId } : {}),
     ...(modelId ? { modelId } : {}),
-    reviewTaskResults,
-    repairFailedChecks,
+    reviewTaskResults: false,
+    repairFailedChecks: false,
     active: isBusy,
   });
   const enqueueRef = useRef(followups.enqueue);
@@ -342,6 +359,19 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
   // approval is pending the composer stays inert, as it did before.
   const runningRef = useRef(Boolean(isRunning));
   runningRef.current = Boolean(isRunning);
+
+  // Slash-command palette above the composer (same contract as the console:
+  // selection fills "/name "; submission queues behind a running turn).
+  const applySlashCommand = useCallback((text: string) => {
+    controller.setInput(text);
+    inputRef.current?.focus();
+  }, [controller]);
+  const palette = useCommandPalette(controller.input, applySlashCommand);
+
+  // Multi-line input grows the composer instead of staying one line tall;
+  // min-h/max-h on the textarea clamp the range and scroll past the max.
+  useAutoGrowTextarea(inputRef, controller.input);
+
   const toolResultById = useMemo(() => indexToolResults(messages), [messages]);
   const showEmpty = !loadError && !restoring && messages.length === 0 && !active;
 
@@ -354,20 +384,28 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
         if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); onClose(); }
       }}
       className={cn(
-        "fixed inset-x-2 bottom-2 top-14 z-40 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl shadow-black/40 md:inset-x-auto md:h-[520px] md:max-h-[calc(100dvh-9rem)] md:w-[380px]",
+        "fixed inset-x-2 bottom-2 top-14 z-40 flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl shadow-black/40 md:inset-x-auto md:h-[520px] md:max-h-[calc(100dvh-9rem)] md:w-[380px]",
         PANEL_DESKTOP_ANCHOR_BY_CORNER[corner]
       )}
     >
-      <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <span
-            className={cn(
-              "size-1.5 shrink-0 rounded-full",
-              isRunning ? "animate-pulse bg-brand" : "bg-emerald-500"
-            )}
-            aria-hidden="true"
-          />
-          <span className="truncate text-sm font-semibold">{t("nav.copilot")}</span>
+      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/10">
+            <Bot className="size-4 text-brand" aria-hidden="true" />
+            <span
+              className={cn(
+                "absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-card",
+                isRunning ? "animate-pulse bg-brand" : "bg-emerald-500"
+              )}
+              aria-hidden="true"
+            />
+          </span>
+          <div className="min-w-0 leading-tight">
+            <p className="truncate text-[13px] font-semibold">{t("nav.copilot")}</p>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {isRunning ? t(copilotPhaseLabel(active?.phase)) : t("copilot.robotStatusReady")}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-0.5">
           <Button
@@ -403,16 +441,12 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
         </div>
       </div>
 
-      {/* Model / thinking-effort pickers, shared with the console so both
-          surfaces read and write the same server-side preferences. */}
-      <CopilotStatusBar onModelChange={setModelId} onSavingChange={setSavingPreferences} controlsDisabled={isBusy || controller.sending} />
-
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={controller.scrollRef}
           onScroll={controller.onScroll}
           data-testid="robot-chat-scroll"
-          className="flex-1 space-y-4 overflow-y-auto px-3 py-3"
+          className="flex-1 space-y-4 overflow-y-auto px-3.5 py-4"
         >
           {loadError && <p className="text-sm text-destructive">{loadError}</p>}
           {!loadError && restoring && (
@@ -455,7 +489,7 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
             ? <CopilotApproval key={active.pendingAction.id} action={active.pendingAction} onDecided={reconcile} />
             : <p role="status" className="text-sm text-muted-foreground">{t("copilot.awaitingApproval")}</p>)}
           {isRunning && (
-            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <p className="inline-flex items-center gap-1.5 rounded-full bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground">
               <span className="size-1.5 animate-pulse rounded-full bg-brand" />
               {t(copilotPhaseLabel(active?.phase))}
             </p>
@@ -490,37 +524,8 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
         )}
       </div>
 
-      {/* Floating composer: no docked bottom bar. The upward gradient fades
-          messages out beneath the elevated input card (Linear/v0 assistant
-          pattern), and the card lifts on hover / glows on focus. The compact
-          context row above it mirrors the console's project-context picker
-          and run options without consuming transcript height. */}
-      <div className="relative shrink-0 px-2.5 pb-2.5 pt-1">
-        <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Select
-            value={projectId || NO_PROJECT_VALUE}
-            disabled={isBusy || controller.sending}
-            onValueChange={(next) => setProjectId(next === NO_PROJECT_VALUE ? "" : next)}
-          >
-            <SelectTrigger
-              aria-label={t("copilot.projectContext")}
-              size="sm"
-              className="h-7 min-w-0 max-w-40 flex-1 px-2 text-xs"
-            >
-              <SelectValue placeholder={t("copilot.noProject")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NO_PROJECT_VALUE}>{t("copilot.noProject")}</SelectItem>
-              {projects.map(project => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <CopilotRunOptions
-            conversationId={conversationId}
-            disabled={isBusy || controller.sending}
-            reviewTaskResults={reviewTaskResults} onReviewChange={setReviewTaskResults}
-            repairFailedChecks={repairFailedChecks} onRepairChange={setRepairFailedChecks}
-          />
-        </div>
+      {/* Shared external toolbar keeps the quick-chat message card uncluttered. */}
+      <div className="relative shrink-0 px-3 pb-3">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 bottom-full h-10 bg-gradient-to-t from-card via-card/80 to-transparent"
@@ -528,48 +533,67 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
         {conversationId && (
           <CopilotFollowupChips items={followups.items} onCancel={(id) => void followups.cancel(id)} />
         )}
-        <div
-          data-testid="robot-chat-composer"
-          className="flex items-end gap-1.5 rounded-xl border border-border/70 bg-card/90 px-2 py-1.5 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
-        >
-          <Textarea
-            ref={inputRef}
-            value={controller.input}
-            onChange={(event) => controller.setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                void send();
-              }
-            }}
+        <div className="relative">
+          <CopilotComposerToolbar projects={projects} projectId={projectId} conversationId={conversationId}
+            onProjectChange={next => void changeProject(next)} onModelChange={setModelId} onSavingChange={setSavingPreferences}
+            disabled={isBusy || controller.sending || projectSaving} />
+          <CommandPalettePopup
+            view={palette.view}
+            onHoverItem={palette.hoverItem}
+            onPickItem={palette.pickItem}
+          />
+          <div
+            data-testid="robot-chat-composer"
+            className="rounded-xl border border-border/70 bg-card/90 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
+          >
+            <Textarea
+              ref={inputRef}
+              value={controller.input}
+              onChange={(event) => controller.setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (palette.handleTextareaKeyDown(event)) return;
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  void send();
+                }
+              }}
+              role="combobox"
+              aria-expanded={palette.view.open}
+              aria-controls="command-palette"
+              aria-activedescendant={palette.view.open && palette.view.highlighted ? `command-option-${palette.view.highlighted}` : undefined}
+              aria-autocomplete="list"
             placeholder={isRunning ? t("copilot.followups.placeholder") : t("copilot.placeholder")}
             aria-label={t("copilot.placeholder")}
-            className="min-h-[32px] max-h-32 flex-1 resize-none rounded-none border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0"
+            className="max-h-32 min-h-[40px] w-full flex-1 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-3 pb-1 pt-2.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
             rows={1}
           />
-          {isBusy ? (
-            <Button
-              variant="outline"
-              size="icon"
-              className="size-7 shrink-0 rounded-full"
-              onClick={() => void controller.stopRun()}
-              disabled={!active?.runId}
-              aria-label={t("copilot.stop")}
-              title={t("copilot.stop")}
-            >
-              <Square className="size-3.5" />
-            </Button>
-          ) : null}
-          <Button
-            size="icon"
-            className="size-7 shrink-0 rounded-full"
-            onClick={() => void send()}
-            disabled={controller.sending || savingPreferences || followups.enqueuing || !controller.input.trim()}
-            aria-label={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
-            title={isRunning ? t("copilot.followups.enqueue") : t("copilot.send")}
-          >
-            <ArrowUp className="size-4" />
-          </Button>
+          <div className="flex items-center justify-end gap-1 px-1.5 pb-1.5">
+            {isBusy ? (
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-7 shrink-0 rounded-full"
+                onClick={() => void controller.stopRun()}
+                disabled={!active?.runId}
+                aria-label={t("copilot.stop")}
+                title={t("copilot.stop")}
+              >
+                <Square className="size-3.5" />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                className="size-7 shrink-0 rounded-full"
+                onClick={() => void send()}
+                disabled={controller.sending || savingPreferences || projectSaving || followups.enqueuing || !controller.input.trim()}
+                aria-label={t("copilot.send")}
+                title={t("copilot.send")}
+              >
+                <Send className="size-3.5" />
+              </Button>
+            )}
+          </div>
+          </div>
         </div>
       </div>
     </div>

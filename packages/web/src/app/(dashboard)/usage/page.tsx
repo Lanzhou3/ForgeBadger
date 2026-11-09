@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -129,18 +129,33 @@ export default function UsagePage() {
 
   const syncMutation = useMutation({
     mutationFn: syncUsageTokens,
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
+      // Invalidation alone reuses a pending first fetch. Discard reads that
+      // may have sampled pre-sync data before requesting the new snapshot.
+      const queries = [["usage-token-summary"], ["usage-project-activity"]];
+      await Promise.all(queries.map((queryKey) => queryClient.cancelQueries({ queryKey })));
+      await Promise.all(queries.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
       const inserted = data.result?.totalInserted ?? 0;
       setNoticeType("ok");
       setNotice(inserted > 0 ? `${t("usage.syncDone")} (+${inserted})` : t("usage.syncDone"));
-      queryClient.invalidateQueries({ queryKey: ["usage-token-summary"] });
-      queryClient.invalidateQueries({ queryKey: ["usage-project-activity"] });
     },
     onError: (error) => {
       setNoticeType("error");
       setNotice(error instanceof Error ? error.message : t("usage.syncFailed"));
     }
   });
+
+  // Auto-refresh on every page open: sync the latest token logs, then the
+  // summary/activity queries are invalidated and refetch with fresh data.
+  // The ref guards StrictMode's double effect invocation in dev.
+  const syncRef = useRef(syncMutation.mutate);
+  syncRef.current = syncMutation.mutate;
+  const autoSyncedRef = useRef(false);
+  useEffect(() => {
+    if (autoSyncedRef.current) return;
+    autoSyncedRef.current = true;
+    syncRef.current();
+  }, []);
 
   const daily = useMemo(() => {
     // Aggregate per-day across groups, then fill every day of the selected month.
@@ -212,7 +227,7 @@ export default function UsagePage() {
         <div className="flex items-center gap-2">
           <select
             aria-label={t("usage.activityTitle")}
-            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+            className="h-8 rounded-lg border border-border/60 bg-background px-2.5 text-xs text-foreground"
             value={range}
             onChange={(event) => {
               setRange(event.target.value);
@@ -276,13 +291,13 @@ export default function UsagePage() {
               {metrics.map((metric) => (
                 <div
                   key={metric.label}
-                  className="flex min-w-[150px] flex-1 items-center gap-2.5 border-l border-border/70 px-4 py-3 first:border-l-0"
+                  className="flex min-w-[150px] flex-1 items-center gap-3 border-l border-border/50 px-4 py-3.5 first:border-l-0"
                 >
-                  <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
                     <metric.icon className="size-4" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-base font-semibold leading-tight tabular-nums">
+                    <div className="text-lg font-semibold leading-tight tabular-nums">
                       {metric.value}
                     </div>
                     <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={metric.hint ? `${metric.label} · ${metric.hint}` : metric.label}>
@@ -486,10 +501,10 @@ function UsageTable({
   const maxRowTotal = Math.max(1, ...rows.map((row) => row.totalTokens));
 
   return (
-    <section className={cn("space-y-3 forgebadger-animate-in", className)}>
+    <section className={cn("space-y-2 forgebadger-animate-in", className)}>
       <h2 className="text-sm font-semibold">{title}</h2>
-      <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
-        <div className="flex items-center gap-3 px-4 py-2 text-xs text-muted-foreground">
+      <div>
+        <div className="flex items-center gap-3 px-3 py-1.5 text-[11px] uppercase tracking-wider text-muted-foreground/70">
           <span className="min-w-0 flex-1">{t("usage.group")}</span>
           <span className="w-20 shrink-0 text-right">{t("usage.input")}</span>
           <span className="w-20 shrink-0 text-right">{t("usage.output")}</span>
@@ -498,38 +513,40 @@ function UsageTable({
             <span className="w-20 shrink-0 text-right">{t("usage.cacheHitRate")}</span>
           )}
         </div>
-        {rows.map((row) => (
-          <div
-            key={row.key}
-            className="relative flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/40"
-          >
-            <span
-              className="pointer-events-none absolute inset-y-0 left-0 bg-brand/5"
-              style={{ width: `${(row.totalTokens / maxRowTotal) * 100}%` }}
-            />
-            <span className="relative min-w-0 flex-1 truncate text-sm font-medium">
-              {brandChip && getCliBrand(row.key).id !== "unknown" ? (
-                <CliBrandChip aiTool={row.key} />
-              ) : (
-                resolveLabel?.(row.key) ?? row.key
-              )}
-            </span>
-            <span className="relative w-20 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
-              {formatTokens(row.inputTokens)}
-            </span>
-            <span className="relative w-20 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
-              {formatTokens(row.outputTokens)}
-            </span>
-            <span className="relative w-20 shrink-0 text-right text-sm font-medium tabular-nums">
-              {formatTokens(row.totalTokens)}
-            </span>
-            {showHitRate && (
-              <span className="relative w-20 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
-                {row.cacheHitRate === null ? "—" : `${row.cacheHitRate}%`}
+        <div className="space-y-0.5">
+          {rows.map((row) => (
+            <div
+              key={row.key}
+              className="relative flex items-center gap-3 overflow-hidden rounded-lg px-3 py-2 transition-colors hover:bg-muted/50"
+            >
+              <span
+                className="pointer-events-none absolute inset-y-0 left-0 bg-brand/[0.07]"
+                style={{ width: `${(row.totalTokens / maxRowTotal) * 100}%` }}
+              />
+              <span className="relative min-w-0 flex-1 truncate text-sm font-medium">
+                {brandChip && getCliBrand(row.key).id !== "unknown" ? (
+                  <CliBrandChip aiTool={row.key} />
+                ) : (
+                  resolveLabel?.(row.key) ?? row.key
+                )}
               </span>
-            )}
-          </div>
-        ))}
+              <span className="relative w-20 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
+                {formatTokens(row.inputTokens)}
+              </span>
+              <span className="relative w-20 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
+                {formatTokens(row.outputTokens)}
+              </span>
+              <span className="relative w-20 shrink-0 text-right text-sm font-medium tabular-nums">
+                {formatTokens(row.totalTokens)}
+              </span>
+              {showHitRate && (
+                <span className="relative w-20 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
+                  {row.cacheHitRate === null ? "—" : `${row.cacheHitRate}%`}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );

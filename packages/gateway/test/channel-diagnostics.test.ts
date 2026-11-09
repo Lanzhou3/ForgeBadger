@@ -228,7 +228,7 @@ it('surfaces a stale identity and a fenced route with targeted fix hints', async
     assert.match(all.identity!.detail, /配置版本不匹配/);
     assert.match(all.identity!.fixHint, /\/pair <配对码>/);
     assert.equal(all.route!.ok, false);
-    assert.match(all.route!.detail, /重新绑定/);
+    assert.match(all.route!.detail, /重新连接/);
     assert.match(all.route!.fixHint, /重新绑定渠道授权/);
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

@@ -251,3 +251,16 @@ it('does not lose the deterministic report when optional review conflicts with s
   assert.equal(f.reports().length, 1);
   assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_research_jobs').get() as { n: number }).n, 0);
 });
+
+for (const revocation of ['deleted-conversation', 'inactive-user'] as const) {
+  it(`does not publish a report after ${revocation} even when optional review conflicts`, async () => {
+    const f = fixture({ reviewTaskResults: true }); const run = await f.run(); f.notify();
+    const selected = new ProjectRepository(f.db, f.user.id).create({ name: 'Other selected context', path: '/tmp', aiTool: 'codex' });
+    const input = JSON.parse(f.ledger.get(run)!.input_json); input.projectId = selected.id;
+    f.db.prepare('UPDATE copilot_runs SET input_json=? WHERE id=?').run(JSON.stringify(input), run);
+    if (revocation === 'deleted-conversation') f.ledger.log.deleteConversation(f.conversation.id);
+    else f.db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(f.user.id);
+    publishTaskReports(f.deps, f.user.id);
+    assert.equal(f.reports().length, 0);
+  });
+}

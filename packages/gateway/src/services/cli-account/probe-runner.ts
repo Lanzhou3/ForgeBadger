@@ -122,7 +122,12 @@ export async function readCliTokenFile(filePath: string): Promise<CliTokenFileRe
 
 export type CliQuotaFetchOutcome =
   | { ok: true; body: unknown }
-  | { ok: false; errorCode: "token_expired" | "upstream_error" | "timeout" | "invalid_response" };
+  | {
+      ok: false;
+      errorCode: "token_expired" | "upstream_error" | "timeout" | "invalid_response";
+      /** HTTP status when the endpoint answered with a non-2xx response. */
+      httpStatus?: number;
+    };
 
 const defaultQuotaTimeoutMs = 10_000;
 
@@ -153,8 +158,9 @@ export async function fetchCliQuotaJson(request: CliQuotaFetchRequest): Promise<
       signal: controller.signal
     });
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) return { ok: false, errorCode: "token_expired" };
-      return { ok: false, errorCode: "upstream_error" };
+      const httpStatus = response.status;
+      if (httpStatus === 401 || httpStatus === 403) return { ok: false, errorCode: "token_expired", httpStatus };
+      return { ok: false, errorCode: "upstream_error", httpStatus };
     }
     const body: unknown = await response.json().catch(() => undefined);
     if (body === undefined) return { ok: false, errorCode: "invalid_response" };

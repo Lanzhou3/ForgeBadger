@@ -4,8 +4,11 @@ export interface ProvisionWorktreeInput {
   runId: string;
   baseCommit?: string;
   mergeCommit?: string;
+  /** Managed branch namespace; defaults to delivery's `codex/task-`. */
+  branchPrefix?: WorktreeBranchPrefix;
   authorize?: () => void;
 }
+export type WorktreeBranchPrefix = 'codex/task-' | 'forgebadger/goal-';
 export interface ProvisionedWorktree {
   path: string;
   branch: string;

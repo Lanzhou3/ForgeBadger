@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDurationMs, formatEstimatedUsd, formatTokens } from "./usage-format";
+import { formatCostUsd, formatDurationMs, formatEstimatedUsd, formatTokens } from "./usage-format";
 
 describe("usage formatters", () => {
   it("formats durations into compact hours and minutes", () => {
@@ -12,6 +12,14 @@ describe("usage formatters", () => {
   it("formats estimated usd values without implying billing precision", () => {
     expect(formatEstimatedUsd(0)).toBe("$0.00 est.");
     expect(formatEstimatedUsd(1.257)).toBe("$1.26 est.");
+  });
+
+  it("formats cost usd with two decimals at $1+ and four significant digits below", () => {
+    expect(formatCostUsd(0)).toBe("$0.00");
+    expect(formatCostUsd(1.257)).toBe("$1.26");
+    expect(formatCostUsd(12)).toBe("$12.00");
+    expect(formatCostUsd(0.123456)).toBe("$0.1235");
+    expect(formatCostUsd(0.05)).toBe("$0.05");
   });
 
   it("formats token counts into compact k/M/B units", () => {

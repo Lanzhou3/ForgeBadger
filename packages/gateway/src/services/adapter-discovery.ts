@@ -91,6 +91,19 @@ const adapterDefinitions: AdapterDefinition[] = [
     launchEnabled: true,
     configDir: ".minimax",
     runtimeModes: ["terminal"]
+  },
+  {
+    // Grok Build. User data lives in $GROK_HOME (default ~/.grok). The
+    // interactive TUI is `grok` with no arguments; `-p` is headless and
+    // `grok agent stdio` is ACP, neither of which is a terminal session.
+    id: "grok",
+    label: "Grok",
+    command: "grok",
+    versionArgs: ["--version"],
+    supportLevel: "supported",
+    launchEnabled: true,
+    configDir: ".grok",
+    runtimeModes: ["terminal"]
   }
 ];
 

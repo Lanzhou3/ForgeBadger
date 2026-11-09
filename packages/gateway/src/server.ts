@@ -19,6 +19,7 @@ import { startAutomationScheduler, type AutomationScheduler } from "./services/a
 import { startCopilotRuntime } from "./services/agent/runtime.js";
 import { attachDispatchSupervisor, type DispatchSupervisor } from "./services/agent/dispatch-supervisor.js";
 import { RuntimeAuthorizationInvalidator } from "./services/runtime-authorization-invalidation.js";
+import { CompanionHostRuntime } from "./services/companion/host-runtime.js";
 import {
   createRuntimeSettingsStore,
   type RuntimeSettingsEffective,
@@ -48,6 +49,8 @@ export interface ServerDeps {
   runtimeAuthorizationInvalidator: RuntimeAuthorizationInvalidator;
   /** Mounts the external MCP endpoint (/mcp) and its token management routes. */
   mcpEnabled?: boolean | undefined;
+  /** Enables Companion host configuration, pairing, and future remote admission. */
+  companionEnabled?: boolean | undefined;
   /** DB-backed runtime settings (absent in minimal test apps → API 503). */
   runtimeSettings?: RuntimeSettingsStore | undefined;
 }
@@ -91,6 +94,10 @@ export interface GatewayAppOptions {
   llmFetch?: typeof fetch | undefined;
   /** Mounts the external MCP endpoint (/mcp) and its token management routes. */
   mcpEnabled?: boolean | undefined;
+  /** Enables Companion host configuration, pairing, and future remote admission. */
+  companionEnabled?: boolean | undefined;
+  /** Optional test seam for the outbound Companion Relay host runtime. */
+  companionHostRuntime?: Pick<CompanionHostRuntime, 'start' | 'stop'> | undefined;
   /** Enables the dispatch supervisor: hook-driven PM work-item auto-advance for programmatically dispatched tasks. */
   pmAutoDispatchEnabled?: boolean | undefined;
   /**
@@ -181,6 +188,8 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   const feishuChannelRuntime = options.feishuChannelRuntime ?? createNativeFeishuRuntime(options.db,options.masterKey,options.nativeFeishuIO,
     (userId,input)=>buildAgentStack(copilotAgent,userId).orchestrator.recordApprovalDecision({userId,...input,decisionOrigin:'channel'}));
   const telegramChannelRuntime = options.telegramChannelRuntime ?? createNativeTelegramRuntime(options.db,options.masterKey,options.nativeTelegramIO);
+  const companionHostRuntime = options.companionHostRuntime
+    ?? new CompanionHostRuntime(options.db, options.masterKey, options.companionEnabled === true, {}, copilotAgent);
 
   const app = createServer({
     db: options.db,
@@ -200,6 +209,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     copilotAgent,
     runtimeAuthorizationInvalidator,
     mcpEnabled: runtimeSettings?.effective().mcpEnabled ?? options.mcpEnabled,
+    companionEnabled: options.companionEnabled,
     runtimeSettings
   });
 
@@ -244,6 +254,9 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
   void telegramChannelRuntime.start().catch(() => {
     console.error("[telegram-runtime] startup failed", { code: "TELEGRAM_RUNTIME_START_FAILED" });
   });
+  void companionHostRuntime.start().catch(() => {
+    console.error("[companion-runtime] startup failed", { code: "COMPANION_RELAY_UNAVAILABLE" });
+  });
 
   return {
     app,
@@ -266,6 +279,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
       await runShutdownStage(failures, () => typeof app.locals.stopDelivery === "function" ? app.locals.stopDelivery() : undefined);
       await runShutdownStage(failures, () => feishuChannelRuntime.stop());
       await runShutdownStage(failures, () => telegramChannelRuntime.stop());
+      await runShutdownStage(failures, () => companionHostRuntime.stop());
       automationScheduler?.stop();
       dispatchSupervisor?.stop();
       await runShutdownStage(failures, () => copilotRuntime.stop());

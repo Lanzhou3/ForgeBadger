@@ -1,6 +1,7 @@
 import type { Database } from '../db/types.js';
 import { NotificationRepository, type CreateNotificationInput } from '../db/repositories/notification-repository.js';
 import { FeishuNotifications } from './notifications/feishu-notifications.js';
+import { TelegramNotifications } from './notifications/telegram-notifications.js';
 
 /** All production notification producers use this atomic in-app + optional delivery boundary. */
 export class NotificationService {
@@ -9,6 +10,7 @@ export class NotificationService {
     return this.db.transaction(()=>{
       const notification=new NotificationRepository(this.db,this.userId).create(input);
       new FeishuNotifications(this.db,this.userId).enqueue(notification);
+      new TelegramNotifications(this.db,this.userId).enqueue(notification);
       return notification;
     }).immediate();
   }

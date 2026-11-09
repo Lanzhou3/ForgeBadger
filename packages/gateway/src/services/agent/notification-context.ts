@@ -8,6 +8,7 @@ import type { AgentLlmMessage } from './orchestrator-types.js';
 import { redactAgentText } from './redaction.js';
 import { assertChannelRunScope } from '../channels/channel-run-scope.js';
 import { SessionRepository } from '../../db/repositories/session-repository.js';
+import { CopilotConversationLog } from './conversation-log.js';
 
 const eventTypes = new Set(['task_completed', 'task_failed', 'session_ended', 'task_interrupted', 'permission_prompt', 'permission_denied', 'attention']);
 const shortText = (value: unknown, limit: number) => typeof value === 'string'
@@ -49,7 +50,11 @@ function notificationProjects(db: Database, input: TurnInput): string[] {
   const channels = new ChannelIdentityRepository(db, input.userId);
   const route = channels.conversationRoute(input.conversationId);
   let candidates: string[];
-  if (route) candidates = new ChannelIdentityService(db, input.userId).admitRoute(route.id, input.conversationId).projectIds;
+  if (route) {
+    const authority = new ChannelIdentityService(db, input.userId).admitRoute(route.id, input.conversationId);
+    const projectId = new CopilotConversationLog(db, input.userId).getConversation(authority.conversationId)?.project_id;
+    candidates = projectId ? [projectId] : [];
+  }
   else if (channels.conversationIsChannelOwned(input.conversationId)) throw new ChannelIdentityError();
   else if (input.projectId) candidates = [input.projectId];
   else candidates = new NotificationRepository(db, input.userId).conversationProjectIds(input.conversationId);

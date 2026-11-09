@@ -42,8 +42,16 @@ try {
 
   await cp(path.join(workspaceRoot, "packages/gateway/dist"), gatewayTarget, copyTreeOptions);
   await cp(path.join(workspaceRoot, "packages/web/.next/standalone"), webStandaloneTarget, copyTreeOptions);
-  await materializePnpmAliases(path.join(webStandaloneTarget, "node_modules"));
-  await removeBundledWebNativeDependencies(path.join(webStandaloneTarget, "node_modules"));
+  const standaloneNodeModules = path.join(webStandaloneTarget, "node_modules");
+  await materializePnpmAliases(standaloneNodeModules);
+  // The workspace's hoisted React aliases can point to Companion's version.
+  // Bundle the complete React packages resolved by the Web build.
+  for (const packageName of ["react", "react-dom"]) {
+    const target = path.join(standaloneNodeModules, packageName);
+    await rm(target, { recursive: true, force: true });
+    await cp(path.join(workspaceRoot, "packages/web/node_modules", packageName), target, copyTreeOptions);
+  }
+  await removeBundledWebNativeDependencies(standaloneNodeModules);
   await mkdir(path.join(webStandalonePackage, ".next"), { recursive: true });
   await cp(path.join(workspaceRoot, "packages/web/.next/static"), path.join(webStandalonePackage, ".next", "static"), copyTreeOptions);
   await cp(path.join(workspaceRoot, "packages/web/public"), path.join(webStandalonePackage, "public"), copyTreeOptions);

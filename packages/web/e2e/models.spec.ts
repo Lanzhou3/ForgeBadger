@@ -28,7 +28,7 @@ test("Models provider can be created manually with an optional credential and mo
 
   await dialog.getByLabel("Name", { exact: true }).fill("My Provider");
   // providerKey is derived from the name but stays editable.
-  await expect(dialog.getByLabel("Provider Key")).toHaveValue("my-provider");
+  await expect(dialog.getByLabel("Provider ID", { exact: true })).toHaveValue("my-provider");
   await dialog.getByLabel("API Format").selectOption("openai-compatible");
   await dialog.getByLabel("OpenAI-compatible base URL").fill("https://provider-01.example.com/v1");
   await dialog.getByLabel("OpenCode").check();
@@ -152,7 +152,7 @@ test("Models CLI status grid shows per-CLI applied state", async ({ page }) => {
 
   const grid = page.getByTestId("cli-status-section");
   await expect(grid).toBeVisible();
-  for (const adapter of ["claude", "opencode", "codex", "kimi", "pi"]) {
+  for (const adapter of ["claude", "opencode", "codex", "kimi", "pi", "mcode", "grok"]) {
     await expect(page.getByTestId(`cli-status-${adapter}`)).toBeVisible();
   }
   // The mocked applied pointer puts this provider in effect on Claude Code.

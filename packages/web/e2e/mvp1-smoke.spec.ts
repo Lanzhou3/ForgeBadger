@@ -46,10 +46,10 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await expect(page.getByText(`E2E Provider ${suffix}`).first()).toBeVisible();
 
   await page.getByRole("tab", { name: "API Keys" }).click();
-  await page.locator("#credential-label").fill("Claude E2E Key");
   await page.locator("#credential-secret").fill("test-api-key-e2e-secret");
   await page.getByRole("button", { name: "Save credential" }).click();
-  await expect(page.getByText("Claude E2E Key")).toBeVisible();
+  await expect(page.getByRole("button", { name: /API Key ·/ })).toBeVisible();
+  await expect(page.getByText("test-api-key-e2e-secret", { exact: true })).toHaveCount(0);
 
   await page.getByRole("tab", { name: "Models" }).click();
   await page.getByRole("button", { name: "New model" }).click();

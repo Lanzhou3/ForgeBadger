@@ -15,12 +15,12 @@ export interface ChannelSession {
   modelProfileId: string | null;
 }
 export interface ChannelRoute {
-  id: string; identityId: string; projectId: string;
+  id: string; identityId: string;
   conversationId: string; status: string; revision: number; createdAt: number;
 }
 const pairingColumns = 'id,channel,account_id AS accountId,account_revision AS accountRevision,status,revision,external_user_id AS externalUserId,chat_id AS chatId,expires_at AS expiresAt,created_at AS createdAt';
 const identityColumns = 'id,channel,account_id AS accountId,account_revision AS accountRevision,external_user_id AS externalUserId,chat_id AS chatId,status,revision,created_at AS createdAt';
-const routeColumns = 'id,identity_id AS identityId,project_id AS projectId,conversation_id AS conversationId,status,revision,created_at AS createdAt';
+const routeColumns = 'id,identity_id AS identityId,conversation_id AS conversationId,status,revision,created_at AS createdAt';
 // Table names are picked from a closed literal set, never from request input.
 function channelAccountTable(channel: string): 'feishu_channel_accounts' | 'telegram_channel_accounts' {
   return channel === 'telegram' ? 'telegram_channel_accounts' : 'feishu_channel_accounts';
@@ -131,11 +131,11 @@ export class ChannelIdentityRepository {
         : [this.userId,peer.channel,peer.accountId,peer.accountRevision,peer.externalUserId,peer.chatId])) as {id:string}|undefined;
     return row ? this.route(row.id) : undefined;
   }
-  createRoute(input: { identityId: string; projectId: string; conversationId: string }): ChannelRoute {
+  createRoute(input: { identityId: string; conversationId: string }): ChannelRoute {
     const id = randomUUID();
     this.db.prepare('UPDATE copilot_conversations SET channel_owned=1 WHERE user_id=? AND id=?').run(this.userId,input.conversationId);
-    this.db.prepare('INSERT INTO channel_routes(id,user_id,identity_id,project_id,conversation_id,created_at) VALUES (?,?,?,?,?,?)')
-      .run(id, this.userId, input.identityId, input.projectId, input.conversationId, Date.now());
+    this.db.prepare('INSERT INTO channel_routes(id,user_id,identity_id,conversation_id,created_at) VALUES (?,?,?,?,?)')
+      .run(id, this.userId, input.identityId, input.conversationId, Date.now());
     this.createSession(id, {chatType:'p2p',chatId:this.identity(input.identityId)!.chatId}, input.conversationId);
     return this.route(id)!;
   }

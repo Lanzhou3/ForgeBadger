@@ -21,6 +21,7 @@ export interface CopilotConversation {
   id: string;
   title: string | null;
   status: string;
+  project_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -43,7 +44,6 @@ export interface CopilotMessage {
 export interface CopilotRun {
   phase?: string;
   phaseStartedAt?: string;
-  usage?: { chargedTokens: number; reportedTokens: number; estimatedCalls: number; calls: number };
   revision?: number;
   stopReason?: string;
   id: string;
@@ -137,11 +137,22 @@ export function listConversations() {
   return fetchJson<{ conversations: CopilotConversation[] }>("/api/v1/copilot/conversations");
 }
 
-export function createConversation(title?: string) {
+export function createConversation(title?: string, projectId?: string) {
   return fetchJson<{ conversation: CopilotConversation }>("/api/v1/copilot/conversations", {
     method: "POST",
-    body: JSON.stringify(title ? { title } : {}),
+    body: JSON.stringify({ ...(title ? { title } : {}), ...(projectId ? { projectId } : {}) }),
   });
+}
+
+export function getConversation(conversationId: string) {
+  return fetchJson<{ conversation: CopilotConversation }>(`/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}`);
+}
+
+export function updateConversationProject(conversationId: string, projectId: string) {
+  return fetchJson<{ conversation: CopilotConversation }>(
+    `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}`,
+    { method: "PATCH", body: JSON.stringify({ projectId: projectId || null }) }
+  );
 }
 
 export function renameConversation(conversationId: string, title: string) {
@@ -184,7 +195,7 @@ export function sendMessage(conversationId: string, content: string, modelId?: s
 }
 
 export function listConversationRuns(conversationId: string) {
-  return fetchJson<{ runs: CopilotRun[]; activeRun: CopilotRun | null }>(
+  return fetchJson<{ runs: CopilotRun[]; activeRun: CopilotRun | null; repairRunIds?: string[] }>(
     `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/runs`
   );
 }
@@ -435,4 +446,216 @@ export function queueFollowup(conversationId: string, content: string, options: 
 }
 export function cancelFollowup(id: string) {
   return fetchJson<{ cancelled: boolean }>(`/api/v1/copilot/followups/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
+// Copilot Goal mode: long-running, budget-bounded objectives executed as a
+// sequence of verifiable tasks. Contract: POST/GET /api/v1/copilot/goals*.
+// ---------------------------------------------------------------------------
+
+export type CopilotGoalStatus =
+  | "active"
+  | "paused"
+  | "completed"
+  | "blocked"
+  | "cancelled";
+
+export type CopilotGoalTaskStatus =
+  | "pending"
+  | "in_progress"
+  | "passes"
+  | "failed"
+  /** Set only by the owner cancelling the linked board work item. */
+  | "cancelled";
+
+/** One-time authority grants a goal holds for its whole run; granted
+ * categories skip per-action owner approval while the goal is active. */
+export type CopilotGoalGrant = "operate_sessions" | "terminal_run" | "pm_dispatch" | "sandbox_checks";
+
+export const COPILOT_GOAL_GRANTS: CopilotGoalGrant[] = [
+  "operate_sessions",
+  "terminal_run",
+  "pm_dispatch",
+  "sandbox_checks",
+];
+
+export interface CopilotGoal {
+  id: string;
+  conversationId: string;
+  projectId?: string | null;
+  title: string;
+  spec: string;
+  status: CopilotGoalStatus;
+  blockedReason?: string | null;
+  grants: CopilotGoalGrant[];
+  /** Where goal edits live until the owner merges; null before the first write or dispatch. */
+  workspace?: CopilotGoalWorkspace | null;
+  /** Epoch milliseconds (Date.now() on the server), not an ISO string. */
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number | null;
+}
+
+export interface CopilotGoalWorkspace {
+  kind: "copy" | "worktree";
+  /** Worktree only: the goal branch, its merge base, and the project branch it merges into. */
+  branch?: string | null;
+  baseCommit?: string | null;
+  targetBranch?: string | null;
+}
+
+/** CLI turn state of a dispatched task; `running` holds the goal until the CLI reports. */
+export type CopilotGoalDispatchStatus = "running" | "completed" | "failed" | "ended";
+
+export interface CopilotGoalTask {
+  id: string;
+  goalId: string;
+  seq: number;
+  description: string;
+  status: CopilotGoalTaskStatus;
+  evidence?: string | null;
+  /** Machine verification command; null when the task has no verify step. */
+  verifyCommand?: string | null;
+  /** Epoch ms of the last verification run; paired with verifyExitCode. */
+  verifiedAt?: number | null;
+  /** Exit code of the last verification run; 0 means machine-verified. */
+  verifyExitCode?: number | null;
+  /** CLI session this task was dispatched to, if any. */
+  dispatchedSessionId?: string | null;
+  dispatchStatus?: CopilotGoalDispatchStatus | null;
+  /** Linked project board work item (personal projects) and its board status. */
+  workItemId?: string | null;
+  boardStatus?: string | null;
+  /** Epoch milliseconds. */
+  createdAt: number;
+  /** Epoch milliseconds. */
+  updatedAt: number;
+}
+
+export interface CopilotGoalJournalEntry {
+  id: string;
+  goalId: string;
+  runId?: string | null;
+  note: string;
+  /** Epoch milliseconds. */
+  createdAt: number;
+}
+
+export interface CopilotGoalListItem {
+  id: string;
+  title: string;
+  status: CopilotGoalStatus;
+  projectId?: string | null;
+  conversationId: string;
+  grants: CopilotGoalGrant[];
+  /** Epoch milliseconds. */
+  createdAt: number;
+  taskTotal: number;
+  taskPasses: number;
+}
+
+export function createGoal(input: {
+  conversationId: string;
+  projectId?: string;
+  title: string;
+  spec: string;
+  grants?: CopilotGoalGrant[];
+}) {
+  return fetchJson<{ goalId: string; runId: string }>("/api/v1/copilot/goals", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function listGoals(conversationId?: string) {
+  const search = conversationId
+    ? `?conversationId=${encodeURIComponent(conversationId)}`
+    : "";
+  return fetchJson<{ goals: CopilotGoalListItem[] }>(
+    `/api/v1/copilot/goals${search}`
+  );
+}
+
+export function getGoal(id: string) {
+  return fetchJson<{
+    goal: CopilotGoal;
+    tasks: CopilotGoalTask[];
+    journal: CopilotGoalJournalEntry[];
+    /** Agent question awaiting a user answer; non-null only while blockedReason === "awaiting_user". */
+    pendingQuestion: string | null;
+  }>(`/api/v1/copilot/goals/${encodeURIComponent(id)}`);
+}
+
+/** Answer a pending agent question; the server rejects (409) unless the goal awaits the user. */
+export function answerGoal(id: string, answer: string) {
+  return fetchJson<{ goal: CopilotGoal }>(
+    `/api/v1/copilot/goals/${encodeURIComponent(id)}/answer`,
+    { method: "POST", body: JSON.stringify({ answer }) }
+  );
+}
+
+export interface CopilotGoalDiffFile {
+  path: string;
+  status: "added" | "modified" | "deleted";
+  diff: string;
+  truncated: boolean;
+}
+
+/** Sandbox diff for the goal's changes; files is empty when no sandbox exists.
+ * Top-level truncated mirrors the 512 KiB server cap. */
+export function getGoalDiff(id: string) {
+  return fetchJson<{ files: CopilotGoalDiffFile[]; truncated: boolean }>(
+    `/api/v1/copilot/goals/${encodeURIComponent(id)}/diff`
+  );
+}
+
+/** Merge the goal's sandbox changes back into the project root. 409 while a
+ * goal run is active or without a sandbox. */
+export function mergeGoal(id: string) {
+  return fetchJson<{ merged: string[]; deleted: string[]; kept: string[]; commit?: string }>(
+    `/api/v1/copilot/goals/${encodeURIComponent(id)}/merge`,
+    { method: "POST" }
+  );
+}
+
+export function pauseGoal(id: string) {
+  return fetchJson<{ goal: CopilotGoal }>(
+    `/api/v1/copilot/goals/${encodeURIComponent(id)}/pause`,
+    { method: "POST" }
+  );
+}
+
+export function resumeGoal(id: string) {
+  return fetchJson<{ goal: CopilotGoal }>(
+    `/api/v1/copilot/goals/${encodeURIComponent(id)}/resume`,
+    { method: "POST" }
+  );
+}
+
+export function cancelGoal(id: string) {
+  return fetchJson<{ goal: CopilotGoal }>(
+    `/api/v1/copilot/goals/${encodeURIComponent(id)}/cancel`,
+    { method: "POST" }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Copilot slash commands: the palette above the chat composer. Names carry no
+// leading slash; the server list is the source of truth (never hardcode).
+// ---------------------------------------------------------------------------
+
+export type CopilotCommandCategory = "goal" | "session" | "model" | "info";
+
+export interface CopilotCommandInfo {
+  /** Command name without the leading slash (e.g. "goal"). */
+  name: string;
+  /** Usage line with the slash and placeholders (e.g. "/goal <描述>"). */
+  usage: string;
+  /** English fallback description; the UI overrides it with localized copy. */
+  description: string;
+  category: CopilotCommandCategory;
+}
+
+export function listCopilotCommands() {
+  return fetchJson<{ commands: CopilotCommandInfo[] }>("/api/v1/copilot/commands");
 }

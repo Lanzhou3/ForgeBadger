@@ -53,7 +53,13 @@ describe("security policy", () => {
   it("limits lifecycle prose exemptions to declared scalar and string-list fields", () => {
     const evaluate = (input: unknown) => policy.evaluate({ userId: 'u1', toolName: 'pm_update_task_plan',
       toolRisk: 'operate', requiresApproval: true, input });
+    // Prose fields are exempt from the denylist; criteria edits feed acceptance and keep approval.
     assert.equal(evaluate({ title: 'Reject ../ traversal', acceptanceCriteria: ['rm -rf /tmp/example'] }).action, 'require_approval');
+    assert.equal(evaluate({ title: 'Reject ../ traversal' }).action, 'auto_approve');
+    for (const toolName of ['pm_manage_dependency', 'pm_attach_evidence'])
+      assert.equal(policy.evaluate({ userId: 'u1', toolName, toolRisk: 'operate', requiresApproval: true, input: {} }).action, 'require_approval', toolName);
+    assert.equal(policy.evaluate({ userId: 'u1', toolName: 'pm_set_goal', toolRisk: 'operate', requiresApproval: true,
+      input: { summary: 'Ship v2' } }).action, 'require_approval');
     for (const input of [{ stageId: '../secret' }, { title: { command: 'rm -rf /tmp/example' } },
       { acceptanceCriteria: [{ path: '../secret' }] }, { unknown: '../secret' }, { '../secret': 'ordinary' }]) {
       assert.equal(evaluate(input).action, 'deny');

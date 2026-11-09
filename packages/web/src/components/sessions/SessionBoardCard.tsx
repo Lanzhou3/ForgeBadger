@@ -25,13 +25,6 @@ import {
   pickSessionTitle,
 } from "./session-board-utils";
 
-const STATUS_BAR_CLASS: Record<string, string> = {
-  running: "bg-emerald-500/80",
-  error: "bg-red-500/80",
-  stopped: "bg-muted-foreground/30",
-  lost: "bg-amber-500/80",
-};
-
 const VISIBLE_TASKS_PER_CARD = 2;
 
 interface SessionBoardCardProps {
@@ -80,20 +73,13 @@ export function SessionBoardCard({
         }
       }}
       className={cn(
-        "group relative cursor-pointer rounded-lg border border-border bg-card p-3 pl-4",
-        "transition-all duration-150 hover:border-border/80 hover:shadow-md",
-        "motion-safe:hover:-translate-y-px",
+        "group relative cursor-pointer rounded-lg border border-border bg-card p-3",
+        "transition-[border-color,box-shadow,transform] duration-200 ease-out",
+        "hover:border-border/80 hover:shadow-md motion-safe:hover:-translate-y-px",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         highlight && "forgebadger-session-card-new"
       )}
     >
-      <span
-        aria-hidden
-        className={cn(
-          "absolute inset-y-0 left-0 w-0.5 rounded-l-lg",
-          STATUS_BAR_CLASS[normalized]
-        )}
-      />
       <div className="flex items-center gap-2">
         <SessionStatusDot status={session.status} />
         {session.aiTool ? <CliBrandChip aiTool={session.aiTool} /> : null}
@@ -146,7 +132,7 @@ export function SessionBoardCard({
 
       <div
         className={cn(
-          "mt-2 text-sm font-medium leading-snug",
+          "mt-2 text-sm font-medium leading-snug tracking-tight",
           picked.fromPrompt ? "line-clamp-2 break-words" : "truncate"
         )}
         title={picked.title}

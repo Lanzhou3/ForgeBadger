@@ -363,3 +363,61 @@ for (const mode of ['live', 'unknown', 'restart-race', 'binding-race', 'scope-re
   else { assert.equal(result.isError, true); assert.ok(f.repo.getWorkItem(projectId, item.id)); }
   if (mode === 'binding-race') assert.notEqual((f.repo.getWorkItem(projectId, item.id)?.details.taskPacket as { sessionId: string }).sessionId, session.id);
 });
+
+test('native owner/Copilot contexts run planning edits without a token but never acceptance or deletion', async t => {
+  const f = await fixture(t), projectId = f.project.id;
+  const context = { db: f.db, userId: f.userId, masterKey: 'x'.repeat(32) };
+  const owner = new PlatformActions({ ...context, actionOrigin: { kind: 'owner_api' } }, createPlatformCommands());
+  const goalInput = { projectId, expectedPlanDigest: planDigest({ ...context } as never, projectId), summary: 'Native plan' };
+  const intent = owner.preview({ commandId: 'mcp.lifecycle.pm_set_goal', input: goalInput, idempotencyKey: 'native-goal' });
+  await owner.execute(intent.id);
+  assert.equal(f.repo.getGoal(projectId)?.summary, 'Native plan');
+
+  const item = f.repo.createWorkItem(projectId, { title: 'Review me', acceptanceCriteria: ['Covered'], evidenceRefs: [{ ref: 'tests/report' }] });
+  f.repo.updateWorkItemStatus(projectId, item.id, { status: 'in_progress' });
+  f.repo.updateWorkItemStatus(projectId, item.id, { status: 'ready_for_review' });
+  const revision = f.repo.taskMetadata(projectId, item.id).revision;
+  for (const [commandId, input] of [
+    ['mcp.lifecycle.pm_review_task', { projectId, workItemId: item.id, expectedRevision: revision, decision: 'accepted', note: 'ok', criteria: [{ index: 0, evidenceRef: 'tests/report' }] }],
+    ['mcp.lifecycle.pm_delete_work_item', { projectId, workItemId: item.id, expectedRevision: revision, confirm: true }]
+  ] as const) {
+    assert.throws(() => owner.preview({ commandId, input, idempotencyKey: `native-${commandId}` }), /PM_LIFECYCLE_OWNER_ONLY/);
+  }
+  assert.equal(f.repo.getWorkItem(projectId, item.id)?.status, 'ready_for_review');
+  // A context with no origin at all (neither Copilot nor owner API) gets no native authority.
+  const anonymous = new PlatformActions(context, createPlatformCommands());
+  assert.throws(() => anonymous.preview({ commandId: 'mcp.lifecycle.pm_set_goal',
+    input: { ...goalInput, expectedPlanDigest: planDigest({ ...context } as never, projectId), summary: 'x' }, idempotencyKey: 'anon' }), /MCP_LIFECYCLE_AUTHORITY_REQUIRED/);
+});
+
+test('native Copilot tool surface carries plan edits; acceptance and deletion stay MCP-only', async () => {
+  const { createPlatformTools } = await import('../src/services/agent/tools/index.js');
+  const names = new Set(createPlatformTools().map(tool => tool.name));
+  for (const name of ['pm_get_plan', 'pm_get_handoff', 'pm_set_goal', 'pm_update_task_plan', 'pm_manage_stage', 'pm_manage_dependency', 'pm_attach_evidence'])
+    assert.ok(names.has(name), name);
+  for (const name of ['pm_review_task', 'pm_delete_work_item']) assert.equal(names.has(name), false, name);
+});
+
+test('task packet dispatch refuses a task whose blockers are not done', async t => {
+  const f = await fixture(t), projectId = f.project.id;
+  const blocker = f.repo.createWorkItem(projectId, { title: 'Schema first' });
+  const item = f.repo.createWorkItem(projectId, { title: 'API on top' });
+  f.repo.addWorkItemDependency(projectId, item.id, blocker.id);
+  const { assertTaskDependenciesResolved } = await import('../src/services/project-manager/task-execution.js');
+  assert.throws(() => assertTaskDependenciesResolved(f.repo, f.repo.getWorkItem(projectId, item.id)!), /TASK_DEPENDENCIES_NOT_DONE: finish "Schema first" \(todo\)/);
+  f.repo.updateWorkItemStatus(projectId, blocker.id, { status: 'cancelled' });
+  assert.doesNotThrow(() => assertTaskDependenciesResolved(f.repo, f.repo.getWorkItem(projectId, item.id)!), 'a cancelled blocker no longer gates');
+});
+
+test('a cancelled blocker no longer gates acceptance, matching the dispatch gate', async t => {
+  const f = await fixture(t), projectId = f.project.id;
+  const blocker = f.repo.createWorkItem(projectId, { title: 'Dropped prerequisite' });
+  const item = f.repo.createWorkItem(projectId, { title: 'Review', acceptanceCriteria: ['Covered'], evidenceRefs: [{ ref: 'tests/report' }] });
+  f.repo.addWorkItemDependency(projectId, item.id, blocker.id);
+  f.repo.updateWorkItemStatus(projectId, blocker.id, { status: 'cancelled' });
+  f.repo.updateWorkItemStatus(projectId, item.id, { status: 'in_progress' });
+  f.repo.updateWorkItemStatus(projectId, item.id, { status: 'ready_for_review' });
+  await f.ok('pm_review_task', { projectId, workItemId: item.id, expectedRevision: f.repo.taskMetadata(projectId, item.id).revision,
+    decision: 'accepted', note: 'Reviewed', criteria: [{ index: 0, evidenceRef: 'tests/report' }], operationId: 'cancelled-blocker-acceptance' });
+  assert.equal(f.repo.getWorkItem(projectId, item.id)?.status, 'done');
+});

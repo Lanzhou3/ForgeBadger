@@ -8,10 +8,12 @@ import * as api from '@/lib/api';
 import * as channels from '@/lib/copilot-channels-api';
 import * as platform from '@/lib/platform-actions-api';
 import * as notificationApi from '@/lib/feishu-notifications-api';
+import * as telegramNotificationApi from '@/lib/telegram-notifications-api';
 vi.mock('next/navigation',()=>({useRouter:()=>({push:vi.fn()})}));
 vi.mock('@/lib/api',()=>({getFeishuChannelAccount:vi.fn(),getFeishuConnectionHealth:vi.fn(),saveFeishuChannelAccount:vi.fn(),emergencyStopFeishu:vi.fn(),getTelegramChannelAccount:vi.fn(),getTelegramConnectionHealth:vi.fn(),saveTelegramChannelAccount:vi.fn(),getTelegramIntegrationConfig:vi.fn(),getFeishuIntegrationConfig:vi.fn(),updateFeishuIntegrationConfig:vi.fn(),updateTelegramIntegrationConfig:vi.fn(),emergencyStopTelegram:vi.fn(),getChannelDiagnostics:vi.fn()}));
 vi.mock('@/lib/copilot-channels-api',()=>({getChannelRecords:vi.fn(),createChannelPairing:vi.fn(),confirmChannelPairing:vi.fn(),cancelChannelPairing:vi.fn(),revokeChannelIdentity:vi.fn(),createChannelRoute:vi.fn(),revokeChannelRoute:vi.fn()}));
 vi.mock('@/lib/platform-actions-api',()=>({getProjectOverview:vi.fn()}));
+vi.mock('@/lib/telegram-notifications-api',()=>({getTelegramNotificationSettings:vi.fn(),getTelegramNotificationDeliveries:vi.fn(),saveTelegramNotificationSettings:vi.fn(),testTelegramNotification:vi.fn()}));
 vi.mock('@/lib/feishu-notifications-api',()=>({getFeishuNotificationSettings:vi.fn(async()=>({config:{enabled:false,targetId:null,identityId:null,types:['attention','failure','completion'],webBaseUrl:'',revision:0},ready:false,blocker:'TARGET_INVALID',targets:[]})),getFeishuNotificationDeliveries:vi.fn(async()=>({deliveries:[]})),saveFeishuNotificationSettings:vi.fn(),testFeishuNotification:vi.fn()}));
 const account={id:'a',appId:'cli_test',enabled:true,secretConfigured:true,configRevision:1,connectionState:'connected',updatedAt:''};
 const pairing={id:'pair',accountId:'a',accountRevision:1,status:'claimed',revision:2,externalUserId:'ou_owner',chatId:'oc_owner',expiresAt:Date.now()+600000};
@@ -26,6 +28,8 @@ beforeEach(()=>{vi.resetAllMocks();client=new QueryClient({defaultOptions:{queri
  Element.prototype.scrollIntoView=vi.fn();
  vi.mocked(notificationApi.getFeishuNotificationSettings).mockResolvedValue({config:{enabled:false,targetId:null,identityId:null,types:['attention','failure','completion'],webBaseUrl:'',revision:0},ready:false,blocker:'TARGET_INVALID',targets:[]});
  vi.mocked(notificationApi.getFeishuNotificationDeliveries).mockResolvedValue({deliveries:[]});
+ vi.mocked(telegramNotificationApi.getTelegramNotificationSettings).mockResolvedValue({config:{enabled:false,targetId:null,types:['attention','failure','completion'],webBaseUrl:'',revision:0},ready:false,blocker:'TARGET_INVALID',targets:[]});
+ vi.mocked(telegramNotificationApi.getTelegramNotificationDeliveries).mockResolvedValue({deliveries:[]});
  vi.mocked(api.getFeishuChannelAccount).mockResolvedValue(account);vi.mocked(api.getFeishuConnectionHealth).mockResolvedValue({state:'connected',accountId:'a',configRevision:1,reconnectAttempt:0,lastConnectedAt:null,lastErrorMessage:null});
  vi.mocked(api.getTelegramChannelAccount).mockResolvedValue(null);vi.mocked(api.getTelegramConnectionHealth).mockResolvedValue({state:'disabled',accountId:null,configRevision:null,reconnectAttempt:0,lastConnectedAt:null,lastErrorMessage:null});
  vi.mocked(api.getFeishuIntegrationConfig).mockResolvedValue({enabled:true,emergencyDisabled:false,allowedChatIds:[],identityMode:'user',commandPrefix:'/fb'});
@@ -55,15 +59,15 @@ it('clears write-only secret on failed submission without caching or rendering i
  await screen.findByRole('alert');expect(secret).toHaveProperty('value','');expect(screen.queryByText('test-only-secret')).toBeNull();
  expect(JSON.stringify(client.getQueryCache().getAll().map(q=>q.state.data))).not.toContain('test-only-secret');expect(client.getMutationCache().getAll()).toHaveLength(0);
 });
-it('binds the selected project and identity',async()=>{
- await mount();expect(screen.getByText(/飞书远程操作尚未启用/)).toBeTruthy();const bind=screen.getByRole('button',{name:'启用飞书远程操作'});expect(bind).toHaveProperty('disabled',true);
- await selectOption('私聊身份','ou_owner');await selectOption('项目','测试项目');
- fireEvent.click(bind);await waitFor(()=>expect(channels.createChannelRoute).toHaveBeenCalledWith('i','p'));
+it('creates a channel conversation without separate project authorization',async()=>{
+ await mount();expect(screen.getByText(/飞书远程操作尚未启用/)).toBeTruthy();const bind=screen.getByRole('button',{name:'启用飞书远程操作'});expect(bind).toHaveProperty('disabled',false);
+ expect(screen.queryByRole('combobox',{name:'项目'})).toBeNull();
+ fireEvent.click(bind);await waitFor(()=>expect(channels.createChannelRoute).toHaveBeenCalledWith('i'));
 });
 it('displays unknown delivery honestly without a resend action and can revoke a route',async()=>{
  vi.mocked(channels.getChannelRecords).mockResolvedValue({pairings:[],identities:[identity],routes:[route],deliveries:[{id:'d',accountId:'a',channel:'feishu',inboxId:'m',phase:'terminal',status:'unknown',createdAt:Date.now(),receiptRecorded:false}]});
  await mount();expect(screen.getByText('任务结果')).not.toBeNull();expect(screen.getByText('结果不确定')).not.toBeNull();expect(screen.getByRole('link',{name:'打开会话'}).getAttribute('href')).toBe('/copilot?c=c');expect(screen.queryByRole('button',{name:/重发/})).toBeNull();
- expect(screen.getByText('测试项目')).not.toBeNull();expect(screen.getByText('权限有效')).not.toBeNull();
+ expect(screen.getByText('p')).not.toBeNull();expect(screen.getByText('权限有效')).not.toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'撤销渠道绑定'}));await waitFor(()=>expect(channels.revokeChannelRoute).toHaveBeenCalledWith('r'));
 });
 it('keeps pairing tokens out of query cache and clears them on claim',async()=>{
@@ -74,15 +78,14 @@ it('keeps pairing tokens out of query cache and clears them on claim',async()=>{
  client.setQueryData(['copilot-channels'],(data:Record<string,unknown>)=>({...data,pairings:[pairing]}));
  await waitFor(()=>expect(screen.queryByText('/pair one-time-test-token')).toBeNull());
 });
-it('handles an unconfigured account and an empty project list',async()=>{
- vi.mocked(api.getFeishuChannelAccount).mockResolvedValue(null);vi.mocked(platform.getProjectOverview).mockResolvedValue({projects:[],observedAt:Date.now()});
- await mount();expect(screen.getByRole('button',{name:'生成新的配对码'})).toHaveProperty('disabled',true);expect(screen.getByText('暂无项目，请先在项目页创建或导入。')).not.toBeNull();
+it('handles an unconfigured account without loading a separate project list',async()=>{
+ vi.mocked(api.getFeishuChannelAccount).mockResolvedValue(null);
+ await mount();expect(screen.getByRole('button',{name:'生成新的配对码'})).toHaveProperty('disabled',true);expect(platform.getProjectOverview).not.toHaveBeenCalled();
 });
 
-it('shows routes honestly when the bound project is missing while retaining revoke',async()=>{
- vi.mocked(platform.getProjectOverview).mockResolvedValue({projects:[],observedAt:Date.now()});
- vi.mocked(channels.getChannelRecords).mockResolvedValue({pairings:[],identities:[identity],routes:[route],deliveries:[]});
- await mount();expect(screen.getByText('项目不存在')).not.toBeNull();expect(screen.getByRole('button',{name:'撤销渠道绑定'})).toHaveProperty('disabled',false);
+it('shows a conversation without a selected project while retaining revoke',async()=>{
+ vi.mocked(channels.getChannelRecords).mockResolvedValue({pairings:[],identities:[identity],routes:[{...route,projectId:null}],deliveries:[]});
+ await mount();expect(screen.getByText('尚未选择项目；打开会话选择，或发送 /project。')).not.toBeNull();expect(screen.getByText('项目不存在')).not.toBeNull();expect(screen.getByRole('button',{name:'撤销渠道绑定'})).toHaveProperty('disabled',false);
 });
 it('clears a submitted secret after success and clears a token on cancellation',async()=>{
  const pending={...pairing,status:'pending',revision:1,externalUserId:null,chatId:null};
@@ -144,6 +147,7 @@ it('keeps identities, routes and deliveries scoped to the selected channel accou
  fireEvent.click(screen.getByRole('button',{name:'Telegram'}));
  await screen.findByText(/tg-owner ·/);
  expect(screen.queryByText(/ou_owner ·/)).toBeNull();
+ expect(await screen.findByText('Telegram 通知')).toBeTruthy();expect(screen.queryByText('飞书通知')).toBeNull();
  expect(screen.getAllByRole('link',{name:'打开会话'})).toHaveLength(1);
  expect(screen.getByRole('link',{name:'打开会话'}).getAttribute('href')).toBe('/copilot?c=tc');
  fireEvent.click(screen.getByRole('button',{name:'撤销渠道绑定'}));
@@ -181,7 +185,7 @@ it('can switch to Telegram even when the default Feishu account request fails',a
 
 it('explains stale identity next to disabled activation even after selecting an autonomous project', async () => {
  vi.mocked(api.getFeishuChannelAccount).mockResolvedValue({...account,configRevision:3});
- await mount();await selectOption('项目','测试项目');
+ await mount();
  expect(screen.getByRole('button',{name:'启用飞书远程操作'})).toHaveProperty('disabled',true);
  expect(screen.getByText('ou_owner · 已失效，需重新配对')).toBeTruthy();
  expect(screen.getByTestId('channel-activation-reason').textContent).toContain('身份已失效，请先在第 2 步重新配对并确认身份');
@@ -191,7 +195,7 @@ it('explains stale identity next to disabled activation even after selecting an 
 it('disables new authority while emergency stopped, retaining revocation and cancellation', async () => {
  vi.mocked(api.getFeishuIntegrationConfig).mockResolvedValue({enabled:true,emergencyDisabled:true,allowedChatIds:[],identityMode:'bot',commandPrefix:'/fb'});
  vi.mocked(channels.getChannelRecords).mockResolvedValue({pairings:[pairing],identities:[identity],routes:[route],deliveries:[]});
- await mount();await selectOption('项目','测试项目');
+ await mount();
  fireEvent.click(screen.getByRole('checkbox',{name:'我确认这是自己的飞书私聊'}));
  expect(screen.getByRole('button',{name:'生成新的配对码'})).toHaveProperty('disabled',true);
  expect(screen.getByRole('button',{name:'确认身份'})).toHaveProperty('disabled',true);
@@ -202,9 +206,9 @@ it('disables new authority while emergency stopped, retaining revocation and can
 
 it('explains an existing route and does not report a deleted parent as authorized', async () => {
  vi.mocked(channels.getChannelRecords).mockResolvedValue({pairings:[],identities:[identity],routes:[{...route,authorityValid:false}],deliveries:[]});
- await mount();await selectOption('项目','测试项目');
+ await mount();
  expect(screen.queryByText(/飞书远程操作已授权/)).toBeNull();
- expect(screen.getAllByText('测试项目').length).toBeGreaterThan(0);expect(screen.getByText('授权已失效，请撤销后重新绑定')).toBeTruthy();
+ expect(screen.getAllByText('p').length).toBeGreaterThan(0);expect(screen.getByText('授权已失效，请撤销后重新绑定')).toBeTruthy();
  expect(screen.getByTestId('channel-activation-reason').textContent).toContain('已有渠道绑定');
  expect(screen.getByRole('button',{name:'撤销渠道绑定'})).toHaveProperty('disabled',false);
 });
@@ -213,18 +217,17 @@ it('does not infer authorization from a legacy route lacking server authority st
  const {authorityValid:_,...legacyRoute}=route;
  vi.mocked(channels.getChannelRecords).mockResolvedValue({pairings:[],identities:[identity],routes:[legacyRoute],deliveries:[]});
  await mount();expect(screen.queryByText(/飞书远程操作已授权/)).toBeNull();
- expect(screen.getByText('测试项目')).not.toBeNull();expect(screen.getByText('授权状态待核查')).not.toBeNull();
+ expect(screen.getByText('p')).not.toBeNull();expect(screen.getByText('授权状态待核查')).not.toBeNull();
 });
 
-it('explains the missing project selection once identity is current', async () => {
- await mount();expect(screen.getByTestId('channel-activation-reason').textContent).toContain('请选择要授权的项目');
- await selectOption('项目','测试项目');
+it('enables conversation creation as soon as identity is current', async () => {
+ await mount();expect(screen.getByTestId('channel-activation-reason').textContent).toContain('已选择身份，点击按钮后创建 Copilot 渠道会话');
  expect(screen.getByRole('button',{name:'启用飞书远程操作'})).toHaveProperty('disabled',false);
 });
 
 it('does not offer new authority when integration configuration failed to load', async () => {
  vi.mocked(api.getFeishuIntegrationConfig).mockRejectedValue(new Error('unavailable'));
- await mount();await selectOption('项目','测试项目');
+ await mount();
  await waitFor(()=>expect(screen.getByRole('button',{name:'生成新的配对码'})).toHaveProperty('disabled',true));
  expect(screen.getByRole('button',{name:'启用飞书远程操作'})).toHaveProperty('disabled',true);
  expect(screen.getByTestId('channel-activation-reason').textContent).toContain('渠道配置加载失败');
@@ -240,7 +243,7 @@ it('renders the channels setup in English for en users instead of hardcoded Chin
   expect(screen.getByText('Credentials saved')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Enable Feishu remote operation' })).toBeTruthy();
   expect(screen.getByRole('checkbox', { name: 'I confirm this is my own Feishu private chat' })).toBeTruthy();
-  expect(screen.getByTestId('channel-activation-reason').textContent).toContain('Choose a project to authorize.');
+  expect(screen.getByTestId('channel-activation-reason').textContent).toContain('Identity selected; click to create a Copilot channel conversation.');
   expect(screen.getByText(/Feishu remote operation is not enabled yet/)).toBeTruthy();
   // The previously hardcoded zh-CN strings must be gone.
   expect(screen.queryByText('生成新的配对码')).toBeNull();

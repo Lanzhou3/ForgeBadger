@@ -17,12 +17,15 @@ import {
 const {
   createConversationMock,
   listMessagesMock,
+  getConversationMock,
+  updateConversationProjectMock,
   renameConversationMock,
   sendMessageMock,
   editMessageMock,
   cancelRunMock,
   getRunMock,
   listRunsMock,
+  revokeRunRepairsMock,
   getCopilotPreferencesMock,
   updateCopilotPreferencesMock,
   listProjectsMock,
@@ -32,12 +35,15 @@ const {
 } = vi.hoisted(() => ({
   createConversationMock: vi.fn(),
   listMessagesMock: vi.fn(),
+  getConversationMock: vi.fn(),
+  updateConversationProjectMock: vi.fn(),
   renameConversationMock: vi.fn(),
   sendMessageMock: vi.fn(),
   editMessageMock: vi.fn(),
   cancelRunMock: vi.fn(),
   getRunMock: vi.fn(),
   listRunsMock: vi.fn(),
+  revokeRunRepairsMock: vi.fn(),
   getCopilotPreferencesMock: vi.fn(),
   updateCopilotPreferencesMock: vi.fn(),
   listProjectsMock: vi.fn(),
@@ -52,12 +58,15 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     ...actual,
     createConversation: createConversationMock,
     listMessages: listMessagesMock,
+    getConversation: getConversationMock,
+    updateConversationProject: updateConversationProjectMock,
     renameConversation: renameConversationMock,
     sendMessage: sendMessageMock,
     editMessage: editMessageMock,
     cancelRun: cancelRunMock,
     getRun: getRunMock,
     listConversationRuns: listRunsMock,
+    revokeRunRepairs: revokeRunRepairsMock,
     getCopilotPreferences: getCopilotPreferencesMock,
     updateCopilotPreferences: updateCopilotPreferencesMock,
     listFollowups: vi.fn().mockResolvedValue({ followups: [] }),
@@ -116,6 +125,7 @@ const newConversation = {
   id: "conv-new",
   title: null,
   status: "active",
+  project_id: null as string | null,
   created_at: 1779370000000,
   updated_at: 1779373600000,
 };
@@ -200,9 +210,30 @@ async function pickOption(name: string, option: string) {
 }
 
 describe("RobotChatPanel", () => {
+  it.each(["pending", "running", "awaiting_approval"])("shows only stop while the run is %s, then restores send after cancellation", async (status) => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    const run = { id: "run-1", conversationId: "conv-stored", status, revision: 3 };
+    listRunsMock.mockResolvedValue({ runs: [run], activeRun: run });
+    getRunMock.mockResolvedValue({ run, pendingActions: [] });
+    renderPanel();
+
+    const stop = await screen.findByRole("button", { name: "停止" });
+    fireEvent.change(screen.getByRole("combobox", { name: "输入消息……" }), { target: { value: "下一条消息" } });
+    expect(screen.queryByRole("button", { name: /^(发送|加入队列)$/ })).toBeNull();
+
+    const cancelled = { ...run, status: "cancelled", revision: 4 };
+    getRunMock.mockResolvedValue({ run: cancelled, pendingActions: [] });
+    listRunsMock.mockResolvedValue({ runs: [cancelled], activeRun: null });
+    fireEvent.click(stop);
+    await waitFor(() => expect(cancelRunMock).toHaveBeenCalledWith("run-1"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送" })).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
+  });
+
   it("focuses the quick-chat input and lets keyboard users close with Escape", () => {
     const { onClose } = renderPanel();
-    const input = screen.getByRole("textbox");
+    // The chat input is a combobox bridged to the slash-command palette.
+    const input = screen.getByRole("combobox", { name: "输入消息……" });
     expect(document.activeElement).toBe(input);
     fireEvent.keyDown(input, { key: "Escape" });
     expect(onClose).toHaveBeenCalledOnce();
@@ -214,6 +245,8 @@ describe("RobotChatPanel", () => {
     window.localStorage.clear();
     createConversationMock.mockResolvedValue({ conversation: newConversation });
     listMessagesMock.mockResolvedValue({ messages: [] });
+    getConversationMock.mockImplementation(async (id: string) => ({ conversation: { ...newConversation, id, project_id: null } }));
+    updateConversationProjectMock.mockImplementation(async (id: string, projectId: string) => ({ conversation: { ...newConversation, id, project_id: projectId || null } }));
     renameConversationMock.mockResolvedValue({ conversation: newConversation });
     sendMessageMock.mockResolvedValue({ runId: "run-1" });
     editMessageMock.mockResolvedValue({ runId: "run-2" });
@@ -280,6 +313,15 @@ describe("RobotChatPanel", () => {
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
   });
 
+  it("lets the floating panel withdraw a restored repair authorization", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    listRunsMock.mockResolvedValue({ runs: [], activeRun: null, repairRunIds: ["legacy-root"] });
+    revokeRunRepairsMock.mockResolvedValue({ revoked: true });
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "停止此对话的后续修复" }));
+    await waitFor(() => expect(revokeRunRepairsMock).toHaveBeenCalledWith("legacy-root"));
+  });
+
   it("offers cancellation for a restored awaiting approval run", async () => {
     window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
     const run = { id: "run-legacy", conversationId: "conv-stored", status: "awaiting_approval", revision: 2 };
@@ -297,13 +339,12 @@ describe("RobotChatPanel", () => {
     expect(screen.getByRole("button", { name: "新建对话" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "关闭" })).toBeTruthy();
     expect(screen.getByText("你好，我是 Copilot")).toBeTruthy();
-    // Parity chrome: model / thinking pickers (shared preferences store),
-    // project context, and the run-options entry all live in the panel too.
+    // Parity chrome: model / thinking pickers (shared preferences store) and
+    // project context live in the panel too.
     expect(screen.getByTestId("copilot-status-bar")).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "当前模型" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "思考强度" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "项目上下文" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "执行选项" })).toBeTruthy();
     // The empty state shares the console's suggestion set.
     expect(screen.getByRole("button", { name: "项目整体进展如何？" })).toBeTruthy();
     // Mobile (<768px): near-fullscreen bottom sheet; desktop: 380x520 card
@@ -610,7 +651,7 @@ describe("RobotChatPanel", () => {
     await waitFor(() => expect(scrollToSpy.mock.calls.length).toBeGreaterThan(callsBefore));
   });
 
-  it("passes the picked project context through to the send", async () => {
+  it("stores the picked project when creating the conversation, then inherits it on send", async () => {
     listProjectsMock.mockResolvedValue({ projects: [{ id: "project-1", name: "示例项目" }] });
     renderPanel();
 
@@ -618,12 +659,30 @@ describe("RobotChatPanel", () => {
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "检查这个项目" } });
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
 
-    await waitFor(() =>
-      expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "检查这个项目", undefined, {
-        projectId: "project-1",
-        clientRequestId: expect.any(String),
-      })
-    );
+    await waitFor(() => expect(createConversationMock).toHaveBeenCalledWith(undefined, "project-1"));
+    expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "检查这个项目", undefined, {
+      clientRequestId: expect.any(String),
+    });
+  });
+
+  it("blocks send until the conversation project update settles", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    listProjectsMock.mockResolvedValue({ projects: [{ id: "project-1", name: "示例项目" }] });
+    const pending = deferred<{ conversation: typeof newConversation }>();
+    updateConversationProjectMock.mockReturnValue(pending.promise);
+    renderPanel();
+    await waitFor(() => expect(getConversationMock).toHaveBeenCalledWith("conv-stored"));
+
+    await pickOption("项目上下文", "示例项目");
+    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "检查这个项目" } });
+    expect(screen.getByRole("button", { name: "发送" })).toHaveProperty("disabled", true);
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    expect(sendMessageMock).not.toHaveBeenCalled();
+
+    await act(async () => pending.resolve({ conversation: { ...newConversation, id: "conv-stored", project_id: "project-1" } }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送" })).toHaveProperty("disabled", false));
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-stored", "检查这个项目", undefined, { clientRequestId: expect.any(String) }));
   });
 
   it("edits a persisted user message and reruns it through the shared controller", async () => {
@@ -654,7 +713,7 @@ describe("RobotChatPanel", () => {
 
     // The run owns the conversation; the composer switches to queue mode and
     // the placeholder tells the user their next message will wait.
-    await waitFor(() => expect(screen.getByPlaceholderText("执行中，发送将加入队列…")).toBeTruthy());
+    await waitFor(() => expect(screen.getByPlaceholderText("执行中，按 Enter 加入队列…")).toBeTruthy());
   });
   it("preserves a newer draft when an earlier enqueue response arrives", async () => {
     const response = deferred<{ followup: { id: string; status: string; runId: null } }>();
@@ -662,7 +721,7 @@ describe("RobotChatPanel", () => {
     renderPanel();
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "start" } });
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
-    const input = await screen.findByPlaceholderText("执行中，发送将加入队列…");
+    const input = await screen.findByPlaceholderText("执行中，按 Enter 加入队列…");
     fireEvent.change(input, { target: { value: "queued A" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(queueFollowupMock).toHaveBeenCalled());
@@ -677,7 +736,7 @@ describe("RobotChatPanel", () => {
     renderPanel();
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "start" } });
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
-    const input = await screen.findByPlaceholderText("执行中，发送将加入队列…");
+    const input = await screen.findByPlaceholderText("执行中，按 Enter 加入队列…");
     fireEvent.change(input, { target: { value: "queued A" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(queueFollowupMock).toHaveBeenCalled());

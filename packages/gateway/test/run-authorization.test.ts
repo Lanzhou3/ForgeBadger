@@ -18,7 +18,7 @@ import { assertChannelRunScope } from '../src/services/channels/channel-run-scop
 import { ChannelIdentityError } from '../src/services/channels/channel-identity-service.js';
 import { CopilotRunLedger, type TurnInput } from '../src/services/agent/run-ledger.js';
 import { loadRunFacts, ParentChainDepthError, PARENT_CHAIN_MAX_DEPTH, hasUserMessageAuthorization, runAncestry } from '../src/services/agent/run-authorization.js';
-import { computeToolSurface, CHANNEL_TOOLS } from '../src/services/agent/tool-surface.js';
+import { computeToolSurface } from '../src/services/agent/tool-surface.js';
 import type { AgentToolRegistry } from '../src/services/agent/tool-registry.js';
 
 function dbFixture() {
@@ -141,20 +141,19 @@ it('computeToolSurface names the excluding layer for every plane', () => {
   assert.deepEqual(layersOf({}, 'load_skill'), ['retired']);
   assert.deepEqual(layersOf({ source: 'scheduled' }, 'takeover_session'), ['scheduled-readonly', 'session-runtime']);
   assert.deepEqual(layersOf({ source: 'scheduled' }, 'update_project'), ['scheduled-readonly']);
-  assert.deepEqual(layersOf({ channelScope: { version: 1 } as never }, 'get_usage_summary'), ['channel-catalog']);
+  assert.deepEqual(layersOf({ channelScope: { version: 1 } as never }, 'get_usage_summary'), []);
   assert.deepEqual(layersOf({ executionMode: 'research' }, 'write_memory'), ['restricted-mode']);
   assert.deepEqual(layersOf({}, 'takeover_session'), ['session-runtime']);
   assert.deepEqual(layersOf({ source: 'scheduled' }, 'mcp_query'), ['scheduled-readonly', 'mcp-source']);
   assert.deepEqual(layersOf({}, 'get_usage_summary'), []);
   assert.deepEqual(layersOf({}, 'get_project'), []);
-  // Owner-disabled is a verdict of its own; channel tools stay visible under a channel scope.
+  // Owner-disabled is independent; scoped conversations use the same tool catalog.
   const disabled = computeToolSurface({}, { registry, hasSessionManager: false, isToolDisabled: name => name === 'get_usage_summary' });
   assert.ok(disabled.excluded('get_usage_summary', 'owner-disabled'));
   assert.equal(disabled.exclusion('get_usage_summary')!.layer, 'owner-disabled');
   const channel = computeToolSurface({ channelScope: { version: 1 } as never }, { registry, hasSessionManager: false });
   assert.ok(channel.visible.some(tool => tool.name === 'list_projects'));
-  assert.ok(CHANNEL_TOOLS.has('list_projects'));
-  assert.equal(channel.exclusion('get_usage_summary')!.layer, 'channel-catalog');
+  assert.ok(channel.visible.some(tool => tool.name === 'get_usage_summary'));
 });
 
 it('retains every exclusion for execution gates while reporting the first layer as provenance', () => {

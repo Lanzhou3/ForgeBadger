@@ -128,7 +128,7 @@ export interface ProjectManagerStarterPack {
   id: string;
   name: string;
   description: string;
-  recommendedAdapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
+  recommendedAdapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | "grok";
   promptFrame: string;
   acceptanceChecklist: string[];
   verificationGuidance: string[];
@@ -640,7 +640,7 @@ export interface ProjectSkill {
 export type ProviderAuthType = "api_key" | "bearer_token" | "oauth" | "none";
 /** Wire protocol the provider endpoint speaks (not the vendor). */
 export type ProviderApiFormat = "anthropic" | "openai-responses" | "openai-compatible" | "google";
-export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
+export type ProviderSupportedAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | "grok";
 
 /**
  * Canonical adapter id list for the web surface.
@@ -657,7 +657,8 @@ export const runtimeAdapterIds = [
   "codex",
   "kimi",
   "pi",
-  "mcode"
+  "mcode",
+  "grok"
 ] as const satisfies readonly ProviderSupportedAdapter[];
 export type ProviderProductType = "payg_api" | "coding_plan" | "token_plan" | "subscription" | "local";
 
@@ -725,14 +726,14 @@ export interface ProviderBalanceResult {
  * Read-only view of a CLI's native login state / subscription quota, as
  * reported by GET /cli-accounts. Mirrors the gateway cli-account types.
  */
-export type CliAccountAdapter = "claude" | "codex" | "kimi" | "mcode";
+export type CliAccountAdapter = "claude" | "codex" | "kimi" | "mcode" | "grok";
 
 /**
  * Adapters the gateway can observe a native login/quota for. Narrower than
  * {@link runtimeAdapterIds}: opencode and pi ship no account surface, so the
  * gateway answers 400 for them and the quota panel must not probe them.
  */
-export const CLI_ACCOUNT_ADAPTERS = ["claude", "codex", "kimi", "mcode"] as const satisfies
+export const CLI_ACCOUNT_ADAPTERS = ["claude", "codex", "kimi", "mcode", "grok"] as const satisfies
   readonly CliAccountAdapter[];
 
 export type CliLoginState = "ready" | "custom_endpoint" | "not_authenticated" | "cli_missing" | "unknown";
@@ -753,6 +754,7 @@ export type CliQuotaUnsupportedReason =
   | "no_native_login"
   | "api_key_mode"
   | "token_expired"
+  | "setup_token_scope"
   | "upstream_error";
 
 export interface CliQuotaEntry {
@@ -823,7 +825,7 @@ export interface ProviderCredentialSummary {
   label: string | null;
   status: string;
   secretPreview: string;
-  generation?: number;
+  generation: number;
 }
 
 export interface SessionActivity {
@@ -969,7 +971,7 @@ export interface TokenDailyPoint {
 }
 
 export interface UsageSyncResultItem {
-  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
+  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | "grok";
   scanned: number;
   inserted: number;
 }
@@ -980,7 +982,7 @@ export interface UsageSyncResult {
 }
 
 export interface AdapterDiscovery {
-  id: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode";
+  id: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | "grok";
   label: string;
   command: string;
   supportLevel: "supported" | "prototype";
@@ -1262,6 +1264,11 @@ export class GatewayApiError extends Error {
   }
 }
 
+/** True when the request never reached the Gateway (connection-level failure). */
+export function isGatewayUnreachable(error: unknown): boolean {
+  return error instanceof GatewayApiError && error.details?.code === "GATEWAY_UNREACHABLE";
+}
+
 export function apiUrl(path: string): string {
   const baseUrl = getGatewayBaseUrl().replace(/\/+$/, "");
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
@@ -1379,8 +1386,22 @@ function handleUnauthorized(path: string, hadToken: boolean, status: number): vo
 }
 
 function normalizeFetchError(error: unknown): never {
+  if (error instanceof GatewayApiError) {
+    throw error;
+  }
   if (error instanceof DOMException && error.name === "AbortError") {
     throw new GatewayApiError("Gateway request timed out. Check that the Gateway service is running.");
+  }
+  // Browsers (and Node) reject fetch with TypeError when the gateway is
+  // unreachable at the network level (connection refused, DNS, CORS). Wrap it
+  // with the resolved base URL so a stale port or runtime config shows up in
+  // the UI instead of a generic "check your credentials" hint.
+  if (error instanceof TypeError) {
+    throw new GatewayApiError(
+      `Cannot reach the Gateway at ${getGatewayBaseUrl()}.`,
+      undefined,
+      { code: "GATEWAY_UNREACHABLE" }
+    );
   }
   throw error;
 }
@@ -1818,7 +1839,9 @@ export async function checkAdapterUpdates(refresh = false): Promise<{ updates: A
 }
 
 export async function updateAdapter(id: RuntimeAdapterId): Promise<AdapterUpdateResult> {
-  return fetchJson(`/api/v1/adapters/${id}/update`, { method: "POST", timeoutMs: 200_000 }) as Promise<AdapterUpdateResult>;
+  // Cover MiniMax's five-minute install, preflight/version probes and cleanup.
+  const timeoutMs = id === "mcode" ? 370_000 : 200_000;
+  return fetchJson(`/api/v1/adapters/${id}/update`, { method: "POST", timeoutMs }) as Promise<AdapterUpdateResult>;
 }
 
 export async function installAdapter(id: RuntimeAdapterId): Promise<AdapterInstallResult> {
@@ -2030,6 +2053,17 @@ export async function writeCliConfigFile(
   return snapshot;
 }
 
+export async function deleteCliProvider(
+  adapter: RuntimeAdapterId,
+  providerId: string
+): Promise<CliConfigSnapshot> {
+  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(
+    cliConfigPath(adapter, `/providers/${encodeURIComponent(providerId)}`),
+    { method: "DELETE" }
+  );
+  return snapshot;
+}
+
 export async function setCliDefaultModel(
   adapter: RuntimeAdapterId,
   model: string,
@@ -2068,10 +2102,22 @@ export async function getCliConfigFieldValues(
   return fetchJson(cliConfigPath(adapter, "/field-values")) as Promise<{ values: Record<string, unknown> }>;
 }
 
+export async function updateCliConfigFields(
+  adapter: RuntimeAdapterId,
+  updates: Record<string, unknown>
+): Promise<CliConfigSnapshot> {
+  const { snapshot } = await fetchJson<{ snapshot: CliConfigSnapshot }>(cliConfigPath(adapter, "/fields"), {
+    method: "PATCH",
+    body: JSON.stringify({ updates }),
+  });
+  return snapshot;
+}
+
 // ---- CLI config apply (provider application to CLI global config) ----
 
 export type ClaudeModelSlot = "opus" | "sonnet" | "haiku" | "fable" | "subagent";
 export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";
+export type KimiPermissionMode = "manual" | "yolo" | "auto";
 
 export interface CliConfigApplyInput {
   providerProfileId: string;
@@ -2083,6 +2129,8 @@ export interface CliConfigApplyInput {
   reasoningEffort?: CodexReasoningEffort;
   /** Claude only: apply through the Gateway route (OpenAI-protocol providers). */
   routeThroughGateway?: boolean;
+  /** Kimi only: default_permission_mode for new sessions. */
+  permissionMode?: KimiPermissionMode;
 }
 
 export interface CliConfigApplyFilePreview {
@@ -2160,11 +2208,24 @@ export interface ClaudeRouteAssignment {
   updatedAt: number;
 }
 
+/** One entry of the ordered Claude-route failover list (position 1 = primary). */
+export interface ClaudeRouteAssignmentEntry {
+  position: number;
+  providerProfileId: string;
+  providerName: string | null;
+  providerStatus: string | null;
+  credentialId: string;
+  modelIds: string[];
+  updatedAt: number;
+}
+
 export interface ClaudeRouteState {
   enabled: boolean;
   hasToken: boolean;
   /** Loopback URL Claude Code is pointed at when a provider is applied through the route. */
   gatewayUrl: string;
+  /** Ordered failover candidates (position 1 = primary). */
+  assignments: ClaudeRouteAssignmentEntry[];
   assignment: ClaudeRouteAssignment | null;
 }
 
@@ -2177,6 +2238,16 @@ export async function setClaudeRoute(enabled: boolean): Promise<ClaudeRouteState
   const { routing } = await fetchJson<{ routing: ClaudeRouteState }>("/api/v1/cli-config/routing/claude", {
     method: "PUT",
     body: JSON.stringify({ enabled }),
+  });
+  return routing;
+}
+
+export async function setClaudeRouteAssignments(
+  assignments: Array<{ providerProfileId: string; credentialId?: string }>,
+): Promise<ClaudeRouteState> {
+  const { routing } = await fetchJson<{ routing: ClaudeRouteState }>("/api/v1/cli-config/routing/claude/assignments", {
+    method: "PUT",
+    body: JSON.stringify({ assignments }),
   });
   return routing;
 }
@@ -2927,8 +2998,11 @@ export async function stopSession(id: string): Promise<{ session: { warning?: st
   return fetchJson(`/api/v1/sessions/${id}/stop`, { method: "POST" });
 }
 
-export async function deleteSession(id: string, options?: { force?: boolean }): Promise<unknown> {
-  const suffix = options?.force ? "?force=true" : "";
+export async function deleteSession(id: string, options?: { force?: boolean; onlyStopped?: boolean }): Promise<unknown> {
+  const params = new URLSearchParams();
+  if (options?.onlyStopped) params.set("onlyStopped", "true");
+  if (options?.force) params.set("force", "true");
+  const suffix = params.size ? `?${params}` : "";
   return fetchJson(`/api/v1/sessions/${id}${suffix}`, { method: "DELETE" });
 }
 
@@ -3173,7 +3247,7 @@ export interface GitTemplateImportResult {
   name: string;
   // `pi` was missing from this union even though the gateway can return it, so
   // consumers had to cast. Kept in sync with the other adapter unions.
-  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | null;
+  adapter: "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | "grok" | null;
   fileCount: number;
   skippedFiles: string[];
 }

@@ -34,12 +34,24 @@ export interface SessionServerOptions {
   onSessionExit?: ((sessionId: string, exitCode: number) => void) | undefined;
   onSessionOutput?: ((sessionId: string, clientId: string, data: string) => void) | undefined;
   onSessionNotification?: ((sessionId: string, notification: TerminalNotification) => void) | undefined;
+  /** Fired once per active→silent transition of a session's PTY (see
+   *  SessionHandle.shouldSignalIdle). Relayed to the Gateway so work state
+   *  can recover when a CLI's completion hook never fires. */
+  onSessionIdle?: ((sessionId: string) => void) | undefined;
+  /** Silence threshold for onSessionIdle (test hook; default 60s). */
+  idleMs?: number;
+  /** Idle sweep cadence (test hook; default 15s). */
+  idleSweepMs?: number;
 }
 
 export interface AttachResult {
   /** Full rendered snapshot (scrollback + screen + modes) for replay. */
   snapshot: string;
 }
+
+/** Defaults for the PTY idle detector: 60s of silence, checked every 15s. */
+export const DEFAULT_SESSION_IDLE_MS = 60_000;
+export const DEFAULT_SESSION_IDLE_SWEEP_MS = 15_000;
 
 export class SessionServer {
   private readonly sessions = new Map<string, SessionHandle>();
@@ -59,6 +71,11 @@ export class SessionServer {
   private _onSessionOutput?: ((sessionId: string, clientId: string, data: string) => void) | undefined;
   /** Callback for terminal notifications — settable via setter for IpcServer wiring. */
   private _onSessionNotification?: ((sessionId: string, notification: TerminalNotification) => void) | undefined;
+  /** Callback for PTY idle transitions — settable via setter for IpcServer wiring. */
+  private _onSessionIdle?: ((sessionId: string) => void) | undefined;
+  private readonly idleMs: number;
+  private readonly idleSweepMs: number;
+  private readonly idleSweepTimer: ReturnType<typeof setInterval>;
 
   constructor(options: SessionServerOptions = {}) {
     this.platformAdapter = options.platformAdapter ?? createPlatformAdapter();
@@ -67,6 +84,12 @@ export class SessionServer {
     this._onSessionExit = options.onSessionExit;
     this._onSessionOutput = options.onSessionOutput;
     this._onSessionNotification = options.onSessionNotification;
+    this._onSessionIdle = options.onSessionIdle;
+    this.idleMs = options.idleMs ?? DEFAULT_SESSION_IDLE_MS;
+    this.idleSweepMs = options.idleSweepMs ?? DEFAULT_SESSION_IDLE_SWEEP_MS;
+    // Unref'd: the sweep must never keep the daemon alive on its own.
+    this.idleSweepTimer = setInterval(() => this.sweepIdleSessions(), this.idleSweepMs);
+    this.idleSweepTimer.unref();
   }
 
   get onSessionExit(): ((sessionId: string, exitCode: number) => void) | undefined {
@@ -91,6 +114,24 @@ export class SessionServer {
 
   set onSessionNotification(value: ((sessionId: string, notification: TerminalNotification) => void) | undefined) {
     this._onSessionNotification = value;
+  }
+
+  get onSessionIdle(): ((sessionId: string) => void) | undefined {
+    return this._onSessionIdle;
+  }
+
+  set onSessionIdle(value: ((sessionId: string) => void) | undefined) {
+    this._onSessionIdle = value;
+  }
+
+  /** Edge-triggered: each handle reports once per active→silent transition. */
+  private sweepIdleSessions(): void {
+    const nowMs = Date.now();
+    for (const [sessionId, handle] of this.sessions) {
+      if (!handle.shouldSignalIdle(nowMs, this.idleMs)) continue;
+      handle.markIdleSignaled();
+      this._onSessionIdle?.(sessionId);
+    }
   }
 
   // ------------------------------------------------------------------
@@ -412,6 +453,7 @@ export class SessionServer {
 
   /** Kill all sessions (called on shutdown). */
   async destroy(): Promise<void> {
+    clearInterval(this.idleSweepTimer);
     const promises = [...this.sessions.values()].map((handle) => {
       try {
         handle.kill();

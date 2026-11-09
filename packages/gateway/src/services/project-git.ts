@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 
 import { validateProjectRoot } from "../lib/safe-resolve.js";
 import { readWorkspaceFile } from "./workspace-context.js";
+import { ProjectGitChangesCache } from "./project-git-cache.js";
 
 export interface GitWorkingTreeEntry {
   path: string;
@@ -86,6 +87,32 @@ function parseLog(output: string): GitCommitEntry[] {
       const [hash = "", subject = "", author = "", relativeDate = ""] = line.split(FIELD_SEPARATOR);
       return { hash, subject, author, relativeDate };
     });
+}
+
+// Short-TTL cache + in-flight coalescing: the projects list fires one
+// git-changes request per project and panels poll the same project, each
+// costing 4 spawned git processes. Identical concurrent calls share one
+// computation and repeat calls within the TTL reuse it, which collapses the
+// process storm. Results may be up to five seconds old; retained payloads
+// expire actively and are bounded by both entry count and serialized bytes.
+const gitChangesCache = new ProjectGitChangesCache();
+const gitChangesInFlight = new Map<string, Promise<ProjectGitChanges>>();
+
+export function getProjectGitChangesCached(projectPath: string): Promise<ProjectGitChanges> {
+  const cached = gitChangesCache.get(projectPath);
+  if (cached) return Promise.resolve(cached);
+  const inFlight = gitChangesInFlight.get(projectPath);
+  if (inFlight) return inFlight;
+  const pending = getProjectGitChanges(projectPath)
+    .then((value) => {
+      gitChangesCache.set(projectPath, value);
+      return value;
+    })
+    .finally(() => {
+      gitChangesInFlight.delete(projectPath);
+    });
+  gitChangesInFlight.set(projectPath, pending);
+  return pending;
 }
 
 export async function getProjectGitChanges(projectPath: string): Promise<ProjectGitChanges> {
@@ -327,5 +354,6 @@ export async function checkoutProjectGitBranch(
       error instanceof Error ? error.message : "git switch failed"
     );
   }
+  gitChangesCache.delete(root);
   return { current: name, created: options.create };
 }

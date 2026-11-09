@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
 import UsagePage from "./page";
 
-const { getTokenUsageSummaryMock, getProjectActivityMock, listProjectsMock } = vi.hoisted(() => ({
+const { getTokenUsageSummaryMock, getProjectActivityMock, listProjectsMock, syncUsageTokensMock } = vi.hoisted(() => ({
   getTokenUsageSummaryMock: vi.fn(),
   getProjectActivityMock: vi.fn(),
   listProjectsMock: vi.fn(),
+  syncUsageTokensMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -19,6 +20,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getTokenUsageSummary: getTokenUsageSummaryMock,
     getProjectActivity: getProjectActivityMock,
     listProjects: listProjectsMock,
+    syncUsageTokens: syncUsageTokensMock,
   };
 });
 
@@ -42,6 +44,41 @@ describe("UsagePage query state", () => {
     window.localStorage.setItem("forgebadger-language", "zh-CN");
     getProjectActivityMock.mockResolvedValue({ series: [] });
     listProjectsMock.mockResolvedValue({ projects: [] });
+    syncUsageTokensMock.mockResolvedValue({ result: { totalInserted: 0 } });
+  });
+
+  it("auto-syncs usage data once when the page opens", async () => {
+    getTokenUsageSummaryMock.mockRejectedValue(new Error("gateway unreachable"));
+    renderPage();
+
+    await screen.findByText("加载失败");
+    expect(syncUsageTokensMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards pending pre-sync reads and shows the synchronized totals", async () => {
+    let resolveOldSummary!: (value: { summary: typeof summary }) => void;
+    let resolveOldActivity!: (value: { series: [] }) => void;
+    let resolveSync!: (value: { result: { totalInserted: number } }) => void;
+    getTokenUsageSummaryMock
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldSummary = resolve; }))
+      .mockResolvedValue({ summary });
+    getProjectActivityMock
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldActivity = resolve; }))
+      .mockResolvedValue({ series: [] });
+    syncUsageTokensMock.mockImplementationOnce(() => new Promise((resolve) => { resolveSync = resolve; }));
+    renderPage();
+    await waitFor(() => expect(syncUsageTokensMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => { resolveSync({ result: { totalInserted: 3 } }); });
+    await act(async () => {
+      resolveOldSummary({ summary: { ...summary, totalTokens: 0 } });
+      resolveOldActivity({ series: [] });
+    });
+
+    await waitFor(() => expect(getTokenUsageSummaryMock).toHaveBeenCalledTimes(2));
+    expect(getProjectActivityMock).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText("6k")).toBeTruthy();
+    expect(await screen.findByText("已同步 (+3)")).toBeTruthy();
   });
 
   it("shows the error state with retry instead of staying on the loading line forever", async () => {
@@ -53,7 +90,8 @@ describe("UsagePage query state", () => {
     expect(screen.queryByText("暂无使用数据")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    expect(getTokenUsageSummaryMock).toHaveBeenCalledTimes(2);
+    // 3 = initial load + one refetch from the auto-sync invalidation + retry.
+    expect(getTokenUsageSummaryMock).toHaveBeenCalledTimes(3);
   });
 });
 

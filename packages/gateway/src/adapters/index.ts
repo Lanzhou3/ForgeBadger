@@ -88,6 +88,18 @@ export function createAdapterLaunchPlan(input: AdapterLaunchPlanInput): LaunchPl
         secretEnvNames: input.secretEnvNames ?? [],
         credentialMode: input.credentialMode
       };
+    case "grok":
+      // Zero-arg interactive TUI. `-p` is a one-shot headless run and
+      // `grok agent stdio` is ACP; neither is a Session Server terminal.
+      // Model and credential selection live in ~/.grok/config.toml.
+      return {
+        command: "grok",
+        args: [],
+        cwd: input.projectRoot,
+        env: input.env ?? {},
+        secretEnvNames: input.secretEnvNames ?? [],
+        credentialMode: input.credentialMode
+      };
   }
 }
 

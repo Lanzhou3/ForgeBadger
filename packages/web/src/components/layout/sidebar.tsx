@@ -338,7 +338,7 @@ export function Sidebar({
               <Menu className="size-5" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="w-[232px] p-0">
+          <SheetContent side="left" className="w-[208px] p-0">
             <div className="flex h-full flex-col py-3">
               <SheetTitle className="sr-only">{t("nav.sheetTitle")}</SheetTitle>
               {BrandHeader}
@@ -354,7 +354,7 @@ export function Sidebar({
         data-app-sidebar
         className={cn(
           "group/sidebar relative hidden h-full flex-col border-r border-border bg-card py-3 transition-[width] duration-200 ease-out md:flex",
-          collapsed ? "w-[60px]" : "w-[220px]"
+          collapsed ? "w-[60px]" : "w-[200px]"
         )}
       >
         {CollapseHandle}

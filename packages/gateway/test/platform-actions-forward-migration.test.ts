@@ -59,7 +59,8 @@ it('upgrades the original 0069, removes the grant tables and grant columns, and 
  assert.equal((f.db.prepare('SELECT count(*) n FROM platform_action_intents').get() as {n:number}).n,2);
  assert.ok(!(f.db.pragma('table_info(projects)') as {name:string}[]).some(c=>c.name==='copilot_autonomy'));
  const routeCols=(f.db.pragma('table_info(channel_routes)') as {name:string}[]).map(c=>c.name);
- assert.ok(routeCols.includes('project_id')&&!routeCols.includes('grant_id')&&!routeCols.includes('grant_revision'));
+ assert.ok(!routeCols.includes('project_id')&&!routeCols.includes('grant_id')&&!routeCols.includes('grant_revision'));
+ assert.ok((f.db.pragma('table_info(copilot_conversations)') as {name:string}[]).some(c=>c.name==='project_id'));
  assert.deepEqual(f.db.pragma('foreign_key_check'),[]);
  assert.equal((f.db.prepare('SELECT hash FROM __drizzle_migrations WHERE created_at=?').get(1788393600202) as {hash:string}).hash,appliedHash);
  upgrade(f.db);assert.equal((f.db.prepare('SELECT count(*) n FROM platform_action_receipts').get() as {n:number}).n,1);
@@ -74,7 +75,7 @@ it('refuses an invalid historical tenant binding without dropping its row or adv
  assert.equal((f.db.prepare('SELECT hash FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1').get() as {hash:string}).hash,appliedHash);
  }finally{f.close();}
 });
-it('drops legacy channel routes bound to grants and rebinds the table to projects',()=>{
+it('drops legacy grant routes and keeps conversation-only route mappings',()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'copilot-forward-0078-'));const db=new Database(':memory:');try{
  journalTo(dir,78);
  migrate(drizzle(db),{migrationsFolder:dir});
@@ -87,7 +88,8 @@ it('drops legacy channel routes bound to grants and rebinds the table to project
  upgrade(db);
  assert.equal((db.prepare('SELECT count(*) n FROM channel_routes').get() as {n:number}).n,0);
  const routeCols=(db.pragma('table_info(channel_routes)') as {name:string}[]).map(c=>c.name);
- assert.ok(routeCols.includes('project_id')&&!routeCols.includes('grant_id')&&!routeCols.includes('grant_revision'));
+ assert.ok(!routeCols.includes('project_id')&&!routeCols.includes('grant_id')&&!routeCols.includes('grant_revision'));
+ assert.ok((db.pragma('table_info(copilot_conversations)') as {name:string}[]).some(c=>c.name==='project_id'));
  assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE name='copilot_grants'").get(),undefined);
  assert.deepEqual(db.pragma('foreign_key_check'),[]);
  }finally{db.close();rmSync(dir,{recursive:true,force:true});}
@@ -99,6 +101,7 @@ it('builds the same final schema from a fresh database',()=>{const db=new Databa
  assert.ok(intentCols.includes('execution_owner')&&!intentCols.includes('grant_id')&&!intentCols.includes('grant_revision'));
  assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='session_writer_leases'").get());
  assert.ok(!(db.pragma('table_info(projects)') as {name:string}[]).some(c=>c.name==='copilot_autonomy'));
- assert.ok((db.pragma('table_info(channel_routes)') as {name:string}[]).some(c=>c.name==='project_id'));
+ assert.ok(!(db.pragma('table_info(channel_routes)') as {name:string}[]).some(c=>c.name==='project_id'));
+ assert.ok((db.pragma('table_info(copilot_conversations)') as {name:string}[]).some(c=>c.name==='project_id'));
  assert.deepEqual(db.pragma('foreign_key_check'),[]);
  }finally{db.close();}});

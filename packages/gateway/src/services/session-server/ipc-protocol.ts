@@ -261,7 +261,15 @@ export interface SessionNotificationMessage {
   notification: TerminalNotification;
 }
 
-export type IoStreamResponse = ClientOutputMessage | AttachAckMessage | SessionExitMessage | SessionNotificationMessage;
+/** Session Server → Gateway: the session's PTY went quiet after activity.
+ *  Relayed only on the management connection. Used to un-stick work state
+ *  when a CLI's completion hook never fires — never a user notification. */
+export interface SessionIdleMessage {
+  type: "session_idle";
+  sessionId: string;
+}
+
+export type IoStreamResponse = ClientOutputMessage | AttachAckMessage | SessionExitMessage | SessionNotificationMessage | SessionIdleMessage;
 
 // ---------------------------------------------------------------------------
 // Shared types
