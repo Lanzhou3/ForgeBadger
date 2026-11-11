@@ -2,7 +2,7 @@
 import { CopilotFollowupChips } from "./CopilotFollowupChips";
 import { CopilotComposerToolbar } from "./CopilotComposerToolbar";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -14,11 +14,11 @@ import { Card } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  MessageRow,
+  AssistantRail,
   StreamingMessage,
   ThinkingSection,
-  indexToolResults,
 } from "@/components/copilot/copilot-message-primitives";
+import { CopilotMessageStream } from "@/components/copilot/copilot-message-stream";
 import { CopilotWelcomeState } from "@/components/copilot/copilot-empty-state";
 import { CopilotSettings } from "@/components/copilot/copilot-settings";
 import { ConversationSidebar } from "@/components/copilot/conversation-sidebar";
@@ -415,6 +415,10 @@ export function CopilotChat() {
   const isRunning = active && (active.status === "running" || active.status === "pending");
   const isBusy = Boolean(isRunning || active?.status === "awaiting_approval");
   const phaseLabel = isRunning ? t(copilotPhaseLabel(active?.phase)) : null;
+  // The live reply opens an assistant turn only when nothing of it is on screen
+  // yet; after persisted blocks it continues that turn's column without a
+  // second avatar.
+  const streamingShowsAvatar = messages[messages.length - 1]?.role !== "assistant";
 
   // Follow-ups typed while a run is in flight queue behind it instead of
   // racing a competing turn; the chips render above the composer.
@@ -479,11 +483,6 @@ export function CopilotChat() {
   // Multi-line input grows the composer instead of staying two lines tall;
   // min-h/max-h on the textarea clamp the range and scroll past the max.
   useAutoGrowTextarea(composerRef, controller.input);
-
-  // Index tool_result rows by their provider toolCallId so MessageRow can pair
-  // them with the corresponding tool_call row and render a single status
-  // icon (running / ok / error / denied) instead of two loose <details>.
-  const toolResultById = useMemo(() => indexToolResults(messages), [messages]);
 
   return (
     <div className="flex h-full min-h-0 w-full pt-16 md:pt-0">
@@ -561,7 +560,7 @@ export function CopilotChat() {
         </div>
 
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <div ref={controller.scrollRef} onScroll={controller.onScroll} role="region" aria-label={t("copilot.conversations")} data-testid="copilot-message-history" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 sm:px-6">
+          <div ref={controller.scrollRef} onScroll={controller.onScroll} role="region" aria-label={t("copilot.conversations")} data-testid="copilot-message-history" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-6 pb-16 sm:px-6">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
               {loadError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
                 <p>{loadError}</p>
@@ -583,27 +582,20 @@ export function CopilotChat() {
               {!loadError && !loadingConversations && !loadingMessages && messages.length === 0 && !active && (
                 <CopilotWelcomeState onSuggestion={(text) => void submit(text)} />
               )}
-              {messages.map((message) => {
-                const pairedResultId = message.toolCallId && toolResultById.has(message.toolCallId)
-                  ? toolResultById.get(message.toolCallId)!.id
-                  : null;
-                return (
-                  <MessageRow
-                    key={message.id}
-                    message={message}
-                    pairedResult={pairedResultId === null ? null : (toolResultById.get(message.toolCallId!) ?? null)}
-                    suppressRender={pairedResultId === message.id}
-                    isEditing={controller.editingMessageId === message.id}
-                    editDraft={controller.editDraft}
-                    editSubmitting={controller.editSubmitting || savingPreferences}
-                    canEdit={!isBusy && !savingPreferences && !controller.sending && controller.editingMessageId === null}
-                    onBeginEdit={controller.beginEditMessage}
-                    onChangeDraft={controller.setEditDraft}
-                    onSubmitEdit={() => void controller.submitEditMessage()}
-                    onCancelEdit={controller.cancelEditMessage}
-                  />
-                );
-              })}
+              {messages.length > 0 && (
+                <CopilotMessageStream
+                  messages={messages}
+                  isEditing={(message) => controller.editingMessageId === message.id}
+                  editDraft={controller.editDraft}
+                  editError={null}
+                  editSubmitting={controller.editSubmitting || savingPreferences}
+                  canEdit={!isBusy && !savingPreferences && !controller.sending && controller.editingMessageId === null}
+                  onBeginEdit={controller.beginEditMessage}
+                  onChangeDraft={controller.setEditDraft}
+                  onSubmitEdit={() => void controller.submitEditMessage()}
+                  onCancelEdit={controller.cancelEditMessage}
+                />
+              )}
               {(syncError || active?.error) && (
                 <p role="status" className="text-sm text-muted-foreground">
                   {syncError || active?.error}
@@ -622,15 +614,12 @@ export function CopilotChat() {
                 </Badge>
               ) : null}
               {active?.thinking ? (
-                <ThinkingSection text={active.thinking} />
+                <AssistantRail>
+                  <ThinkingSection text={active.thinking} />
+                </AssistantRail>
               ) : null}
               {active?.text ? (
-                <StreamingMessage text={active.text} />
-              ) : isRunning ? (
-                <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="size-1.5 animate-pulse rounded-full bg-brand" />
-                  {t("copilot.running")}
-                </p>
+                <StreamingMessage text={active.text} showAvatar={streamingShowsAvatar} />
               ) : null}
               {terminalProgress && terminalProgressLabel ? (
                 <Card className="w-full gap-2 p-3 text-xs" data-testid="terminal-command-progress">

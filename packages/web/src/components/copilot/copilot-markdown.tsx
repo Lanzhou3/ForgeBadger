@@ -91,13 +91,17 @@ function flattenText(node: ReactNode): string {
 }
 
 const markdownComponents: Components = {
-  h1: ({ children }) => <h1 className="mt-4 mb-2 text-lg font-semibold text-foreground">{children}</h1>,
-  h2: ({ children }) => <h2 className="mt-4 mb-2 text-base font-semibold text-foreground">{children}</h2>,
-  h3: ({ children }) => <h3 className="mt-3 mb-1.5 text-sm font-semibold text-foreground">{children}</h3>,
-  h4: ({ children }) => <h4 className="mt-3 mb-1.5 text-sm font-semibold text-foreground/90">{children}</h4>,
-  h5: ({ children }) => <h5 className="mt-3 mb-1.5 text-sm font-semibold text-foreground/90">{children}</h5>,
-  h6: ({ children }) => <h6 className="mt-3 mb-1.5 text-sm font-semibold text-muted-foreground">{children}</h6>,
-  p: ({ children }) => <p className="my-2 leading-relaxed first:mt-0 last:mb-0">{children}</p>,
+  // No vertical margins on blocks: the wrapper owns one consistent rhythm
+  // between top-level blocks (and tightens it after headings), so a paragraph,
+  // list, table and code block all sit on the same 16px baseline grid instead
+  // of stacking their own margins on top of the container's gap.
+  h1: ({ children }) => <h1 className="text-lg leading-snug font-semibold tracking-tight text-foreground">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-base leading-snug font-semibold text-foreground">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-sm font-semibold text-foreground">{children}</h3>,
+  h4: ({ children }) => <h4 className="text-sm font-semibold text-foreground/90">{children}</h4>,
+  h5: ({ children }) => <h5 className="text-sm font-semibold text-foreground/90">{children}</h5>,
+  h6: ({ children }) => <h6 className="text-sm font-semibold text-muted-foreground">{children}</h6>,
+  p: ({ children }) => <p className="my-0 leading-[1.7]">{children}</p>,
   a: ({ children, href }) => (
     <a
       href={href}
@@ -109,13 +113,13 @@ const markdownComponents: Components = {
     </a>
   ),
   ul: ({ children }) => (
-    <ul className="my-2 list-disc space-y-1 ps-5 marker:text-muted-foreground/70 [&>li>p]:my-0">{children}</ul>
+    <ul className="my-0 list-disc space-y-1 ps-5 marker:text-muted-foreground/60 [&>li>p]:my-0">{children}</ul>
   ),
   ol: ({ children }) => (
-    <ol className="my-2 list-decimal space-y-1 ps-5 marker:text-muted-foreground/70 [&>li>p]:my-0">{children}</ol>
+    <ol className="my-0 list-decimal space-y-1 ps-5 marker:text-muted-foreground/60 [&>li>p]:my-0">{children}</ol>
   ),
   li: ({ children, className }) => (
-    <li className={cn("leading-relaxed", className?.includes("task-list-item") && "list-none")}>{children}</li>
+    <li className={cn("leading-[1.7]", className?.includes("task-list-item") && "list-none")}>{children}</li>
   ),
   input: ({ checked, type }) =>
     type === "checkbox" ? (
@@ -130,22 +134,32 @@ const markdownComponents: Components = {
       </span>
     ) : null,
   blockquote: ({ children }) => (
-    <blockquote className="my-2 border-l-2 border-border/70 pl-3 text-muted-foreground [&>*:first-child]:mt-0">
+    <blockquote className="my-0 border-l-2 border-border/70 ps-3 text-muted-foreground [&>*]:my-0">
       {children}
     </blockquote>
   ),
-  hr: () => <hr className="my-3 border-border/70" />,
+  hr: () => <hr className="my-0 border-border/60" />,
+  // Tables: hairline header rule + row separators instead of a full cell grid,
+  // 13px cells with roomier padding so multi-line conclusions stay readable.
+  // Headers never wrap (a column title breaking mid-word is what made the old
+  // four-column tables unreadable); the wrapper scrolls when content overflows.
   table: ({ children }) => (
-    <div className="my-2 overflow-x-auto rounded-md border border-border/70">
-      <table className="w-full border-collapse text-xs">{children}</table>
+    <div className="overflow-x-auto rounded-lg border border-border/60">
+      <table className="w-full border-collapse text-[13px] [&_tbody_tr+tr>td]:border-t [&_tbody_tr+tr>td]:border-border/40">
+        {children}
+      </table>
     </div>
   ),
+  thead: ({ children }) => <thead className="bg-muted/40">{children}</thead>,
+  tr: ({ children }) => <tr className="transition-colors hover:bg-muted/25">{children}</tr>,
   th: ({ children }) => (
-    <th className="border-b border-border/70 bg-muted/50 px-2.5 py-1.5 text-left font-medium text-foreground">
+    <th className="border-b border-border/60 px-3 py-2 text-left text-xs font-semibold whitespace-nowrap text-foreground/80">
       {children}
     </th>
   ),
-  td: ({ children }) => <td className="border-t border-border/50 px-2.5 py-1.5 align-top">{children}</td>,
+  td: ({ children }) => (
+    <td className="px-3 py-2 align-top leading-relaxed text-foreground/85 text-pretty [&>p]:my-0">{children}</td>
+  ),
   img: ({ alt, src }) => (
     <a
       href={typeof src === "string" ? src : undefined}
@@ -166,7 +180,7 @@ const markdownComponents: Components = {
     return <pre>{children}</pre>;
   },
   code: ({ children }) => (
-    <code className="rounded bg-muted/80 px-1 py-0.5 font-mono text-[0.85em] text-foreground">{children}</code>
+    <code className="rounded bg-muted/70 px-1 py-0.5 font-mono text-[0.85em] text-foreground">{children}</code>
   ),
 };
 
@@ -176,7 +190,7 @@ const markdownComponents: Components = {
  */
 export const CopilotMarkdown = memo(function CopilotMarkdown({ content }: { content: string }) {
   return (
-    <div className="text-sm leading-relaxed text-foreground/90 break-words [&>*:first-child]:mt-0">
+    <div className="text-sm leading-[1.7] text-foreground/90 break-words [&>*+*]:mt-4 [&>h1+*]:mt-2 [&>h2+*]:mt-2 [&>h3+*]:mt-1.5 [&>h4+*]:mt-1.5 [&>h5+*]:mt-1 [&>h6+*]:mt-1">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         urlTransform={safeUrl}
@@ -257,8 +271,8 @@ const ChatCodeBlock = memo(function ChatCodeBlock({ code, language }: { code: st
   };
 
   return (
-    <div className="my-2 overflow-hidden rounded-md border border-border/70 bg-muted/40">
-      <div className="flex items-center justify-between gap-2 border-b border-border/60 bg-muted/60 px-3 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+    <div className="overflow-hidden rounded-lg border border-border/60 bg-muted/30">
+      <div className="flex items-center justify-between gap-2 border-b border-border/50 bg-muted/40 px-3 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
         <span className="font-mono normal-case tracking-normal text-foreground/80">{language || "code"}</span>
         <button
           type="button"
@@ -270,7 +284,7 @@ const ChatCodeBlock = memo(function ChatCodeBlock({ code, language }: { code: st
           <span>{copied ? "Copied" : "Copy"}</span>
         </button>
       </div>
-      <pre className="overflow-x-auto p-3 font-mono text-xs leading-relaxed">
+      <pre className="overflow-x-auto p-3 font-mono text-xs leading-[1.6]">
         <code>
           {tokens
             ? tokens.map((line, lineIndex) => (

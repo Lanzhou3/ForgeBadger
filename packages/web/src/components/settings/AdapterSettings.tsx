@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -33,9 +33,11 @@ import {
   discoverAdapters,
   getDependencies,
   installAdapter,
+  listAdapterOperations,
   putAdapterOrder,
   updateAdapter,
   type AdapterDiscovery,
+  type AdapterOperation,
   type AdapterUpdateStatus,
   type RuntimeAdapterId,
 } from "@/lib/api";
@@ -49,12 +51,11 @@ import { cn } from "@/lib/utils";
 export function AdapterSettings() {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const [adapterOperations, setAdapterOperations] = useState<Partial<Record<RuntimeAdapterId, "update" | "install">>>({});
   const [refreshingUpdates, setRefreshingUpdates] = useState(false);
   const [updateRefreshError, setUpdateRefreshError] = useState(false);
-  const [updateFeedback, setUpdateFeedback] = useState<Partial<Record<RuntimeAdapterId, "done" | "behind" | "failed">>>({});
-  const [installFeedback, setInstallFeedback] = useState<Partial<Record<RuntimeAdapterId, "done" | "not_detected" | "failed">>>({});
+  const [operationSubmissionFailed, setOperationSubmissionFailed] = useState<Partial<Record<RuntimeAdapterId, boolean>>>({});
   const [orderSaveFailed, setOrderSaveFailed] = useState(false);
+  const settledOperationIds = useRef(new Set<string>());
 
   const {
     data: adapterData,
@@ -75,6 +76,11 @@ export function AdapterSettings() {
     queryKey: ["adapter-updates"],
     queryFn: () => checkAdapterUpdates(),
     staleTime: 5 * 60 * 1000,
+  });
+  const { data: adapterOperationData } = useQuery({
+    queryKey: ["adapter-operations"],
+    queryFn: listAdapterOperations,
+    refetchInterval: (query) => query.state.data?.operations.some((operation) => operation.state === "running") ? 1000 : false,
   });
   const {
     data: dependenciesData,
@@ -139,34 +145,36 @@ export function AdapterSettings() {
     }
   }
 
-  async function handleAdapterUpdate(id: RuntimeAdapterId) {
-    if (adapterOperations[id]) return;
-    setAdapterOperations((previous) => ({ ...previous, [id]: "update" }));
-    setUpdateFeedback((previous) => ({ ...previous, [id]: undefined }));
+  const adapterOperations = adapterOperationData?.operations ?? [];
+
+  useEffect(() => {
+    const newlySettled = adapterOperations.filter(
+      (operation) => operation.state !== "running" && !settledOperationIds.current.has(operation.id)
+    );
+    if (newlySettled.length === 0) return;
+    for (const operation of newlySettled) settledOperationIds.current.add(operation.id);
+    void Promise.allSettled([refetchAdapters(), refetchDependencies(), refetchUpdates()]);
+  }, [adapterOperations, refetchAdapters, refetchDependencies, refetchUpdates]);
+
+  async function startAdapterOperation(id: RuntimeAdapterId, kind: "install" | "update") {
+    if (adapterOperations.some((operation) => operation.adapterId === id && operation.state === "running")) return;
+    setOperationSubmissionFailed((previous) => ({ ...previous, [id]: false }));
     try {
-      const result = await updateAdapter(id);
-      setUpdateFeedback((previous) => ({ ...previous, [id]: result.versionStillBehind ? "behind" : "done" }));
-      await Promise.allSettled([refetchAdapters(), refetchDependencies(), refetchUpdates()]);
+      const operation = kind === "update" ? await updateAdapter(id) : await installAdapter(id);
+      queryClient.setQueryData<{ operations: AdapterOperation[] }>(["adapter-operations"], (current) => ({
+        operations: [operation, ...(current?.operations.filter((item) => item.id !== operation.id) ?? [])]
+      }));
     } catch {
-      setUpdateFeedback((previous) => ({ ...previous, [id]: "failed" }));
-    } finally {
-      setAdapterOperations((previous) => ({ ...previous, [id]: undefined }));
+      setOperationSubmissionFailed((previous) => ({ ...previous, [id]: true }));
     }
   }
 
+  async function handleAdapterUpdate(id: RuntimeAdapterId) {
+    await startAdapterOperation(id, "update");
+  }
+
   async function handleAdapterInstall(id: RuntimeAdapterId) {
-    if (adapterOperations[id]) return;
-    setAdapterOperations((previous) => ({ ...previous, [id]: "install" }));
-    setInstallFeedback((previous) => ({ ...previous, [id]: undefined }));
-    try {
-      const result = await installAdapter(id);
-      setInstallFeedback((previous) => ({ ...previous, [id]: result.commandAvailable ? "done" : "not_detected" }));
-      await Promise.allSettled([refetchAdapters(), refetchDependencies(), refetchUpdates()]);
-    } catch {
-      setInstallFeedback((previous) => ({ ...previous, [id]: "failed" }));
-    } finally {
-      setAdapterOperations((previous) => ({ ...previous, [id]: undefined }));
-    }
+    await startAdapterOperation(id, "install");
   }
 
   const terminalRuntime = dependenciesData?.terminalRuntime;
@@ -306,24 +314,31 @@ export function AdapterSettings() {
                 strategy={verticalListSortingStrategy}
               >
                 <div className="space-y-2">
-                  {orderedAdapters.map((adapter) => (
-                    <SortableAdapterItem
-                      key={adapter.id}
-                      adapter={adapter}
-                      update={updateRefreshError ? undefined : adapterUpdates?.updates.find((item) => item.id === adapter.id)}
-                      canUpdate={adapterUpdates?.canUpdate ?? false}
-                      canInstall={adapterUpdates?.canInstall ?? false}
-                      checkingUpdate={(!adapterUpdates && updatesFetching) || refreshingUpdates}
-                      updateCheckFailed={updatesError || updateRefreshError}
-                      updating={adapterOperations[adapter.id] === "update"}
-                      installing={adapterOperations[adapter.id] === "install"}
-                      operationBlocked={!!adapterOperations[adapter.id]}
-                      feedback={updateFeedback[adapter.id]}
-                      installFeedback={installFeedback[adapter.id]}
-                      onUpdate={() => void handleAdapterUpdate(adapter.id)}
-                      onInstall={() => void handleAdapterInstall(adapter.id)}
-                    />
-                  ))}
+                  {orderedAdapters.map((adapter) => {
+                    const activeOperation = adapterOperations.find(
+                      (operation) => operation.adapterId === adapter.id && operation.state === "running"
+                    );
+                    const updateOperation = latestAdapterOperation(adapterOperations, adapter.id, "update");
+                    const installOperation = latestAdapterOperation(adapterOperations, adapter.id, "install");
+                    return (
+                      <SortableAdapterItem
+                        key={adapter.id}
+                        adapter={adapter}
+                        update={updateRefreshError ? undefined : adapterUpdates?.updates.find((item) => item.id === adapter.id)}
+                        canUpdate={adapterUpdates?.canUpdate ?? false}
+                        canInstall={adapterUpdates?.canInstall ?? false}
+                        checkingUpdate={(!adapterUpdates && updatesFetching) || refreshingUpdates}
+                        updateCheckFailed={updatesError || updateRefreshError}
+                        updating={activeOperation?.kind === "update"}
+                        installing={activeOperation?.kind === "install"}
+                        operationBlocked={!!activeOperation}
+                        feedback={getUpdateFeedback(updateOperation, operationSubmissionFailed[adapter.id] === true)}
+                        installFeedback={getInstallFeedback(installOperation, operationSubmissionFailed[adapter.id] === true)}
+                        onUpdate={() => void handleAdapterUpdate(adapter.id)}
+                        onInstall={() => void handleAdapterInstall(adapter.id)}
+                      />
+                    );
+                  })}
                 </div>
               </SortableContext>
             </DndContext>
@@ -332,6 +347,39 @@ export function AdapterSettings() {
       </CardContent>
     </Card>
   );
+}
+
+function latestAdapterOperation(
+  operations: AdapterOperation[],
+  adapterId: RuntimeAdapterId,
+  kind: AdapterOperation["kind"]
+): AdapterOperation | undefined {
+  return operations
+    .filter((operation) => operation.adapterId === adapterId && operation.kind === kind)
+    .reduce<AdapterOperation | undefined>(
+      (latest, operation) => !latest || operation.startedAt > latest.startedAt ? operation : latest,
+      undefined
+    );
+}
+
+function getUpdateFeedback(
+  operation: AdapterOperation | undefined,
+  submissionFailed: boolean
+): "done" | "behind" | "failed" | undefined {
+  if (operation?.state === "running") return undefined;
+  if (submissionFailed || operation?.state === "failed") return "failed";
+  if (operation?.state !== "succeeded" || !operation.result) return undefined;
+  return "versionStillBehind" in operation.result && operation.result.versionStillBehind ? "behind" : "done";
+}
+
+function getInstallFeedback(
+  operation: AdapterOperation | undefined,
+  submissionFailed: boolean
+): "done" | "not_detected" | "failed" | undefined {
+  if (operation?.state === "running") return undefined;
+  if (submissionFailed || operation?.state === "failed") return "failed";
+  if (operation?.state !== "succeeded" || !operation.result) return undefined;
+  return "commandAvailable" in operation.result && operation.result.commandAvailable ? "done" : "not_detected";
 }
 
 interface AdapterItemProps {

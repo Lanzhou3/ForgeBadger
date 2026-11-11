@@ -6,6 +6,7 @@ import { provisionalText, clearProvisionalText } from '../services/agent/provisi
 import { createCopilotSkillRoutes } from "./copilot-skills.js";
 import { createCopilotConnectionRoutes } from "./copilot-connections.js";
 import { createCopilotPlaybookRoutes } from "./copilot-playbooks.js";
+import { createCopilotMachineRootRoutes } from "./copilot-machine-roots.js";
 import { visibleToolSchemas, toolUnavailableReason } from "../services/agent/tool-availability.js";
 import { randomUUID } from "node:crypto";
 import { PlatformActions } from "../services/platform-commands/actions.js";
@@ -71,6 +72,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   router.use(authenticate);
   router.use(createCopilotDevelopmentRoutes(deps.db));
   router.use(createCopilotConnectionRoutes(deps.db, deps.masterKey));
+  router.use(createCopilotMachineRootRoutes(deps.db));
 
   const KNOWN_TOOL_NAMES = new Set<string>(createPlatformTools().map((tool) => tool.name));
   router.use(createCopilotPlaybookRoutes(deps.db, {

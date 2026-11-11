@@ -4,7 +4,7 @@ import type { AgentToolRegistry } from './tool-registry.js';
 // Registration as "read" alone is insufficient: external tools, delegation,
 // terminal reads and discovery can carry additional effects or ordering needs.
 const PARALLEL_READS = new Set(['get_project_git_status','get_project','list_project_files','read_project_file',
-  'search_project_files','read_project_diff','get_development_task','list_development_tasks']);
+  'search_project_files','machine_search','read_machine_file','machine_tree','verify_retrieval_evidence','read_project_diff','get_development_task','list_development_tasks']);
 
 export function nextReadBatch(steps: RunStep[], registry: AgentToolRegistry): RunStep[] {
   const pending = steps.filter(step => step.kind === 'tool' && step.status !== 'completed');

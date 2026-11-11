@@ -1025,6 +1025,17 @@ export interface AdapterUpdateResult {
   versionStillBehind: boolean;
 }
 
+export interface AdapterOperation {
+  id: string;
+  adapterId: RuntimeAdapterId;
+  kind: "install" | "update";
+  state: "running" | "succeeded" | "failed";
+  startedAt: string;
+  finishedAt?: string;
+  result?: AdapterInstallResult | AdapterUpdateResult;
+  error?: string;
+}
+
 export type CredentialMode = "host_environment" | "stored_encrypted_key";
 
 export interface SkillInput {
@@ -1838,14 +1849,22 @@ export async function checkAdapterUpdates(refresh = false): Promise<{ updates: A
   return fetchJson(`/api/v1/adapters/updates${refresh ? "?refresh=true" : ""}`) as Promise<{ updates: AdapterUpdateStatus[]; canUpdate: boolean; canInstall: boolean }>;
 }
 
-export async function updateAdapter(id: RuntimeAdapterId): Promise<AdapterUpdateResult> {
-  // Cover MiniMax's five-minute install, preflight/version probes and cleanup.
-  const timeoutMs = id === "mcode" ? 370_000 : 200_000;
-  return fetchJson(`/api/v1/adapters/${id}/update`, { method: "POST", timeoutMs }) as Promise<AdapterUpdateResult>;
+export async function listAdapterOperations(): Promise<{ operations: AdapterOperation[] }> {
+  return fetchJson("/api/v1/adapters/operations") as Promise<{ operations: AdapterOperation[] }>;
 }
 
-export async function installAdapter(id: RuntimeAdapterId): Promise<AdapterInstallResult> {
-  return fetchJson(`/api/v1/adapters/${id}/install`, { method: "POST", timeoutMs: 330_000 }) as Promise<AdapterInstallResult>;
+export async function getAdapterOperation(id: string): Promise<{ operation: AdapterOperation }> {
+  return fetchJson(`/api/v1/adapters/operations/${id}`) as Promise<{ operation: AdapterOperation }>;
+}
+
+export async function updateAdapter(id: RuntimeAdapterId): Promise<AdapterOperation> {
+  const { operation } = await fetchJson<{ operation: AdapterOperation }>(`/api/v1/adapters/${id}/update`, { method: "POST" });
+  return operation;
+}
+
+export async function installAdapter(id: RuntimeAdapterId): Promise<AdapterOperation> {
+  const { operation } = await fetchJson<{ operation: AdapterOperation }>(`/api/v1/adapters/${id}/install`, { method: "POST" });
+  return operation;
 }
 
 export async function createGateASession(cwd: string): Promise<GateASession> {

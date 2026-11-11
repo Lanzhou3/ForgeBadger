@@ -145,5 +145,6 @@
   "0144_companion_foundation.sql": "6035fd7d2a5544a54389c9d8b6e5eebda78cdf4b298f617de330021fa78fd9ca",
   "0145_companion_readonly_sync.sql": "053c79f0ab967e9d6c1f0023bf98aff30465b550b837bb6763fcde5f9e59f629",
   "0146_companion_commands.sql": "3b56fbcf2e143930a4c12991b13f3cca6d4ed09f40dafdb58c4620ca14d0b4c3",
-  "0147_conversation_project_context.sql": "df023e46d5129710c9d72dd9f5d691551f28e6db54300494d81396a5cbdb683f"
+  "0147_conversation_project_context.sql": "df023e46d5129710c9d72dd9f5d691551f28e6db54300494d81396a5cbdb683f",
+  "0148_copilot_machine_roots.sql": "b26d6aa984355b7095266533d9a184c6025131e9838473ab0f3fdb1cb56d6091"
 }

@@ -32,7 +32,7 @@ it('serves independently scoped catalog/edit/toggle APIs with active-user valida
   assert.equal((await fetch(base+'/copilot/playbooks')).status,401);
   const catalog=await request('/copilot/playbooks');assert.equal(catalog.status,200);
   const rows=((await catalog.json()) as {data:{playbooks:CopilotPlaybook[]}}).data.playbooks;
-  assert.equal(rows.length,6);const row=rows.find(s=>s.name==='session-dispatch')!;
+  assert.equal(rows.length,7);const row=rows.find(s=>s.name==='session-dispatch')!;
   const cli=new SkillRepository(db,user.id).create({name:row.name,content:'CLI data'});
   assert.equal((await request('/skills/'+row.id)).status,404);
   assert.equal((await request('/skills/'+row.id,'PUT',{content:'attack'})).status,404);

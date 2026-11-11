@@ -94,6 +94,19 @@ export default function UsagePage() {
   const [notice, setNotice] = useState("");
   const [noticeType, setNoticeType] = useState<"ok" | "error">("ok");
   const [range, setRange] = useState(LAST_30_DAYS);
+  const [activityFocus, setActivityFocus] = useState<{ project: string; day: string } | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedRange = params.get("range");
+    const project = params.get("project");
+    const day = params.get("day");
+    if (requestedRange === LAST_30_DAYS || /^\d{4}-\d{2}$/.test(requestedRange ?? "")) {
+      setRange(requestedRange!);
+    }
+    if (project && /^\d{4}-\d{2}-\d{2}$/.test(day ?? "")) {
+      setActivityFocus({ project, day: day! });
+    }
+  }, []);
   // Tap-to-inspect fallback for touch devices (hover tooltips don't exist
   // there); tapping the same bar again dismisses it.
   const [tappedDay, setTappedDay] = useState<string | null>(null);
@@ -126,6 +139,13 @@ export default function UsagePage() {
   const summary = usageData?.summary;
   const series = activityData?.series ?? [];
   const rangeDays = activeRange.days;
+  const focusedActivity = activityFocus && rangeDays.includes(activityFocus.day)
+    ? activityFocus
+    : null;
+  const heatmapSeries = focusedActivity
+    ? series.filter((point) => point.group === focusedActivity.project && point.day === focusedActivity.day)
+    : series;
+  const heatmapDays = focusedActivity ? [focusedActivity.day] : rangeDays;
 
   const syncMutation = useMutation({
     mutationFn: syncUsageTokens,
@@ -466,6 +486,19 @@ export default function UsagePage() {
             </>
           )}
 
+          {focusedActivity && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand/20 bg-brand/5 px-4 py-3 text-sm">
+              <span>
+                {t("usage.activityFiltered")
+                  .replace("{project}", projectNameByKey.get(focusedActivity.project) ?? focusedActivity.project)
+                  .replace("{day}", focusedActivity.day)}
+              </span>
+              <Button size="sm" variant="ghost" onClick={() => setActivityFocus(null)}>
+                {t("usage.clearActivityFilter")}
+              </Button>
+            </div>
+          )}
+
           {activityLoading ? (
             <Card className="forgebadger-animate-in">
               <CardContent className="py-6 text-center text-sm text-muted-foreground">
@@ -473,7 +506,7 @@ export default function UsagePage() {
               </CardContent>
             </Card>
           ) : (
-            <ActivityHeatmap series={series} days={rangeDays} />
+            <ActivityHeatmap series={heatmapSeries} days={heatmapDays} />
           )}
         </>
       )}

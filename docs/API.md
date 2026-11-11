@@ -510,6 +510,19 @@ unresolved write or queued follow-up.
 | `POST /api/v1/copilot/conversations/:id/edit-message` | Accepts `{messageId,content,clientRequestId?,modelId?,projectId?,toolDiscovery?}`. Validates a user text in the URL conversation. Active or unresolved writes return 409. Clears summary, preserves run/step receipts and admits the edit atomically. Matching request-key retries return the original run before truncation; changed targets or context return 409 `COPILOT_REQUEST_CONFLICT`. |
 | `DELETE /api/v1/copilot/conversations/:id` | Hides a conversation while retaining messages, runs, steps and receipts. Only `pending`, `running` or `awaiting_approval` runs return 409 `COPILOT_CONVERSATION_BUSY`; terminal runs (including `indeterminate` or cancelled unknown writes) can be hidden without replaying effects. Repeated deletion returns 404. |
 
+`GET /api/v1/copilot/machine-roots` lists the caller's local search roots as
+`{roots}`. `POST /api/v1/copilot/machine-roots` accepts `{label,path}` for an
+existing local directory, canonicalizes it, and returns `201 {root}`; duplicate
+canonical paths return 409. `DELETE /api/v1/copilot/machine-roots/:id` revokes
+the caller's root and returns `{unregistered:true}`. Roots and IDs are
+tenant-scoped. The owner-only `machine_search`, `read_machine_file`,
+`machine_tree`, `list_machine_roots`, and `verify_retrieval_evidence` tools use
+these grants for guarded, redacted reads; registration and revocation through
+the agent use the approval-gated `register_machine_root` and
+`unregister_machine_root` tools. Channel-originated runs cannot list local root
+paths or invoke these tools. `route_query` only classifies a query as direct or
+research and does not access the filesystem.
+
 Run terminal states are `completed`, `failed`, `cancelled`, `stopped` (for example `step_budget_exhausted`) and `indeterminate` (unconfirmed side effects). `pending`, `running` and `awaiting_approval` remain active. Cancellation may retain an indeterminate write step; a later receipt records the outcome without reviving the run. There is no automatic retry endpoint for unknown writes.
 
 Approval lifecycle (2026-10-04): a verified `awaiting_approval` interval is
@@ -669,28 +682,38 @@ adapter reports the `terminal` runtime mode; the former Codex
   for 60 seconds across users; instance admins may pass `?refresh=true` to
   recheck immediately. Homebrew formula releases may lag npm releases.
 - `POST /api/v1/adapters/:adapterId/update` requires an active instance admin
-  with a Bearer credential; cookie-only requests are rejected.
-  It rechecks availability, executes only the adapter's fixed official command
-  (`claude update`, `opencode upgrade`, `codex update`, `kimi upgrade --yes`,
-  `pi update --self`, or `grok update`; MiniMax Code uses its official npm install
-  command with `@latest`), then probes the installed version again. For a Homebrew
-  OpenCode install, the command specifies the published formula version and
-  `--method brew` so the CLI refreshes its tap before upgrading. Different CLIs
-  may update concurrently; each CLI allows only one install or update at a time
-  across all users (`409` for a duplicate operation). The response reports whether the installed version is
-  still behind its installation channel's available version. Existing terminal sessions are not
-  restarted by this endpoint.
-- `POST /api/v1/adapters/:adapterId/install` requires an active instance admin
-  with a Bearer credential. It installs a missing CLI with its fixed official
-  npm command, then checks whether the CLI command is visible on Gateway's
-  `PATH`. It rejects an already installed CLI, an uncertain discovery result,
-  missing npm, or unmet Node.js requirements. Different CLIs may install or
-  update concurrently. If a timed-out subprocess cannot be confirmed stopped,
-  only that CLI remains locked until Gateway restarts. Existing terminal sessions are not restarted. npm uses
-  the Gateway host's npm registry configuration; version checks use
-  `registry.npmjs.org`. The OpenCode adapter tracks the `@opencode/cli`
-  package documented under OpenCode's `/v2/docs` channel. Grok tracks
-  `@xai-official/grok`.
+  with a Bearer credential; cookie-only requests are rejected. It starts a
+  background operation and immediately returns `202` with an `operation` whose
+  state is `running`. The operation rechecks availability, executes only the
+  adapter's fixed official command (`claude update`, `codex update`,
+  `kimi upgrade --yes`, or `pi update --self`; OpenCode, Grok, and MiniMax
+  Code use their official npm install commands, with MiniMax pinned to
+  `@latest`), then
+  probes the installed version again. For a Homebrew OpenCode install, the
+  command specifies the published formula version and `--method brew` so the
+  CLI refreshes its tap before upgrading. A successful result reports whether
+  the installed version is still behind its installation channel's available
+  version. Existing terminal sessions are not restarted.
+- `POST /api/v1/adapters/:adapterId/install` requires the same admin Bearer
+  authorization and returns `202` with a running background operation. It
+  installs a missing CLI with its fixed official npm command, then checks
+  whether the CLI command is visible on Gateway's `PATH`. An already installed
+  CLI, uncertain discovery, missing npm, or unmet Node.js requirements produce
+  a failed operation rather than a long-running HTTP error response.
+- `GET /api/v1/adapters/operations` and
+  `GET /api/v1/adapters/operations/:operationId` return background operations
+  to authenticated users. Operation states are `running`, `succeeded`, or
+  `failed`; settled operations include a result or a sanitized error, never raw
+  subprocess output. Different CLIs may run concurrently. Submitting another
+  operation for a CLI that is already running returns the existing operation,
+  while the execution layer retains its host-wide per-CLI lock. Operations are
+  held in Gateway memory so browser refreshes can recover them; a Gateway
+  restart clears the records and never retries an interrupted command
+  automatically. If a timed-out subprocess cannot be confirmed stopped, only
+  that CLI remains locked until Gateway restarts. npm uses the Gateway host's
+  npm registry configuration; version checks use `registry.npmjs.org`. The
+  OpenCode adapter tracks the `@opencode/cli` package documented under
+  OpenCode's `/v2/docs` channel. Grok tracks `@xai-official/grok`.
 
 Official command audit (2026-10-31): the one-click npm installs use the packages
 below. OpenCode includes optional dependencies and permits its postinstall
@@ -707,12 +730,12 @@ on `PATH` (reported as `versionStillBehind`).
 | CLI | Official npm package | Official update command and reference |
 | --- | --- | --- |
 | Claude Code | `@anthropic-ai/claude-code` | [`claude update`](https://code.claude.com/docs/en/setup) |
-| OpenCode 2 | [`@opencode/cli`](https://opencode.ai/v2/docs/) | [`opencode upgrade`](https://opencode.ai/docs/cli/#upgrade) |
+| OpenCode 2 | [`@opencode/cli`](https://opencode.ai/v2/docs/) | The official npm install command with lifecycle-script opt-in; Homebrew installs use [`opencode upgrade <version> --method brew`](https://opencode.ai/docs/cli/#upgrade) |
 | Codex | [`@openai/codex`](https://learn.chatgpt.com/docs/codex/cli) | [`codex update`](https://learn.chatgpt.com/docs/developer-commands?surface=cli#codex-update) (release builds supporting self-update) |
 | Kimi Code | [`@moonshot-ai/kimi-code`](https://moonshotai.github.io/kimi-code/en/guides/getting-started) | [`kimi upgrade --yes`](https://moonshotai.github.io/kimi-code/en/reference/kimi-command) |
 | Pi | [`@earendil-works/pi-coding-agent`](https://pi.dev/docs/latest/quickstart) | [`pi update --self`](https://pi.dev/docs/latest/cli) (official alias of `pi update`) |
 | MiniMax Code | [`@minimax-ai/code@latest`](https://github.com/MiniMax-AI/minimax-code/blob/main/README.md) | The same official npm install command (non-interactive update) |
-| Grok | [`@xai-official/grok`](https://docs.x.ai/build/enterprise) | [`grok update`](https://docs.x.ai/build/cli/reference) |
+| Grok | [`@xai-official/grok`](https://docs.x.ai/build/enterprise) | The official npm install command with lifecycle-script opt-in |
 
 ### Projects
 

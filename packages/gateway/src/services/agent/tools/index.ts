@@ -2,6 +2,9 @@ import { createNativeLifecycleTools } from '../../mcp/lifecycle-tools.js';
 import { createProjectDiffTools } from './project-diff.js';
 import { createResearchTools } from "./research.js";
 import { createSourceSearchTools } from "./source-search.js";
+import { createMachineSearchTools } from "./machine-search.js";
+import { createMachineRootTools, createMachineRootListTools } from "./machine-roots.js";
+import { createDeepResearchTools } from "./deep-research.js";
 import { createDevelopmentTools } from './development.js';
 import { createDiscoveryTools } from './discovery.js';
 import { createPlatformCoverageTools } from "./platform-coverage.js";
@@ -32,6 +35,10 @@ export function createPlatformTools(): AgentTool[] {
     ...createProjectDiffTools(),
     ...createResearchTools(),
     ...createSourceSearchTools(),
+    ...createMachineSearchTools(),
+    ...createMachineRootTools(),
+    ...createMachineRootListTools(),
+    ...createDeepResearchTools(),
     ...createDiscoveryTools(),
     ...createDevelopmentTools(),
     ...createPlatformCoverageTools(),

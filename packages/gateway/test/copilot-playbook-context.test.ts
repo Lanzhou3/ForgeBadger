@@ -196,10 +196,14 @@ it('automatic skill catalog obeys loader and resource availability', async () =>
   for (const disabled of [new Set(['load_playbook']), new Set(['read_skill_resource']), new Set<string>()]) {
     const f = fixture(disabled);
     try {
+      f.emit([{ name: 'get_usage_summary', input: { days: 7 } }]);
       await f.turn('Explain the available workflows');
-      const catalog = f.requests[0]!.messages.find(message => typeof message.content === 'string' && message.content.startsWith('Available skills ('));
-      assert.equal(!!catalog, !disabled.has('load_playbook'));
-      if (catalog) assert.equal(String(catalog.content).includes('Use read_skill_resource'), !disabled.has('read_skill_resource'));
+      assert.equal(f.requests.length, 2);
+      for (const request of f.requests) {
+        const catalog = request.messages.find(message => typeof message.content === 'string' && message.content.startsWith('Available skills ('));
+        assert.equal(!!catalog, !disabled.has('load_playbook'));
+        if (catalog) assert.equal(String(catalog.content).includes('Use read_skill_resource'), !disabled.has('read_skill_resource'));
+      }
     } finally { f.db.close(); }
   }
 });

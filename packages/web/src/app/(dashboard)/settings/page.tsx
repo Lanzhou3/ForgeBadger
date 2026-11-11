@@ -7,14 +7,11 @@ import {
   Bell,
   Cpu,
   Globe2,
-  Moon,
   Palette,
   Plug,
   Server,
   Settings2,
   ShieldCheck,
-  Sun,
-  MonitorSmartphone,
   Type,
   type LucideIcon,
 } from "lucide-react";
@@ -26,6 +23,7 @@ import { ClaudeRouteSettings } from "@/components/settings/ClaudeRouteSettings";
 import { DiagnosticsSettings } from "@/components/settings/DiagnosticsSettings";
 import { InstanceRuntimeSettings } from "@/components/settings/InstanceRuntimeSettings";
 import { McpIntegrationSettings } from "@/components/settings/McpIntegrationSettings";
+import { ColorThemeSettings } from "@/components/settings/ColorThemeSettings";
 import { PetSettings } from "@/components/settings/PetSettings";
 import { SecurityBaselineSettings } from "@/components/settings/SecurityBaselineSettings";
 import { SettingsCardHeader, SettingsSection, SettingRow } from "@/components/settings/ui";
@@ -34,15 +32,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
-import { useColorMode } from "@/hooks/use-color-mode";
 import { useLanguage } from "@/hooks/use-language";
-import {
-  ACCENT_THEMES,
-  DEFAULT_ACCENT_ID,
-  applyAccentTheme,
-  readStoredAccent,
-} from "@/lib/accent-theme";
-import { setColorMode } from "@/lib/color-mode";
 import {
   DEFAULT_TERMINAL_FONT,
   MAX_TERMINAL_FONT_SIZE,
@@ -88,18 +78,13 @@ export default function SettingsPage() {
   const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(false);
   const [browserNotificationPermission, setBrowserNotificationPermission] =
     useState<BrowserNotificationPermission>("unsupported");
-  const [accentId, setAccentId] = useState(DEFAULT_ACCENT_ID);
-  // The color mode is app-global (see Providers -> initColorMode): the hook
-  // observes the module store, and setColorMode applies + persists it.
-  const { mode: colorMode } = useColorMode();
   // Terminal font draft inputs commit on blur/Enter so each keystroke does
   // not re-render every live xterm instance. Initialized from localStorage on
-  // mount (same pattern as accentId).
+  // mount after the inline appearance script has restored the saved palette.
   const [fontFamilyDraft, setFontFamilyDraft] = useState(DEFAULT_TERMINAL_FONT.fontFamily);
   const [fontSizeDraft, setFontSizeDraft] = useState(String(DEFAULT_TERMINAL_FONT.fontSize));
 
   useEffect(() => {
-    setAccentId(readStoredAccent());
     const storedFont = readStoredTerminalFont();
     setFontFamilyDraft(storedFont.fontFamily);
     setFontSizeDraft(String(storedFont.fontSize));
@@ -188,38 +173,6 @@ export default function SettingsPage() {
             <SettingsSection title={t(active.labelKey)} description={t(active.descriptionKey)}>
               <Card className="forgebadger-animate-in">
                 <SettingsCardHeader
-                  icon={<Palette className="size-4" />}
-                  title={t("settings.colorMode")}
-                  description={t("settings.colorModeDescription")}
-                />
-                <CardContent>
-                  <div className="flex flex-wrap gap-2">
-                    {([
-                      { id: "light", labelKey: "settings.colorModeLight", icon: Sun },
-                      { id: "dark", labelKey: "settings.colorModeDark", icon: Moon },
-                      { id: "system", labelKey: "settings.colorModeSystem", icon: MonitorSmartphone },
-                    ] as const).map((option) => {
-                      const selected = colorMode === option.id;
-                      return (
-                        <Button
-                          key={option.id}
-                          type="button"
-                          aria-pressed={selected}
-                          variant={selected ? "brand" : "outline"}
-                          size="sm"
-                          onClick={() => setColorMode(option.id)}
-                        >
-                          <option.icon className="size-4" />
-                          {t(option.labelKey)}
-                        </Button>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="forgebadger-animate-in" style={{ animationDelay: "40ms" }}>
-                <SettingsCardHeader
                   icon={<Globe2 className="size-4" />}
                   title={t("settings.language")}
                   description={t("settings.languageDescription")}
@@ -241,40 +194,7 @@ export default function SettingsPage() {
                 </CardContent>
               </Card>
 
-              <Card className="forgebadger-animate-in" style={{ animationDelay: "80ms" }}>
-                <SettingsCardHeader
-                  icon={<Palette className="size-4" />}
-                  title={t("settings.theme")}
-                  description={t("settings.themeDescription")}
-                />
-                <CardContent>
-                  <div className="flex flex-wrap gap-2">
-                    {ACCENT_THEMES.map((theme) => {
-                      const selected = accentId === theme.id;
-                      return (
-                        <button
-                          key={theme.id}
-                          type="button"
-                          aria-pressed={selected}
-                          onClick={() => setAccentId(applyAccentTheme(theme.id))}
-                          className={
-                            selected
-                              ? "flex items-center gap-2 rounded-md border border-brand/60 bg-brand/10 px-3 py-2 text-sm text-foreground transition-colors duration-150"
-                              : "flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors duration-150 hover:border-brand/40 hover:bg-muted/40 hover:text-foreground"
-                          }
-                        >
-                          <span
-                            className="size-3.5 rounded-full ring-1 ring-border"
-                            style={{ backgroundColor: theme.swatch }}
-                            aria-hidden="true"
-                          />
-                          {t(theme.nameKey)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
+              <ColorThemeSettings />
 
               <Card className="forgebadger-animate-in" style={{ animationDelay: "120ms" }}>
                 <SettingsCardHeader

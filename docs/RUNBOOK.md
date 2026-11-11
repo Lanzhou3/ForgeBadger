@@ -121,6 +121,18 @@ reconnect restores the live terminal snapshot and continues output. Daemon
 death or an OS restart loses the original processes; startup reconciliation
 marks the affected database sessions `lost`.
 
+Copilot harness code (the agent tool registry, tool-surface layers, playbooks,
+channel-scope rules) is loaded once at Gateway construction, not per request.
+After editing anything under `src/services/agent/**`,
+`src/services/platform-commands/agent-scope.ts`, or
+`src/services/channels/channel-run-scope.ts`, restart the Gateway before
+testing Copilot behavior. A stale process keeps the old tool registry:
+`discover_tools` cannot return a tool that was never registered, so "the model
+searches for a tool that exists in source but not in the running process" is
+the classic symptom of a missing restart. The startup log prints the
+registered tool count (`registered tools: N`) so a restart can be verified by
+eye.
+
 ## 6. Common Failure Handling
 
 | Failure | Expected behavior |

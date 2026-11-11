@@ -15,6 +15,7 @@ import type { FeishuChannelRuntime } from "./services/integrations/feishu-channe
 import type { RegistrationMode } from "./routes/auth.js";
 import type { LocalAccountRecovery } from "./services/local-account-recovery.js";
 import { buildAgentStack, type AgentStackDeps } from "./services/agent/agent-stack.js";
+import { createPlatformTools } from "./services/agent/tools/index.js";
 import { startAutomationScheduler, type AutomationScheduler } from "./services/automation/scheduler.js";
 import { startCopilotRuntime } from "./services/agent/runtime.js";
 import { attachDispatchSupervisor, type DispatchSupervisor } from "./services/agent/dispatch-supervisor.js";
@@ -185,6 +186,11 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
 
   const copilotRuntime = startCopilotRuntime(copilotAgent);
   const recoveryReady = copilotRuntime.ready;
+  // Operator check that a restart picked up source changes to the Copilot
+  // tool registry: the harness loads its registry once at construction, so a
+  // stale process silently serves the old surface (discover_tools then cannot
+  // return tools that only exist in source). See RUNBOOK §5.
+  console.log("[gateway] registered tools:", createPlatformTools().length);
   const feishuChannelRuntime = options.feishuChannelRuntime ?? createNativeFeishuRuntime(options.db,options.masterKey,options.nativeFeishuIO,
     (userId,input)=>buildAgentStack(copilotAgent,userId).orchestrator.recordApprovalDecision({userId,...input,decisionOrigin:'channel'}));
   const telegramChannelRuntime = options.telegramChannelRuntime ?? createNativeTelegramRuntime(options.db,options.masterKey,options.nativeTelegramIO);

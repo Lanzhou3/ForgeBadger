@@ -14,6 +14,9 @@ const DETAIL_KEYS = new Set([
   'status', 'toolName', 'decision', 'reason', 'attempt', 'tokens', 'durationMs',
   'executionMode', 'phase', 'kind', 'childRunId',
   'source', 'parentRunId',
+  // machine_search evidence: which local root was queried, how, and how many
+  // matches it surfaced (scalar-only, never file content).
+  'root', 'query', 'matchCount', 'mode',
 ]);
 function isScalar(value: unknown): value is string | number | boolean | null {
   return value === null || ['string', 'number', 'boolean'].includes(typeof value);

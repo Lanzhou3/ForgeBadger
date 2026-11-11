@@ -49,19 +49,17 @@
   --color-brand: hsl(var(--brand));
   --color-brand-foreground: hsl(var(--brand-foreground));
   --color-surface-raised: hsl(var(--surface-raised));
+  --color-sidebar: hsl(var(--sidebar));
   --color-terminal: hsl(var(--terminal-bg));
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
-  /* Layered, low-contrast shadows: a tight near-shadow for contact plus a
-     soft far-shadow for lift. They key off --foreground, so dark mode gets
-     the same geometry as a faint light bloom instead of an invisible blur. */
   --shadow-card:
-    0 1px 2px hsl(var(--foreground) / 0.05), 0 1px 3px hsl(var(--foreground) / 0.04);
+    0 1px 2px hsl(var(--shadow-color) / 0.08), 0 1px 3px hsl(var(--shadow-color) / 0.06);
   --shadow-raised:
-    0 1px 2px hsl(var(--foreground) / 0.06), 0 8px 20px hsl(var(--foreground) / 0.07);
+    0 1px 2px hsl(var(--shadow-color) / 0.1), 0 8px 20px hsl(var(--shadow-color) / 0.12);
   --shadow-overlay:
-    0 4px 12px hsl(var(--foreground) / 0.08), 0 24px 48px hsl(var(--foreground) / 0.12);
+    0 4px 12px hsl(var(--shadow-color) / 0.14), 0 24px 48px hsl(var(--shadow-color) / 0.18);
   --radius-xs: calc(var(--radius) - 6px);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -72,116 +70,136 @@
 @layer base {
   :root {
     color-scheme: light;
-    /* Surface separation (Apple-style grouping): the app canvas drops half a
-       step below pure white so white cards/popovers read as distinct,
-       elevated surfaces. */
-    --background: 240 8% 96%;
-    --foreground: 240 10% 3.9%;
+    --background: 210 28.6% 97.3%;
+    --foreground: 213 12.7% 13.9%;
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
+    --card-foreground: 213 12.7% 13.9%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 5% 94%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 5% 94%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 5% 93%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --success: 160 84% 39%;
-    --warning: 38 92% 50%;
-    /* Soft hairline tuned to stay visible on both the gray canvas and white
-       cards without drawing a hard line. */
-    --border: 240 6% 91%;
-    --input: 240 6% 91%;
-    --ring: 240 5.9% 10%;
-    --brand: 187 86% 53%;
-    --brand-foreground: 220 30% 6%;
+    --popover-foreground: 213 12.7% 13.9%;
+    --primary: 212 92.1% 44.5%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 23.1% 94.9%;
+    --secondary-foreground: 213 12.7% 13.9%;
+    --muted: 210 23.1% 94.9%;
+    --muted-foreground: 211 10.6% 39%;
+    --accent: 210 23.1% 94.9%;
+    --accent-foreground: 213 12.7% 13.9%;
+    --destructive: 356 71.8% 47.3%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 137 66% 30%;
+    --warning: 40 100% 30.2%;
+    --border: 208 19.5% 84.9%;
+    --input: 208 19.5% 84.9%;
+    --ring: 212 92.1% 44.5%;
+    --brand: 212 92.1% 44.5%;
+    --brand-foreground: 0 0% 100%;
     --surface-raised: 0 0% 100%;
-    /* Matches the light xterm palette background (#f6f8fa) so the terminal
-       surface blends with the frame in light mode. */
-    --terminal-bg: 208 27% 97%;
-    /* 10px base: xs 4 / sm 6 / md 8 / lg 10 / xl 14. Buttons land on 8,
-       cards on 10 — the Apple-style hierarchy of soft corners. */
+    --sidebar: 210 28.6% 97.3%;
+    --terminal-bg: 210 28.6% 97.3%;
+    --shadow-color: 210 20% 25%;
     --radius: 0.625rem;
-    /* Restrained motion tokens: fast, quiet, ease-out. Consumed by the
-       forgebadger-motion-* utilities below. */
     --forgebadger-motion-fast: 120ms;
     --forgebadger-motion-base: 180ms;
     --forgebadger-motion-slow: 260ms;
     --forgebadger-ease-out: cubic-bezier(0.25, 0.1, 0.25, 1);
   }
 
+  :root[data-light-theme="solarized-light"] {
+    --background: 46 42.4% 88.4%;
+    --foreground: 194 14.1% 40.2%;
+    --card: 44 86.7% 94.1%;
+    --card-foreground: 194 14.1% 40.2%;
+    --popover: 44 86.7% 94.1%;
+    --popover-foreground: 194 14.1% 40.2%;
+    --primary: 205 69.4% 48.6%;
+    --primary-foreground: 44 86.7% 94.1%;
+    --secondary: 44 40.5% 85.5%;
+    --secondary-foreground: 194 14.1% 40.2%;
+    --muted: 44 40.5% 85.5%;
+    --muted-foreground: 196 12.9% 45.5%;
+    --accent: 44 40.5% 85.5%;
+    --accent-foreground: 194 14.1% 40.2%;
+    --destructive: 1 71.2% 52.4%;
+    --destructive-foreground: 44 86.7% 94.1%;
+    --success: 68 100% 30%;
+    --warning: 45 100% 35.5%;
+    --border: 45 25.5% 78.4%;
+    --input: 45 25.5% 78.4%;
+    --ring: 205 69.4% 48.6%;
+    --brand: 205 69.4% 48.6%;
+    --brand-foreground: 44 86.7% 94.1%;
+    --surface-raised: 44 86.7% 94.1%;
+    --sidebar: 46 42.4% 88.4%;
+    --terminal-bg: 44 86.7% 94.1%;
+    --shadow-color: 45 30% 25%;
+  }
+
   .dark {
-    /* Elevation ladder: each surface lifts in lightness from the canvas,
-       and the terminal well stays recessed below it. */
-    --background: 220 30% 5%;
-    --foreground: 210 35% 96%;
-    --card: 216 24% 8.5%;
-    --card-foreground: 210 35% 96%;
-    --popover: 216 24% 8.5%;
-    --popover-foreground: 210 35% 96%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 214 20% 10.5%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 214 20% 10.5%;
-    --muted-foreground: 213 12% 58%;
-    --accent: 214 18% 14%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --success: 160 70% 45%;
-    --warning: 38 92% 55%;
-    /* Desaturated vs the old 211 28% 15% so dark hairlines stay soft. */
-    --border: 212 16% 16%;
-    --input: 212 16% 16%;
-    --ring: 240 4.9% 83.9%;
-    --brand: 187 86% 53%;
-    --brand-foreground: 220 30% 6%;
-    --surface-raised: 213 22% 11%;
-    --terminal-bg: 220 33% 3%;
+    --background: 220 13% 18%;
+    --foreground: 219 13.5% 71%;
+    --card: 219 13.7% 20%;
+    --card-foreground: 219 13.5% 71%;
+    --popover: 219 13.7% 20%;
+    --popover-foreground: 219 13.5% 71%;
+    --primary: 207 81.6% 65.9%;
+    --primary-foreground: 220 13% 14%;
+    --secondary: 220 15.5% 22.7%;
+    --secondary-foreground: 219 13.5% 71%;
+    --muted: 220 15.5% 22.7%;
+    --muted-foreground: 220 6.2% 52.7%;
+    --accent: 220 15.5% 22.7%;
+    --accent-foreground: 219 13.5% 71%;
+    --destructive: 355 65.2% 65.1%;
+    --destructive-foreground: 220 13% 14%;
+    --success: 95 38.1% 62%;
+    --warning: 39 67.1% 69%;
+    --border: 222 12.8% 26.1%;
+    --input: 222 12.8% 26.1%;
+    --ring: 207 81.6% 65.9%;
+    --brand: 207 81.6% 65.9%;
+    --brand-foreground: 220 13% 14%;
+    --surface-raised: 220 15.5% 22.7%;
+    --sidebar: 216 13.2% 14.9%;
+    --terminal-bg: 220 13% 18%;
+    --shadow-color: 220 30% 3%;
+  }
+
+  .dark[data-dark-theme="tokyo-night"] {
+    --background: 235 18.8% 12.5%;
+    --foreground: 229 72.6% 85.7%;
+    --card: 229 26.2% 16.5%;
+    --card-foreground: 229 72.6% 85.7%;
+    --popover: 229 26.2% 16.5%;
+    --popover-foreground: 229 72.6% 85.7%;
+    --primary: 221 88.7% 72.4%;
+    --primary-foreground: 235 18.8% 12.5%;
+    --secondary: 228 23.4% 21%;
+    --secondary-foreground: 229 72.6% 85.7%;
+    --muted: 228 23.4% 21%;
+    --muted-foreground: 229 21.8% 56.9%;
+    --accent: 228 23.4% 21%;
+    --accent-foreground: 229 72.6% 85.7%;
+    --destructive: 349 89% 71.6%;
+    --destructive-foreground: 235 18.8% 12.5%;
+    --success: 89 50.5% 61.2%;
+    --warning: 36 65.9% 64.3%;
+    --border: 228 23.4% 21%;
+    --input: 229 24.4% 30.6%;
+    --ring: 221 88.7% 72.4%;
+    --brand: 221 88.7% 72.4%;
+    --brand-foreground: 235 18.8% 12.5%;
+    --surface-raised: 228 23.4% 21%;
+    --sidebar: 240 15.4% 10.2%;
+    --terminal-bg: 235 18.8% 12.5%;
+    --shadow-color: 240 40% 3%;
   }
 
   html.dark {
     color-scheme: dark;
   }
 
-  /* Accent themes: --brand recolor driven by data-accent on <html>
-     (see src/lib/accent-theme.ts). */
-  :root[data-accent="cyan"] {
-    --brand: 187 86% 53%;
-    --brand-foreground: 220 30% 6%;
-  }
-  :root[data-accent="orange"] {
-    --brand: 24 100% 50%;
-    --brand-foreground: 0 0% 100%;
-  }
-  :root[data-accent="violet"] {
-    --brand: 258 90% 66%;
-    --brand-foreground: 0 0% 100%;
-  }
-  :root[data-accent="emerald"] {
-    --brand: 160 84% 39%;
-    --brand-foreground: 160 60% 6%;
-  }
-  :root[data-accent="blue"] {
-    --brand: 217 91% 60%;
-    --brand-foreground: 0 0% 100%;
-  }
-  :root[data-accent="rose"] {
-    --brand: 350 89% 60%;
-    --brand-foreground: 0 0% 100%;
-  }
-  :root[data-accent="amber"] {
-    --brand: 38 92% 55%;
-    --brand-foreground: 38 60% 8%;
-  }
-  .dark[data-accent] {
-    --ring: var(--brand);
+  ::selection {
+    background: hsl(var(--brand) / 0.28);
   }
 }
 

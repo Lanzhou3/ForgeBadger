@@ -170,4 +170,17 @@ describe("UsagePage chart interactions", () => {
     fireEvent.click(cell);
     expect(screen.queryByText(/alpha ·/)).toBeNull();
   });
+
+  it("opens a dashboard activity link with a clearable project and day filter", async () => {
+    window.history.replaceState({}, "", `/usage?range=last30&project=alpha&day=${dayOffset(1)}`);
+    renderPage();
+
+    expect(await screen.findByText(`活动筛选：alpha · ${dayOffset(1)}`)).toBeTruthy();
+    expect(screen.getAllByTestId(`usage-cell-${dayOffset(1)}`)).toHaveLength(1);
+    expect(screen.queryByTestId(`usage-cell-${dayOffset(2)}`)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看全部活动" }));
+    expect(screen.getByTestId(`usage-cell-${dayOffset(2)}`)).toBeTruthy();
+    window.history.replaceState({}, "", "/usage");
+  });
 });

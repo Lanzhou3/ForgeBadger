@@ -21,6 +21,7 @@ import { CliBrandChip } from "@/components/cli-brand-chip";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { AnimatedStatValue } from "@/components/dashboard/animated-stat-value";
+import { ProjectActivityCard } from "@/components/dashboard/project-activity-card";
 import {
   discoverAdapters,
   getDashboardSummary,
@@ -155,11 +156,22 @@ export default function DashboardPage() {
   useEffect(() => {
     setActivationDismissed(readActivationDismissed());
   }, []);
+  useEffect(() => {
+    if (!activationReadiness.complete) return;
+    writeActivationDismissed();
+    setActivationDismissed(true);
+  }, [activationReadiness.complete]);
   const dismissActivation = () => {
     writeActivationDismissed();
     setActivationDismissed(true);
   };
-  const showFirstRunReadiness = !activationReadiness.complete && !activationDismissed;
+  const activationLoading =
+    dashboardQuery.isLoading ||
+    projectsQuery.isLoading ||
+    dependenciesQuery.isLoading ||
+    adaptersQuery.isLoading;
+  const showFirstRunReadiness =
+    !activationLoading && !activationReadiness.complete && !activationDismissed;
   const requiredSteps = activationReadiness.steps.filter((step) => !step.optional);
   const doneStepCount = requiredSteps.filter((step) => step.done).length;
   const readinessProgress = Math.round((doneStepCount / requiredSteps.length) * 100);
@@ -472,6 +484,8 @@ export default function DashboardPage() {
           </Card>
         </section>
       </div>
+
+      <ProjectActivityCard projects={projects} />
     </div>
   );
 }

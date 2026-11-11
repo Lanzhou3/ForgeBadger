@@ -188,7 +188,12 @@ describe("adapter updates", () => {
   it("runs only the official fixed command and verifies the version afterwards", async () => {
     const expected: Record<AdapterId, string[]> = {
       claude: ["update"],
-      opencode: ["upgrade"],
+      opencode: [
+        "install", "-g", "@opencode/cli",
+        "--ignore-scripts=false",
+        "--include=optional",
+        "--allow-scripts=@opencode/cli"
+      ],
       codex: ["update"],
       kimi: ["upgrade", "--yes"],
       pi: ["update", "--self"],
@@ -198,7 +203,12 @@ describe("adapter updates", () => {
         "--ignore-scripts=false", "--include=optional",
         "--allow-scripts=@minimax-ai/code,better-sqlite3"
       ],
-      grok: ["update"]
+      grok: [
+        "install", "-g", "@xai-official/grok",
+        "--ignore-scripts=false",
+        "--include=optional",
+        "--allow-scripts=@xai-official/grok"
+      ]
     };
     for (const id of Object.keys(expected) as AdapterId[]) {
       let installed = "1.0.0";
@@ -211,10 +221,11 @@ describe("adapter updates", () => {
 
       const result = await updateAdapter(id, { runner, fetcher: versionFetcher, resolveHost: publicResolver, nodeVersion: "22.19.0" });
 
+      const updateViaNpm = id === "mcode" || id === "opencode" || id === "grok";
       assert.deepEqual(commands.filter(([, args]) => args[0] !== "--version"), [
-        [id === "mcode" ? "npm" : id, expected[id]]
+        [updateViaNpm ? "npm" : id, expected[id]]
       ]);
-      assert.equal(result.command, [id === "mcode" ? "npm" : id, ...expected[id]].join(" "));
+      assert.equal(result.command, [updateViaNpm ? "npm" : id, ...expected[id]].join(" "));
       assert.equal(result.previousVersion, "1.0.0");
       assert.equal(result.installedVersion, "2.0.0");
       assert.equal(result.versionStillBehind, false);
@@ -286,7 +297,12 @@ describe("adapter updates", () => {
         "--ignore-scripts=false", "--include=optional",
         "--allow-scripts=@minimax-ai/code,better-sqlite3"
       ],
-      grok: ["install", "-g", "@xai-official/grok"]
+      grok: [
+        "install", "-g", "@xai-official/grok",
+        "--ignore-scripts=false",
+        "--include=optional",
+        "--allow-scripts=@xai-official/grok"
+      ]
     };
     for (const id of Object.keys(expected) as AdapterId[]) {
       let installed = false;

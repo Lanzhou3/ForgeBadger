@@ -73,20 +73,33 @@ const MCODE_NPM_INSTALL_ARGS = [
   "--allow-scripts=@minimax-ai/code,better-sqlite3"
 ];
 
+const OPENCODE_NPM_INSTALL_ARGS = [
+  "install", "-g", "@opencode/cli",
+  "--ignore-scripts=false",
+  "--include=optional",
+  "--allow-scripts=@opencode/cli"
+];
+
+const GROK_NPM_INSTALL_ARGS = [
+  "install", "-g", "@xai-official/grok",
+  "--ignore-scripts=false",
+  "--include=optional",
+  "--allow-scripts=@xai-official/grok"
+];
+
 const updateConfig: Record<AdapterId, AdapterUpdateConfig> = {
   claude: { npmPackage: "@anthropic-ai/claude-code", args: ["update"], installArgs: ["install", "-g", "@anthropic-ai/claude-code"] },
   // OpenCode 2 publishes `@opencode/cli`, whose platform binary arrives through
   // a required postinstall script. npm 12 blocks unapproved scripts by default,
-  // so the install opts back in and keeps the optional platform packages.
+  // so the install opts back in and keeps the optional platform packages. The
+  // self-updater re-runs npm without that opt-in, replacing the real binary
+  // with the tarball's "postinstall was not run" stub; update through the same
+  // documented npm command as the install instead.
   opencode: {
     npmPackage: "@opencode/cli",
-    args: ["upgrade"],
-    installArgs: [
-      "install", "-g", "@opencode/cli",
-      "--ignore-scripts=false",
-      "--include=optional",
-      "--allow-scripts=@opencode/cli"
-    ]
+    updateCommand: "npm",
+    args: OPENCODE_NPM_INSTALL_ARGS,
+    installArgs: OPENCODE_NPM_INSTALL_ARGS
   },
   codex: { npmPackage: "@openai/codex", args: ["update"], installArgs: ["install", "-g", "@openai/codex"] },
   kimi: { npmPackage: "@moonshot-ai/kimi-code", args: ["upgrade", "--yes"], installArgs: ["install", "-g", "@moonshot-ai/kimi-code"], minNode: "22.19.0" },
@@ -107,13 +120,16 @@ const updateConfig: Record<AdapterId, AdapterUpdateConfig> = {
     minNode: "22.19.0",
     nodeRange: ">=22.19.0 <23 || >=24.2.0 <27"
   },
-  // Grok Build publishes `@xai-official/grok`. `grok update` is the documented
-  // in-place updater for the official installer; npm install covers the
-  // package path.
+  // Grok Build publishes `@xai-official/grok`, whose postinstall copies the
+  // real binary from the matching platform package into ~/.grok/bin/.
+  // `grok update` is the in-place updater of the official installer; like
+  // OpenCode's self-updater its npm handling is unverified for npm installs,
+  // so update through the documented npm command with the script opt-in.
   grok: {
     npmPackage: "@xai-official/grok",
-    args: ["update"],
-    installArgs: ["install", "-g", "@xai-official/grok"]
+    updateCommand: "npm",
+    args: GROK_NPM_INSTALL_ARGS,
+    installArgs: GROK_NPM_INSTALL_ARGS
   }
 };
 
@@ -189,9 +205,10 @@ export async function updateAdapter(
       );
     }
     const definition = getAdapterDefinition(id);
-    if (updateConfig[id].updateCommand === "npm") await assertNpmInstallationAvailable(id, dependencies);
-    const result = await (dependencies.runner ?? runCommand)(updateCommand(id), updateArgs(id, before.latestSource, before.latestVersion), {
-      timeoutMs: updateConfig[id].updateCommand === "npm" ? 300_000 : 180_000,
+    const command = updateCommand(id, before.latestSource);
+    if (command === "npm") await assertNpmInstallationAvailable(id, dependencies);
+    const result = await (dependencies.runner ?? runCommand)(command, updateArgs(id, before.latestSource, before.latestVersion), {
+      timeoutMs: command === "npm" ? 300_000 : 180_000,
       maxOutputBytes: 16 * 1024,
       killGraceMs: 5000,
       killProcessTree: true,
@@ -264,10 +281,14 @@ export async function installAdapter(
 }
 
 function formatCommand(id: AdapterId): string {
-  return [updateCommand(id), ...updateConfig[id].args].join(" ");
+  return [updateCommand(id, undefined), ...updateConfig[id].args].join(" ");
 }
 
-function updateCommand(id: AdapterId): string {
+function updateCommand(id: AdapterId, latestSource: AdapterUpdateStatus["latestSource"]): string {
+  // A Homebrew OpenCode install must stay on its self-updater; every other
+  // installation is updated through npm so the platform-binary postinstall
+  // script is approved.
+  if (id === "opencode" && latestSource === "homebrew") return getAdapterDefinition(id).command;
   return updateConfig[id].updateCommand ?? getAdapterDefinition(id).command;
 }
 
@@ -278,7 +299,7 @@ function updateArgs(id: AdapterId, latestSource: AdapterUpdateStatus["latestSour
 }
 
 function formatUpdateCommand(id: AdapterId, latestSource: AdapterUpdateStatus["latestSource"], latestVersion: string): string {
-  return [updateCommand(id), ...updateArgs(id, latestSource, latestVersion)].join(" ");
+  return [updateCommand(id, latestSource), ...updateArgs(id, latestSource, latestVersion)].join(" ");
 }
 
 function formatInstallCommand(id: AdapterId): string {

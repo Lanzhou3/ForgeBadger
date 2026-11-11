@@ -152,28 +152,24 @@ describe("api client", () => {
     });
   });
 
-  it("waits for a MiniMax npm update including its preflight and version probes", async () => {
-    vi.useFakeTimers();
-    let finish!: (response: Response) => void;
-    let signal: AbortSignal | null | undefined;
-    vi.stubGlobal("fetch", vi.fn((_url: string, options: RequestInit) => {
-      signal = options.signal;
-      return new Promise<Response>((resolve) => { finish = resolve; });
-    }));
-    const result = apiModule.updateAdapter("mcode").then(
-      (value) => ({ value }),
-      (error: unknown) => ({ error })
+  it("submits CLI operations without waiting and queries their status separately", async () => {
+    const operation = { id: "operation-1", adapterId: "mcode", kind: "update", state: "running", startedAt: "2026-01-01T00:00:00.000Z" };
+    vi.stubGlobal("fetch", vi.fn((url: string) => mockEnvelope(
+      url.endsWith("/operations") ? { operations: [operation] } : { operation }
+    )));
+
+    await expect(apiModule.updateAdapter("mcode")).resolves.toEqual(operation);
+    await expect(apiModule.listAdapterOperations()).resolves.toEqual({ operations: [operation] });
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:18332/api/v1/adapters/mcode/update",
+      expect.objectContaining({ method: "POST" })
     );
-    try {
-      await vi.advanceTimersByTimeAsync(340_000);
-      expect(signal?.aborted).toBe(false);
-      finish(await mockEnvelope({ id: "mcode", versionStillBehind: false }));
-      await expect(result).resolves.toMatchObject({ value: { id: "mcode", versionStillBehind: false } });
-    } finally {
-      finish(await mockEnvelope({}));
-      await result;
-      vi.useRealTimers();
-    }
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:18332/api/v1/adapters/operations",
+      expect.any(Object)
+    );
   });
 
   it("reports unreachable gateways with the resolved base URL", async () => {

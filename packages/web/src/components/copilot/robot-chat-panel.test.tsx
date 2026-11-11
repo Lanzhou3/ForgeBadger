@@ -462,20 +462,20 @@ describe("RobotChatPanel", () => {
       blockedCreate.resolve({ conversation: newConversation });
     });
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
-    // Thinking while the send POST is in flight — no dead air while the
-    // Gateway starts the model turn.
-    expect(screen.getByText("Copilot 正在思考…")).toBeTruthy();
+    // The run indicator is the phase chip ("等待执行" until the Gateway
+    // reports a phase) — no dead air while it starts the turn.
+    expect(screen.getAllByText("等待执行").length).toBeGreaterThan(0);
 
     await act(async () => {
       blockedSend.resolve({ runId: "run-1" });
     });
     // The placeholder graduated to running; still no text, so the indicator
     // stays until the first delta or terminal event arrives.
-    expect(screen.getByText("Copilot 正在思考…")).toBeTruthy();
+    expect(screen.getAllByText("等待执行").length).toBeGreaterThan(0);
 
     getRunMock.mockResolvedValue({ run: { id: "run-1", conversationId: "conv-new", status: "completed", revision: 3 }, pendingActions: [] });
     dispatchRunUpdated({ run_id: "run-1", status: "completed" });
-    await waitFor(() => expect(screen.queryByText("Copilot 正在思考…")).toBeNull());
+    await waitFor(() => expect(screen.queryAllByText("等待执行").length).toBe(0));
   });
 
   it("clears the thinking pulse and offers a retry when the POST fails", async () => {
@@ -486,13 +486,13 @@ describe("RobotChatPanel", () => {
     fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "hi" } });
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
-    expect(screen.getByText("Copilot 正在思考…")).toBeTruthy();
+    expect(screen.getAllByText("等待执行").length).toBeGreaterThan(0);
 
     await act(async () => {
       blockedSend.reject(new Error("gateway down"));
     });
 
-    await waitFor(() => expect(screen.queryByText("Copilot 正在思考…")).toBeNull());
+    await waitFor(() => expect(screen.queryAllByText("等待执行").length).toBe(0));
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("发送失败，请检查 Gateway 服务。"));
     expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
   });

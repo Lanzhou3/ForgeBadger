@@ -8,6 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { useTerminalWriter } from "@/hooks/use-terminal-writer";
 import { useColorMode } from "@/hooks/use-color-mode";
+import { useColorTheme } from "@/hooks/use-color-theme";
 import { useTerminalFont } from "@/hooks/use-terminal-font";
 import { useTerminalToolbarDrag } from "@/hooks/use-terminal-toolbar-drag";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ import { toast } from "@/lib/toast";
 import { createTerminalInputMessage, createTerminalResizeMessage, MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS } from "@/lib/terminal-messages";
 import { createTerminalPromptCapture } from "@/lib/terminal-prompt-capture";
 import { notifySessionTabsChanged, setSessionTabPrompt } from "@/lib/session-tabs";
+import { readDocumentColorTheme } from "@/lib/color-theme";
 import { getTerminalPalette } from "@/lib/terminal-theme";
 import {
   ensureTerminalFontLoaded,
@@ -139,6 +141,8 @@ export function TerminalView({
   const { t } = useLanguage();
   const toolbarCopy = useTerminalToolbarCopy();
   const { resolved: colorModeResolved } = useColorMode();
+  const colorThemes = useColorTheme();
+  const colorThemeId = colorThemes[colorModeResolved];
   const terminalFont = useTerminalFont();
   const writer = useTerminalWriter(sessionId);
   const queryClient = useQueryClient();
@@ -578,15 +582,14 @@ export function TerminalView({
           const host = hostRef.current;
           if (cancelled || !host) return;
 
+          const initialColorMode = document.documentElement.classList.contains("dark") ? "dark" : "light";
           const terminal = new xterm.Terminal({
             cursorBlink: true,
             fontFamily: terminalFontRef.current.fontFamily,
             fontSize: terminalFontRef.current.fontSize,
-            // Palette chosen from the DOM class: the beforeInteractive script
-            // has already stamped the correct `dark` class before paint, so
-            // this is always in sync with the stored preference on first open.
             theme: getTerminalPalette(
-              document.documentElement.classList.contains("dark") ? "dark" : "light"
+              initialColorMode,
+              readDocumentColorTheme(initialColorMode)
             )
           });
           terminal.attachCustomKeyEventHandler((event) => {
@@ -790,15 +793,13 @@ export function TerminalView({
     };
   }, [syncAtBottom]);
 
-  // Follow the app color mode at runtime: xterm.js re-renders the viewport
-  // (including scrollback) when the theme option changes, so a light/dark
-  // switch never re-opens the terminal. No-op while the instance is still
-  // initializing; creation already picked the palette from the DOM class.
+  // xterm re-renders scrollback when its palette changes; keep it on the same
+  // named theme as the app without re-opening the session.
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
-    terminal.options.theme = getTerminalPalette(colorModeResolved);
-  }, [colorModeResolved]);
+    terminal.options.theme = getTerminalPalette(colorModeResolved, colorThemeId);
+  }, [colorModeResolved, colorThemeId]);
 
   // Font metrics change the cell grid even when the container keeps its size.
   // Re-fit after rendering and report the new rows/columns to the live PTY.

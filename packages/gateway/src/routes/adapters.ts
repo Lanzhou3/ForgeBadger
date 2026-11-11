@@ -6,11 +6,9 @@ import { extractBearerToken, userIsInstanceAdmin, type AuthenticatedRequest } fr
 import { AdapterOrderRepository } from "../db/repositories/adapter-order-repository.js";
 import type { Database } from "../db/types.js";
 import { discoverAdapters, isAdapterId } from "../services/adapter-discovery.js";
+import { AdapterOperationManager } from "../services/adapter-operations.js";
 import {
-  AdapterUpdateError,
   checkAdapterUpdates,
-  installAdapter,
-  updateAdapter,
   type AdapterUpdateDependencies,
   type AdapterUpdateStatus
 } from "../services/adapter-updates.js";
@@ -47,6 +45,7 @@ export function createAdapterRoutes(
     inFlight = undefined;
   }
 
+  const operationManager = new AdapterOperationManager(updateDependencies, invalidateUpdates);
   const adapterOrderSchema = z.object({ order: z.array(z.string()).max(32) });
 
   router.get("/discovery", async (_req, res) => {
@@ -93,35 +92,22 @@ export function createAdapterRoutes(
     res.json({ code: 0, data: { order }, message: "" });
   });
 
-  router.post("/:adapterId/update", async (req, res) => {
-    const bearerToken = extractBearerToken(req.headers.authorization)?.trim();
-    if (!bearerToken || (req as unknown as AuthenticatedRequest).authToken !== bearerToken) {
-      res.status(403).json({ code: 1, message: "Bearer authorization required" });
-      return;
-    }
-    const db = req.app.locals.db as Database | undefined;
-    const userId = (req as unknown as AuthenticatedRequest).userId;
-    if (!db || !userIsInstanceAdmin(db, userId)) {
-      res.status(403).json({ code: 1, message: "Instance admin access required" });
-      return;
-    }
-    const adapterId = req.params.adapterId;
-    if (!adapterId || !isAdapterId(adapterId)) {
-      res.status(400).json({ code: 1, message: "Unknown adapter" });
-      return;
-    }
-    try {
-      const result = await updateAdapter(adapterId, updateDependencies);
-      invalidateUpdates();
-      res.json({ code: 0, data: result, message: "" });
-    } catch (error) {
-      const status = error instanceof AdapterUpdateError ? error.statusCode : 500;
-      const message = error instanceof AdapterUpdateError ? error.message : "CLI update failed";
-      res.status(status).json({ code: 1, message });
-    }
+  router.get("/operations", (_req, res) => {
+    res.json({ code: 0, data: { operations: operationManager.list() }, message: "" });
   });
 
-  router.post("/:adapterId/install", async (req, res) => {
+  router.get("/operations/:operationId", (req, res) => {
+    const operation = req.params.operationId
+      ? operationManager.get(req.params.operationId)
+      : undefined;
+    if (!operation) {
+      res.status(404).json({ code: 1, message: "CLI operation not found" });
+      return;
+    }
+    res.json({ code: 0, data: { operation }, message: "" });
+  });
+
+  router.post("/:adapterId/update", (req, res) => {
     const bearerToken = extractBearerToken(req.headers.authorization)?.trim();
     if (!bearerToken || (req as unknown as AuthenticatedRequest).authToken !== bearerToken) {
       res.status(403).json({ code: 1, message: "Bearer authorization required" });
@@ -138,15 +124,29 @@ export function createAdapterRoutes(
       res.status(400).json({ code: 1, message: "Unknown adapter" });
       return;
     }
-    try {
-      const result = await installAdapter(adapterId, updateDependencies);
-      invalidateUpdates();
-      res.json({ code: 0, data: result, message: "" });
-    } catch (error) {
-      const status = error instanceof AdapterUpdateError ? error.statusCode : 500;
-      const message = error instanceof AdapterUpdateError ? error.message : "CLI install failed";
-      res.status(status).json({ code: 1, message });
+    const operation = operationManager.start(adapterId, "update");
+    res.status(202).json({ code: 0, data: { operation }, message: "" });
+  });
+
+  router.post("/:adapterId/install", (req, res) => {
+    const bearerToken = extractBearerToken(req.headers.authorization)?.trim();
+    if (!bearerToken || (req as unknown as AuthenticatedRequest).authToken !== bearerToken) {
+      res.status(403).json({ code: 1, message: "Bearer authorization required" });
+      return;
     }
+    const db = req.app.locals.db as Database | undefined;
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    if (!db || !userIsInstanceAdmin(db, userId)) {
+      res.status(403).json({ code: 1, message: "Instance admin access required" });
+      return;
+    }
+    const adapterId = req.params.adapterId;
+    if (!adapterId || !isAdapterId(adapterId)) {
+      res.status(400).json({ code: 1, message: "Unknown adapter" });
+      return;
+    }
+    const operation = operationManager.start(adapterId, "install");
+    res.status(202).json({ code: 0, data: { operation }, message: "" });
   });
 
   return router;

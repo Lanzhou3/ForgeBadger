@@ -59,6 +59,24 @@ Scopes are global, project (requires projectId), or session. Kinds include fact,
 Project/session memory written from a direct user turn follows the routine scoped risk policy. Global memory changes still require exact approval. Loading this document never authorizes a write. Keep wording precise, distinguish observations from assumptions, and cite current evidence when updating an earlier conclusion.`
   },
   {
+    name: 'session-lifecycle', version: '1.0.0',
+    description: 'Create, start, stop and monitor CLI sessions in the selected project without guessing identities.',
+    requiredTools: ['list_sessions', 'create_session', 'start_session', 'stop_session', 'get_session_output', 'dispatch_task_to_session'],
+    body: `# Session lifecycle
+
+1. Resolve before creating. Call list_sessions {projectId, limit?} for the selected project. A usable session is one whose status is running or stopped. Status lost means the CLI exited and the session is not a live target; it may be started again only by an explicit owner request, never as a substitute for a fresh session.
+
+2. Create exactly one new session per request with create_session {projectId, aiTool, name?}. The aiTool is the CLI the user named (claude, codex, kimi, opencode or pi); a plain terminal is aiTool terminal. Do not call create_session more than once for the same request: a second call after an approved first call duplicates the session. The platform parks the create for owner approval; while it is pending, report the pending decision and wait, do not open a terminal or start another session instead.
+
+3. Start only an existing stopped session of the selected project with start_session {sessionId}. Sessions of other projects are authority-rejected; when the selected project has no session yet, create one instead of starting a foreign one. start_session never submits a task.
+
+4. Monitor with get_session_output {sessionId, maxLines:120}. Keep every stop_session target attached to the output it was read from: copy target.observationId and target.taskTitle exactly, never match titles to IDs by list order. A stale or mismatched target requires a fresh read and a new approval.
+
+5. Stop exactly the observed session with stop_session after the owner approves the server-bound target. A terminal/process-group stop does not prove detached or shared background work stopped; report the returned scope and never stop a shared Codex daemon to clear a thread lock.
+
+6. Deliver work to a running session only through dispatch_task_to_session {sessionId, message}, which is confirmed only when the composer consumes the task. COPILOT_DELIVERY_UNCONFIRMED means the task may already have reached the CLI: inspect the terminal, never retry automatically.`
+  },
+  {
     name: 'usage-analysis', version: '2.0.0',
     description: 'Explain token and session telemetry with explicit time windows and estimate labels.',
     requiredTools: ['get_usage_summary'],

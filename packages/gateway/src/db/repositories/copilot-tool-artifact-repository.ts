@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Database } from '../types.js';
 import { encryptSecret, decryptSecret } from '../../crypto/secret-box.js';
 import { ProjectRepository } from './project-repository.js';
+import { CopilotMachineRootRepository } from './copilot-machine-root-repository.js';
 import type { ToolResultSource } from './copilot-tool-result-repository.js';
 import { sourcePath } from '../../services/development/workspace.js';
 import { validateProjectRoot } from '../../lib/safe-resolve.js';
@@ -39,11 +40,13 @@ export class CopilotToolArtifactRepository {
         COALESCE(SUM(CASE WHEN run_id=? THEN content_bytes ELSE 0 END),0) AS run FROM copilot_tool_artifacts WHERE user_id=?`)
         .get(identity.runId, this.userId) as { total: number; run: number };
       if (quota.total + bytes > MAX_USER_ARTIFACT_BYTES || quota.run + bytes > MAX_RUN_ARTIFACT_BYTES) return { status: 'quota' as const, bytes };
-      const raw = JSON.parse(identity.inputJson) as { projectId?: string };
+      const raw = JSON.parse(identity.inputJson) as { projectId?: string; root?: string };
       const project = raw.projectId ? new ProjectRepository(this.db, this.userId).getById(raw.projectId) : undefined;
-      if (!project) return { status: 'unavailable' as const };
-      const canonicalRoot = project && FILE_ARTIFACT_TOOLS.has(identity.toolName) ? realpathSync(project.path) : null;
-      const payload = { userId: this.userId, ...identity, inputDigest: digest(identity.inputJson), projectPath: project?.path ?? null, canonicalRoot, content: redacted };
+      const machineRoot = !project && raw.root ? new CopilotMachineRootRepository(this.db, this.userId).getById(raw.root) : undefined;
+      const rootDir = machineRoot?.path ?? project?.path ?? null;
+      if (!rootDir) return { status: 'unavailable' as const };
+      const canonicalRoot = FILE_ARTIFACT_TOOLS.has(identity.toolName) ? realpathSync(rootDir) : null;
+      const payload = { userId: this.userId, ...identity, inputDigest: digest(identity.inputJson), projectPath: rootDir, canonicalRoot, content: redacted };
       const { inputJson: _inputJson, ...stored } = payload;
       const expiresAt = Date.now() + ARTIFACT_RETENTION_MS;
       this.db.prepare('INSERT INTO copilot_tool_artifacts(step_id,user_id,run_id,conversation_id,payload_json,content_bytes,content_sha256,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)')
@@ -74,15 +77,17 @@ export class CopilotToolArtifactRepository {
   }
 
   private validateScope(source: ToolResultSource, payload: z.infer<typeof payloadSchema>): void {
-    const raw = JSON.parse(source.inputJson) as { projectId?: string; path?: string };
+    const raw = JSON.parse(source.inputJson) as { projectId?: string; root?: string; path?: string };
     const project = raw.projectId ? new ProjectRepository(this.db, this.userId).getById(raw.projectId) : undefined;
-    if (!project || project.path !== payload.projectPath) throw new Error('scope');
+    const machineRoot = !project && raw.root ? new CopilotMachineRootRepository(this.db, this.userId).getById(raw.root) : undefined;
+    const anchor = project?.path ?? machineRoot?.path;
+    if (!anchor || anchor !== payload.projectPath) throw new Error('scope');
     if (!FILE_ARTIFACT_TOOLS.has(source.toolName)) return;
-    if (!project || realpathSync(project.path) !== payload.canonicalRoot) throw new Error('root');
+    if (realpathSync(anchor) !== payload.canonicalRoot) throw new Error('root');
     validateProjectRoot(payload.canonicalRoot!);
     if (source.toolName === 'read_project_diff') assertGitRoot(payload.canonicalRoot!);
     const output = JSON.parse(payload.content) as { path?: string; files?: Array<string | { path: string }>; matches?: Array<{ path: string }> };
     const paths = [raw.path, output.path, ...(output.files ?? []).map(file => typeof file === 'string' ? file : file.path), ...(output.matches ?? []).map(match => match.path)];
-    for (const path of paths) if (path) sourcePath(project.path, path, false);
+    for (const path of paths) if (path) sourcePath(anchor, path, false);
   }
 }

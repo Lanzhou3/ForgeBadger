@@ -1,7 +1,7 @@
 import type { BrandStorage } from "./brand-storage";
 
 /**
- * Color mode (light / dark / system): mirrors the accent-theme persistence
+ * Color mode (light / dark / system): mirrors the color-theme persistence
  * pattern. The chosen mode is stamped on <html> as a `dark` class (present
  * when the resolved mode is dark) and persisted per user in localStorage.
  * `system` follows `prefers-color-scheme` via matchMedia.

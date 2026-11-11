@@ -176,7 +176,9 @@ function NavLinkItem({
           : "text-muted-foreground hover:bg-muted hover:text-foreground"
       )}
     >
+      {active && <span className="absolute left-0 h-4 w-0.5 rounded-full bg-brand" aria-hidden="true" />}
       <item.icon
+        strokeWidth={1.75}
         className={cn(
           "size-4 shrink-0 transition-colors duration-150",
           active ? "text-brand" : "text-muted-foreground/70 group-hover:text-foreground"
@@ -353,7 +355,7 @@ export function Sidebar({
       <aside
         data-app-sidebar
         className={cn(
-          "group/sidebar relative hidden h-full flex-col border-r border-border bg-card py-3 transition-[width] duration-200 ease-out md:flex",
+          "group/sidebar relative hidden h-full flex-col border-r border-border bg-sidebar py-3 transition-[width] duration-200 ease-out md:flex",
           collapsed ? "w-[60px]" : "w-[200px]"
         )}
       >

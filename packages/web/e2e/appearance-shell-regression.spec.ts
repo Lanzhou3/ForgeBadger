@@ -10,7 +10,9 @@ async function mockGateway(page: Page, options: {
     Object.defineProperty(navigator, "platform", { value: options.browserPlatform ?? "MacIntel" });
     localStorage.setItem("forgebadger.token", "appearance-shell-qa");
     localStorage.setItem("forgebadger-language", "en");
-    localStorage.setItem("forgebadger.color-mode", options.mode ?? "system");
+    if (!localStorage.getItem("forgebadger.color-mode")) {
+      localStorage.setItem("forgebadger.color-mode", options.mode ?? "system");
+    }
   }, options);
   const session = { id: "shell-qa", projectId: "qa-project", projectName: "Shell QA", aiTool: "terminal",
     name: "Shell QA", status: "running", attachToken: "qa-attach", createdAt: new Date().toISOString() };
@@ -44,20 +46,23 @@ async function mockGateway(page: Page, options: {
 }
 
 for (const initial of ["system", "dark"]) {
-  test(`keeps manual colors and can resume following OS after initial ${initial}`, async ({ page }) => {
+  test(`uses theme cards for manual colors and can resume following OS after initial ${initial}`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: "dark" });
     const errors = await mockGateway(page, { mode: initial });
     await page.goto("/settings?section=appearance");
     await expect(page.getByRole("heading", { name: "Appearance & Preferences" })).toBeVisible();
     await expect(page.locator("html")).toHaveClass(/dark/);
-    await page.getByRole("button", { name: "Light", exact: true }).click();
+    const systemSwitch = page.getByRole("switch", { name: "System", exact: true });
+    if (initial === "system") await systemSwitch.click();
+    await expect(systemSwitch).not.toBeChecked();
+    await page.getByRole("button", { name: "GitHub Light", exact: true }).click();
     await expect(page.locator("html")).not.toHaveClass(/dark/);
+    await expect(page.locator("[data-theme-choice][aria-pressed=true]")).toHaveCount(1);
     await page.emulateMedia({ colorScheme: "light" });
     await page.emulateMedia({ colorScheme: "dark" });
     await expect(page.locator("html")).not.toHaveClass(/dark/);
-    await expect(page.getByRole("button", { name: "Light", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "GitHub Light", exact: true })).toHaveAttribute("aria-pressed", "true");
     expect(await page.evaluate(() => localStorage.getItem("forgebadger.color-mode"))).toBe("light");
-    // Exercise the actual compiled Tailwind dark utility with OS still dark.
     const lightColor = await page.evaluate(() => {
       const probe = document.createElement("div");
       probe.id = "dark-utility-probe";
@@ -69,19 +74,51 @@ for (const initial of ["system", "dark"]) {
       return getComputedStyle(probe).color;
     });
     expect(lightColor).toBe("rgb(0, 0, 0)");
-    await page.getByRole("button", { name: "Dark", exact: true }).click();
+    await page.getByRole("button", { name: "One Dark", exact: true }).click();
     expect(await page.locator("#dark-utility-probe").evaluate(el => getComputedStyle(el).color)).not.toBe(lightColor);
-    await page.getByRole("button", { name: "System", exact: true }).click();
+    await systemSwitch.click();
     await page.emulateMedia({ colorScheme: "light" });
     await expect(page.locator("html")).not.toHaveClass(/dark/);
+    await expect(page.getByRole("button", { name: "GitHub Light", exact: true })).toHaveAttribute("aria-pressed", "true");
     await page.emulateMedia({ colorScheme: "dark" });
     await expect(page.locator("html")).toHaveClass(/dark/);
-    await expect(page.getByRole("button", { name: "System", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "One Dark", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(systemSwitch).toBeChecked();
     expect(await page.evaluate(() => localStorage.getItem("forgebadger.color-mode"))).toBe("system");
-    await page.screenshot({ path: `/tmp/forgebadger-appearance-${initial}.png` });
     expect(errors).toEqual([]);
   });
 }
+
+test("separates the active theme from system preferences and persists both palettes", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  const errors = await mockGateway(page, { mode: "system" });
+  await page.goto("/settings?section=appearance");
+  await expect(page.getByRole("button", { name: "One Dark", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "GitHub Light", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await page.getByRole("button", { name: "Tokyo Night", exact: true }).click();
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(26, 27, 38)");
+  await page.getByRole("button", { name: "Solarized Light", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Tokyo Night", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Solarized Light", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByText("Preferred", { exact: true })).toBeVisible();
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(238, 232, 213)");
+  await expect(page.getByRole("button", { name: "Solarized Light", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.getByRole("switch", { name: "System", exact: true }).click();
+  await page.getByRole("button", { name: "Solarized Light", exact: true }).click();
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(238, 232, 213)");
+  expect(await page.evaluate(() => localStorage.getItem("forgebadger.color-mode"))).toBe("light");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Solarized Light", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "GitHub Light", exact: true }).click();
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(246, 248, 250)");
+  await page.getByRole("button", { name: "One Dark", exact: true }).click();
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(40, 44, 52)");
+  expect(await page.evaluate(() => localStorage.getItem("forgebadger.dark-theme"))).toBe("one-dark");
+  expect(await page.evaluate(() => localStorage.getItem("forgebadger.light-theme"))).toBe("github-light");
+  expect(errors).toEqual([]);
+});
 
 for (const scenario of [
   { browserPlatform: "Win32", gatewayPlatform: "linux", installed: ["bash"], selected: "bash" },

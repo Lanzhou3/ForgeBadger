@@ -7,10 +7,12 @@ import { RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useColorMode } from "@/hooks/use-color-mode";
+import { useColorTheme } from "@/hooks/use-color-theme";
 import { useTerminalFont } from "@/hooks/use-terminal-font";
 import { useLanguage } from "@/hooks/use-language";
 import { fetchJson } from "@/lib/api";
 import { ensureTerminalFontLoaded } from "@/lib/terminal-font";
+import { readDocumentColorTheme } from "@/lib/color-theme";
 import { getTerminalPalette } from "@/lib/terminal-theme";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +45,8 @@ export function SessionOutputHistory({
 }) {
   const { t } = useLanguage();
   const { resolved: colorModeResolved } = useColorMode();
+  const colorThemes = useColorTheme();
+  const colorThemeId = colorThemes[colorModeResolved];
   const terminalFont = useTerminalFont();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<TerminalInstance | null>(null);
@@ -95,15 +99,15 @@ export function SessionOutputHistory({
         const host = hostRef.current;
         if (!host) return;
 
+        const initialColorMode = document.documentElement.classList.contains("dark") ? "dark" : "light";
         const terminal = new xterm.Terminal({
           scrollback: 100000,
           cursorBlink: false,
           fontFamily: terminalFontRef.current.fontFamily,
           fontSize: terminalFontRef.current.fontSize,
-          // Palette from the DOM class: the beforeInteractive script keeps
-          // <html> in sync with the stored preference before first paint.
           theme: getTerminalPalette(
-            document.documentElement.classList.contains("dark") ? "dark" : "light"
+            initialColorMode,
+            readDocumentColorTheme(initialColorMode)
           )
         });
         // Read-only: never forward any key to the terminal.
@@ -132,13 +136,12 @@ export function SessionOutputHistory({
     };
   }, [open]);
 
-  // Follow the app color mode while the panel is open (xterm re-renders the
-  // viewport on a theme change; no re-open needed).
+  // Follow both the resolved mode and its named palette while the panel is open.
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
-    terminal.options.theme = getTerminalPalette(colorModeResolved);
-  }, [colorModeResolved]);
+    terminal.options.theme = getTerminalPalette(colorModeResolved, colorThemeId);
+  }, [colorModeResolved, colorThemeId]);
 
   // Follow the terminal font preference while the panel is open.
   useEffect(() => {

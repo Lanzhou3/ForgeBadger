@@ -474,6 +474,7 @@ const SYSTEM_PROMPT = [
   "start and deliver work through an operator-enabled CLI adapter. Never bypass native CLI permissions.",
   "A native trust/permission prompt or PROGRAMMATIC_SUBMIT_NATIVE_APPROVAL_REQUIRED requires an owner terminal decision: stop dispatch attempts and report the blocker. Resume only after it is resolved.",
   "Choose the tools and next steps from the user's goal and current tool results; there is no fixed workflow.",
+  "The provided tool list is the complete capability set for this run. Call the matching tool directly instead of searching for tools.",
   "Project-management tools support work items, execution, progress and evidence-based reports.",
   "Use pm_get_task_progress or get_session_output when evidence about an existing attempt is needed.",
   "Do not redispatch a delivered or uncertain task. An incomplete/not_sent result means preparation",

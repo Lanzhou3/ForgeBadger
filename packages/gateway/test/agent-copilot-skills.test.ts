@@ -26,7 +26,7 @@ describe('Copilot playbook boundary',()=>{
   const {db,user,context}=fixture();try{
    new SkillRepository(db,user.id).create({name:'cli-only',content:'Never expose this CLI body'});
    const rows=listEnabledCopilotPlaybookSummaries(db,user.id,options);
-   assert.equal(rows.length,6);assert.equal(new Set(rows.map(s=>s.id)).size,6);
+   assert.equal(rows.length,7);assert.equal(new Set(rows.map(s=>s.id)).size,7);
    assert.ok(!JSON.stringify(rows).includes('Never expose'));
    assert.ok(rows.every(s=>!('content' in s)));
    const listed=await createSkillTools()[0]!.execute({},context);

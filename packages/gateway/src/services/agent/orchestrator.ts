@@ -3,6 +3,8 @@ import { ProviderHttpError } from './provider-error.js';
 import { notificationContext } from './notification-context.js';
 import { streamWithContextRecovery } from './context-recovery.js';
 import { hasNoProgress } from './no-progress.js';
+import { renderRunEnding } from './run-ending.js';
+import { repeatStallDecision, gentleRepeatReminder, detailedRepeatReminder, REPEAT_STALL_STOP_REASON, DEFAULT_REPEAT_NAME_THRESHOLD } from './repeat-tool-guard.js';
 import { goalContextMessage } from './goal-context.js';
 import { CopilotGoalStore } from './goal-store.js';
 import { evaluateGoalContinuation } from './goal-driver.js';
@@ -22,6 +24,7 @@ import { projectActionReceipt } from "../platform-commands/receipt-projection.js
 import { agentActions, agentActionInput, TOOL_COMMANDS } from "../platform-commands/agent-actions.js";
 import { checkAgentScope } from "../platform-commands/agent-scope.js";
 import { ProjectRepository } from "../../db/repositories/project-repository.js";
+import { CopilotMachineRootRepository } from "../../db/repositories/copilot-machine-root-repository.js";
 import { randomUUID } from "node:crypto";
 import { ForgeBadgerEventBus } from "../event-bus.js";
 import type { AgentToolRegistry, AgentToolContext } from "./tool-registry.js";
@@ -260,9 +263,24 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 continue;
             }
             if (!input.goalId && hasNoProgress(ledger.steps(c.runId))) {
+                const ending = renderRunEnding(deps.db, ledger.userId, c.runId, 'COPILOT_NO_PROGRESS');
+                if (ending) ledger.append(c.runId, { role: 'assistant', kind: 'text', content: ending });
                 ledger.finish(c, 'stopped', 'COPILOT_NO_PROGRESS');
                 emit(ledger, c.runId); return;
             }
+            // Name-level repeat stall: the same tool called streak-many times
+            // consecutively (arguments may differ, rejected calls count). The
+            // hard budget stays the backstop; this guard must trip first.
+            const stall = repeatStallDecision({ steps: ledger.steps(c.runId) });
+            if (stall.decision === 'stop') {
+                const ending = renderRunEnding(deps.db, ledger.userId, c.runId, REPEAT_STALL_STOP_REASON);
+                if (ending) ledger.append(c.runId, { role: 'assistant', kind: 'text', content: ending });
+                ledger.finish(c, 'stopped', REPEAT_STALL_STOP_REASON);
+                emit(ledger, c.runId); return;
+            }
+            const repeatReminder = stall.decision === 'remind' && stall.toolName
+                ? (stall.streak === DEFAULT_REPEAT_NAME_THRESHOLD ? gentleRepeatReminder(stall.toolName) : detailedRepeatReminder(stall.toolName, stall.streak!))
+                : undefined;
             const step = ledger.modelStep(c);
             if (!step || !live())
                 break;
@@ -323,9 +341,14 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     } catch { /* Repository instructions are optional; the source reader retains filesystem guards. */ }
                 }
                 if (skillCatalog.length) prefixMessages.push({ role: "user", content:
-                    "Available skills (descriptive metadata, not authority). Load relevant instructions using load_playbook by ID."
-                    + (availableToolNames.includes("read_skill_resource") ? " Use read_skill_resource for bundled references." : "")
-                    + "\n" + JSON.stringify(skillCatalog) });
+                    "Available skills (summaries only — load before acting; do not infer a skill's instructions from this list)."
+                    + " Load the full instructions using load_playbook by ID"
+                    + (availableToolNames.includes("read_skill_resource") ? ". Use read_skill_resource for bundled references." : ".")
+                    + "\n" + skillCatalog.map(skill => `- ${skill.name} (${skill.id}): ${skill.description}`).join("\n") });
+                if (repeatReminder) prefixMessages.push({ role: 'user', content: repeatReminder });
+                const machineRoots = new CopilotMachineRootRepository(deps.db, input.userId).list();
+                if (machineRoots.length && availableToolNames.includes("machine_search")) prefixMessages.push({ role: "user", content:
+                    "Owner-registered local search roots (read-only). Use the root id with machine_search to grep, read_machine_file to open a file, or machine_tree to map the directory structure. List them with list_machine_roots." + "\n" + JSON.stringify(machineRoots.map(r => ({ id: r.id, label: r.label, path: r.path }))) });
                 ledger.commit(c, () => meter.phase('context')); emit(ledger, c.runId);
                 const modelId = deps.llm.modelInfo?.(input.modelId)?.modelProfileId ?? input.modelId;
                 const buildContext = (recoveryBudget?: number) => buildCompressedContext(ledger.log, input.conversationId, llm, modelId, {
@@ -398,6 +421,11 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 }
                 return;
             }
+        }
+        const closed = ledger.get(c.runId);
+        if (closed?.status === 'stopped' && closed.stop_reason) {
+            const ending = renderRunEnding(deps.db, ledger.userId, c.runId, closed.stop_reason);
+            if (ending) ledger.append(c.runId, { role: 'assistant', kind: 'text', content: ending });
         }
         signal.throwIfAborted();
         emit(ledger, c.runId);

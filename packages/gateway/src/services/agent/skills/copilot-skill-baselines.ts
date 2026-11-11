@@ -44,6 +44,10 @@ const baselines = [
   {"name":"session-dispatch","version":"4.1.0","digest":"c390210c9004a5f471b45d867bd9f08feaab4bf21cf14fc90293e5b7b72cbbd6","commit":"bundled-2026-10-10"},
   {"name":"project-insights","version":"2.1.0","digest":"489f808e0956817d6472c2c1f34d336c5be5350c7f1f00a3aeeb5973866325b3","commit":"bundled-2026-10-10"},
   {"name":"safety-and-approvals","version":"3.1.0","digest":"3fcf1d426818475fc8adb3ef5fa0f2db62435da3ab8f129e0c5b9fb4139013c0","commit":"bundled-2026-10-10"},
+  // 2026-11-11: session-lifecycle added so "create/start/stop a session" tasks
+  // have a loadable playbook; it names create_session first and keeps the
+  // server-bound stop discipline of session-dispatch.
+  {"name":"session-lifecycle","version":"1.0.0","digest":"f11be305f81d96d303d24deb4bdf2fa957fb02924d7fe977df85cc42218b67b9","commit":"bundled-2026-11-11"},
 ] as const;
 
 export function isUnmodifiedBuiltin(snapshot: CopilotSkillSnapshot): boolean {

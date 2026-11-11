@@ -1,17 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ArrowDown, Bot, Maximize2, Send, Square, SquarePen, XIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  MessageRow,
+  AssistantRail,
   StreamingMessage,
   ThinkingSection,
-  indexToolResults,
 } from "@/components/copilot/copilot-message-primitives";
+import { CopilotMessageStream } from "@/components/copilot/copilot-message-stream";
 import { CopilotWelcomeState } from "@/components/copilot/copilot-empty-state";
 import { CopilotFollowupChips } from "@/components/copilot/CopilotFollowupChips";
 import { CopilotComposerToolbar } from "@/components/copilot/CopilotComposerToolbar";
@@ -372,8 +372,8 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
   // min-h/max-h on the textarea clamp the range and scroll past the max.
   useAutoGrowTextarea(inputRef, controller.input);
 
-  const toolResultById = useMemo(() => indexToolResults(messages), [messages]);
   const showEmpty = !loadError && !restoring && messages.length === 0 && !active;
+  const streamingShowsAvatar = messages[messages.length - 1]?.role !== "assistant";
 
   return (
     <div
@@ -446,7 +446,7 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
           ref={controller.scrollRef}
           onScroll={controller.onScroll}
           data-testid="robot-chat-scroll"
-          className="flex-1 space-y-4 overflow-y-auto px-3.5 py-4"
+          className="flex-1 space-y-4 overflow-y-auto px-3.5 pt-4 pb-14"
         >
           {loadError && <p className="text-sm text-destructive">{loadError}</p>}
           {!loadError && restoring && (
@@ -456,27 +456,20 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
             </p>
           )}
           {showEmpty && <CopilotWelcomeState compact onSuggestion={(text) => void send(text)} />}
-          {messages.map((message) => {
-            const pairedResultId = message.toolCallId && toolResultById.has(message.toolCallId)
-              ? toolResultById.get(message.toolCallId)!.id
-              : null;
-            return (
-              <MessageRow
-                key={message.id}
-                message={message}
-                pairedResult={pairedResultId === null ? null : (toolResultById.get(message.toolCallId!) ?? null)}
-                suppressRender={pairedResultId === message.id}
-                isEditing={controller.editingMessageId === message.id}
-                editDraft={controller.editDraft}
-                editSubmitting={controller.editSubmitting || savingPreferences}
-                canEdit={!isBusy && !savingPreferences && !controller.sending && controller.editingMessageId === null}
-                onBeginEdit={controller.beginEditMessage}
-                onChangeDraft={controller.setEditDraft}
-                onSubmitEdit={() => void controller.submitEditMessage()}
-                onCancelEdit={controller.cancelEditMessage}
-              />
-            );
-          })}
+          {messages.length > 0 && (
+            <CopilotMessageStream
+              messages={messages}
+              isEditing={(message) => controller.editingMessageId === message.id}
+              editDraft={controller.editDraft}
+              editError={null}
+              editSubmitting={controller.editSubmitting || savingPreferences}
+              canEdit={!isBusy && !savingPreferences && !controller.sending && controller.editingMessageId === null}
+              onBeginEdit={controller.beginEditMessage}
+              onChangeDraft={controller.setEditDraft}
+              onSubmitEdit={() => void controller.submitEditMessage()}
+              onCancelEdit={controller.cancelEditMessage}
+            />
+          )}
           {(syncError || active?.error) && (
             <p role="status" className="text-sm text-muted-foreground">
               {syncError || active?.error}
@@ -494,14 +487,13 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
               {t(copilotPhaseLabel(active?.phase))}
             </p>
           )}
-          {active?.thinking ? <ThinkingSection text={active.thinking} live={isRunning === true} /> : null}
+          {active?.thinking ? (
+            <AssistantRail>
+              <ThinkingSection text={active.thinking} live={isRunning === true} />
+            </AssistantRail>
+          ) : null}
           {active?.text ? (
-            <StreamingMessage text={active.text} />
-          ) : isRunning ? (
-            <p className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="size-1.5 animate-pulse rounded-full bg-brand" />
-              {t("copilot.running")}
-            </p>
+            <StreamingMessage text={active.text} showAvatar={streamingShowsAvatar} />
           ) : null}
           {controller.sendFailed && (
             <div className="flex items-center gap-2">

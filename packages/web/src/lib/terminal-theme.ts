@@ -1,16 +1,6 @@
+import type { ColorThemeId } from "./color-theme";
 import type { ResolvedColorMode } from "./color-mode";
 
-/**
- * xterm.js terminal palettes, one per resolved color mode. Mirrors how VS
- * Code themes own their terminal colors: the palette carries the surface
- * (background/foreground/cursor/selection) plus the full ANSI 16-color
- * ladder, with the light palette's ANSI colors tuned dark-on-light for
- * contrast (e.g. red is #cf222e, not the bright terminal red).
- *
- * Applied live via `terminal.options.theme = ...` — xterm.js re-renders the
- * whole viewport including scrollback, so no terminal re-open is needed on
- * a light/dark switch.
- */
 export interface TerminalPalette {
   background: string;
   foreground: string;
@@ -35,58 +25,111 @@ export interface TerminalPalette {
   brightWhite: string;
 }
 
-export const TERMINAL_PALETTES: Record<ResolvedColorMode, TerminalPalette> = {
-  dark: {
-    background: "#05070a",
-    foreground: "#e5edf7",
-    cursor: "#5cc8ff",
-    cursorAccent: "#05070a",
-    selectionBackground: "rgba(92, 200, 255, 0.3)",
-    // xterm.js default ANSI ladder (dark-oriented).
-    black: "#000000",
-    red: "#cd3131",
-    green: "#0dbc79",
-    yellow: "#e5e510",
-    blue: "#2472c8",
-    magenta: "#bc3fbc",
-    cyan: "#11a8cd",
-    white: "#e5e5e5",
-    brightBlack: "#666666",
-    brightRed: "#f14c4c",
-    brightGreen: "#23d18b",
-    brightYellow: "#f5f543",
-    brightBlue: "#3b8eea",
-    brightMagenta: "#d670d6",
-    brightCyan: "#29b8db",
-    brightWhite: "#ffffff",
+export const TERMINAL_PALETTES: Record<ColorThemeId, TerminalPalette> = {
+  "one-dark": {
+    background: "#282c34",
+    foreground: "#abb2bf",
+    cursor: "#61afef",
+    cursorAccent: "#282c34",
+    selectionBackground: "rgba(97, 175, 239, 0.32)",
+    black: "#282c34",
+    red: "#e06c75",
+    green: "#98c379",
+    yellow: "#e5c07b",
+    blue: "#61afef",
+    magenta: "#c678dd",
+    cyan: "#56b6c2",
+    white: "#abb2bf",
+    brightBlack: "#5c6370",
+    brightRed: "#ef7983",
+    brightGreen: "#a6d189",
+    brightYellow: "#eacb8f",
+    brightBlue: "#74b9f1",
+    brightMagenta: "#d08ce4",
+    brightCyan: "#69c5cf",
+    brightWhite: "#c8ccd4",
   },
-  light: {
+  "tokyo-night": {
+    background: "#1a1b26",
+    foreground: "#c0caf5",
+    cursor: "#7aa2f7",
+    cursorAccent: "#1a1b26",
+    selectionBackground: "rgba(122, 162, 247, 0.32)",
+    black: "#15161e",
+    red: "#f7768e",
+    green: "#9ece6a",
+    yellow: "#e0af68",
+    blue: "#7aa2f7",
+    magenta: "#bb9af7",
+    cyan: "#7dcfff",
+    white: "#a9b1d6",
+    brightBlack: "#414868",
+    brightRed: "#ff899d",
+    brightGreen: "#9fe044",
+    brightYellow: "#faba4a",
+    brightBlue: "#8db0ff",
+    brightMagenta: "#c7a9ff",
+    brightCyan: "#a4daff",
+    brightWhite: "#c0caf5",
+  },
+  "github-light": {
     background: "#f6f8fa",
-    foreground: "#24292f",
-    cursor: "#0e7490",
+    foreground: "#1f2328",
+    cursor: "#0969da",
     cursorAccent: "#f6f8fa",
-    selectionBackground: "rgba(8, 110, 168, 0.25)",
-    // Light-background ANSI ladder (GitHub Light-inspired, tuned for
-    // contrast on #f6f8fa).
+    selectionBackground: "rgba(9, 105, 218, 0.22)",
     black: "#24292f",
     red: "#cf222e",
     green: "#1a7f37",
     yellow: "#9a6700",
-    blue: "#0550ae",
+    blue: "#0969da",
     magenta: "#8250df",
-    cyan: "#0969da",
-    white: "#57606a",
+    cyan: "#1b7c83",
+    white: "#6e7781",
     brightBlack: "#57606a",
     brightRed: "#a40e26",
     brightGreen: "#2da44e",
     brightYellow: "#bb8009",
-    brightBlue: "#388bfd",
-    brightMagenta: "#8250df",
-    brightCyan: "#1b7c83",
-    brightWhite: "#24292f",
+    brightBlue: "#218bff",
+    brightMagenta: "#a475f9",
+    brightCyan: "#3192aa",
+    brightWhite: "#8c959f",
+  },
+  "solarized-light": {
+    background: "#fdf6e3",
+    foreground: "#586e75",
+    cursor: "#268bd2",
+    cursorAccent: "#fdf6e3",
+    selectionBackground: "rgba(38, 139, 210, 0.24)",
+    black: "#073642",
+    red: "#dc322f",
+    green: "#859900",
+    yellow: "#b58900",
+    blue: "#268bd2",
+    magenta: "#d33682",
+    cyan: "#2aa198",
+    white: "#eee8d5",
+    brightBlack: "#657b83",
+    brightRed: "#cb4b16",
+    brightGreen: "#586e75",
+    brightYellow: "#657b83",
+    brightBlue: "#839496",
+    brightMagenta: "#6c71c4",
+    brightCyan: "#93a1a1",
+    brightWhite: "#fdf6e3",
   },
 };
 
-export function getTerminalPalette(mode: ResolvedColorMode): TerminalPalette {
-  return TERMINAL_PALETTES[mode];
+const DEFAULT_THEMES: Record<ResolvedColorMode, ColorThemeId> = {
+  dark: "one-dark",
+  light: "github-light",
+};
+
+export function getTerminalPalette(
+  mode: ResolvedColorMode,
+  themeId: ColorThemeId = DEFAULT_THEMES[mode]
+): TerminalPalette {
+  const theme = TERMINAL_PALETTES[themeId];
+  const isDark = themeId === "one-dark" || themeId === "tokyo-night";
+  return (mode === "dark") === isDark ? theme : TERMINAL_PALETTES[DEFAULT_THEMES[mode]];
 }

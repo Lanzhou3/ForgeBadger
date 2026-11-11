@@ -4,13 +4,15 @@ import type { AgentTool } from '../tool-registry.js';
 import { executeAgentAction } from '../../platform-commands/agent-actions.js';
 import { workItemCreateInput, workItemUpdateInput } from '../../platform-commands/catalog.js';
 import { projectManagementOverview, createManagementCommands } from '../../project-manager/management.js';
+import { sessionCreateInput } from '../../platform-commands/session-commands.js';
 export function createPlatformManagementTools(): AgentTool[] {
     const writes = [
         { name: 'pm_create_work_item', description: 'Create a planned work item with acceptance criteria. Does not execute it.', schema: workItemCreateInput },
         { name: 'pm_update_work_item', description: 'Update task title, description or priority. Cannot change acceptance criteria or claim completion.', schema: workItemUpdateInput.omit({ acceptanceCriteria: true, stageId: true }) },
         { name: 'pm_update_management', description: 'Update project management owner and next action at the expected revision.', schema: createManagementCommands()[0]!.inputSchema },
         { name: 'update_project', description: 'Update project name or description.', schema: z.object({ projectId: z.string().min(1), name: z.string().min(1).max(200).optional(), description: z.string().max(2000).optional() }).strict() },
-        { name: 'start_session', description: 'Start an existing CLI session for manual operation. Does not submit a task.', schema: z.object({ sessionId: z.string().min(1) }).strict() },
+        { name: 'create_session', description: 'Create and launch a new session (an AI CLI such as claude, codex, kimi, opencode or pi, or a plain terminal) inside the selected project, then wait for owner approval. projectId must be the selected project; sessions of other projects are authority-rejected.', schema: sessionCreateInput },
+        { name: 'start_session', description: 'Start an existing stopped CLI session that belongs to the selected project, for manual operation. Sessions of other projects are authority-rejected; when the selected project has no session yet, use create_session instead of starting a foreign one. Does not submit a task.', schema: z.object({ sessionId: z.string().min(1) }).strict() },
         { name: 'stop_session', description: 'Stop exactly the observed CLI terminal after owner approval. First read get_session_output; copy its sessionId, target.observationId, and target.taskTitle as expectedTitle. Do not swap IDs or guess a task from list order. Stale/mismatched targets require a new read and approval. Shared/unknown Codex daemon execution cannot be stopped here.', schema: copilotStopSessionInput },
         { name: 'dispatch_task_to_session', description: 'Programmatically submit a task message to a running CLI session (bracketed paste + single Enter) with delivery confirmation. Requires the composer to be ready.', schema: z.object({ sessionId: z.string().min(1).max(128), message: z.string().min(1).max(4000) }).strict() }
     ];

@@ -38,7 +38,10 @@ function currentScope(db: Database, userId: string, conversationId: string): Cha
   const conversation = new CopilotConversationLog(db, userId).getConversation(conversationId);
   const route = records.conversationRoute(conversationId);
   const channelOwned = records.conversationIsChannelOwned(conversationId);
-  if (!route && !channelOwned && !conversation?.project_id) return;
+  // A project-bound owner conversation is not channel authority. Only a bound
+  // channel route or a channel-owned conversation composes a scope snapshot;
+  // everything else keeps full owner authority over its own resources.
+  if (!route && !channelOwned) return undefined;
   requireScope(conversation);
   requireScope(route || !channelOwned);
   if (route) requireScope(conversation.project_id);
@@ -157,6 +160,10 @@ export function channelToolContext(context: AgentToolContext): AgentToolContext 
   return scope ? { ...context, channelScope: scope, allowedProjectIds: scope.projectIds } : context;
 }
 
+/** Read-only tools whose input carries no project/session/task resource ID: nothing to place out of scope. */
+const NO_RESOURCE_ID_TOOLS = ['list_projects', 'list_sessions', 'pm_overview', 'discover_tools', 'read_tool_result',
+  'load_playbook', 'read_skill_resource', 'list_playbooks', 'get_usage_summary'];
+
 /** Resolve resource IDs against their actual rows, never trust a supplied project hint. */
 export function assertChannelToolScope(context: AgentToolContext, name: string, raw: unknown): void {
   const scope = contextScope(context); if (!scope) return;
@@ -194,9 +201,12 @@ export function assertChannelToolScope(context: AgentToolContext, name: string, 
     }
   }
   if (['search_memory', 'list_memory', 'write_memory'].includes(name)) {
-    requireScope(input.scope === 'project' && typeof input.projectId === 'string' || input.scope === 'session' && input.projectId === undefined);
+    // A missing scope searches every scope this run may see; it is not a rejection.
+    requireScope(input.scope === undefined
+      || input.scope === 'project' && typeof input.projectId === 'string'
+      || input.scope === 'session' && input.projectId === undefined);
     if (input.conversationId !== undefined) requireScope(input.conversationId === context.conversationId);
-  } else if (!['list_projects', 'list_sessions', 'pm_overview', 'discover_tools', 'read_tool_result'].includes(name)) requireScope(projects.size > 0);
+  } else if (!NO_RESOURCE_ID_TOOLS.includes(name)) requireScope(projects.size > 0);
   requireScope([...projects].every(project => scope.projectIds.includes(project)));
   for (const root of roots) {
     const canonical = canonicalRoot(root);

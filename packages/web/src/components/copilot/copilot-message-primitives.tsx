@@ -1,27 +1,31 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { AlertTriangle, Bot, Brain, Check, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Copy, Pencil, Wrench, XCircle } from "lucide-react";
+import type { ReactNode } from "react";
+import { AlertTriangle, Bot, Brain, Check, ChevronDown, ChevronRight, Copy, Pencil } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { CopilotMarkdown, closeOpenMarkdown } from "@/components/copilot/copilot-markdown";
+import { ToolCallRow } from "@/components/copilot/copilot-tool-call-row";
 import { useLanguage } from "@/hooks/use-language";
 import type { Language } from "@/lib/i18n";
 import { parseThinkingContent } from "@/lib/parse-thinking";
-import { cn } from "@/lib/utils";
 import type { CopilotMessage } from "@/lib/copilot-api";
 
 /**
  * Shared Copilot message-stream primitives, used by both the full-page console
  * (copilot-chat.tsx) and the robot widget's floating chat panel
- * (robot-chat-panel.tsx). Layout follows the Linear/v0 floating-assistant
- * pattern: user messages are compact right-aligned accent bubbles, assistant
- * messages are full-width plain composition with a small avatar marker (no
- * bubble), reasoning is a dim collapsible strip. `<think>...</think>` blocks
- * inlined by some providers are split out via parseThinkingContent for both
- * persisted history and live streams.
+ * (robot-chat-panel.tsx), composed into a stream by copilot-message-stream.tsx.
+ *
+ * Layout: user messages are compact right-aligned accent bubbles; assistant
+ * content is plain full-width composition on a single rail — one avatar marker
+ * per assistant turn (not per block), with every following block indented to
+ * the same text column. Tool calls arrive as slim single-line rows from
+ * copilot-tool-call-row.tsx rather than as bordered cards, because a run of
+ * calls is process, not answer. Reasoning is a dim collapsible strip.
+ * `<think>...</think>` blocks inlined by some providers are split out via
+ * parseThinkingContent for both persisted history and live streams.
  *
  * Edit-and-rerun props are optional: surfaces that do not support editing
  * simply omit them and the pencil affordance stays hidden.
@@ -30,6 +34,7 @@ export function MessageRow({
   message,
   pairedResult,
   suppressRender,
+  showAvatar = true,
   isEditing = false,
   editDraft = "",
   editError = null,
@@ -43,6 +48,8 @@ export function MessageRow({
   message: CopilotMessage;
   pairedResult: CopilotMessage | null;
   suppressRender: boolean;
+  /** false on blocks that follow the first of an assistant turn (rail indent). */
+  showAvatar?: boolean;
   isEditing?: boolean;
   editDraft?: string;
   editError?: string | null;
@@ -57,41 +64,23 @@ export function MessageRow({
   const isUser = message.role === "user";
 
   // tool_result rows that have been merged into their tool_call row above are
-  // suppressed; the merged card already shows the result.
+  // suppressed; the merged row already shows the result.
   if (suppressRender) return null;
 
-  if (message.kind === "tool_call") {
-    // A missing durable result does not prove that a tool is still running.
-    // Live execution state is shown by the run indicator, not inferred here.
-    const status = pairedResult ? deriveToolStatus(pairedResult.content) : "unknown";
-    return (
-      <details className="rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
-        <summary className="flex cursor-pointer items-center gap-1.5 font-medium">
-          <ToolStatusIcon status={status} />
-          <Wrench className="size-3" />
-          <span className="min-w-0 break-all">{t("copilot.toolCall")}{message.toolName ? `：${message.toolName}` : ""}</span>
-        </summary>
-        {message.toolInputJson && (
-          <pre className="mt-2 max-h-40 overflow-auto rounded bg-background p-2 text-[11px]">{message.toolInputJson}</pre>
-        )}
-        {pairedResult && (
-          <pre className="mt-2 max-h-40 overflow-auto rounded bg-background p-2 text-[11px]">{pairedResult.content}</pre>
-        )}
-      </details>
-    );
-  }
-  if (message.kind === "tool_result") {
-    return (
-      <details className="max-w-[85%] rounded-lg bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
-        <summary className="cursor-pointer break-all font-medium">
-          {t("copilot.toolResult")} — {truncateContent(message.content)}
-        </summary>
-        <pre className="mt-2 max-h-40 overflow-auto rounded bg-background p-2 text-[11px]">{message.content}</pre>
-      </details>
-    );
+  // A missing durable result does not prove that a tool is still running;
+  // live execution state is shown by the run indicator, not inferred here.
+  if (message.kind === "tool_call" || message.kind === "tool_result") {
+    return <ToolCallRow message={message} pairedResult={pairedResult} />;
   }
   if (message.kind === "error") {
-    return <div className="break-words text-sm text-destructive">{message.content}</div>;
+    return (
+      <AssistantRail>
+        <div className="flex gap-2 break-words text-sm text-destructive">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0">{message.content}</span>
+        </div>
+      </AssistantRail>
+    );
   }
 
   if (isUser && isEditing) {
@@ -154,11 +143,45 @@ export function MessageRow({
     );
   }
 
-  return <AssistantBody content={message.content} createdAt={message.createdAt} />;
+  return <AssistantBody content={message.content} createdAt={message.createdAt} showAvatar={showAvatar} />;
 }
 
-/** Full-width assistant composition: avatar marker + think strip + markdown. */
-function AssistantBody({ content, createdAt, streaming = false }: { content: string; createdAt?: string; streaming?: boolean }) {
+/** Small brand-tinted bot marker that opens an assistant turn. */
+export function AssistantAvatar() {
+  return (
+    <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-brand/10">
+      <Bot className="size-3.5 text-brand" aria-hidden="true" />
+    </span>
+  );
+}
+
+/**
+ * The assistant column: a fixed 24px rail slot (avatar or indent) plus the text
+ * column every assistant block aligns to, so tool rows, reasoning strips and
+ * the markdown answer share one left edge instead of each starting wherever
+ * its own box happens to begin.
+ */
+export function AssistantRail({ showAvatar = false, children }: { showAvatar?: boolean; children: ReactNode }) {
+  return (
+    <div className="forgebadger-animate-in flex gap-2.5">
+      {showAvatar ? <AssistantAvatar /> : <span aria-hidden="true" className="size-6 shrink-0" />}
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+/** Full-width assistant composition: rail avatar + think strip + markdown. */
+function AssistantBody({
+  content,
+  createdAt,
+  showAvatar = true,
+  streaming = false,
+}: {
+  content: string;
+  createdAt?: string;
+  showAvatar?: boolean;
+  streaming?: boolean;
+}) {
   const { language } = useLanguage();
   const parsed = parseThinkingContent(content);
   // While tokens are still arriving, close obviously unfinished markdown
@@ -167,11 +190,8 @@ function AssistantBody({ content, createdAt, streaming = false }: { content: str
   const bodyText = streaming ? closeOpenMarkdown(parsed.text) : parsed.text;
   const time = !streaming && createdAt ? formatMessageTime(createdAt, language) : "";
   return (
-    <div className="forgebadger-animate-in flex gap-2.5">
-      <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-brand/10">
-        <Bot className="size-3.5 text-brand" />
-      </span>
-      <div className="min-w-0 flex-1 space-y-2 text-sm leading-relaxed">
+    <AssistantRail showAvatar={showAvatar}>
+      <div className="space-y-2.5 text-sm leading-relaxed">
         {parsed.thinking ? (
           <ThinkingSection text={parsed.thinking} live={streaming && parsed.thinkingOpen} />
         ) : null}
@@ -182,7 +202,7 @@ function AssistantBody({ content, createdAt, streaming = false }: { content: str
           <AssistantActions content={content} time={time} createdAt={createdAt} />
         )}
       </div>
-    </div>
+    </AssistantRail>
   );
 }
 
@@ -196,7 +216,7 @@ function AssistantActions({ content, time, createdAt }: { content: string; time:
     return () => clearTimeout(timer);
   }, [copied]);
   return (
-    <div className="flex items-center gap-2 pt-0.5">
+    <div className="flex items-center gap-1.5 pt-0.5">
       <button
         type="button"
         aria-label={copied ? t("copilot.copied") : t("copilot.copy")}
@@ -215,8 +235,8 @@ function AssistantActions({ content, time, createdAt }: { content: string; time:
   );
 }
 
-export function StreamingMessage({ text }: { text: string }) {
-  return <AssistantBody content={text} streaming />;
+export function StreamingMessage({ text, showAvatar = true }: { text: string; showAvatar?: boolean }) {
+  return <AssistantBody content={text} streaming showAvatar={showAvatar} />;
 }
 
 /**
@@ -233,12 +253,12 @@ export function ThinkingSection({ text, live = false }: { text: string; live?: b
   const [open, setOpen] = useState(false);
   const summary = summarizeThinking(text);
   return (
-    <div className="rounded-lg border border-dashed border-border/60 bg-muted/30 text-xs text-muted-foreground">
+    <div className="rounded-lg border border-dashed border-border/50 bg-muted/20 text-xs text-muted-foreground">
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/60"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/50"
       >
         {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         <Brain className="size-3" />
@@ -286,46 +306,4 @@ export function formatMessageTime(createdAt: string, language?: Language): strin
   const date = new Date(createdAt);
   if (!createdAt || Number.isNaN(date.getTime())) return "";
   return date.toLocaleTimeString(language ?? "zh-CN", { hour: "2-digit", minute: "2-digit" });
-}
-
-function truncateContent(content: string): string {
-  const max = 80;
-  return content.length > max ? `${content.slice(0, max)}…` : content;
-}
-
-type ToolStatus = "unknown" | "ok" | "error" | "denied";
-
-function deriveToolStatus(resultContent: string): ToolStatus {
-  // The orchestrator prefixes tool_result content so the UI can detect the
-  // outcome without re-running security-policy or error parsing. Anything
-  // else (real tool JSON output) is treated as a successful read.
-  if (/^(?:Denied by security policy:|Action rejected by owner|Tool disabled by owner:|Scheduled runs are read only)/u.test(resultContent)) return "denied";
-  if (/^(?:Tool error:|Unknown tool:|Invalid tool input|Tool input digest mismatch)/u.test(resultContent)) return "error";
-  return "ok";
-}
-
-// Semantic status colors: emerald = healthy, amber = needs attention (denied
-// / owner action), destructive = failed, muted = unknown.
-const TOOL_STATUS_STYLES: Record<ToolStatus, string> = {
-  unknown: "border-border text-muted-foreground",
-  ok: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  error: "border-destructive/40 bg-destructive/10 text-destructive",
-  denied: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-};
-
-function ToolStatusIcon({ status }: { status: ToolStatus }) {
-  const Icon =
-    status === "ok" ? CheckCircle2
-      : status === "error" ? XCircle
-        : status === "denied" ? AlertTriangle
-          : CircleHelp;
-  return (
-    <Badge
-      variant="outline"
-      aria-label={status}
-      className={cn("shrink-0 gap-0 rounded-full px-1 py-0 [&>svg]:size-3", TOOL_STATUS_STYLES[status])}
-    >
-      <Icon className="size-3 shrink-0" aria-hidden="true" />
-    </Badge>
-  );
 }

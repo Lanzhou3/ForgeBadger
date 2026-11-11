@@ -28,6 +28,7 @@ import { AgentMemoryRepository } from '../src/services/agent/memory.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { agentActions, agentActionInput } from '../src/services/platform-commands/agent-actions.js';
 import { CopilotToolArtifactRepository } from '../src/db/repositories/copilot-tool-artifact-repository.js';
+import { CopilotMachineRootRepository } from '../src/db/repositories/copilot-machine-root-repository.js';
 import { recoverLegacyChannelRuns } from '../src/services/channels/channel-run-authority.js';
 import { NativeChannelDelivery } from '../src/services/channels/native-channel-delivery.js';
 
@@ -132,11 +133,19 @@ it('real orchestrator excludes global recall, unknown tools and other-project re
     memory.create({ scope: 'global', kind: 'fact', text: 'scope-marker GLOBAL-SECRET' });
     memory.create({ scope: 'project', projectId: f.b.id, kind: 'fact', text: 'scope-marker B-SECRET' });
     memory.create({ scope: 'project', projectId: f.a.id, kind: 'fact', text: 'scope-marker A-ALLOWED' });
+    const machineRoot = join(f.root, 'PRIVATE-MACHINE-ROOT');
+    mkdirSync(machineRoot);
+    const registeredRoot = new CopilotMachineRootRepository(f.db, f.user.id).register('private', machineRoot)!;
+    const surface = computeToolSurface(f.turn(), { registry: f.registry, hasSessionManager: true });
+    assert.equal(surface.visible.some(tool => tool.name === 'machine_search' || tool.name === 'list_machine_roots'), false);
+    assert.equal((await f.call('list_machine_roots', {})).ok, false);
+    assert.equal((await f.call('machine_search', { root: registeredRoot.id, query: 'secret' })).ok, false);
     const llm: AgentLlmClient = {
       async stream(request) {
         contexts.push(JSON.stringify(request.messages));
         assert.equal(request.tools.some(tool => tool.name === 'get_usage_summary'), true);
         assert.equal(request.tools.some(tool => tool.name.startsWith('terminal_')), false);
+        assert.equal(request.tools.some(tool => tool.name === 'machine_search' || tool.name === 'list_machine_roots'), false);
         if (calls++ === 0) request.onEvent({ type: 'tool_call', toolCall: { id: 'cross-project', name: 'get_project', arguments: JSON.stringify({ projectId: f.b.id }) } });
         else request.onEvent({ type: 'text_delta', text: 'scope done' });
         return { message: calls === 1 ? '' : 'scope done' };
@@ -147,6 +156,7 @@ it('real orchestrator excludes global recall, unknown tools and other-project re
     assert.equal(contexts.join('').includes('GLOBAL-SECRET'), false);
     assert.equal(contexts.join('').includes('B-SECRET'), false);
     assert.equal(contexts.join('').includes('private-b-marker'), false);
+    assert.equal(contexts.join('').includes('PRIVATE-MACHINE-ROOT'), false);
     assert.equal(f.ledger.get(f.runId)?.status, 'completed');
   } finally { f.cleanup(); }
 });
@@ -205,6 +215,41 @@ it('session and packet hints resolve actual resources; lists omit another projec
     assert.deepEqual(packets.taskPackets, []);
     const overview = (await f.call('pm_overview', {})).output as { projects: { id: string }[] };
     assert.deepEqual(overview.projects.map(project => project.id), [f.a.id]);
+  } finally { f.cleanup(); }
+});
+
+it('session authority denials name the out-of-scope owner and offer create_session as the in-scope escape hatch', async () => {
+  const f = fixture(); try {
+    const sessions = new SessionRepository(f.db, f.user.id);
+    const bSession = sessions.create({ projectId: f.b.id, name: 'b', aiTool: 'pi', workingDir: f.b.path });
+    const aSession = sessions.create({ projectId: f.a.id, name: 'a', aiTool: 'pi', workingDir: f.a.path });
+    // The reported loop: the model remembered another project's pi session and
+    // kept start_session-ing it. The denial must say so and stop the retry loop.
+    const denied = await f.call('start_session', { sessionId: bSession.id });
+    assert.equal(denied.ok, false);
+    assert.match(denied.error!, /CHANNEL_AUTHORITY_REJECTED: that session.*belongs to project .* which is outside this run's selected project/u);
+    assert.match(denied.error!, /use create_session/u);
+    // A fresh session outside the selected project is refused before preflight.
+    const deniedCreate = await f.call('create_session', { projectId: f.b.id, aiTool: 'pi' });
+    assert.equal(deniedCreate.ok, false);
+    assert.match(deniedCreate.error!, /CHANNEL_AUTHORITY_REJECTED: project .* is outside this run's selected project/u);
+    // Inside the scope the call sails past authority into the approval gate,
+    // proving the project selection gates correctly (no preview intent exists
+    // for a direct executeAgentTool call, so the runtime is never asked).
+    assert.equal((await f.call('create_session', { projectId: f.a.id, aiTool: 'pi' })).error, 'Platform write requires an approved action intent');
+    assert.equal((await f.call('start_session', { sessionId: aSession.id })).error, 'Platform write requires an approved action intent');
+  } finally { f.cleanup(); }
+});
+
+it('create_session joins the session-runtime plane: visible with a manager, excluded without one', () => {
+  const f = fixture(); try {
+    const input = f.turn();
+    const withRuntime = computeToolSurface(input, { registry: f.registry, hasSessionManager: true });
+    assert.equal(withRuntime.visible.some(tool => tool.name === 'create_session'), true);
+    assert.equal(withRuntime.visible.some(tool => tool.name === 'start_session'), true);
+    const withoutRuntime = computeToolSurface(input, { registry: f.registry, hasSessionManager: false });
+    assert.equal(withoutRuntime.visible.some(tool => tool.name === 'create_session'), false);
+    assert.equal(withoutRuntime.exclusion('create_session')?.layer, 'session-runtime');
   } finally { f.cleanup(); }
 });
 

@@ -1030,6 +1030,13 @@
       "when": 1793620299655,
       "tag": "0147_conversation_project_context",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1793700000000,
+      "tag": "0148_copilot_machine_roots",
+      "breakpoints": true
     }
   ]
 }

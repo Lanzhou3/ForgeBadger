@@ -12,6 +12,8 @@ import { createManagementCommands } from '../project-manager/management.js';
 import { z } from 'zod';
 import { mkdirSync, statSync } from 'node:fs';
 import { ProjectRepository } from '../../db/repositories/project-repository.js';
+import { CopilotMachineRootRepository } from '../../db/repositories/copilot-machine-root-repository.js';
+import { validateProjectRoot } from '../../lib/safe-resolve.js';
 import { SessionRepository } from '../../db/repositories/session-repository.js';
 import { ProjectManagerRepository } from '../../db/repositories/project-manager-repository.js';
 import { TemplateRepository } from '../../db/repositories/template-repository.js';
@@ -57,6 +59,8 @@ function terminalProgressEmitter(ctx: CommandContext, projectId: string, command
     };
 }
 export const memoryWriteInput = z.object({ kind: z.enum(['fact', 'preference', 'decision', 'project_note']), scope: z.enum(['global', 'project', 'session']), text: z.string().min(1).max(8192), projectId: id.optional(), conversationId: id.optional(), metadata: z.record(z.unknown()).optional() }).strict();
+export const machineRootRegisterInput = z.object({ label: z.string().trim().min(1).max(200), path: z.string().trim().min(1).max(1024) }).strict();
+export const machineRootUnregisterInput = z.object({ rootId: id }).strict();
 function project(ctx: CommandContext, id: string) {
     const p = new ProjectRepository(ctx.db, ctx.userId).getById(id);
     if (!p)
@@ -262,6 +266,38 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
             execute(ctx, input) {
                 const v = memoryWriteInput.parse(input);
                 return new AgentMemoryRepository(ctx.db, ctx.userId).create({ kind: v.kind, scope: v.scope, text: v.text, ...(v.projectId ? { projectId: v.projectId } : {}), ...(v.conversationId ? { conversationId: v.conversationId } : {}), ...(v.metadata ? { metadata: v.metadata } : {}) });
+            } }),
+        command({ id: 'machine.register_root', effect: 'database', inputSchema: machineRootRegisterInput,
+            resolve(_ctx, input) {
+                const v = machineRootRegisterInput.parse(input);
+                const root = canonicalRoot(v.path);
+                return { projectIds: [], rootPaths: [root], revision: root };
+            },
+            execute(ctx, input) {
+                const v = machineRootRegisterInput.parse(input);
+                const root = canonicalRoot(v.path);
+                if (!statSync(root, { throwIfNoEntry: false })?.isDirectory())
+                    throw new Error('Machine root must be an existing directory');
+                validateProjectRoot(root);
+                const created = new CopilotMachineRootRepository(ctx.db, ctx.userId).register(v.label, root);
+                if (!created)
+                    throw new Error('MACHINE_ROOT_ALREADY_REGISTERED');
+                return created;
+            } }),
+        command({ id: 'machine.unregister_root', effect: 'database', inputSchema: machineRootUnregisterInput,
+            resolve(ctx, input) {
+                const v = machineRootUnregisterInput.parse(input);
+                const root = new CopilotMachineRootRepository(ctx.db, ctx.userId).getById(v.rootId);
+                if (!root)
+                    throw new Error('MACHINE_ROOT_NOT_FOUND');
+                return { projectIds: [], rootPaths: [root.path], revision: root.path };
+            },
+            execute(ctx, input) {
+                const v = machineRootUnregisterInput.parse(input);
+                const ok = new CopilotMachineRootRepository(ctx.db, ctx.userId).unregister(v.rootId);
+                if (!ok)
+                    throw new Error('MACHINE_ROOT_NOT_FOUND');
+                return { rootId: v.rootId, unregistered: true };
             } })
     ];
     commands.push(
