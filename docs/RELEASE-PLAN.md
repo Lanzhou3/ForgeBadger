@@ -436,6 +436,47 @@ to move a dist-tag back; do not unpublish as an automatic rollback.
 - The npm build bundles the Web workspace's complete React and React DOM
   packages so the standalone server can start in a multi-version workspace.
 
+### 2026-11-12 candidate: 0.2.0-beta.2
+
+- Reviewed upstream baseline: `e6b898b1d8184b489927fba12e79e895ae8667eb`.
+  Corrections are committed through `0e8bd398e836e4f6a07e82f19091ff6d558bafe3`;
+  the candidate commit adds this release record and version. Channel: `beta`.
+  Keep the existing `latest=0.1.3` tag unchanged.
+- Changes include the latest console themes, Copilot transcript/workflow and
+  owner-registered local-search updates, plus these reviewed corrections:
+  - Query and glob matching use a memory-limited, cancellable Worker with a
+    two-second deadline and bounded concurrency instead of the Gateway thread.
+  - Native CLI history discovery no longer truncates at 256/64 artifacts;
+    Claude fallback ranks matching transcripts by modification time. Metadata
+    reads are bounded, and stored Claude IDs are matched exactly.
+  - Copilot/MCP stop requests retain their observed target fields through
+    strict validation. Tenant, token, expiry, runtime-generation, approval and
+    idempotency checks remain in place.
+  - Registration translations stay consistent while the Suspense boundary
+    hydrates. Browser smoke now rejects uncaught page errors. Historical
+    migration/Skill fixtures and subpixel layout assertions match their contracts.
+- Verification on macOS arm64, Node `24.16.0`, pnpm `12.6.0`:
+  - Gateway full regression with normal host process permissions: **3337 total,
+    3325 passed, 0 failed, 12 skipped**. Skips are 11 Linux-specific cases and
+    one explicitly gated compiled-daemon case; physical Windows is unverified.
+    The stop/fixture subset passed **65/65** with independent Gate 1/2/3 review.
+  - Web **1273/1273**, CLI **127/127** (after version bump), Relay **2/2**,
+    Companion **4/4**, and root script harness **137/137** passed.
+  - Frozen-lockfile installation, workspace typecheck, affected builds, brand,
+    migration, trial-readiness and whitespace checks passed. A concurrent pnpm
+    auto-install race was resolved by serial installation and typecheck rerun.
+  - Production-build Chromium smoke: **8/8** passed, including real-Gateway
+    account/project/Skill/config export and mocked theme, shell-choice and
+    desktop/mobile transcript interactions. Local Skill sources were isolated;
+    the preinstalled Chromium executable was supplied through the supported
+    environment override. A dev-server-only theme CSS failure is superseded by
+    this production-build verification, not counted as a passing dev result.
+- The frozen tarball must still pass the install/startup/real-PTY package smoke
+  and integrity comparison below before publication. Package evidence is
+  recorded in the publication record after the candidate commit is frozen.
+- Existing caveats remain: physical Windows/ConPTY, WSL and live AI-provider
+  execution were not tested. This beta does not claim those external gates.
+
 ## 7. Release Acceptance
 
 A release candidate is acceptable only when:
