@@ -477,6 +477,37 @@ to move a dist-tag back; do not unpublish as an automatic rollback.
 - Existing caveats remain: physical Windows/ConPTY, WSL and live AI-provider
   execution were not tested. This beta does not claim those external gates.
 
+### 2026-11-12 publication: 0.2.0-beta.2
+
+- Source: `15b40fb16eab48c8d7864db7adf26bd3407bc556`. The exact frozen
+  tarball passed install, doctor, Gateway/Web startup, auth/project import and
+  real Session Server PTY input/output/stop before publication. The compiled
+  daemon lifecycle case was explicitly enabled and passed separately.
+- npm accepted the upload after native maintainer authentication. Its
+  automated review subsequently completed; `beta=0.2.0-beta.2` and
+  `latest=0.1.3` were confirmed from the public registry.
+- Public registry SHA-512 integrity:
+  `sha512-Gk9rWrAX4nuw0ugCMiYnsik8X45ycJnmCv74X5eEuZAOkw8psyYGUmWenPBjp6rqpWV3hoLTjC3hW2lR3VPPFg==`.
+  A complete public tarball download also matched the tested tarball's SHA-256
+  `f7d8283e16999513633bf674966c70dfc6fa16cf267ebeae292c31f34df766e3`.
+- A second registry installation stalled downloading the package and was
+  stopped; it is not reported as a passing install. The maintainer requested
+  proceeding directly to stable after the byte-for-byte public artifact check,
+  reusing the successful frozen-tarball runtime smoke above.
+
+### 2026-11-12 stable candidate: 0.2.0
+
+- Explicitly authorized by the maintainer after beta publication. Only the CLI
+  package version changes; runtime source remains the tested beta source.
+  Reuse the frozen Gateway/Web runtime and compare every packed file with the
+  published beta, permitting only the package version change.
+- Reuse the unchanged-source automated evidence recorded above. Rerun the
+  version-sensitive CLI tests, package verification and archive integrity checks.
+  Publish the checked tarball on `latest`, without repeating the stalled public
+  installation. Registry availability and integrity must still be confirmed.
+- Physical Windows/ConPTY, WSL and live AI-provider execution remain unverified;
+  stable publication does not remove these platform/provider caveats.
+
 ## 7. Release Acceptance
 
 A release candidate is acceptable only when:
