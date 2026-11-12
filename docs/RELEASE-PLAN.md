@@ -508,7 +508,7 @@ to move a dist-tag back; do not unpublish as an automatic rollback.
 - Physical Windows/ConPTY, WSL and live AI-provider execution remain unverified;
   stable publication does not remove these platform/provider caveats.
 
-### 2026-11-12 stable publication submission: 0.2.0
+### 2026-11-12 stable publication: 0.2.0
 
 - Source: `ec753dbf19f5eeea8b92e89e7c7aa015309f6485`. CLI tests passed
   **127/127**, package verification passed, and the built CLI reports `0.2.0`.
@@ -524,8 +524,11 @@ to move a dist-tag back; do not unpublish as an automatic rollback.
 - The first upload encountered a connection reset and the maintainer version
   history confirmed no stable version had been received. A retry completed
   native maintainer authentication and npm accepted `forgebadger@0.2.0` with
-  explicit `--tag latest` (publish exit 0). Public availability is pending npm's
-  automated review; acceptance alone is not a successful public install.
+  explicit `--tag latest` (publish exit 0). Automated review completed and the
+  exact public version's integrity matched the checked stable archive.
+- Confirmed public tags: `latest=0.2.0`, `beta=0.2.0-beta.2`. Source and annotated
+  tags `v0.2.0-beta.2` / `v0.2.0` were pushed to GitHub. No GitHub Release,
+  new CI result, provenance attestation or second public install is claimed.
 
 ## 7. Release Acceptance
 
