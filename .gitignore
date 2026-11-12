@@ -116,6 +116,7 @@ packages/gateway/pty-attach-e2e.mts
 
 # Local scratch / one-off debug scripts kept in the workspace but never shipped.
 packages/gateway/scratch-*.ts
+packages/gateway/scripts-tmp/
 
 # One-off local port-fix debug scripts (never tracked).
 logs/portfix*.ps1
