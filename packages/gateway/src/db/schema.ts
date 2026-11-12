@@ -642,6 +642,8 @@ export const sessions = sqliteTable(
     status: text("status").notNull().default("idle"),
     attachToken: text("attach_token").notNull().default(""),
     runtimeSessionName: text("runtime_session_name"),
+    /** Native CLI session id (claude/opencode/kimi/pi/codex) for resume on relaunch. */
+    nativeSessionId: text("native_session_id"),
     workingDir: text("working_dir").notNull(),
     credentialMode: text("credential_mode").notNull().default("host_environment"),
     lastPrompt: text("last_prompt"),

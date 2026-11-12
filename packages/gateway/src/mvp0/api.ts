@@ -206,6 +206,7 @@ export function createMvp0Api(options: Mvp0ApiOptions) {
         status: session.status,
         attachToken: session.attachToken,
         runtimeSessionName: session.runtimeSessionName,
+        nativeSessionId: null,
         workingDir: project.path,
         credentialMode: input.credentialMode,
         apiKeyId: null,

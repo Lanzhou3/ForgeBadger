@@ -4,7 +4,7 @@ import { notificationContext } from './notification-context.js';
 import { streamWithContextRecovery } from './context-recovery.js';
 import { hasNoProgress } from './no-progress.js';
 import { renderRunEnding } from './run-ending.js';
-import { repeatStallDecision, gentleRepeatReminder, detailedRepeatReminder, REPEAT_STALL_STOP_REASON, DEFAULT_REPEAT_NAME_THRESHOLD } from './repeat-tool-guard.js';
+import { repeatStallDecision, gentleRepeatReminder, detailedRepeatReminder } from './repeat-tool-guard.js';
 import { goalContextMessage } from './goal-context.js';
 import { CopilotGoalStore } from './goal-store.js';
 import { evaluateGoalContinuation } from './goal-driver.js';
@@ -268,18 +268,13 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 ledger.finish(c, 'stopped', 'COPILOT_NO_PROGRESS');
                 emit(ledger, c.runId); return;
             }
-            // Name-level repeat stall: the same tool called streak-many times
-            // consecutively (arguments may differ, rejected calls count). The
-            // hard budget stays the backstop; this guard must trip first.
+            // DSH-style advisory repeat guard: reminders only at the exact
+            // threshold streaks (3/5/8), never a stop. A repeating run ends by
+            // its step budget or by the owner cancelling it — the guard
+            // advises, it does not decide for the owner.
             const stall = repeatStallDecision({ steps: ledger.steps(c.runId) });
-            if (stall.decision === 'stop') {
-                const ending = renderRunEnding(deps.db, ledger.userId, c.runId, REPEAT_STALL_STOP_REASON);
-                if (ending) ledger.append(c.runId, { role: 'assistant', kind: 'text', content: ending });
-                ledger.finish(c, 'stopped', REPEAT_STALL_STOP_REASON);
-                emit(ledger, c.runId); return;
-            }
             const repeatReminder = stall.decision === 'remind' && stall.toolName
-                ? (stall.streak === DEFAULT_REPEAT_NAME_THRESHOLD ? gentleRepeatReminder(stall.toolName) : detailedRepeatReminder(stall.toolName, stall.streak!))
+                ? (stall.tier === 'gentle' ? gentleRepeatReminder(stall.toolName) : detailedRepeatReminder(stall.toolName, stall.streak!, stall.preview))
                 : undefined;
             const step = ledger.modelStep(c);
             if (!step || !live())

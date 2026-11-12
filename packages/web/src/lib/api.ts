@@ -291,6 +291,8 @@ export interface Session {
   attachToken?: string;
   /** Session Server runtime session identifier. */
   runtimeSessionName?: string | null;
+  /** Native CLI session id; when present, relaunch resumes that conversation. */
+  nativeSessionId?: string | null;
   status: string;
   name?: string;
   projectId?: string;
@@ -3009,8 +3011,8 @@ export async function getSession(id: string): Promise<{ session: Session }> {
   return fetchJson(`/api/v1/sessions/${id}`) as Promise<{ session: Session }>;
 }
 
-export async function startSession(id: string): Promise<unknown> {
-  return fetchJson(`/api/v1/sessions/${id}/start`, { method: "POST" });
+export async function startSession(id: string, options?: { resume?: boolean }): Promise<unknown> {
+  return fetchJson(`/api/v1/sessions/${id}/start`, { method: "POST", body: options?.resume !== undefined ? JSON.stringify({ resume: options.resume }) : undefined });
 }
 
 export async function stopSession(id: string): Promise<{ session: { warning?: string; terminalStopped?: boolean; stopScope?: string; externalExecutionStopped?: null } }> {

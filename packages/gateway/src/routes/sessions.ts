@@ -452,7 +452,12 @@ export function createSessionRoutes(
       }
       try {
         const actions = new PlatformActions({ db, userId, masterKey, sessionManager, eventBus, adapterCommandRunner }, createPlatformCommands());
-        const result = await actions.executeOwner(`session.${action}`, { sessionId: req.params.id }, randomUUID());
+        // session.start accepts an optional { resume: false } body that forces a
+        // fresh conversation; every other action takes the bare session id.
+        const commandInput = action === "start" && req.body && typeof req.body.resume === "boolean"
+          ? { sessionId: req.params.id, resume: req.body.resume as boolean }
+          : { sessionId: req.params.id };
+        const result = await actions.executeOwner(`session.${action}`, commandInput, randomUUID());
         res.json({code:0,data:action === "takeover" ? result : {session:result},message:""});
       } catch(error) {
         const detail = error as Error & {httpStatus?:number;details?:unknown};

@@ -592,3 +592,119 @@ async function makeRequest(
     });
   });
 }
+
+describe("native session id capture from hooks", () => {
+  let db: Database;
+  let eventBus: ForgeBadgerEventBus;
+
+  beforeEach(() => {
+    db = createTestDb();
+    eventBus = new ForgeBadgerEventBus();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("stores the CLI's native session id on the session row", () => {
+    const user = new UserRepository(db).create("native-id@example.com", "hash");
+    const project = new ProjectRepository(db, user.id).create({
+      name: "Native Id Project",
+      path: "/tmp/native-id-project",
+      aiTool: "claude"
+    });
+    const session = new SessionRepository(db, user.id).create({
+      projectId: project.id,
+      name: "Native Id Project",
+      aiTool: "claude",
+      workingDir: project.path,
+      attachToken: "native-token"
+    });
+    assert.equal(session.nativeSessionId, null);
+
+    const res = handleSessionNotificationHook(
+      db,
+      eventBus,
+      {
+        sessionId: session.id,
+        event: {
+          hook_event_name: "UserPromptSubmit",
+          prompt: "do the thing",
+          session_id: "01a176ff-ce02-7683-9a74-8df8c5f8e0fb",
+          turn_id: "turn-1"
+        }
+      },
+      "native-token"
+    );
+    assert.equal(res.status, 200);
+    assert.equal(
+      new SessionRepository(db, user.id).getById(session.id)?.nativeSessionId,
+      "01a176ff-ce02-7683-9a74-8df8c5f8e0fb"
+    );
+  });
+
+  it("latest-wins: a later hook from a forked conversation overwrites the stored id", () => {
+    const user = new UserRepository(db).create("native-fork@example.com", "hash");
+    const project = new ProjectRepository(db, user.id).create({
+      name: "Fork Project",
+      path: "/tmp/fork-project",
+      aiTool: "kimi"
+    });
+    const session = new SessionRepository(db, user.id).create({
+      projectId: project.id,
+      name: "Fork Project",
+      aiTool: "kimi",
+      workingDir: project.path,
+      attachToken: "fork-token"
+    });
+    for (const [nativeId, hookEvent] of [
+      ["11111111-aaaa-4bbb-8ccc-111111111111", "TaskStarted"],
+      ["22222222-bbbb-4ccc-8ddd-222222222222", "Stop"]
+    ] as const) {
+      const res = handleSessionNotificationHook(
+        db,
+        eventBus,
+        { sessionId: session.id, event: { hook_event_name: hookEvent, session_id: nativeId } },
+        "fork-token"
+      );
+      assert.equal(res.status, 200);
+    }
+    assert.equal(
+      new SessionRepository(db, user.id).getById(session.id)?.nativeSessionId,
+      "22222222-bbbb-4ccc-8ddd-222222222222"
+    );
+  });
+
+  it("subagent events do not hijack the parent session's native id", () => {
+    const user = new UserRepository(db).create("native-sub@example.com", "hash");
+    const project = new ProjectRepository(db, user.id).create({
+      name: "Sub Project",
+      path: "/tmp/sub-project",
+      aiTool: "claude"
+    });
+    const session = new SessionRepository(db, user.id).create({
+      projectId: project.id,
+      name: "Sub Project",
+      aiTool: "claude",
+      workingDir: project.path,
+      attachToken: "sub-token"
+    });
+    handleSessionNotificationHook(
+      db,
+      eventBus,
+      { sessionId: session.id, event: { hook_event_name: "TaskStarted", session_id: "11111111-aaaa-4bbb-8ccc-111111111111" } },
+      "sub-token"
+    );
+    const res = handleSessionNotificationHook(
+      db,
+      eventBus,
+      { sessionId: session.id, event: { hook_event_name: "Stop", session_id: "99999999-aaaa-4bbb-8ccc-999999999999", agent_id: "child-1" } },
+      "sub-token"
+    );
+    assert.equal(res.status, 200);
+    assert.equal(
+      new SessionRepository(db, user.id).getById(session.id)?.nativeSessionId,
+      "11111111-aaaa-4bbb-8ccc-111111111111"
+    );
+  });
+});

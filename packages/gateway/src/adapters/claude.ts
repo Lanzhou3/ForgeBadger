@@ -15,12 +15,17 @@ export interface ClaudeLaunchPlanInput {
   env?: Record<string, string>;
   secretEnvNames?: string[];
   pluginDirs?: string[] | undefined;
+  /** Native Claude Code session id; launches with `--resume <id>` when set. */
+  resumeSessionId?: string | undefined;
 }
 
 export function createClaudeLaunchPlan(input: ClaudeLaunchPlanInput): LaunchPlan {
   return {
     command: "claude",
-    args: pluginDirArgs(input.pluginDirs ?? []),
+    args: [
+      ...(input.resumeSessionId ? ["--resume", input.resumeSessionId] : []),
+      ...pluginDirArgs(input.pluginDirs ?? [])
+    ],
     cwd: input.projectRoot,
     env: input.env ?? {},
     // A worker ACK capability is a process-local secret even when Claude uses

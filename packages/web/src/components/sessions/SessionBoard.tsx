@@ -21,6 +21,7 @@ import { clampColumnWidth, moveColumnKey } from "./session-board-prefs";
 import {
   isRecentlyCreated,
   type SessionBoardColumnData,
+  type SessionStartOptions,
 } from "./session-board-utils";
 
 const EDGE_FADE_PX = 32;
@@ -48,7 +49,7 @@ interface SessionBoardProps {
   onColumnWidthChange: (width: number) => void;
   onColumnOrderChange: (order: string[]) => void;
   onOpenSession: (session: Session) => void;
-  onStartSession: (session: Session) => void;
+  onStartSession: (session: Session, options?: SessionStartOptions) => void;
   onStopSession: (session: Session) => void;
   onDeleteSession: (session: Session) => void;
 }

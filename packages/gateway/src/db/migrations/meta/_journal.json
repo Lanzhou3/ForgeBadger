@@ -1037,6 +1037,13 @@
       "when": 1793700000000,
       "tag": "0148_copilot_machine_roots",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1793800000000,
+      "tag": "0149_sessions_native_session_id",
+      "breakpoints": true
     }
   ]
 }

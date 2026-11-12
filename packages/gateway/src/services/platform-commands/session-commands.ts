@@ -11,10 +11,21 @@ import { recordActivity } from "../activity-events.js";
 import { recordSessionSnapshot } from "../session-snapshots.js";
 import { getAdapterLaunchStatus } from "../adapter-discovery.js";
 import { createLaunchPlan, createTerminalLaunchPlan, checkTerminalShell, resolveAvailableTerminalShell, normalizeSessionKind, prepareAdapterLaunchExtras, TERMINAL_SHELLS } from "../session-launch-plan.js";
+import { isNativeSessionResolvable, probeLatestNativeSessionId } from "../session-native-id.js";
 import { adapterIds } from "../../lib/adapter-ids.js";
 import { canonical } from "./actions.js";
 import type { CommandContext, PlatformCommand } from "./types.js";
 const inputSchema = z.object({ sessionId: z.string().min(1).max(128) }).strict();
+
+/**
+ * `session.start` input. `resume` is tri-state-free on purpose: omitted means
+ * "resume the native session when one is known" (the card-click default),
+ * `false` forces a fresh conversation and discards the stored handle.
+ */
+const startSessionInput = z.object({
+    sessionId: z.string().min(1).max(128),
+    resume: z.boolean().optional()
+}).strict();
 
 /**
  * `session.create` names the runtime kind explicitly (`aiTool` "terminal" for a
@@ -43,7 +54,7 @@ function createResources(ctx: CommandContext, input: unknown) {
     return { projectIds: [project.id], rootPaths: [project.path], revision: createHash("sha256").update(canonical(project)).digest("hex") };
 }
 function resolve(ctx: CommandContext, input: unknown, action: string) {
-    const parsed = (action === "stop" ? stopSessionInput : inputSchema).parse(input);
+    const parsed = (action === "stop" ? stopSessionInput : action === "start" ? startSessionInput : inputSchema).parse(input);
     const { sessionId } = parsed;
     const session = new SessionRepository(ctx.db, ctx.userId).getById(sessionId);
     if (!session || !new ProjectRepository(ctx.db, ctx.userId).getById(session.projectId))
@@ -53,15 +64,15 @@ function resolve(ctx: CommandContext, input: unknown, action: string) {
 }
 export function createSessionCommands(): PlatformCommand[] {
     return [createSessionCommand(), ...["start", "stop", "takeover"].map((action): PlatformCommand => ({
-        id: `session.${action}`, capability: `session.${action}`, effect: "external", inputSchema: action === "stop" ? stopSessionInput : inputSchema,
+        id: `session.${action}`, capability: `session.${action}`, effect: "external", inputSchema: action === "stop" ? stopSessionInput : action === "start" ? startSessionInput : inputSchema,
         resolve: (ctx, input) => resolve(ctx, input, action),
         prepare(ctx, input) {
-            return preflight(ctx, (action === "stop" ? stopSessionInput : inputSchema).parse(input).sessionId, action, input);
+            return preflight(ctx, (action === "stop" ? stopSessionInput : action === "start" ? startSessionInput : inputSchema).parse(input).sessionId, action, input);
         },
         execute(ctx, input) {
-            const { sessionId } = (action === "stop" ? stopSessionInput : inputSchema).parse(input);
             if (action === "start")
-                return start(ctx, sessionId);
+                return start(ctx, startSessionInput.parse(input));
+            const { sessionId } = inputSchema.parse(input);
             if (action === "stop")
                 return stop(ctx, stopSessionInput.parse(input));
             if (!ctx.sessionManager)
@@ -227,13 +238,13 @@ async function preflight(ctx: CommandContext, sessionId: string, action: string,
     else if (action === 'takeover' && !live)
         throw new PlatformNoEffectError("Session is not running");
 }
-async function start(ctx: CommandContext, sessionId: string) {
+async function start(ctx: CommandContext, input: { sessionId: string; resume?: boolean | undefined }) {
     const { db, userId, eventBus, adapterCommandRunner } = ctx;
     const sessionManager = ctx.sessionManager;
     if (!sessionManager)
         throw new Error("Session runtime unavailable");
     const sessionRepo = new SessionRepository(db, userId);
-    const dbSession = sessionRepo.getById(sessionId);
+    const dbSession = sessionRepo.getById(input.sessionId);
     if (!dbSession)
         throw new Error("Session not found");
     let effectsStarted = false;
@@ -244,15 +255,15 @@ async function start(ctx: CommandContext, sessionId: string) {
         authorizationPassed = true;
     };
     try {
-        return await sessionManager.runExclusive(sessionId, async () => {
+        return await sessionManager.runExclusive(input.sessionId, async () => {
             // Re-check state inside the mutex. A `running` claim is only a
             // conflict when a pty is genuinely alive; a stale claim (CLI exited
             // unobserved / daemon restart) is startable and gets healed by the
             // createSession below overwriting the row.
-            const fresh = sessionRepo.getById(sessionId);
+            const fresh = sessionRepo.getById(input.sessionId);
             if (
                 (fresh?.status === "running") &&
-                (await sessionManager.hasLiveTerminal(sessionId, fresh.runtimeSessionName ?? undefined))
+                (await sessionManager.hasLiveTerminal(input.sessionId, fresh.runtimeSessionName ?? undefined))
             ) {
                 throw new SessionConflictError("Session already running");
             }
@@ -265,6 +276,8 @@ async function start(ctx: CommandContext, sessionId: string) {
                 throw err;
             }
             let launchPlan;
+            let resumeId: string | undefined;
+            let handleWrite: string | null | undefined;
             if (kind === "terminal") {
                 const shell = await resolveAvailableTerminalShell(undefined, undefined, adapterCommandRunner);
                 const shellStatus = await checkTerminalShell(shell, undefined, undefined, adapterCommandRunner);
@@ -306,11 +319,36 @@ async function start(ctx: CommandContext, sessionId: string) {
                 authorize();
                 effectsStarted = true;
                 const pluginDirs = await prepareAdapterLaunchExtras(db, userId, adapter, dbSession.workingDir);
+                // Native session resume: the stored id (captured from CLI hooks)
+                // wins; otherwise probe the CLI's local session store once. An
+                // id whose artifact is gone is discarded and the session starts
+                // fresh instead of failing. An explicit resume:false starts a
+                // brand-new conversation and forgets the handle, because the
+                // new process is the session from now on. The row write is
+                // deferred past the final re-authorization (it is this
+                // command's own effect, like the attach-token rotation).
+                if (input.resume !== false) {
+                    let candidate = dbSession.nativeSessionId;
+                    if (!candidate)
+                        candidate = (await probeLatestNativeSessionId(adapter, dbSession.workingDir)) ?? null;
+                    if (candidate) {
+                        if (await isNativeSessionResolvable(adapter, candidate, dbSession.workingDir)) {
+                            resumeId = candidate;
+                            if (candidate !== dbSession.nativeSessionId)
+                                handleWrite = candidate;
+                        } else if (dbSession.nativeSessionId) {
+                            handleWrite = null;
+                        }
+                    }
+                } else if (dbSession.nativeSessionId) {
+                    handleWrite = null;
+                }
                 launchPlan = createLaunchPlan({
                     adapter,
                     projectRoot: dbSession.workingDir,
                     sessionId: dbSession.id,
-                    ...(pluginDirs.length > 0 ? { pluginDirs } : {})
+                    ...(pluginDirs.length > 0 ? { pluginDirs } : {}),
+                    ...(resumeId ? { resumeSessionId: resumeId } : {})
                 });
             }
             const attachToken = randomUUID();
@@ -328,7 +366,9 @@ async function start(ctx: CommandContext, sessionId: string) {
                 runtimeSessionName: session.runtimeSessionName,
                 lastActive: new Date()
             });
-            recordSessionActivity(db, eventBus, userId, updatedSession ?? dbSession, "session_started", "success", `Session ${dbSession.name} started`);
+            if (kind !== "terminal" && handleWrite !== undefined)
+                sessionRepo.update(dbSession.id, { nativeSessionId: handleWrite });
+            recordSessionActivity(db, eventBus, userId, updatedSession ?? dbSession, resumeId ? "session_resumed" : "session_started", "success", resumeId ? `Session ${dbSession.name} resumed` : `Session ${dbSession.name} started`);
             recordSessionSnapshot({
                 db,
                 userId,
@@ -345,15 +385,15 @@ async function start(ctx: CommandContext, sessionId: string) {
             throw error;
         if (error instanceof SessionConflictError)
             throw error;
-        sessionRepo.update(sessionId, { status: "error", attachToken: "", errorMessage: error instanceof Error ? error.message : String(error) });
+        sessionRepo.update(input.sessionId, { status: "error", attachToken: "", errorMessage: error instanceof Error ? error.message : String(error) });
         recordSessionActivity(db, eventBus, userId, dbSession, "session_error", "error", error instanceof Error ? error.message : "Session operation failed");
-        eventBus?.emitEvent({ type: "session_status_changed", userId, sessionId, oldStatus: dbSession.status, newStatus: "error" });
+        eventBus?.emitEvent({ type: "session_status_changed", userId, sessionId: input.sessionId, oldStatus: dbSession.status, newStatus: "error" });
         throw error;
     }
 }
 /** Shared runtime launch path: session.start and pm.task.execute both spawn the CLI through here. */
 export async function startSessionRuntime(ctx: CommandContext, sessionId: string) {
-    return start(ctx, sessionId);
+    return start(ctx, { sessionId });
 }
 async function stop(ctx: CommandContext, input: z.infer<typeof stopSessionInput>) {
     const { sessionId } = input;

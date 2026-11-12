@@ -24,6 +24,8 @@ export interface LaunchPlanInput {
   projectRoot: string;
   sessionId: string;
   pluginDirs?: string[];
+  /** Native CLI session id to resume; omitted for a fresh conversation. */
+  resumeSessionId?: string | undefined;
 }
 
 /**
@@ -54,7 +56,8 @@ export function createLaunchPlan(input: LaunchPlanInput): LaunchPlan {
     credentialMode: "host_environment",
     env,
     secretEnvNames: [],
-    pluginDirs: input.pluginDirs
+    pluginDirs: input.pluginDirs,
+    ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {})
   });
 }
 

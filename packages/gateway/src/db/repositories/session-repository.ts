@@ -31,6 +31,8 @@ export interface Session {
   status: string;
   attachToken: string;
   runtimeSessionName: string | null;
+  /** Native CLI session id used to resume the conversation on relaunch. */
+  nativeSessionId: string | null;
   workingDir: string;
   credentialMode: SessionCredentialMode;
   apiKeyId: string | null;
@@ -53,6 +55,7 @@ const sessionColumns = {
   status: sessions.status,
   attachToken: sessions.attachToken,
   runtimeSessionName: sessions.runtimeSessionName,
+  nativeSessionId: sessions.nativeSessionId,
   workingDir: sessions.workingDir,
   credentialMode: sessions.credentialMode,
   lastPrompt: sessions.lastPrompt,
@@ -162,6 +165,7 @@ export class SessionRepository {
     status: string;
     attachToken: string;
     runtimeSessionName: string | null;
+    nativeSessionId: string | null;
     credentialMode: SessionCredentialMode;
     apiKeyId: string | null;
     lastPrompt: string | null;
@@ -174,6 +178,7 @@ export class SessionRepository {
     if (input.status !== undefined) updateData.status = input.status;
     if (input.attachToken !== undefined) updateData.attachToken = input.attachToken;
     if (input.runtimeSessionName !== undefined) updateData.runtimeSessionName = input.runtimeSessionName;
+    if (input.nativeSessionId !== undefined) updateData.nativeSessionId = input.nativeSessionId;
     if (input.credentialMode !== undefined) updateData.credentialMode = input.credentialMode;
     if (input.apiKeyId !== undefined) updateData.apiKeyId = input.apiKeyId;
     if (input.lastPrompt !== undefined) updateData.lastPrompt = input.lastPrompt;

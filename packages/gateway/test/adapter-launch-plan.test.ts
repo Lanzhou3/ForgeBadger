@@ -88,4 +88,36 @@ describe("multi-adapter launch plans", () => {
   it("keeps provider-prefixed OpenCode model IDs unchanged", () => {
     assert.equal(formatAdapterModelId("opencode", "anthropic", "anthropic/claude-sonnet-4-5"), "anthropic/claude-sonnet-4-5");
   });
+
+  it("adds native-session resume args for every resume-capable adapter", () => {
+    const id = "01a176ff-ce02-7683-9a74-8df8c5f8e0fb";
+    const base = { projectRoot: "/workspace/app", credentialMode: "host_environment" as const };
+    const claude = createAdapterLaunchPlan({ ...base, adapter: "claude", resumeSessionId: id });
+    assert.deepEqual(claude.args, ["--resume", id]);
+    const codex = createAdapterLaunchPlan({ ...base, adapter: "codex", resumeSessionId: id });
+    assert.deepEqual(codex.args.slice(0, 2), ["resume", id]);
+    assert.equal(codex.args.includes("--no-daemon"), true);
+    for (const adapter of ["opencode", "kimi", "pi"] as const) {
+      const plan = createAdapterLaunchPlan({ ...base, adapter, resumeSessionId: id });
+      assert.deepEqual(plan.args, ["--session", id]);
+    }
+    // Zero-resume-surface adapters ignore the id entirely.
+    for (const adapter of ["grok", "mcode"] as const) {
+      const plan = createAdapterLaunchPlan({ ...base, adapter, resumeSessionId: id });
+      assert.deepEqual(plan.args, []);
+    }
+    // Fresh conversations keep the historical zero-resume shape.
+    assert.deepEqual(createAdapterLaunchPlan({ ...base, adapter: "claude" }).args, []);
+  });
+
+  it("creates a Claude launch plan with resume and plugin dirs", () => {
+    const plan = createAdapterLaunchPlan({
+      adapter: "claude",
+      projectRoot: "/workspace/app",
+      credentialMode: "host_environment",
+      resumeSessionId: "abc-123",
+      pluginDirs: ["/plugins/one"]
+    });
+    assert.deepEqual(plan.args, ["--resume", "abc-123", "--plugin-dir", "/plugins/one"]);
+  });
 });

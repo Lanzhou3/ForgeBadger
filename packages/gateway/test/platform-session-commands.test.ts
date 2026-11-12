@@ -230,3 +230,98 @@ test('session.create leaves no session row when the runtime cannot launch',async
  assert.equal(new SessionRepository(db,user.id).list().length,0,'no orphan session row');
  }finally{db.close();rmSync(root,{recursive:true,force:true});}
 });
+
+test('session.start resumes the stored native session when it still resolves', async () => {
+  const db = new Database(':memory:');
+  const workRoot = mkdtempSync(path.join(tmpdir(),'fb-resume-work-'));
+  try {
+    migrate(drizzle(db), {migrationsFolder:fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
+    const user = new UserRepository(db).create('resume-start@test.dev','hash');
+    const project = new ProjectRepository(db,user.id).create({name:'p',path:workRoot,aiTool:'opencode'});
+    const repo = new SessionRepository(db,user.id);
+    const session = repo.create({projectId:project.id,name:'s',aiTool:'opencode',workingDir:workRoot});
+    repo.update(session.id,{status:'exited',nativeSessionId:'native-opencode-1'});
+    let launchedArgs: string[] = [];
+    const manager = new InMemorySessionManager({
+      async createSession(input){
+        launchedArgs = input.args;
+        return {id:input.sessionId,userId:input.userId,attachToken:input.env.FORGEBADGER_SESSION_ID ?? 'tok',
+          runtimeSessionName:'rt-'+input.sessionId,launchPlan:{command:input.command,args:input.args,cwd:input.cwd,env:input.env,secretEnvNames:[],credentialMode:'host_environment'},status:'running',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+      },
+      async killSession(){},async listSessions(){return[];},async hasSession(){return false;},async capturePane(){return '';}
+    });
+    const actions = new PlatformActions({db,userId:user.id,sessionManager:manager,
+      adapterCommandRunner:async()=>({exitCode:0,stdout:'v1',stderr:''})},
+      new Map(createSessionCommands().map(c=>[c.id,c])));
+    await actions.executeOwner('session.start',{sessionId:session.id},'resume-run-1');
+    assert.deepEqual(launchedArgs,['--session','native-opencode-1']);
+    assert.equal(repo.getById(session.id)?.status,'running');
+    assert.equal(repo.getById(session.id)?.nativeSessionId,'native-opencode-1');
+    assert.deepEqual(db.prepare(`SELECT type FROM session_activities WHERE session_id=? ORDER BY rowid DESC LIMIT 1`).get(session.id),{type:'session_resumed'});
+  } finally { rmSync(workRoot,{recursive:true,force:true}); db.close(); }
+});
+
+test('session.start with resume:false forgets the native handle and starts fresh', async () => {
+  const db = new Database(':memory:');
+  const workRoot = mkdtempSync(path.join(tmpdir(),'fb-fresh-work-'));
+  try {
+    migrate(drizzle(db), {migrationsFolder:fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
+    const user = new UserRepository(db).create('fresh-start@test.dev','hash');
+    const project = new ProjectRepository(db,user.id).create({name:'p',path:workRoot,aiTool:'opencode'});
+    const repo = new SessionRepository(db,user.id);
+    const session = repo.create({projectId:project.id,name:'s',aiTool:'opencode',workingDir:workRoot});
+    repo.update(session.id,{status:'exited',nativeSessionId:'native-opencode-2'});
+    let launchedArgs: string[] = ['unexpected'];
+    const manager = new InMemorySessionManager({
+      async createSession(input){
+        launchedArgs = input.args;
+        return {id:input.sessionId,userId:input.userId,attachToken:'tok',
+          runtimeSessionName:'rt-'+input.sessionId,launchPlan:input.launchPlan,status:'running',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+      },
+      async killSession(){},async listSessions(){return[];},async hasSession(){return false;},async capturePane(){return '';}
+    });
+    const actions = new PlatformActions({db,userId:user.id,sessionManager:manager,
+      adapterCommandRunner:async()=>({exitCode:0,stdout:'v1',stderr:''})},
+      new Map(createSessionCommands().map(c=>[c.id,c])));
+    await actions.executeOwner('session.start',{sessionId:session.id,resume:false},'fresh-run-1');
+    assert.deepEqual(launchedArgs,[]);
+    assert.equal(repo.getById(session.id)?.nativeSessionId,null);
+  } finally { rmSync(workRoot,{recursive:true,force:true}); db.close(); }
+});
+
+test('session.start discards a stale native id whose artifact is gone (codex probe)', async () => {
+  const db = new Database(':memory:');
+  const codexHome = mkdtempSync(path.join(tmpdir(),'fb-codex-probe-'));
+  const workRoot = mkdtempSync(path.join(tmpdir(),'fb-stale-work-'));
+  const priorCodexHome = process.env.CODEX_HOME;
+  try {
+    migrate(drizzle(db), {migrationsFolder:fileURLToPath(new URL('../src/db/migrations', import.meta.url))});
+    process.env.CODEX_HOME = codexHome;
+    const user = new UserRepository(db).create('stale-start@test.dev','hash');
+    const project = new ProjectRepository(db,user.id).create({name:'p',path:workRoot,aiTool:'codex'});
+    const repo = new SessionRepository(db,user.id);
+    const session = repo.create({projectId:project.id,name:'s',aiTool:'codex',workingDir:workRoot});
+    repo.update(session.id,{status:'exited',nativeSessionId:'01a176ff-ce02-7683-9a74-8df8c5f8e0fb'});
+    let launchedArgs: string[] = ['unexpected'];
+    const manager = new InMemorySessionManager({
+      async createSession(input){
+        launchedArgs = input.args;
+        return {id:input.sessionId,userId:input.userId,attachToken:'tok',
+          runtimeSessionName:'rt-'+input.sessionId,launchPlan:input.launchPlan,status:'running',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+      },
+      async killSession(){},async listSessions(){return[];},async hasSession(){return false;},async capturePane(){return '';}
+    });
+    const actions = new PlatformActions({db,userId:user.id,sessionManager:manager,
+      adapterCommandRunner:async()=>({exitCode:0,stdout:'v1',stderr:''})},
+      new Map(createSessionCommands().map(c=>[c.id,c])));
+    await actions.executeOwner('session.start',{sessionId:session.id},'stale-run-1');
+    assert.equal(launchedArgs.includes('resume'),false);
+    assert.equal(repo.getById(session.id)?.nativeSessionId,null);
+  } finally {
+    if (priorCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = priorCodexHome;
+    rmSync(codexHome,{recursive:true,force:true});
+    rmSync(workRoot,{recursive:true,force:true});
+    db.close();
+  }
+});

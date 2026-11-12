@@ -147,12 +147,25 @@ export default function (pi) {
   const attachToken = process.env.FORGEBADGER_ATTACH_TOKEN || "";
   if (!sessionId || !gatewayUrl || !attachToken) return;
 
-  const post = async (hookEventName, extra) => {
+  // Native PI session id (the UUID of the session file). session_start/resume/
+  // fork all re-bind the session manager, so reading it per event tracks forks.
+  const nativeSessionId = (context) => {
+    try {
+      const value = context && context.sessionManager && context.sessionManager.getSessionId
+        ? context.sessionManager.getSessionId() : "";
+      return typeof value === "string" ? value : "";
+    } catch { return ""; }
+  };
+
+  const post = async (hookEventName, extra, context) => {
     try {
       const url =
         gatewayUrl.replace(/\\/+$/u, "") +
         "/api/v1/session-hooks/cli-notification/" +
         encodeURIComponent(sessionId);
+      const body = { hook_event_name: hookEventName, adapter: "pi", ...extra };
+      const nativeId = nativeSessionId(context);
+      if (nativeId) body.session_id = nativeId;
       const response = await fetch(url, {
         method: "POST",
         headers: {
@@ -160,7 +173,7 @@ export default function (pi) {
           "x-forgebadger-session-id": sessionId,
           "x-forgebadger-session-token": attachToken
         },
-        body: JSON.stringify({ hook_event_name: hookEventName, adapter: "pi", ...extra }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(4500)
       });
       if (!response.ok) {
@@ -190,14 +203,14 @@ export default function (pi) {
     if (context?.hasUI !== true) return;
     const reply = finalReply;
     finalReply = ""; active = false;
-    await post("Stop", reply ? { last_assistant_message: reply } : {});
+    await post("Stop", reply ? { last_assistant_message: reply } : {}, context);
   });
 
   pi.on("agent_start", async (_event, context) => {
     if (context?.hasUI !== true) return;
     if (!active) finalReply = "";
     active = true;
-    await post("TaskStarted");
+    await post("TaskStarted", {}, context);
   });
 
   pi.on("ui_prompt_start", (event, context) => {
@@ -206,14 +219,14 @@ export default function (pi) {
     const kind = typeof event.kind === "string" && event.kind ? event.kind : "input";
     post("PermissionRequest", {
       message: "PI is waiting for your " + kind + (title ? ": " + title : "")
-    });
+    }, context);
   });
 
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", async (_event, context) => {
     finalReply = ""; active = false;
     // Awaited: pi waits for session_shutdown handlers before process exit, so
     // the report lands instead of dying with the in-flight fetch.
-    await post("SessionEnd");
+    await post("SessionEnd", {}, context);
   });
 }
 `;

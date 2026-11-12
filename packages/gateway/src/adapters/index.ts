@@ -17,6 +17,11 @@ export interface AdapterLaunchPlanInput {
   secretEnvNames?: string[] | undefined;
   model?: AdapterModelSelection | undefined;
   pluginDirs?: string[] | undefined;
+  /**
+   * Native CLI session id to resume (claude `--resume`, codex `resume`,
+   * opencode/kimi/pi `--session`). Adapters without a resume surface ignore it.
+   */
+  resumeSessionId?: string | undefined;
 }
 
 export function createAdapterLaunchPlan(input: AdapterLaunchPlanInput): LaunchPlan {
@@ -27,12 +32,15 @@ export function createAdapterLaunchPlan(input: AdapterLaunchPlanInput): LaunchPl
         credentialMode: input.credentialMode,
         ...(input.env ? { env: input.env } : {}),
         ...(input.secretEnvNames ? { secretEnvNames: input.secretEnvNames } : {}),
-        ...(input.pluginDirs ? { pluginDirs: input.pluginDirs } : {})
+        ...(input.pluginDirs ? { pluginDirs: input.pluginDirs } : {}),
+        ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {})
       });
     case "opencode":
       return {
         command: "opencode",
-        args: modelArgs(input.adapter, input.model),
+        // --session <id> continues an existing session and creates it if
+        // missing, so a stale id degrades to a fresh session instead of failing.
+        args: [...resumeArgs("opencode", input.resumeSessionId), ...modelArgs(input.adapter, input.model)],
         cwd: input.projectRoot,
         env: input.env ?? {},
         secretEnvNames: input.secretEnvNames ?? [],
@@ -44,9 +52,13 @@ export function createAdapterLaunchPlan(input: AdapterLaunchPlanInput): LaunchPl
         // The shared Codex daemon retains its launch environment, including
         // another terminal's hook identity. Keep execution inside this PTY's
         // process tree so hooks inherit this session's id and attach token.
-        args: ["--no-daemon", "-c", 'tui.notifications=["approval-requested"]',
-          "-c", 'tui.notification_method="osc9"', "-c", 'tui.notification_condition="always"',
-          ...modelArgs(input.adapter, input.model)],
+        args: input.resumeSessionId
+          ? ["resume", input.resumeSessionId, "--no-daemon", "-c", 'tui.notifications=["approval-requested"]',
+            "-c", 'tui.notification_method="osc9"', "-c", 'tui.notification_condition="always"',
+            ...modelArgs(input.adapter, input.model)]
+          : ["--no-daemon", "-c", 'tui.notifications=["approval-requested"]',
+            "-c", 'tui.notification_method="osc9"', "-c", 'tui.notification_condition="always"',
+            ...modelArgs(input.adapter, input.model)],
         cwd: input.projectRoot,
         env: input.env ?? {},
         secretEnvNames: input.secretEnvNames ?? [],
@@ -55,7 +67,7 @@ export function createAdapterLaunchPlan(input: AdapterLaunchPlanInput): LaunchPl
     case "kimi":
       return {
         command: "kimi",
-        args: modelArgs(input.adapter, input.model),
+        args: [...resumeArgs("kimi", input.resumeSessionId), ...modelArgs(input.adapter, input.model)],
         cwd: input.projectRoot,
         env: input.env ?? {},
         secretEnvNames: input.secretEnvNames ?? [],
@@ -66,10 +78,11 @@ export function createAdapterLaunchPlan(input: AdapterLaunchPlanInput): LaunchPl
       // model, and credential selection live in the applied global config
       // (~/.pi/agent/models.json + settings.json defaultModel/defaultProvider),
       // never in launch-time args/env. `--provider`/`--model`/`--api-key`
-      // flags exist in pi but are intentionally not used.
+      // flags exist in pi but are intentionally not used. `--session <id>`
+      // opens a previous session by id when we know one.
       return {
         command: "pi",
-        args: [],
+        args: resumeArgs("pi", input.resumeSessionId),
         cwd: input.projectRoot,
         env: input.env ?? {},
         secretEnvNames: input.secretEnvNames ?? [],
@@ -101,6 +114,16 @@ export function createAdapterLaunchPlan(input: AdapterLaunchPlanInput): LaunchPl
         credentialMode: input.credentialMode
       };
   }
+}
+
+/** Per-adapter native-session resume flags; adapters without a resume
+ * surface return nothing. codex uses the `resume` subcommand instead. */
+function resumeArgs(adapter: AdapterId, resumeSessionId: string | undefined): string[] {
+  if (!resumeSessionId) return [];
+  if (adapter === "opencode" || adapter === "kimi" || adapter === "pi") {
+    return ["--session", resumeSessionId];
+  }
+  return [];
 }
 
 export function formatAdapterModelId(

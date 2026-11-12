@@ -21,7 +21,9 @@ import {
   formatColumnStats,
   formatSessionRelativeTime,
   pickSessionTitle,
+  shortNativeSessionId,
   type SessionBoardColumnData,
+  type SessionStartOptions,
 } from "./session-board-utils";
 
 interface SessionBoardListViewProps {
@@ -30,7 +32,7 @@ interface SessionBoardListViewProps {
   now: number | null;
   actionPending: boolean;
   onOpenSession: (session: Session) => void;
-  onStartSession: (session: Session) => void;
+  onStartSession: (session: Session, options?: SessionStartOptions) => void;
   onStopSession: (session: Session) => void;
   onDeleteSession: (session: Session) => void;
 }
@@ -108,7 +110,7 @@ interface SessionListRowProps {
   actionPending: boolean;
   language: Language;
   onOpen: (session: Session) => void;
-  onStart: (session: Session) => void;
+  onStart: (session: Session, options?: SessionStartOptions) => void;
   onStop: (session: Session) => void;
   onDelete: (session: Session) => void;
 }
@@ -149,6 +151,14 @@ function SessionListRow({
     >
       <SessionStatusDot status={session.status} />
       {session.aiTool ? <CliBrandChip aiTool={session.aiTool} /> : null}
+      {!isRunning && session.nativeSessionId ? (
+        <span
+          className="shrink-0 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+          title={`${t("sessions.nativeSessionBadge")}: ${session.nativeSessionId}`}
+        >
+          {shortNativeSessionId(session.nativeSessionId)}
+        </span>
+      ) : null}
       <span className="hidden w-28 shrink-0 truncate text-xs text-muted-foreground md:block" title={session.projectName}>
         {session.projectName}
       </span>
@@ -189,10 +199,21 @@ function SessionListRow({
                 {t("common.stop")}
               </DropdownMenuItem>
             ) : (
-              <DropdownMenuItem disabled={actionPending} onSelect={() => onStart(session)}>
-                <RotateCcw className="size-3.5" />
-                {t("common.start")}
-              </DropdownMenuItem>
+              <>
+                <DropdownMenuItem disabled={actionPending} onSelect={() => onStart(session)}>
+                  <RotateCcw className="size-3.5" />
+                  {t("common.start")}
+                </DropdownMenuItem>
+                {session.nativeSessionId ? (
+                  <DropdownMenuItem
+                    disabled={actionPending}
+                    onSelect={() => onStart(session, { fresh: true })}
+                  >
+                    <RotateCcw className="size-3.5" />
+                    {t("sessions.startFresh")}
+                  </DropdownMenuItem>
+                ) : null}
+              </>
             )}
             <DropdownMenuItem
               disabled={actionPending}

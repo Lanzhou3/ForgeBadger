@@ -30,6 +30,21 @@ export interface SessionTitle {
   showNoInputHint: boolean;
 }
 
+/**
+ * Optional flags for a session start. `fresh` forces a brand-new CLI
+ * conversation even when a native session id is stored; omitted means the
+ * Gateway default (resume the stored conversation when one exists).
+ */
+export interface SessionStartOptions {
+  fresh?: boolean;
+}
+
+/** Short display form of a native CLI session id (first 8 chars). */
+export function shortNativeSessionId(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return value.length > 8 ? `${value.slice(0, 8)}…` : value;
+}
+
 export function parseSessionTimestamp(value: string | number | null | undefined): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) && value > 0 ? value : null;

@@ -156,6 +156,13 @@ export function handleSessionNotificationHook(
 
   const native = nativePromptIdentity(parsed.event.session_id, parsed.event.turn_id);
   const isSubagent = parsed.event.agent_id !== undefined && parsed.event.agent_id !== null && parsed.event.agent_id !== '';
+  // The CLI's native conversation id is the resume handle for a future
+  // relaunch. Subagent events carry the child's own id and must not
+  // overwrite the parent session's handle. Latest-wins: a /fork or --fork
+  // inside the CLI keeps the row on the conversation that is actually live.
+  if (native && !isSubagent && session.nativeSessionId !== native.sessionId) {
+    new SessionRepository(db, session.userId).update(session.id, { nativeSessionId: native.sessionId });
+  }
   const adapter = parsed.event.adapter ?? session.aiTool;
   let cliSummary;
   try { cliSummary = observeCliHook(db, session, parsed.event, adapter); }

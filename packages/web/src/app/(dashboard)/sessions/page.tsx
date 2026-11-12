@@ -27,6 +27,7 @@ import {
   filterBoardSessions,
   groupSessionsIntoColumns,
   resolveSessionPrompt,
+  type SessionStartOptions,
 } from "@/components/sessions/session-board-utils";
 import type { Session } from "@/lib/api";
 import {
@@ -86,7 +87,8 @@ export default function SessionsPage() {
   };
 
   const startMutation = useMutation({
-    mutationFn: (id: string) => startSession(id),
+    mutationFn: (input: { id: string; fresh?: boolean }) =>
+      startSession(input.id, { resume: !input.fresh }),
     onSuccess: refreshSessions,
     onError: (error) => {
       toast.error(
@@ -263,7 +265,7 @@ export default function SessionsPage() {
 
   const sessionActions = {
     onOpenSession: openSession,
-    onStartSession: (session: Session) => startMutation.mutate(session.id),
+    onStartSession: (session: Session, options?: SessionStartOptions) => startMutation.mutate({ id: session.id, fresh: options?.fresh }),
     onStopSession: (session: Session) => stopMutation.mutate(session.id),
     onDeleteSession: (session: Session) => deleteMutation.mutate({ id: session.id }),
   };

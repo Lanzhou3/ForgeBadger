@@ -54,16 +54,16 @@ it('projects the stall reasons with histogram and goal, nothing else', () => {
       const step = ledger.addStep(runId, { kind: 'tool', toolCallId: query, toolName: 'discover_tools', inputJson: JSON.stringify({ query }) });
       db.prepare("UPDATE copilot_run_steps SET status='completed' WHERE id=?").run(step.id);
     }
-    for (const reason of ['cancelled_by_owner', 'goal_paused', 'COPILOT_CONTEXT_RECOVERY_INTERRUPTED', null]) {
+    for (const reason of ['cancelled_by_owner', 'goal_paused', 'COPILOT_CONTEXT_RECOVERY_INTERRUPTED', 'COPILOT_TOOL_REPEAT_STALL', null]) {
       assert.equal(renderRunEnding(db, user.id, runId, reason), undefined, `reason ${String(reason)} must not synthesize text`);
     }
-    assert.deepEqual([...CLOSING_STOP_REASONS].sort(), ['COPILOT_NO_PROGRESS', 'COPILOT_TOOL_REPEAT_STALL', 'step_budget_exhausted']);
+    assert.deepEqual([...CLOSING_STOP_REASONS].sort(), ['COPILOT_NO_PROGRESS', 'step_budget_exhausted']);
     const ending = renderRunEnding(db, user.id, runId, 'step_budget_exhausted')!;
     assert.match(ending, /步数预算用尽/);
     assert.match(ending, /discover_tools×3/);
     assert.match(ending, /新建一个pi会话/);
-    const stall = renderRunEnding(db, user.id, runId, 'COPILOT_TOOL_REPEAT_STALL')!;
-    assert.match(stall, /同一工具连续重复且未推进/);
+    const noProgress = renderRunEnding(db, user.id, runId, 'COPILOT_NO_PROGRESS')!;
+    assert.match(noProgress, /重复观察相同结果/);
   } finally { db.close(); }
 });
 
