@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,6 +77,22 @@ describe("native session probe (pi)", () => {
 });
 
 describe("native session probe (claude)", () => {
+  it("selects the most recently updated transcript rather than the highest UUID", async () => {
+    const home = makeHome();
+    try {
+      const oldId = "ffffffff-0000-4000-8000-111111111111";
+      const recentId = "11111111-0000-4000-8000-222222222222";
+      for (const [id, time] of [[oldId, "2026-01-01"], [recentId, "2026-11-12"]] as const) {
+        const file = `projects/demo/${id}.jsonl`;
+        write(home.dir, file, JSON.stringify({ type: "user", sessionId: id, cwd: WORKING_DIR }) + "\n");
+        utimesSync(path.join(home.dir, file), new Date(time), new Date(time));
+      }
+      assert.equal(await probeLatestNativeSessionId("claude", WORKING_DIR, {
+        env: { CLAUDE_CONFIG_DIR: home.dir }
+      }), recentId);
+    } finally { home.cleanup(); }
+  });
+
   it("returns the sessionId of the newest matching transcript", async () => {
     const home = makeHome();
     try {
@@ -92,7 +108,70 @@ describe("native session probe (claude)", () => {
   });
 });
 
+for (const adapter of ["codex", "pi", "claude"] as const) {
+  it(`${adapter}: finds a stored artifact and latest matching conversation beyond 256 older files`, async () => {
+    const home = makeHome();
+    try {
+      const id = "11111111-0000-4000-8000-222222222222";
+      const base = adapter === "claude" ? "projects" : "sessions";
+      const env = adapter === "codex" ? { CODEX_HOME: home.dir }
+        : adapter === "pi" ? { PI_CODING_AGENT_DIR: home.dir } : { CLAUDE_CONFIG_DIR: home.dir };
+      for (let index = 0; index < 270; index++) {
+        write(home.dir, `${base}/000-old/${String(index).padStart(3, "0")}.jsonl`, "{}\n");
+      }
+      const name = adapter === "codex" ? `rollout-2026-11-12-${id}.jsonl`
+        : adapter === "pi" ? `2026-11-12_${id}.jsonl` : `${id}.jsonl`;
+      const header = adapter === "codex" ? { type: "session_meta", payload: { session_id: id, cwd: WORKING_DIR } }
+        : adapter === "pi" ? { type: "session", id, cwd: WORKING_DIR } : { sessionId: id, cwd: WORKING_DIR };
+      write(home.dir, `${base}/zzz-recent/${name}`, JSON.stringify(header) + "\n");
+      assert.equal(await isNativeSessionResolvable(adapter, id, WORKING_DIR, { env }), true);
+      assert.equal(await probeLatestNativeSessionId(adapter, WORKING_DIR, { env }), id);
+      assert.equal(await isNativeSessionResolvable(adapter, "missing-id", WORKING_DIR, { env }), false);
+    } finally { home.cleanup(); }
+  });
+
+  it(`${adapter}: searches the requested project even behind 64 unrelated candidates`, async () => {
+    const home = makeHome();
+    try {
+      const id = "11111111-0000-4000-8000-222222222222";
+      const base = adapter === "claude" ? "projects" : "sessions";
+      const env = adapter === "codex" ? { CODEX_HOME: home.dir }
+        : adapter === "pi" ? { PI_CODING_AGENT_DIR: home.dir } : { CLAUDE_CONFIG_DIR: home.dir };
+      const record = adapter === "codex" ? { payload: { session_id: id, cwd: WORKING_DIR } }
+        : adapter === "pi" ? { type: "session", id, cwd: WORKING_DIR } : { sessionId: id, cwd: WORKING_DIR };
+      write(home.dir, `${base}/000-target/target.jsonl`, JSON.stringify(record) + "\n");
+      for (let index = 0; index < 65; index++) {
+        write(home.dir, `${base}/zzz-other/${index}.jsonl`, "{}\n");
+      }
+      assert.equal(await probeLatestNativeSessionId(adapter, WORKING_DIR, { env }), id);
+    } finally { home.cleanup(); }
+  });
+}
+
 describe("isNativeSessionResolvable", () => {
+  it("matches Claude IDs exactly and skips directory symlinks", async () => {
+    const home = makeHome();
+    try {
+      const env = { CLAUDE_CONFIG_DIR: home.dir };
+      write(home.dir, "projects/demo/prefix-target.jsonl", "{}\n");
+      assert.equal(await isNativeSessionResolvable("claude", "target", WORKING_DIR, { env }), false);
+      write(home.dir, "outside/target.jsonl", "{}\n");
+      symlinkSync(path.join(home.dir, "outside"), path.join(home.dir, "projects", "linked"), "junction");
+      assert.equal(await isNativeSessionResolvable("claude", "target", WORKING_DIR, { env }), false);
+    } finally { home.cleanup(); }
+  });
+
+  it("probes only the metadata line of large transcripts and skips oversized metadata", async () => {
+    const home = makeHome();
+    try {
+      const env = { CLAUDE_CONFIG_DIR: home.dir };
+      write(home.dir, "projects/demo/valid.jsonl", JSON.stringify({ sessionId: "valid", cwd: WORKING_DIR }) + "\n");
+      truncateSync(path.join(home.dir, "projects/demo/valid.jsonl"), 128 * 1024 * 1024);
+      write(home.dir, "projects/demo/oversized.jsonl", JSON.stringify({ padding: "x".repeat(1024 * 1024), sessionId: "oversized", cwd: WORKING_DIR }));
+      assert.equal(await probeLatestNativeSessionId("claude", WORKING_DIR, { env }), "valid");
+    } finally { home.cleanup(); }
+  });
+
   it("codex: true while the rollout file exists, false once it is gone", async () => {
     const home = makeHome();
     try {

@@ -4,7 +4,7 @@ import { createSessionCommands } from '../src/services/platform-commands/session
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -259,6 +259,50 @@ test('session.start resumes the stored native session when it still resolves', a
     assert.equal(repo.getById(session.id)?.nativeSessionId,'native-opencode-1');
     assert.deepEqual(db.prepare(`SELECT type FROM session_activities WHERE session_id=? ORDER BY rowid DESC LIMIT 1`).get(session.id),{type:'session_resumed'});
   } finally { rmSync(workRoot,{recursive:true,force:true}); db.close(); }
+});
+
+test('session.start preserves a valid stored Codex handle after 256 older artifacts', async () => {
+  const db = new Database(':memory:');
+  const workRoot = mkdtempSync(path.join(tmpdir(), 'fb-many-resume-'));
+  const codexHome = mkdtempSync(path.join(tmpdir(), 'fb-many-codex-'));
+  const priorCodexHome = process.env.CODEX_HOME;
+  try {
+    migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
+    process.env.CODEX_HOME = codexHome;
+    const user = new UserRepository(db).create('many-resume@test.dev', 'hash');
+    const project = new ProjectRepository(db, user.id).create({ name: 'p', path: workRoot, aiTool: 'codex' });
+    const repo = new SessionRepository(db, user.id);
+    const session = repo.create({ projectId: project.id, name: 's', aiTool: 'codex', workingDir: workRoot });
+    const nativeId = '01a176ff-ce02-7683-9a74-8df8c5f8e0fb';
+    repo.update(session.id, { status: 'exited', nativeSessionId: nativeId });
+    mkdirSync(path.join(codexHome, 'sessions/2025/01/01'), { recursive: true });
+    mkdirSync(path.join(codexHome, 'sessions/2026/11/12'), { recursive: true });
+    for (let index = 0; index < 270; index++)
+      writeFileSync(path.join(codexHome, `sessions/2025/01/01/old-${index}.jsonl`), '{}\n');
+    writeFileSync(path.join(codexHome, `sessions/2026/11/12/rollout-2026-11-12-${nativeId}.jsonl`), '{}\n');
+    let launchedArgs: string[] = [];
+    const manager = new InMemorySessionManager({
+      async createSession(input) {
+        launchedArgs = input.args;
+        return { id: input.sessionId, userId: input.userId, attachToken: 'tok',
+          runtimeSessionName: 'rt-' + input.sessionId, launchPlan: input.launchPlan, status: 'running',
+          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      },
+      async killSession() {}, async listSessions() { return []; }, async hasSession() { return false; }, async capturePane() { return ''; }
+    });
+    const actions = new PlatformActions({ db, userId: user.id, sessionManager: manager,
+      adapterCommandRunner: async () => ({ exitCode: 0, stdout: 'v1', stderr: '' }) },
+      new Map(createSessionCommands().map(command => [command.id, command])));
+    await actions.executeOwner('session.start', { sessionId: session.id }, 'many-resume-run');
+    assert.deepEqual(launchedArgs.slice(0, 2), ['resume', nativeId]);
+    assert.equal(repo.getById(session.id)?.nativeSessionId, nativeId);
+  } finally {
+    if (priorCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = priorCodexHome;
+    rmSync(workRoot, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
+    db.close();
+  }
 });
 
 test('session.start with resume:false forgets the native handle and starts fresh', async () => {

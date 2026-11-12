@@ -16,8 +16,8 @@
  * false, never an error, because resume selection is an optimization, not a
  * launch precondition.
  */
-import { readdir, readFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { constants } from "node:fs";
+import { open, opendir, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
 import type { AdapterId } from "./adapter-discovery.js";
@@ -28,7 +28,7 @@ export interface NativeSessionProbeOptions {
   homeDir?: string;
 }
 
-const MAX_PROBE_ARTIFACTS = 256;
+const MAX_METADATA_BYTES = 1024 * 1024;
 
 function probeRoot(adapter: AdapterId, options: NativeSessionProbeOptions): string | undefined {
   try {
@@ -55,37 +55,40 @@ function normalizeDir(value: string): string {
   return value.trim().replace(/\\/gu, "/").replace(/\/+$/u, "");
 }
 
-async function listFilesRecursive(root: string, stopAtDepth = 6): Promise<string[]> {
-  const out: string[] = [];
-  async function walk(dir: string, depth: number): Promise<void> {
-    if (depth > stopAtDepth || out.length >= MAX_PROBE_ARTIFACTS) return;
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        await walk(full, depth + 1);
-      } else if (entry.isFile()) {
-        out.push(full);
-      }
-      if (out.length >= MAX_PROBE_ARTIFACTS) return;
-    }
+// Stream all supported artifacts: a global file-count cap must never make a
+// known resume handle disappear. Directory symlinks are not traversed.
+async function* transcriptFiles(root: string, depth = 0): AsyncGenerator<string> {
+  if (depth > 6) return;
+  let directory;
+  try { directory = await opendir(root); }
+  catch { return; }
+  for await (const entry of directory) {
+    const full = path.join(root, entry.name);
+    if (entry.isDirectory()) yield* transcriptFiles(full, depth + 1);
+    else if (entry.isFile() && entry.name.endsWith(".jsonl")) yield full;
   }
-  await walk(root, 0);
-  return out;
 }
 
 async function firstJsonLine(filePath: string): Promise<Record<string, unknown> | undefined> {
   try {
-    const raw = await readFile(filePath, "utf8");
-    const line = raw.split(/\r?\n/u, 1)[0]?.trim();
-    if (!line) return undefined;
-    const parsed: unknown = JSON.parse(line);
-    return isRecord(parsed) ? parsed : undefined;
+    const file = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      if (!(await file.stat()).isFile()) return undefined;
+      const buffer = Buffer.alloc(16 * 1024);
+      const chunks: Buffer[] = [];
+      let size = 0;
+      while (size < MAX_METADATA_BYTES) {
+        const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, MAX_METADATA_BYTES - size), null);
+        if (!bytesRead) break;
+        const newline = buffer.subarray(0, bytesRead).indexOf(10);
+        chunks.push(Buffer.from(buffer.subarray(0, newline < 0 ? bytesRead : newline)));
+        size += bytesRead;
+        if (newline >= 0) break;
+        if (size === MAX_METADATA_BYTES) return undefined;
+      }
+      const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8").trim());
+      return isRecord(parsed) ? parsed : undefined;
+    } finally { await file.close(); }
   } catch {
     return undefined;
   }
@@ -93,6 +96,45 @@ async function firstJsonLine(filePath: string): Promise<Record<string, unknown> 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+type TranscriptAdapter = "claude" | "codex" | "pi";
+
+function transcriptIdentity(adapter: TranscriptAdapter, header: Record<string, unknown>) {
+  if (adapter === "codex") {
+    const payload = isRecord(header.payload) ? header.payload : {};
+    return { id: payload.session_id ?? payload.id, cwd: payload.cwd };
+  }
+  if (adapter === "pi") return { id: header.type === "session" ? header.id : undefined, cwd: header.cwd };
+  return { id: header.sessionId, cwd: header.cwd };
+}
+
+async function latestTranscript(adapter: TranscriptAdapter, root: string, workingDir: string): Promise<string | undefined> {
+  let latest: { id: string; file: string; modified: number } | undefined;
+  for await (const file of transcriptFiles(root)) {
+    const header = await firstJsonLine(file);
+    if (!header) continue;
+    const identity = transcriptIdentity(adapter, header);
+    if (typeof identity.id !== "string" || !identity.id || !sameWorkingDir(identity.cwd, workingDir)) continue;
+    // Codex/Pi filenames contain timestamps; Claude filenames are random UUIDs
+    // and must instead be ranked by the last transcript write.
+    const modified = adapter === "claude" ? (await stat(file).catch(() => undefined))?.mtimeMs : 0;
+    if (modified === undefined) continue;
+    if (!latest || modified > latest.modified || modified === latest.modified && file.localeCompare(latest.file) > 0)
+      latest = { id: identity.id, file, modified };
+  }
+  return latest?.id;
+}
+
+async function hasTranscript(adapter: TranscriptAdapter, root: string, nativeSessionId: string): Promise<boolean> {
+  for await (const file of transcriptFiles(root)) {
+    const name = path.basename(file);
+    const matches = adapter === "claude" ? name === `${nativeSessionId}.jsonl`
+      : adapter === "codex" ? name.startsWith("rollout-") && name.endsWith(`-${nativeSessionId}.jsonl`)
+      : name.endsWith(`_${nativeSessionId}.jsonl`);
+    if (matches) return true;
+  }
+  return false;
 }
 
 /**
@@ -105,22 +147,13 @@ export async function probeLatestNativeSessionId(
   workingDir: string,
   options: NativeSessionProbeOptions = {}
 ): Promise<string | undefined> {
-  const env = options.env ?? process.env;
   switch (adapter) {
-    case "codex": {
+    case "codex":
+    case "pi":
+    case "claude": {
       const root = probeRoot(adapter, options);
       if (!root) return undefined;
-      const files = await listFilesRecursive(path.join(root, "sessions"));
-      const newest = files.filter((f) => f.endsWith(".jsonl")).sort((a, b) => b.localeCompare(a)).slice(0, 64);
-      for (const file of newest) {
-        const meta = await firstJsonLine(file);
-        const payload = isRecord(meta?.payload) ? meta.payload : undefined;
-        if (payload && sameWorkingDir(payload.cwd, workingDir)) {
-          const id = typeof payload.session_id === "string" ? payload.session_id : undefined;
-          if (id) return id;
-        }
-      }
-      return undefined;
+      return latestTranscript(adapter, path.join(root, adapter === "claude" ? "projects" : "sessions"), workingDir);
     }
     case "kimi": {
       const root = probeRoot(adapter, options);
@@ -153,34 +186,6 @@ export async function probeLatestNativeSessionId(
       candidates.sort((a, b) => b.updatedAt - a.updatedAt);
       return candidates[0]?.id;
     }
-    case "pi": {
-      const root = probeRoot(adapter, options);
-      if (!root) return undefined;
-      const files = await listFilesRecursive(path.join(root, "sessions"));
-      const newest = files.filter((f) => f.endsWith(".jsonl")).sort((a, b) => b.localeCompare(a)).slice(0, 64);
-      for (const file of newest) {
-        const header = await firstJsonLine(file);
-        if (header?.type === "session" && sameWorkingDir(header.cwd, workingDir)) {
-          const id = typeof header.id === "string" ? header.id : undefined;
-          if (id) return id;
-        }
-      }
-      return undefined;
-    }
-    case "claude": {
-      const root = probeRoot(adapter, options);
-      if (!root) return undefined;
-      const files = await listFilesRecursive(path.join(root, "projects"));
-      const newest = files.filter((f) => f.endsWith(".jsonl")).sort((a, b) => b.localeCompare(a)).slice(0, 64);
-      for (const file of newest) {
-        const header = await firstJsonLine(file);
-        if (sameWorkingDir(header?.cwd, workingDir)) {
-          const sessionId = typeof header?.sessionId === "string" ? header.sessionId : undefined;
-          if (sessionId) return sessionId;
-        }
-      }
-      return undefined;
-    }
     default:
       // opencode resumes with --session <id> and creates the session when the
       // id is missing, so a stored id never needs disk verification; grok and
@@ -201,13 +206,13 @@ export async function isNativeSessionResolvable(
   options: NativeSessionProbeOptions = {}
 ): Promise<boolean> {
   if (!nativeSessionId.trim()) return false;
-  const env = options.env ?? process.env;
   switch (adapter) {
-    case "codex": {
+    case "codex":
+    case "pi":
+    case "claude": {
       const root = probeRoot(adapter, options);
       if (!root) return false;
-      const files = await listFilesRecursive(path.join(root, "sessions"));
-      return files.some((f) => f.endsWith(`-${nativeSessionId}.jsonl`));
+      return hasTranscript(adapter, path.join(root, adapter === "claude" ? "projects" : "sessions"), nativeSessionId);
     }
     case "kimi": {
       const root = probeRoot(adapter, options);
@@ -225,18 +230,6 @@ export async function isNativeSessionResolvable(
         if (state && (state.cwd === undefined || sameWorkingDir(state.cwd, workingDir))) return true;
       }
       return false;
-    }
-    case "pi": {
-      const root = probeRoot(adapter, options);
-      if (!root) return false;
-      const files = await listFilesRecursive(path.join(root, "sessions"));
-      return files.some((f) => f.endsWith(`_${nativeSessionId}.jsonl`));
-    }
-    case "claude": {
-      const root = probeRoot(adapter, options);
-      if (!root) return false;
-      const files = await listFilesRecursive(path.join(root, "projects"));
-      return files.some((f) => f.endsWith(`${nativeSessionId}.jsonl`));
     }
     case "opencode":
       return true;
