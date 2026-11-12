@@ -508,6 +508,25 @@ to move a dist-tag back; do not unpublish as an automatic rollback.
 - Physical Windows/ConPTY, WSL and live AI-provider execution remain unverified;
   stable publication does not remove these platform/provider caveats.
 
+### 2026-11-12 stable publication submission: 0.2.0
+
+- Source: `ec753dbf19f5eeea8b92e89e7c7aa015309f6485`. CLI tests passed
+  **127/127**, package verification passed, and the built CLI reports `0.2.0`.
+- The published beta archive was reused with only its package version changed,
+  preserving pnpm's existing prepack-script filtering. All **8717** archive
+  entries, runtime bytes and file modes were compared; only `package.json`'s
+  version differs. No additional runtime rebuild or installation is claimed.
+- Stable archive: **28,704,605 bytes**, SHA-256
+  `ed534c07d21d54a257c79ab2e0f1494b16e53624f7030a6a3fcde917725c3e90`;
+  SHA-512 integrity
+  `sha512-Ob/U3qbu7XTZPF9tVZQXCnh1Hg+FJL+eP1i+7BdZitFsFhrK4pLYYWf5jEMk3/u397FMOraqw1U+h+8+iTq5yg==`.
+  The npm publish dry run matched that integrity.
+- The first upload encountered a connection reset and the maintainer version
+  history confirmed no stable version had been received. A retry completed
+  native maintainer authentication and npm accepted `forgebadger@0.2.0` with
+  explicit `--tag latest` (publish exit 0). Public availability is pending npm's
+  automated review; acceptance alone is not a successful public install.
+
 ## 7. Release Acceptance
 
 A release candidate is acceptable only when:
