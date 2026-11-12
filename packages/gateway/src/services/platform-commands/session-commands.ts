@@ -72,9 +72,9 @@ export function createSessionCommands(): PlatformCommand[] {
         execute(ctx, input) {
             if (action === "start")
                 return start(ctx, startSessionInput.parse(input));
-            const { sessionId } = inputSchema.parse(input);
             if (action === "stop")
                 return stop(ctx, stopSessionInput.parse(input));
+            const { sessionId } = inputSchema.parse(input);
             if (!ctx.sessionManager)
                 throw new Error("Session runtime unavailable");
             ctx.sessionManager.takeoverSession(ctx.userId, sessionId);
