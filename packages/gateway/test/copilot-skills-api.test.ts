@@ -11,6 +11,7 @@ import { signJwt } from '../src/auth/jwt.js';
 import { createCopilotSkillRoutes } from '../src/routes/copilot-skills.js';
 import { createCopilotPlaybookRoutes } from '../src/routes/copilot-playbooks.js';
 import type { CopilotSkillDetail } from '../src/services/agent/skills/copilot-skill-service.js';
+import { BUILTIN_COPILOT_SKILLS } from '../src/services/agent/skills/copilot-skills.js';
 
 it('supports authenticated import/detail/update/toggle/history/rollback and legacy edits without cross-user or stale writes',async()=>{
  const db=new Database(':memory:');migrate(drizzle(db),{migrationsFolder: fileURLToPath(new URL('../src/db/migrations/', import.meta.url))});
@@ -25,7 +26,8 @@ it('supports authenticated import/detail/update/toggle/history/rollback and lega
  try {
   assert.equal((await fetch(base+'/skills')).status,401);
   const initial=await call('/skills');assert.equal(initial.status,200);const initialBody=await initial.json() as {data:{skills:CopilotSkillDetail[]}};
-  assert.equal(initialBody.data.skills.length,6);assert.ok(initialBody.data.skills.every(row=>!('files' in row)));
+  assert.deepEqual(initialBody.data.skills.map(row=>row.name).sort(),BUILTIN_COPILOT_SKILLS.map(row=>row.name).sort());
+  assert.ok(initialBody.data.skills.every(row=>!('files' in row)));
   assert.equal((await call('/skills/imports','POST',{source:{kind:'builtin'},files})).status,400);
   const response=await call('/skills/imports','POST',{source:{kind:'upload',label:'browser-folder'},files});assert.equal(response.status,201);const imported=await readSkill(response);
   assert.equal(imported.kind,'imported');assert.equal(imported.isEnabled,false);assert.deepEqual(imported.files,files);

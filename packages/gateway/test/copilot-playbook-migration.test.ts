@@ -67,7 +67,11 @@ it('upgrades populated 0081 preserving identities, overrides, disable state, cus
    assert.equal((restored.pragma('table_info(skills)') as {name:string}[]).some(c=>c.name==='runtime_target'),false);
    assert.equal((restored.prepare('SELECT content FROM skills WHERE id=?').get('legacy-0') as {content:string}).content,LEGACY_COPILOT_SKILLS[0]!.body);
    migrate(drizzle(restored),{migrationsFolder});
-   const legacyProjection = (rows: typeof catalog) => rows.map(({revisionId:_revisionId,updatedAt:_updatedAt,...row})=>row);
+   // The old backup predates newly bundled skills. Each independent upgrade
+   // creates those with fresh IDs; historical skills must retain their IDs.
+   const legacyIds = new Set(LEGACY_COPILOT_SKILLS.map((_,index)=>'legacy-'+index));
+   const legacyProjection = (rows: typeof catalog) => rows.map(({id,revisionId:_revisionId,updatedAt:_updatedAt,...row})=>
+    ({...row,...(legacyIds.has(id)?{id}:{})}));
    assert.deepEqual(legacyProjection(listCopilotPlaybooks(restored,user.id,{availableToolNames:[]})),legacyProjection(catalog));
   }finally{restored.close();}
  }finally{if(db?.open)db.close();rmSync(dir,{recursive:true,force:true});}

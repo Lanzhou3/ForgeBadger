@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { randomUUID } from 'node:crypto';
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,12 +27,17 @@ it('upgrades existing sessions without inventing native associations and can mig
     migrate(drizzle(db), { migrationsFolder: old });
     const user = new UserRepository(db).create('upgrade@test.dev', 'hash');
     const project = new ProjectRepository(db, user.id).create({ name: 'Project', path: temporary, aiTool: 'claude' });
+    // Seed the historical schema directly: today's repository includes columns
+    // that intentionally do not exist until later migrations have run.
+    const session = { id: randomUUID() };
+    db.prepare('INSERT INTO sessions(id,user_id,project_id,name,working_dir,ai_tool,last_prompt) VALUES(?,?,?,?,?,?,?)')
+      .run(session.id, user.id, project.id, 'Original session', temporary, 'claude', 'Old request without native identity');
+    migrate(drizzle(db), { migrationsFolder: root });
+    migrate(drizzle(db), { migrationsFolder: root });
     const sessions = new SessionRepository(db, user.id);
-    const session = sessions.create({ projectId: project.id, name: 'Original session', workingDir: temporary, aiTool: 'claude' });
-    sessions.update(session.id, { lastPrompt: 'Old request without native identity' });
-    migrate(drizzle(db), { migrationsFolder: root });
-    migrate(drizzle(db), { migrationsFolder: root });
     assert.equal(sessions.getById(session.id)?.name, 'Original session');
+    assert.equal(sessions.getById(session.id)?.lastPrompt, 'Old request without native identity');
+    assert.equal(sessions.getById(session.id)?.nativeSessionId, null);
     const prompts = new SessionNotificationPromptRepository(db, user.id);
     assert.equal(prompts.find(session.id, { sessionId: 'unknown-native' }), undefined);
     prompts.save(session.id, { sessionId: 'known-native' }, 'Fresh request');

@@ -31,7 +31,7 @@ it('renames persisted runtime identifiers without losing data and migrates only 
       const expected = (before[index] as Record<string, unknown>[]).map(({tmux_session, ...row}) => ({
         ...row,
         runtime_session_name: tmux_session,
-        ...(table === 'sessions' ? { last_prompt: null } : {})
+        ...(table === 'sessions' ? { last_prompt: null, native_session_id: null } : {})
       }));
       assert.deepEqual(db.prepare(`SELECT * FROM ${table}`).all(), expected);
       assert.ok(!(db.pragma(`table_info(${table})`) as {name:string}[]).some(column => column.name === 'tmux_session'));

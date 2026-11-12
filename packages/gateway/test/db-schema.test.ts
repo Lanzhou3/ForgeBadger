@@ -85,6 +85,7 @@ describe("db schema", () => {
       "copilot_goal_journal",
       "copilot_goal_tasks",
       "copilot_goals",
+      "copilot_machine_roots",
       "copilot_memory",
       "copilot_memory_fts",
       "copilot_memory_fts_config",

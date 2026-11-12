@@ -160,7 +160,7 @@ describe("CLI lifecycle notification settings", () => {
       assert.match(source, /pi\.on\("session_shutdown"/);
       assert.match(source, /await post\("Stop",/);
       assert.match(source, /"PermissionRequest"/);
-      assert.match(source, /await post\("SessionEnd"\)/);
+      assert.match(source, /await post\("SessionEnd",\s*\{\},\s*context\)/);
       assert.match(source, /adapter: "pi"/);
       // Idempotent: second call rewrites nothing.
       assert.equal((await ensurePiNotificationSettings()).changed, false);
