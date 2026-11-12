@@ -523,6 +523,14 @@ the agent use the approval-gated `register_machine_root` and
 paths or invoke these tools. `route_query` only classifies a query as direct or
 research and does not access the filesystem.
 
+`machine_search` evaluates query and glob patterns in a memory-limited worker
+with a two-second deadline for each page and supports run cancellation. Expensive
+patterns fail with `MACHINE_SEARCH_TIMEOUT`; invalid regexes fail with
+`MACHINE_SEARCH_INVALID_PATTERN`. At most four matching workers run concurrently;
+additional searches return `MACHINE_SEARCH_BUSY` and can be retried. Matching
+failures return no partial search results. File, tenant, pagination and redaction
+guards still apply.
+
 Run terminal states are `completed`, `failed`, `cancelled`, `stopped` (for example `step_budget_exhausted`) and `indeterminate` (unconfirmed side effects). `pending`, `running` and `awaiting_approval` remain active. Cancellation may retain an indeterminate write step; a later receipt records the outcome without reviving the run. There is no automatic retry endpoint for unknown writes.
 
 Approval lifecycle (2026-10-04): a verified `awaiting_approval` interval is

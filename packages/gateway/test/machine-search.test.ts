@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -12,6 +13,64 @@ import { CopilotMachineRootRepository } from '../src/db/repositories/copilot-mac
 import { createMachineSearchTools } from '../src/services/agent/tools/machine-search.js';
 import { createMachineRootListTools } from '../src/services/agent/tools/machine-roots.js';
 import { checkAgentScope } from '../src/services/platform-commands/agent-scope.js';
+
+// Run potentially blocking regressions in a disposable process, so a broken
+// matcher fails the test without hanging the entire Gateway test runner.
+async function isolatedPatternSearch(input: object, dir: string): Promise<{ error: string; heartbeats: number; recovered: boolean }> {
+  const moduleUrl = new URL('../src/services/agent/tools/machine-search.ts', import.meta.url).href;
+  const code = `
+    import Database from 'better-sqlite3';
+    import { createMachineSearchTools } from ${JSON.stringify(moduleUrl)};
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE copilot_machine_roots(id TEXT,user_id TEXT,label TEXT,path TEXT,created_at INTEGER)');
+    db.prepare('INSERT INTO copilot_machine_roots VALUES(?,?,?,?,?)').run('root','user','test',${JSON.stringify(dir)},0);
+    let heartbeats = 0;
+    const timer = setInterval(() => heartbeats++, 25);
+    let error = '';
+    let recovered = false;
+    try { await createMachineSearchTools()[0].execute(${JSON.stringify(input)}, {db,userId:'user'}); }
+    catch (failure) { error = failure instanceof Error ? failure.message : String(failure); }
+    try {
+      const next = await createMachineSearchTools()[0].execute({root:'root',query:'a'}, {db,userId:'user'});
+      recovered = next.matches.length === 1;
+    } finally { clearInterval(timer); db.close(); }
+    console.log(JSON.stringify({error,heartbeats,recovered}));
+  `;
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', code], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)), stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', chunk => { stdout += String(chunk); });
+    child.stderr.on('data', chunk => { stderr += String(chunk); });
+    const timer = setTimeout(() => child.kill('SIGKILL'), 8000);
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('close', (code, signal) => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error(`Pattern search did not finish: ${signal ?? code}; ${stderr}`));
+      try { resolve(JSON.parse(stdout) as { error: string; heartbeats: number; recovered: boolean }); }
+      catch (error) { reject(error); }
+    });
+  });
+}
+
+for (const pattern of [
+  { query: '(a+)+$', mode: 'regex' },
+  { query: '(a|aa)+$', mode: 'regex' },
+  { query: 'a', pathGlob: '*a'.repeat(24) + 'z' },
+]) {
+  it(`bounds expensive patterns and keeps the event loop responsive: ${JSON.stringify(pattern)}`, async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'fb-pattern-timeout-'));
+    try {
+      writeFileSync(path.join(dir, 'a'.repeat(100) + '.txt'), 'a'.repeat(100) + '!');
+      const result = await isolatedPatternSearch({ root: 'root', ...pattern }, dir);
+      assert.match(result.error, /MACHINE_SEARCH_TIMEOUT/);
+      assert.ok(result.heartbeats > 0, 'the Gateway event loop must continue while matching');
+      assert.equal(result.recovered, true, 'a normal search must succeed after the timed-out worker is terminated');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+}
 
 function fixture() {
   const db = new Database(':memory:'); db.pragma('foreign_keys=ON');
@@ -40,6 +99,26 @@ it('searches an owner-registered local root and returns redacted, line-numbered 
     assert.ok(String(out.matches[0].text).includes('needle'));
     const alpha = await runSearch(f, { root: root.id, query: 'answer' });
     assert.deepEqual(alpha.matches.map((m: any) => m.path), ['src/alpha.ts']);
+  } finally { f.db.close(); rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+it('preserves regex pagination, glob escaping, line numbers and redaction', async () => {
+  const f = fixture();
+  try {
+    writeFileSync(path.join(f.dir, 'a[1].txt'), 'needle one\nneedle two\nneedle sk-test-abcdefghijklmnopqrstuvwxyz1234567890\n');
+    writeFileSync(path.join(f.dir, 'a1.txt'), 'needle excluded\n');
+    const root = new CopilotMachineRootRepository(f.db, f.userId).register('home', f.dir)!;
+    const input = { root: root.id, query: 'needle.*', mode: 'regex', pathGlob: 'a[1].txt', limit: 1 };
+    const first = await runSearch(f, input);
+    assert.deepEqual(first.matches.map((match: { path: string; line: number }) => [match.path, match.line]), [['a[1].txt', 1]]);
+    const second = await runSearch(f, { ...input, offset: first.nextOffset, lineOffset: first.nextLineOffset });
+    assert.equal(second.matches[0].line, 2);
+    const third = await runSearch(f, { ...input, offset: second.nextOffset, lineOffset: second.nextLineOffset });
+    assert.equal(third.matches[0].line, 3);
+    assert.ok(!third.matches[0].text.includes('abcdefghijklmnopqrstuvwxyz1234567890'));
+    const exhausted = await runSearch(f, { ...input, offset: third.nextOffset, lineOffset: third.nextLineOffset });
+    assert.deepEqual(exhausted.matches, []);
+    assert.equal(exhausted.nextOffset, null);
   } finally { f.db.close(); rmSync(f.dir, { recursive: true, force: true }); }
 });
 

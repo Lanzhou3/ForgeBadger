@@ -4,6 +4,7 @@ import { sourcePathSchema } from '../../development/contracts.js';
 import { redactAgentText } from '../redaction.js';
 import { CopilotMachineRootRepository } from '../../../db/repositories/copilot-machine-root-repository.js';
 import type { AgentTool } from '../tool-registry.js';
+import { matchSearchPage } from './machine-search-matcher.js';
 
 const id = z.string().min(1).max(128);
 const readFileInput = z.object({
@@ -37,27 +38,6 @@ const inputSchema = z.object({
   limit: z.number().int().min(1).max(50).default(20),
 }).strict();
 
-// Self-contained glob: the search space is already '/'-normalized relative paths
-// (listSourceFiles joins with '/'; sourcePathSchema forbids backslash), so a
-// backslash-free converter is unambiguous on Windows, macOS and Linux alike.
-function globToRegExp(glob: string): RegExp {
-  let out = '^';
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i]!;
-    if (c === '*') {
-      if (glob[i + 1] === '*') { out += '.*'; i++; }
-      else out += '[^/]*';
-    } else if (c === '?') {
-      out += '[^/]';
-    } else if ('\\^$.|+()[]{}()'.includes(c)) {
-      out += '\\' + c;
-    } else {
-      out += c;
-    }
-  }
-  return new RegExp(out + '$');
-}
-
 /**
  * Read-only agent search over an owner-registered local root. This is the
  * machine-file half of "agent search": the orchestrator already drives the
@@ -82,43 +62,28 @@ export function createMachineSearchTools(): AgentTool[] {
         throw new Error('MACHINE_ROOT_NOT_FOUND: register this local path first with register_machine_root');
       const page = listSourceFiles(rootEntry.path, input.path, 100, input.offset);
       const nameFilter = input.extFilter ? new Set(input.extFilter.map((ext) => ext.replace(/^\./, '').toLowerCase())) : undefined;
-      const glob = input.pathGlob ? globToRegExp(input.pathGlob) : undefined;
-      const queryRe = input.mode === 'regex' ? new RegExp(input.query, 'i') : null;
-      const queryLower = input.query.toLowerCase();
-      const matches: Array<{ path: string; line: number; text: string }> = [];
-      let scanned = 0;
-      let resume: { nextOffset: number; nextLineOffset: number } | undefined;
-      for (const file of page.files) {
-        scanned++;
+      // Keep all filesystem/tenant guards here; the worker receives only the
+      // bounded snapshots and performs no filesystem operations of its own.
+      const files = page.files.map(file => {
         if (nameFilter) {
           const dot = file.lastIndexOf('.');
           if (!nameFilter.has(dot >= 0 ? file.slice(dot + 1).toLowerCase() : ''))
-            continue;
+            return { path: file, content: null };
         }
-        if (glob && !glob.test(file))
-          continue;
-        if (matches.length >= input.limit)
-          break;
         try {
-          const source = readSource(rootEntry.path, file);
-          const lines = source.content.split('\n');
-          for (let index = scanned === 1 ? input.lineOffset : 0; index < lines.length; index++) {
-            const line = lines[index]!;
-            if (queryRe ? queryRe.test(line) : line.toLowerCase().includes(queryLower)) {
-              matches.push({ path: file, line: index + 1, text: redactAgentText(line).slice(0, 500) });
-              if (matches.length >= input.limit) {
-                resume = { nextOffset: input.offset + scanned - 1, nextLineOffset: index + 1 };
-                break;
-              }
-            }
-          }
-        } catch { /* Unsupported or changed files are not evidence of a complete search. */ }
-      }
+          return { path: file, content: readSource(rootEntry.path, file).content };
+        } catch { return { path: file, content: null }; }
+      });
+      const signal = context.signal instanceof AbortSignal ? context.signal : undefined;
+      const { matches, scannedFiles, resume } = await matchSearchPage({
+        files, query: input.query, mode: input.mode, pathGlob: input.pathGlob,
+        lineOffset: input.lineOffset, limit: input.limit,
+      }, signal);
       return {
-        matches,
-        scannedFiles: scanned,
-        nextOffset: resume?.nextOffset ?? (scanned < page.files.length ? input.offset + scanned : page.nextOffset),
-        nextLineOffset: resume?.nextLineOffset ?? 0,
+        matches: matches.map(match => ({ ...match, text: redactAgentText(match.text).slice(0, 500) })),
+        scannedFiles,
+        nextOffset: resume ? input.offset + resume.fileOffset : page.nextOffset,
+        nextLineOffset: resume?.lineOffset ?? 0,
         coverage: 'bounded_non_hidden_text_files_up_to_64KiB',
         scanLimitReached: page.scanLimitReached,
         truncated: matches.length >= input.limit || page.truncated,
