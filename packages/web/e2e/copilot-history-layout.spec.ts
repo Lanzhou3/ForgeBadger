@@ -38,7 +38,9 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     const history = page.getByTestId("copilot-message-history");
     await expect(history.getByText("会话 a 消息 39：项目分析与验证记录。", { exact: true })).toBeInViewport();
     const height = await history.evaluate(el => el.clientHeight);
-    expect(height).toBeGreaterThan(viewport.height * 0.6);
+    // clientHeight is integer-rounded; preserve the 60% guard without failing
+    // on a subpixel difference (e.g. 506px versus 506.4px).
+    expect(height).toBeGreaterThanOrEqual(Math.floor(viewport.height * 0.6));
     await expect(page.getByTestId("copilot-composer")).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
     expect(await page.locator("#main-content").evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1);
