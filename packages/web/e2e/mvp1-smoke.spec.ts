@@ -11,6 +11,8 @@ const gatewayUrl =
   "http://127.0.0.1:18332";
 
 test("MVP-1 management console smoke", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", error => pageErrors.push(error.message));
   const suffix = uniqueSuffix();
   const email = `mvp1-${suffix}@example.com`;
   const password = "password12345";
@@ -95,6 +97,7 @@ test("MVP-1 management console smoke", async ({ page }) => {
 
   await expect.poll(() => fileExists(skillPath)).toBe(true);
   await expect(await readFile(skillPath, "utf8")).toContain("Treat payloads as text.");
+  expect(pageErrors).toEqual([]);
 });
 
 async function fileExists(pathname: string): Promise<boolean> {

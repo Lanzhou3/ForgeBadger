@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
 import { GatewayApiError, gatewayBaseUrl, isGatewayUnreachable } from "@/lib/api";
-import type { TranslationKey } from "@/lib/i18n";
+import { getTranslation, type TranslationKey } from "@/lib/i18n";
 
 interface FormData {
   email: string;
@@ -28,8 +28,13 @@ export function RegisterForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { register: registerAuth } = useAuth();
-  const { t } = useLanguage();
+  const { t: translate } = useLanguage();
   const [isHydrated, setIsHydrated] = useState(false);
+  // The surrounding provider can switch to the stored language while this
+  // Suspense boundary is still dehydrated. Match its server fallback until
+  // this form hydrates, then follow the selected language normally.
+  const t = useMemo(() => isHydrated ? translate
+    : (key: TranslationKey) => getTranslation("zh-CN", key), [isHydrated, translate]);
   const schema = useMemo(() => z.object({
     email: z.string().email(t("auth.emailInvalid")),
     inviteCode: z.string().trim().optional(),
