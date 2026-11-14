@@ -1523,8 +1523,6 @@ export const copilotConversations = sqliteTable("copilot_conversations", {
   summary: text("summary"),
   summaryCoveredSequence: integer("summary_covered_sequence"),
   lastSummaryAt: integer("last_summary_at", { mode: "timestamp" }),
-  // Historical DSH session binding; retained only to describe existing rows.
-  dshSessionId: text("dsh_session_id"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
 }, (table) => ({
@@ -1555,10 +1553,8 @@ export const copilotRuns = sqliteTable("copilot_runs", {
   conversationId: text("conversation_id").notNull().references(() => copilotConversations.id, { onDelete: "cascade" }),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("pending"), // pending | running | awaiting_approval | completed | cancelled | failed
-  repairRevokedAt:integer("repair_revoked_at"), executionPhase: text('execution_phase').notNull().default('queued'),
+  executionPhase: text('execution_phase').notNull().default('queued'),
   phaseStartedAt: integer('phase_started_at'),
-  tokenBudget: integer('token_budget').notNull().default(500000),
-  maxDurationMs: integer('max_duration_ms').notNull().default(1800000),
   approvalWaitMs: integer('approval_wait_ms').notNull().default(0),
   approvalWaitStartedAt: integer('approval_wait_started_at'),
   runtimeVersion: integer("runtime_version").notNull().default(0),
@@ -1597,9 +1593,6 @@ export const copilotGoals = sqliteTable("copilot_goals", {
   title: text("title").notNull(),
   spec: text("spec").notNull(),
   status: text("status").notNull().default("active"), // active | paused | completed | blocked | cancelled
-  tokenBudget: integer("token_budget").notNull().default(5000000),
-  maxDurationMs: integer("max_duration_ms").notNull().default(28800000),
-  maxRuns: integer("max_runs").notNull().default(50),
   blockedReason: text("blocked_reason"),
   pendingQuestion: text("pending_question"),
   grantsJson: text("grants_json").notNull().default("[]"),
@@ -1730,21 +1723,6 @@ export const copilotAutomationRuns = sqliteTable("copilot_automation_runs", {
   due: index("idx_copilot_automation_run_due").on(table.userId, table.status, table.notBefore)
 }));
 
-export const copilotAutomationRunProjects = sqliteTable(
-  "copilot_automation_run_projects",
-  {
-    runId: text("run_id").notNull().references(() => copilotAutomationRuns.id, { onDelete: "cascade" }),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-    projectName: text("project_name").notNull(),
-    ordinal: integer("ordinal").notNull()
-  },
-  (table) => ({
-    pk: primaryKey({ columns: [table.runId, table.projectId] }),
-    snapshotUser: index("idx_copilot_automation_snapshot_user").on(table.userId, table.runId, table.ordinal)
-  })
-);
-
 export const copilotAutomationSuggestions = sqliteTable("copilot_automation_suggestions", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -1758,15 +1736,7 @@ export const copilotAutomationSuggestions = sqliteTable("copilot_automation_sugg
   dedup: uniqueIndex("idx_copilot_automation_suggestion_dedup").on(table.userId, table.dedupKey)
 }));
 
-// Historical per-user DSH configuration; never read by the current runtime.
-export const copilotDshConfig = sqliteTable("copilot_dsh_config", {
-  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
-  defaultModelId: text("default_model_id"),
-  pluginsJson: text("plugins_json").notNull().default("{}"),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-});
-
-// Historical per-user Copilot tool switches; never read by the current runtime.
+// Per-user Copilot tool switches (live; accessed through CopilotToolPreferenceRepository raw SQL).
 export const copilotToolPreferences = sqliteTable("copilot_tool_preferences", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   toolName: text("tool_name").notNull(),
@@ -1776,17 +1746,6 @@ export const copilotToolPreferences = sqliteTable("copilot_tool_preferences", {
   pk_copilot_tool_preferences: primaryKey({ columns: [table.userId, table.toolName] }),
   idx_copilot_tool_preferences_user: index("idx_copilot_tool_preferences_user").on(table.userId)
 }));
-
-// Historical Feishu-to-Copilot channel rows. Current Feishu ingress requires a
-// Portfolio binding and fails closed when none exists.
-export const feishuCopilotChannels = sqliteTable("feishu_copilot_channels", {
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  chatId: text("chat_id").notNull(),
-  conversationId: text("conversation_id").notNull().references(() => copilotConversations.id, { onDelete: "cascade" }),
-  senderIdentity: text("sender_identity"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date())
-}, (table) => ({ chatIdentity: primaryKey({ columns: [table.userId, table.chatId], name: "feishu_copilot_channel_pk" }) }));
 
 // Auth sessions replace the long-lived bearer JWT for console sign-in. The
 // token itself is opaque (random 256-bit, base64url); only its SHA-256 is
@@ -2183,15 +2142,6 @@ export const runtimeSettings=sqliteTable('runtime_settings',{
  updatedBy:text('updated_by')
 });
 
-export const copilotModelCalls = sqliteTable('copilot_model_calls', {
-  id: text('id').primaryKey(), userId: text('user_id').notNull(), runId: text('run_id').notNull(),
-  kind: text('kind').notNull(), status: text('status').notNull().default('running'),
-  chargedTokens: integer('charged_tokens').notNull(), usageJson: text('usage_json'),
-  modelJson: text('model_json'), pricingJson: text('pricing_json'), costNanousd: integer('cost_nanousd'),
-  createdAt: integer('created_at').notNull(), completedAt: integer('completed_at'),
-}, table => ({ run: index('idx_copilot_model_calls_run').on(table.userId, table.runId),
-  tenant: foreignKey({ columns: [table.userId, table.runId], foreignColumns: [copilotRuns.userId, copilotRuns.id] }).onDelete('cascade') }));
-
 export const copilotRunTrace = sqliteTable('copilot_run_trace', {
   id: text('id').primaryKey(), userId: text('user_id').notNull(), runId: text('run_id').notNull(),
   seq: integer('seq').notNull(), fence: integer('fence').notNull(),
@@ -2231,24 +2181,6 @@ export const copilotToolArtifacts = sqliteTable('copilot_tool_artifacts', {
  conversation: foreignKey({ columns:[t.userId,t.conversationId], foreignColumns:[copilotConversations.userId,copilotConversations.id] }).onDelete('cascade'),
  run: index('idx_copilot_artifact_run').on(t.userId,t.runId), expiry: index('idx_copilot_artifact_expiry').on(t.userId,t.expiresAt),
 }));
-
-export const copilotTokenRates = sqliteTable('copilot_token_rates', {
-  userId: text('user_id').notNull().references(() => users.id, {onDelete:'cascade'}),
-  modelProfileId: text('model_profile_id').notNull().references(() => modelProfiles.id, {onDelete:'cascade'}),
-  ratesJson: text('rates_json').notNull(), updatedAt: integer('updated_at').notNull(),
-}, table => ({identity:primaryKey({columns:[table.userId,table.modelProfileId]})}));
-
-export const copilotRepairJobs = sqliteTable('copilot_repair_jobs', {
- id:text('id').primaryKey(),userId:text('user_id').notNull(),rootTaskId:text('root_task_id').notNull(),failedTaskId:text('failed_task_id').notNull(),
- originRunId:text('origin_run_id').notNull(),childRunId:text('child_run_id').notNull(),attempt:integer('attempt').notNull(),evidenceDigest:text('evidence_digest').notNull(),
- submissionStepId:text('submission_step_id'),submittedTaskId:text('submitted_task_id'),reportMessageId:text('report_message_id'),createdAt:integer('created_at').notNull(),
-},t=>({attempt:uniqueIndex('idx_copilot_repair_attempt').on(t.userId,t.rootTaskId,t.attempt),failed:uniqueIndex('idx_copilot_repair_failed').on(t.userId,t.failedTaskId),
- child:uniqueIndex('idx_copilot_repair_child').on(t.userId,t.childRunId),limit:check('repair_attempt_limit',sql`${t.attempt} BETWEEN 1 AND 2`),
- root:foreignKey({columns:[t.userId,t.rootTaskId],foreignColumns:[copilotDevelopmentTasks.userId,copilotDevelopmentTasks.id]}).onDelete('cascade'),
- source:foreignKey({columns:[t.userId,t.failedTaskId],foreignColumns:[copilotDevelopmentTasks.userId,copilotDevelopmentTasks.id]}).onDelete('cascade'),
- origin:foreignKey({columns:[t.userId,t.originRunId],foreignColumns:[copilotRuns.userId,copilotRuns.id]}).onDelete('cascade'),
- run:foreignKey({columns:[t.userId,t.childRunId],foreignColumns:[copilotRuns.userId,copilotRuns.id]}).onDelete('cascade'),
- task:foreignKey({columns:[t.userId,t.submittedTaskId],foreignColumns:[copilotDevelopmentTasks.userId,copilotDevelopmentTasks.id]})}));
 
 export const copilotMemorySearchIndex = sqliteTable('copilot_memory_search_index', {
   userId: text('user_id').notNull(), memoryId: text('memory_id').notNull(), version: text('version').notNull(),

@@ -3,9 +3,9 @@ import { createConnectionToolRegistry } from "../extensions/connection-tools.js"
  * Per-user agent stack factory for the Copilot harness.
  *
  * Builds the log, memory, LLM client, tool registry, and orchestrator for one
- * user. Shared by the HTTP routes (a turn per request) and the reactive loop
- * (a proactive turn per platform event) so there is a single construction path
- * and every entry point is scoped by user_id.
+ * user. Shared by the HTTP routes, channels, automations and the recovery
+ * sweep so there is a single construction path and every entry point is
+ * scoped by user_id.
  */
 import type { Database } from "../../db/types.js";
 import type { ForgeBadgerEventBus } from "../event-bus.js";

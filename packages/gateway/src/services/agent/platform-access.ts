@@ -108,20 +108,6 @@ export function getProjectDetail(db: Database, userId: string, projectId: string
   };
 }
 
-export function createProjectRecord(
-  db: Database,
-  userId: string,
-  input: { name: string; path: string; description?: string }
-) {
-  const created = new ProjectRepository(db, userId).create({
-    name: input.name,
-    path: input.path,
-    aiTool: "",
-    ...(input.description !== undefined ? { description: input.description } : {})
-  });
-  return { projectId: created.id, name: created.name };
-}
-
 export function listMemoryEntries(
   db: Database,
   userId: string,
@@ -148,29 +134,6 @@ export function searchMemoryEntries(
   return new AgentMemoryRepository(db, userId)
     .search(input.query, scope, input.limit ?? 10)
     .map(mapMemoryEntry);
-}
-
-export function writeMemoryEntry(
-  db: Database,
-  userId: string,
-  input: {
-    kind: "fact" | "preference" | "decision" | "project_note";
-    scope: AgentMemoryScope["scope"];
-    text: string;
-    projectId?: string;
-    conversationId?: string;
-    metadata?: Record<string, unknown>;
-  }
-) {
-  const entry = new AgentMemoryRepository(db, userId).create({
-    kind: input.kind,
-    scope: input.scope,
-    text: input.text,
-    ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
-    ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {}),
-    ...(input.metadata !== undefined ? { metadata: input.metadata } : {})
-  });
-  return { saved: true, id: entry.id };
 }
 
 function mapMemoryEntry(entry: AgentMemoryEntry) {

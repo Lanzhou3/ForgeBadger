@@ -278,10 +278,6 @@ const zh = {
   reloadAction: "重新加载",
   activationLoadError: "渠道状态加载失败，请重新加载后再连接。",
   activationReady: "已选择身份，点击按钮后创建 Copilot 渠道会话。",
-  // Repair revocation kill-switch in the run options sheet
-  repairRevoke: "停止此对话的后续修复",
-  repairRevoked: "已停止后续修复",
-  repairRevokeError: "停止修复失败，请重试。",
 };
 const en: typeof zh = {
   navAriaLabel: "Copilot settings navigation",
@@ -559,10 +555,6 @@ const en: typeof zh = {
   reloadAction: "Reload",
   activationLoadError: "Failed to load channel status; reload before connecting.",
   activationReady: "Identity selected; click to create a Copilot channel conversation.",
-  // Repair revocation kill-switch in the run options sheet
-  repairRevoke: "Stop later repairs in this conversation",
-  repairRevoked: "Later repairs stopped",
-  repairRevokeError: "Failed to stop repairs; retry.",
 };
 const zhTW: typeof zh = {
   ...zh,
@@ -841,9 +833,5 @@ const zhTW: typeof zh = {
   reloadAction: "重新載入",
   activationLoadError: "渠道狀態載入失敗，請重新載入後再連接。",
   activationReady: "已選擇身份，點擊按鈕後建立 Copilot 渠道會話。",
-  // Repair revocation kill-switch in the run options sheet
-  repairRevoke: "停止此對話的後續修復",
-  repairRevoked: "已停止後續修復",
-  repairRevokeError: "停止修復失敗，請重試。",
 };
 export function useSettingsCopy() { const { language } = useLanguage(); return language === "en" ? en : language === "zh-TW" ? zhTW : zh; }

@@ -103,6 +103,6 @@ it('adds observations to model context only when they fit, without sacrificing t
     const normal = await buildCompressedContext(f.log, f.conversation.id, llm, undefined, { observations });
     assert.match(JSON.stringify(normal.messages), /review 通知/);
     const small = await buildCompressedContext(f.log, f.conversation.id, llm, undefined, { observations, maxContextTokens: 60 });
-    assert.deepEqual(small.messages, [{ role: 'user', content: '进度如何' }]);
+    assert.deepEqual(small.messages, [{ role: 'user', content: '进度如何', cacheBreakpoint: true }]);
   } finally { f.db.close(); }
 });

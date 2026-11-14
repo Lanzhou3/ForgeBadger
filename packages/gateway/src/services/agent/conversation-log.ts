@@ -179,12 +179,6 @@ export class CopilotConversationLog {
       const row=this.db.prepare("SELECT sequence,conversation_id,role,kind FROM copilot_messages WHERE id=? AND user_id=?").get(messageId,this.userId) as {sequence:number;conversation_id:string;role:string;kind:string} | undefined;
       if (!row || (conversationId && row.conversation_id!==conversationId) || row.role!=="user" || row.kind!=="text")return;
       this.assertEditable(row.conversation_id);
-      // Editing even identical text revokes earlier repair authorization. Keep
-      // immutable run inputs and execution evidence intact for audit/recovery.
-      this.db.prepare(`UPDATE copilot_runs SET repair_revoked_at=? WHERE user_id=? AND conversation_id=?
-        AND (id IN (SELECT run_id FROM copilot_messages WHERE user_id=? AND conversation_id=? AND sequence>=?)
-          OR json_extract(input_json,'$.editMessageId') IN (SELECT id FROM copilot_messages WHERE user_id=? AND conversation_id=? AND sequence>=?))`)
-        .run(Date.now(),this.userId,row.conversation_id,this.userId,row.conversation_id,row.sequence,this.userId,row.conversation_id,row.sequence);
       if(newContent!==undefined) {
         this.db.prepare("UPDATE copilot_messages SET content=? WHERE user_id=? AND id=?").run(redactAgentText(newContent),this.userId,messageId);
         this.db.prepare("DELETE FROM copilot_messages WHERE user_id=? AND conversation_id=? AND sequence>?").run(this.userId,row.conversation_id,row.sequence);
@@ -257,21 +251,6 @@ export class CopilotConversationLog {
       SELECT * FROM copilot_runs WHERE conversation_id = ? AND user_id = ? ORDER BY created_at DESC
     `).all(conversationId, this.userId) as RunRow[];
     return rows.map(toRun);
-  }
-
-  /** Includes older consent outside the latest-run page without exposing turn inputs. */
-  listRepairRunIds(conversationId: string): string[] {
-    const rows = this.db.prepare(`
-      SELECT id FROM copilot_runs WHERE user_id = ? AND conversation_id = ?
-        AND repair_revoked_at IS NULL AND status IN ('pending', 'running', 'completed', 'awaiting_approval')
-        AND CASE WHEN json_valid(input_json) THEN
-          json_extract(input_json, '$.repairFailedChecks') = 1
-          AND json_extract(input_json, '$.executionMode') IS NULL
-          AND coalesce(json_extract(input_json, '$.source'), 'user') = 'user'
-        ELSE 0 END
-      ORDER BY created_at DESC
-    `).all(this.userId, conversationId) as Array<{ id: string }>;
-    return rows.map((row) => row.id);
   }
 
   updateRun(id: string, input: { status?: AgentRunStatus; error?: string; steps?: number; startedAt?: Date; completedAt?: Date }): AgentRun | undefined {

@@ -5,13 +5,11 @@ import { AgentError } from './types.js';
 interface ApprovalClockRow {
   started_at: number | null;
   status: string;
-  max_duration_ms: number;
   approval_wait_ms: number;
   approval_wait_started_at: number | null;
 }
 
 export interface RunDuration {
-  remainingMs: number;
   approvalWaitMs: number;
 }
 
@@ -34,12 +32,12 @@ function currentWaitMs(db: Database, userId: string, runId: string, row: Approva
 
 /** Ordinary queued/running downtime retains the existing wall-clock semantics. */
 export function runDuration(db: Database, userId: string, runId: string, now = Date.now()): RunDuration {
-  const row = db.prepare('SELECT started_at,status,max_duration_ms,approval_wait_ms,approval_wait_started_at FROM copilot_runs WHERE user_id=? AND id=?')
+  const row = db.prepare('SELECT started_at,status,approval_wait_ms,approval_wait_started_at FROM copilot_runs WHERE user_id=? AND id=?')
     .get(userId, runId) as ApprovalClockRow | undefined;
   if (!row) throw new AgentError('COPILOT_NOT_FOUND', 'Run not found');
   const elapsedMs = row.started_at === null ? 0 : Math.max(0, now - row.started_at);
   const approvalWaitMs = Math.min(elapsedMs, Math.max(0, row.approval_wait_ms) + currentWaitMs(db, userId, runId, row, now));
-  return { remainingMs: Math.max(0, row.max_duration_ms - (elapsedMs - approvalWaitMs)), approvalWaitMs };
+  return { approvalWaitMs };
 }
 
 /** Caller holds the ledger's existing immediate transaction/fence boundary. */

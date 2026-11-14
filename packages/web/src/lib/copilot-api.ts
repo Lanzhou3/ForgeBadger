@@ -177,9 +177,6 @@ export function listMessages(conversationId: string) {
 
 /** Run a turn; returns the run id. Streaming deltas arrive via /ws/events. */
 export interface CopilotMessageOptions {
-  reviewTaskResults?: boolean;
-  repairFailedChecks?: boolean;
-  toolDiscovery?: boolean;
   projectId?: string;
   clientRequestId?: string;
 }
@@ -195,15 +192,11 @@ export function sendMessage(conversationId: string, content: string, modelId?: s
 }
 
 export function listConversationRuns(conversationId: string) {
-  return fetchJson<{ runs: CopilotRun[]; activeRun: CopilotRun | null; repairRunIds?: string[] }>(
+  return fetchJson<{ runs: CopilotRun[]; activeRun: CopilotRun | null }>(
     `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/runs`
   );
 }
 
-/** Revoke the repair authorization chain of a run; later repair attempts are rejected. */
-export function revokeRunRepairs(runId: string) {
-  return fetchJson<{ revoked: boolean }>(`/api/v1/copilot/runs/${encodeURIComponent(runId)}/repairs`, { method: "DELETE" });
-}
 
 export function getRun(runId: string) {
   return fetchJson<{ run: CopilotRun; pendingActions: CopilotPendingAction[]; provisionalText?: import("@/lib/copilot-text-stream").CopilotProvisionalText }>(
@@ -270,7 +263,7 @@ export function deleteMemoryEntry(id: string) {
   );
 }
 
-export function editMessage(conversationId: string, messageId: string, content: string, options?: CopilotMessageOptions & { modelId?: string; toolDiscovery?: boolean }) {
+export function editMessage(conversationId: string, messageId: string, content: string, options?: CopilotMessageOptions & { modelId?: string }) {
   return fetchJson<{ runId: string }>(
     `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/edit-message`,
     { method: "POST", body: JSON.stringify({ messageId, content, ...options }) }

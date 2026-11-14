@@ -33,7 +33,7 @@ function fixture(toolName: string, source?: 'reactive' | 'scheduled') {
       else request.onEvent({ type: 'text_delta', text: 'Task recorded.' });
       return { message: '' };
     },
-    async summarize() { return ''; }, async generateTitle() { return ''; }, async proposeMemory() { return []; },
+    async summarize() { return ''; }, async generateTitle() { return ''; },
   };
   const orchestrator = createCopilotOrchestrator({ db, masterKey: randomBytes(32).toString('hex'),
     toolRegistry: createAgentToolRegistry(createPlatformTools()), llm, eventBus: new ForgeBadgerEventBus() });

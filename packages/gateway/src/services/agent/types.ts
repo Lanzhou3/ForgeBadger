@@ -65,14 +65,6 @@ export interface AgentToolResult {
   requiresApproval: boolean;
 }
 
-/** Streamed events emitted while a run executes (drives /ws/events + UI). */
-export type AgentRunEvent =
-  | { type: "text_delta"; text: string }
-  | { type: "tool_call"; toolCall: AgentToolCall }
-  | { type: "tool_result"; result: AgentToolResult }
-  | { type: "pending_action"; pendingAction: { id: string; tool: string } }
-  | { type: "run_completed"; runId: string; status: AgentRunStatus };
-
 /** A run (one user turn and its tool steps). */
 export interface AgentRun {
   phase?: string;

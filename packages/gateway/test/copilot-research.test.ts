@@ -13,7 +13,6 @@ import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
 import { createCopilotOrchestrator } from '../src/services/agent/orchestrator.js';
 import { createAgentToolRegistry, executeAgentTool } from '../src/services/agent/tool-registry.js';
 import { createPlatformTools } from '../src/services/agent/tools/index.js';
-import { discoverToolSchemas } from '../src/services/agent/tool-discovery.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 
 function fixture(t: TestContext) {
@@ -55,7 +54,7 @@ it('runs isolated research with inherited model, blocks forged writes, and rejec
       }
       if (++mainCalls === 1) request.onEvent({ type: 'tool_call', toolCall: { id: 'research', name: 'research_project', arguments: JSON.stringify({ projectId: f.project.id, goal: 'Inspect project' }) } });
       return { message: 'Parent report', usage: { inputTokens: 10, outputTokens: 5 } };
-    }, async summarize() { return 'Summary'; }, async generateTitle() { return ''; }, async proposeMemory() { return []; }
+    }, async summarize() { return 'Summary'; }, async generateTitle() { return ''; }
   } });
   const parent = await orchestrator.runTurn({ userId: f.userId, conversationId, projectId: f.project.id, modelId: 'owner-model', userText: 'Inspect' });
   const jobs = f.db.prepare('SELECT child_run_id FROM copilot_research_jobs WHERE origin_run_id=?').all(parent) as Array<{ child_run_id: string }>;
@@ -74,7 +73,6 @@ it('source search continues within a file and Chinese discovery finds project to
   const first = await tool.execute({ projectId: f.project.id, query: 'needle', limit: 2 }, f.context) as { matches: Array<{ line: number }>; nextOffset: number; nextLineOffset: number };
   const second = await tool.execute({ projectId: f.project.id, query: 'needle', limit: 2, offset: first.nextOffset, lineOffset: first.nextLineOffset }, f.context) as typeof first;
   assert.deepEqual(first.matches.map(m => m.line), [1, 2]); assert.deepEqual(second.matches.map(m => m.line), [3, 4]);
-  assert.ok(discoverToolSchemas(f.registry.toModelSchemas(), '查找项目代码', 10).length > 0);
 });
 
 it('propagates parent cancel to an in-flight research model', async t => {
@@ -94,7 +92,7 @@ it('propagates parent cancel to an in-flight research model', async t => {
         if (request.signal?.aborted) abort(); else request.signal?.addEventListener('abort', abort, { once: true });
       });
       return { message: 'unreachable' };
-    }, async summarize() { return ''; }, async generateTitle() { return ''; }, async proposeMemory() { return []; }
+    }, async summarize() { return ''; }, async generateTitle() { return ''; }
   } });
   const parent = f.ledger.admit({ userId: f.userId, conversationId: f.ledger.log.createConversation().id, projectId: f.project.id, userText: 'Research' }, 4);
   const execution = orchestrator.executeRun(f.userId, parent);

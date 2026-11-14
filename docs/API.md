@@ -502,12 +502,12 @@ unresolved write or queued follow-up.
 | Endpoint | Contract |
 |---|---|
 | `POST /api/v1/copilot/conversations/:id/messages` | `{content,modelId?,projectId?,clientRequestId?}`; returns 201 `{runId}` after durable admission, before model completion. `projectId` may initialize an unbound conversation and must match its existing project. A new request during an active run returns 409 `COPILOT_CONVERSATION_BUSY`. Matching request-key retries return the original run, including after completion; conflicting payloads return 409 `COPILOT_REQUEST_CONFLICT`. |
-| `GET /api/v1/copilot/conversations/:id/runs` | `{runs,activeRun,repairRunIds}`; latest 50 runs and current active run, or null. `repairRunIds` lists unrevoked user repair opt-ins for the conversation, including completed origins older than the latest 50 runs; revoke each through `DELETE /api/v1/copilot/runs/:id/repairs`. |
+| `GET /api/v1/copilot/conversations/:id/runs` | `{runs,activeRun}`; latest 50 runs and current active run, or null. |
 | `GET /api/v1/copilot/runs/:id` | `{run,pendingActions,steps}`; run includes revision and stopReason, actions include full inputJson/inputDigest, stepId and toolCallId. Steps retain execution receipts. |
 | `GET /api/v1/copilot/runs/:id/trace` | `{events}`; tenant-scoped per-run decision timeline ordered by `created_at,seq` (admission, claims/recovery, step start/complete, tool gates, approval parking/decisions, sub-run admissions, follow-up promotions, terminal states). Metadata only: rows carry monotonic `seq` (UNIQUE per run), the run-instance `fence`, optional `step_id` and whitelisted scalar `detail_json`; message contents, tool input plaintext and secrets are never stored. Unknown or foreign runs return 404. |
 | `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/decide` | `{approved}`; persists a single decision and returns `{resumed,runId}`. The original run continues asynchronously, including after rejection. |
 | `POST /api/v1/copilot/runs/:id/cancel` | Awaits durable cancellation; returns `{cancelled,runId}`. It does not undo effects already sent to a CLI. |
-| `POST /api/v1/copilot/conversations/:id/edit-message` | Accepts `{messageId,content,clientRequestId?,modelId?,projectId?,toolDiscovery?}`. Validates a user text in the URL conversation. Active or unresolved writes return 409. Clears summary, preserves run/step receipts and admits the edit atomically. Matching request-key retries return the original run before truncation; changed targets or context return 409 `COPILOT_REQUEST_CONFLICT`. |
+| `POST /api/v1/copilot/conversations/:id/edit-message` | Accepts `{messageId,content,clientRequestId?,modelId?,projectId?}`. Validates a user text in the URL conversation. Active or unresolved writes return 409. Clears summary, preserves run/step receipts and admits the edit atomically. Matching request-key retries return the original run before truncation; changed targets or context return 409 `COPILOT_REQUEST_CONFLICT`. |
 | `DELETE /api/v1/copilot/conversations/:id` | Hides a conversation while retaining messages, runs, steps and receipts. Only `pending`, `running` or `awaiting_approval` runs return 409 `COPILOT_CONVERSATION_BUSY`; terminal runs (including `indeterminate` or cancelled unknown writes) can be hidden without replaying effects. Repeated deletion returns 404. |
 
 `GET /api/v1/copilot/machine-roots` lists the caller's local search roots as
@@ -520,8 +520,7 @@ tenant-scoped. The owner-only `machine_search`, `read_machine_file`,
 these grants for guarded, redacted reads; registration and revocation through
 the agent use the approval-gated `register_machine_root` and
 `unregister_machine_root` tools. Channel-originated runs cannot list local root
-paths or invoke these tools. `route_query` only classifies a query as direct or
-research and does not access the filesystem.
+paths or invoke these tools.
 
 `machine_search` evaluates query and glob patterns in a memory-limited worker
 with a two-second deadline for each page and supports run cancellation. Expensive
@@ -2737,7 +2736,7 @@ retains `message_thread_id`; Feishu uses actual `thread_id` and replies to the
 persisted inbound message. A Feishu quote `root_id` alone does not create a topic.
 Admission persists a trusted snapshot of the conversation project and canonical
 root, plus route/identity revisions for channel-owned conversations. Followups
-and research/review/repair children inherit it. Reading, memory recall,
+and research/coding children inherit it. Reading, memory recall,
 notifications, artifacts, approvals, execution and result delivery recheck that
 snapshot against current authority; changes do not expand an existing run.
 Resource lists contain only the original project set. Web and channel runs use
@@ -3563,13 +3562,9 @@ scoped history and bounded evidence readback. Additional management tools are
 `get_session_writer`, and exact interactive owner `takeover_session`. They retain
 the existing platform-command, Grant and active-user checks.
 
-`POST /conversations/:id/messages` accepts optional `toolDiscovery: boolean`
-(default false). True starts with a small core schema set and `discover_tools`;
-successful discovery affects the next model step. Query length is 100 characters,
-at most 12 results per lookup and 32 selected tools per run. Persistent selections
-are authenticated and intersected with current visibility each round; discovery
-cannot grant execution permission. A request key cannot be reused with a different
-mode. Existing false/omitted request identities retain their prior digest behavior.
+Tool discovery mode (`toolDiscovery`, `discover_tools`) was removed in 2026-11:
+every run receives its complete authorized tool catalog, and the request field is
+rejected by the strict body schema.
 
 ## Team administration and invitation contracts
 
@@ -3811,11 +3806,10 @@ change task progress, Copilot acceptance or Git state.
 ### Copilot reliability APIs (2026-09-26)
 
 All endpoints remain Gateway-owned, JWT authenticated, tenant scoped and use the
-standard `{ code, data, message }` envelope. Message and edit requests accept the
-optional boolean `reviewTaskResults` (default false). This authorizes a bounded
-read-only review of a verified task result; it does not authorize another CLI
-submission, edits, test execution, acceptance or deployment. Internal
-`executionMode`, `parentRunId` and review provenance cannot be supplied over HTTP.
+standard `{ code, data, message }` envelope. The optional post-completion model
+review (`reviewTaskResults`) was removed in 2026-11; the deterministic task
+completion report remains. Internal `executionMode` and `parentRunId` cannot be
+supplied over HTTP.
 
 | Method | Path below `/api/v1/copilot` | Contract |
 |---|---|---|
@@ -3837,24 +3831,11 @@ results are not proof that excluded or oversized files have no matches.
 `read_project_file` supports offset slices of permitted files up to 1 MiB;
 controlled patch/test source limits remain 64 KiB per file.
 
-### Copilot streaming and controlled repair
+### Copilot streaming
 
-Message/edit/follow-up bodies additionally accept `repairFailedChecks?: boolean`
-(default false). Only the originating user's explicit opt-in permits a repair
-analysis after a verified `checks_failed` development task. Each root permits at
-most two repair revisions, one immutable submission per child, and fresh exact
-owner approval before each sandbox retest. Original source files, permitted
-change paths and check hashes/content remain fixed. No automatic source apply,
-CLI dispatch, test weakening, acceptance or deployment is authorized.
-Deleting the original conversation, editing/truncating its request (even with
-identical text), disabling the actor/tool, source
-changes or revoking repair stops subsequent authorized work and sandbox checks.
-Repair admission/results append links and receipts to the original conversation;
-Gateway events plus polling refresh the Web view.
-
-| Method | Path below `/api/v1/copilot` | Contract |
-|---|---|---|
-| DELETE | `/runs/:runId/repairs` | `{ revoked: true }`; persistently revokes the root repair chain and cancels its active children/queued or running sandbox tasks. A repair child's ID resolves to its root. Does not alter immutable request JSON or erase evidence. |
+Controlled repair of failed development checks (`repairFailedChecks`,
+`DELETE /runs/:runId/repairs`) was removed in 2026-11; a failed check is reported
+and any follow-up is a new owner request.
 
 `copilot_run_updated` public text frames include `text_step_id`, `text_fence` and
 `text_sequence` alongside `text_delta`. The Web client orders/deduplicates frames,
@@ -3905,14 +3886,7 @@ Readiness, ownership validation and all queries share one database read snapshot
 after committed rebuild progress, including multi-scope recall.
 
 
-### Copilot discovery and bounded context recovery (2026-09-26)
-
-`discover_tools` ranks the current authorized tool names/descriptions with lexical
-BM25. Exact underscore-separated tool identifiers resolve only that tool (or no
-result when unavailable). Descriptions state supported query languages: English
-for the whole catalog; Chinese for tools with Chinese descriptions. No global
-synonym expansion, arbitrary no-hit fallback or permission changes. Discovery
-receipts remain signed and intersected with current tool visibility on use.
+### Copilot bounded context recovery (2026-09-26)
 
 Provider HTTP 400/413 is classified as context overflow only for bounded,
 recognized structured rejections. The run may consume one recovery allowance for

@@ -107,6 +107,9 @@ export function evaluateGoalContinuation(
     conversationId: goal.conversation_id,
     goalId,
     source: 'user',
+    // An owner-authored text (answer/resume note) keeps the full transcript;
+    // an automatic continuation restarts from the checklist and journal.
+    ...(options?.userText === undefined ? { goalContinuation: true } : {}),
     userText: options?.userText ?? goalContinuationText(goal),
     clientRequestId: randomUUID()
   });

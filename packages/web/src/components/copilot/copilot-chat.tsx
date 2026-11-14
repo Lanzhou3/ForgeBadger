@@ -257,8 +257,6 @@ export function CopilotChat() {
     conversationId,
     projectId,
     modelId,
-    reviewTaskResults: false,
-    repairFailedChecks: false,
     savingPreferences: savingPreferences || projectSaving,
     conversations,
     messages,
@@ -425,8 +423,6 @@ export function CopilotChat() {
   const followups = useCopilotFollowups({
     conversationId,
     ...(modelId ? { modelId } : {}),
-    reviewTaskResults: false,
-    repairFailedChecks: false,
     active: isBusy,
   });
   const enqueueRef = useRef(followups.enqueue);

@@ -354,7 +354,7 @@ function inboxFixture(path?:string) {
 const incoming=(suffix:string,text='Check project progress')=>({eventId:`event-${suffix}`,messageId:`message-${suffix}`,text});
 const llmFixture:AgentLlmClient={
   stream:async request=>{request.onEvent({type:'text_delta',text:'Project summary'});return {message:'Project summary'};},
-  summarize:async()=> 'Summary',generateTitle:async()=> 'Title',proposeMemory:async()=>[]
+  summarize:async()=> 'Summary',generateTitle:async()=> 'Title'
 };
 
 it('durably deduplicates encrypted input and adopts FIFO once into real native runs', async()=>{

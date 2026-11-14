@@ -86,7 +86,7 @@ function runtime(f: Fixture, toolExists = true) {
   const orchestrator = createCopilotOrchestrator({ db: f.db, masterKey: f.key, eventBus: new ForgeBadgerEventBus(),
     toolRegistry: createAgentToolRegistry(toolExists ? [{ name: 'update_project', description: 'test approval', risk: 'operate', requiresApproval: true,
       inputSchema: z.object({ projectId: z.string(), name: z.string() }), execute: async () => ({ changed: true }) }] : []),
-    llm: { async streamTurn() { return { text: '操作已处理', toolCalls: [] }; }, async summarize() { return ''; }, async generateTitle() { return '审批测试'; }, async proposeMemory() { return []; } } });
+    llm: { async streamTurn() { return { text: '操作已处理', toolCalls: [] }; }, async summarize() { return ''; }, async generateTitle() { return '审批测试'; } } });
   return { orchestrator, projectName: () => f.projects.getById(f.project.id)!.name };
 }
 function callback(f: Fixture, approved = true) {

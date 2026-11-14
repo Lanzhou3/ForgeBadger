@@ -161,7 +161,7 @@ export function channelToolContext(context: AgentToolContext): AgentToolContext 
 }
 
 /** Read-only tools whose input carries no project/session/task resource ID: nothing to place out of scope. */
-const NO_RESOURCE_ID_TOOLS = ['list_projects', 'list_sessions', 'pm_overview', 'discover_tools', 'read_tool_result',
+const NO_RESOURCE_ID_TOOLS = ['list_projects', 'list_sessions', 'pm_overview', 'read_tool_result',
   'load_playbook', 'read_skill_resource', 'list_playbooks', 'get_usage_summary'];
 
 /** Resolve resource IDs against their actual rows, never trust a supplied project hint. */

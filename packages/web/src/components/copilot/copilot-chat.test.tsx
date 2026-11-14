@@ -32,7 +32,6 @@ const {
   listProjectsMock,
   getRunMock,
   listRunsMock,
-  revokeRunRepairsMock,
   getCopilotPreferencesMock,
   updateCopilotPreferencesMock,
 } = vi.hoisted(() => ({
@@ -53,7 +52,6 @@ const {
   listProjectsMock: vi.fn(),
   getRunMock: vi.fn(),
   listRunsMock: vi.fn(),
-  revokeRunRepairsMock: vi.fn(),
   getCopilotPreferencesMock: vi.fn(),
   updateCopilotPreferencesMock: vi.fn(),
 }));
@@ -85,7 +83,6 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     getCopilotCapabilities: getCopilotCapabilitiesMock,
     getRun: getRunMock,
     listConversationRuns: listRunsMock,
-    revokeRunRepairs: revokeRunRepairsMock,
     getCopilotPreferences: getCopilotPreferencesMock,
     updateCopilotPreferences: updateCopilotPreferencesMock,
   };
@@ -233,17 +230,6 @@ describe("CopilotChat console layout", () => {
     await waitFor(() => expect(cancelRunMock).toHaveBeenCalledWith("run-1"));
     await waitFor(() => expect(screen.getByRole("button", { name: "发送" })).toBeTruthy());
     expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
-  });
-
-  it("revokes older completed repair authorizations even when the latest run is ordinary", async () => {
-    listRunsMock.mockResolvedValue({ runs: [], activeRun: null, repairRunIds: ["legacy-root-1", "legacy-root-2"] });
-    revokeRunRepairsMock.mockResolvedValue({ revoked: true });
-    renderChat();
-    fireEvent.click(await screen.findByRole("button", { name: "停止此对话的后续修复" }));
-    await waitFor(() => expect(revokeRunRepairsMock).toHaveBeenCalledTimes(2));
-    expect(revokeRunRepairsMock).toHaveBeenCalledWith("legacy-root-1");
-    expect(revokeRunRepairsMock).toHaveBeenCalledWith("legacy-root-2");
-    expect(await screen.findByRole("button", { name: "已停止后续修复" })).toHaveProperty("disabled", true);
   });
 
   it("renders the conversation title as the page's semantic h1", async () => {

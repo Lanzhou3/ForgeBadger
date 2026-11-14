@@ -10,6 +10,13 @@ import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
 import { runDuration } from '../src/services/agent/approval-clock.js';
 
+/** Charged (non-approval) time against the fixture's nominal 60s window; the stored budget column is retired. */
+function remaining(db: Database.Database, userId: string, runId: string, now = Date.now()): number {
+  const row = db.prepare('SELECT started_at FROM copilot_runs WHERE id=?').get(runId) as { started_at: number | null };
+  const elapsed = row.started_at === null ? 0 : Math.max(0, now - row.started_at);
+  return Math.max(0, 60_000 - (elapsed - runDuration(db, userId, runId, now).approvalWaitMs));
+}
+
 it('upgrades populated 0124 conservatively, preserving approval-clock evidence and all prior execution evidence', () => {
   const root = new URL('../src/db/migrations/', import.meta.url).pathname;
   const dir = mkdtempSync(join(tmpdir(), 'fb-approval-migration-'));
@@ -66,15 +73,17 @@ it('upgrades populated 0124 conservatively, preserving approval-clock evidence a
     const upgraded = db.prepare('SELECT * FROM copilot_runs ORDER BY id').all() as Record<string, unknown>[];
     for (let i = 0; i < originalRuns.length; i++) {
       const { approval_wait_ms, approval_wait_started_at, goal_id, ...unchanged } = upgraded[i];
-      assert.deepEqual(unchanged, originalRuns[i]);
+      // 0150 drops the retired budget/repair columns; every other legacy value is untouched.
+      const { token_budget: _budget, max_duration_ms: _duration, repair_revoked_at: _repair, ...legacy } = originalRuns[i]!;
+      assert.deepEqual(unchanged, legacy);
       assert.equal(approval_wait_ms, 0);
       if (originalRuns[i].id === valid.id) assert.equal(approval_wait_started_at, waitAt);
       else if (originalRuns[i].id !== invalid[0].id) assert.equal(approval_wait_started_at, null);
     }
     for (let i = 0; i < evidenceTables.length; i++) assert.deepEqual(db.prepare(`SELECT * FROM ${evidenceTables[i]} ORDER BY 1`).all(), evidence[i]);
-    assert.ok(runDuration(db, userId, valid.id).remainingMs > 49_000 && runDuration(db, userId, valid.id).remainingMs <= 50_000);
+    assert.ok(remaining(db, userId, valid.id) > 49_000 && remaining(db, userId, valid.id) <= 50_000);
     for (const id of [...invalid.map(row => row.id), missing, running, pending]) {
-      assert.equal(runDuration(db, userId, id).remainingMs, 0);
+      assert.equal(remaining(db, userId, id), 0);
     }
     migrate(drizzle(db), { migrationsFolder: root });
     assert.deepEqual(db.prepare('SELECT * FROM copilot_runs ORDER BY id').all(), upgraded);
@@ -84,7 +93,7 @@ it('upgrades populated 0124 conservatively, preserving approval-clock evidence a
     assert.equal(reopened.decide(valid.id, valid.actionId, true), true);
     assert.equal(reopened.get(completed)?.status, 'completed');
     assert.equal((db.prepare('SELECT started_at FROM copilot_runs WHERE id=?').get(valid.id) as { started_at: number }).started_at, startedAt);
-    assert.ok(runDuration(db, userId, valid.id).remainingMs > 49_000);
+    assert.ok(remaining(db, userId, valid.id) > 49_000);
     assert.deepEqual(db.pragma('foreign_key_check'), []);
     assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
   } finally { if (db.open) db.close(); rmSync(dir, { recursive: true, force: true }); }

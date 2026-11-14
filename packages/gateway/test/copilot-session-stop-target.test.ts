@@ -244,7 +244,7 @@ test('the real orchestrator keeps the observed target through approval and resum
         request.onEvent({ type: 'tool_call', toolCall: { id: 'stop-target', name: 'stop_session', arguments: JSON.stringify({ sessionId: session.id, observationId: target.observationId, expectedTitle: target.taskTitle }) } });
       } else request.onEvent({ type: 'text_delta', text: 'Terminal process group stopped.' });
       return { message: '' };
-    }, async summarize() { return ''; }, async generateTitle() { return ''; }, async proposeMemory() { return []; }
+    }, async summarize() { return ''; }, async generateTitle() { return ''; }
   };
   const create = () => createCopilotOrchestrator({ db: f.db, masterKey: 'x'.repeat(32), sessionManager: f.manager, llm,
     toolRegistry: createAgentToolRegistry([...createSessionTools(), ...createPlatformManagementTools()]), eventBus: new ForgeBadgerEventBus() });

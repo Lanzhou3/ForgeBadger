@@ -44,11 +44,11 @@ it('preserves all follow-up request options through the actual API after a lost 
   }));
   const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
   const queryWrapper=({children}:{children:ReactNode})=><LanguageProvider><QueryClientProvider client={client}>{children}</QueryClientProvider></LanguageProvider>;
-  const {result,rerender}=renderHook(({modelId,reviewTaskResults,repairFailedChecks})=>useCopilotFollowups({conversationId:'c1',projectId:'p1',modelId,reviewTaskResults,repairFailedChecks,active:false}),{wrapper:queryWrapper,initialProps:{modelId:'m1',reviewTaskResults:true,repairFailedChecks:true}});
+  const {result,rerender}=renderHook(({modelId})=>useCopilotFollowups({conversationId:'c1',projectId:'p1',modelId,active:false}),{wrapper:queryWrapper,initialProps:{modelId:'m1'}});
   await act(async()=>{expect(await result.current.enqueue('continue')).toBe(false);});
-  rerender({modelId:'m2',reviewTaskResults:false,repairFailedChecks:false});
+  rerender({modelId:'m2'});
   await act(async()=>{expect(await result.current.enqueue('continue')).toBe(true);});
-  expect(bodies[0]).toMatchObject({content:'continue',modelId:'m1',reviewTaskResults:true,repairFailedChecks:true,clientRequestId:expect.any(String)});
+  expect(bodies[0]).toMatchObject({content:'continue',modelId:'m1',clientRequestId:expect.any(String)});
   expect(bodies[1]).toEqual(bodies[0]);
   client.clear();
 });

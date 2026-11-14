@@ -44,8 +44,7 @@ function fixture(memory = false, researchAfterApproval = false) {
       }, request.onEvent, request.signal ?? new AbortController().signal);
     },
     async summarize() { return 'summary'; },
-    async generateTitle() { return 'Lifecycle'; },
-    async proposeMemory() { return []; }
+    async generateTitle() { return 'Lifecycle'; }
   };
   const runtime = () => createCopilotOrchestrator({ db, masterKey, llm,
     toolRegistry: createAgentToolRegistry(createPlatformTools()),

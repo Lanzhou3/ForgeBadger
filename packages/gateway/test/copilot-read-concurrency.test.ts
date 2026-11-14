@@ -42,7 +42,7 @@ it('runs at most three real Git reads, serializes intervening writes and preserv
     }
     else assert.deepEqual(request.messages.filter(m=>m.role==='tool').map(m=>m.toolCallId),['git0','git1','git2','write','git3','git4']);
     return {message:'done',usage:{totalTokens:10}};
-   },async summarize(){return '';},async generateTitle(){return '';},async proposeMemory(){return [];}
+   },async summarize(){return '';},async generateTitle(){return '';}
   }});
   await orchestrator.executeRun(userId,runId);
   assert.equal(ledger.get(runId)?.status,'completed');assert.equal(peak,3);
@@ -65,7 +65,7 @@ for(const interruption of ['cancel','fence','read-error'] as const) it(`settles 
     if(++calls===1)for(let i=0;i<5;i++)request.onEvent({type:'tool_call',toolCall:{id:`read${i}`,name:'read_project_diff',arguments:JSON.stringify({projectId:interruption==='read-error'&&i===1?'missing':project.id,includeUntracked:true})}});
     else {const receipts=request.messages.filter(m=>m.role==='tool');assert.deepEqual(receipts.map(m=>m.toolCallId),['read0','read1','read2','read3','read4']);assert.match(receipts[1]!.content,/Denied|not found|error/i);}
     return {message:'done',usage:{totalTokens:10}};
-   },async summarize(){return '';},async generateTitle(){return '';},async proposeMemory(){return [];}
+   },async summarize(){return '';},async generateTitle(){return '';}
   }});
   if(interruption!=='read-error')timer=setInterval(()=>{
    if(interrupted||ledger.steps(runId).filter(s=>s.kind==='tool'&&s.status==='running').length!==3)return;

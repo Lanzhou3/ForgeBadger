@@ -50,8 +50,3 @@ export function verifyEvidence(lineText: string | undefined, snippet: string, pr
   // The citation is real and anchored; the proposed (weaker-or-equal) level stands.
   return { verified: true, grounded: proposed, present: true };
 }
-
-/** The strongest grounding level a real-but-unjudged citation can default to. */
-export function defaultGrounding(): GroundingLevel {
-  return 'related';
-}

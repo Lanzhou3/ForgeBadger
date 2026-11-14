@@ -10,7 +10,6 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { CopilotMachineRootRepository } from '../src/db/repositories/copilot-machine-root-repository.js';
 import { verifyEvidence } from '../src/services/agent/retrieval-grounding.js';
-import { routeQuery } from '../src/services/agent/retrieval-routing.js';
 import { createDeepResearchTools } from '../src/services/agent/tools/deep-research.js';
 
 it('verifyEvidence accepts a present citation and falsifies absent ones', () => {
@@ -19,14 +18,6 @@ it('verifyEvidence accepts a present citation and falsifies absent ones', () => 
   assert.deepEqual(verifyEvidence(undefined, 'x', 'supported', 99), { verified: false, grounded: 'unrelated', present: false, reason: 'LINE_OUT_OF_RANGE' });
   // whitespace reflow does not break the citation
   assert.equal(verifyEvidence('const  answer    =\t42;', 'const answer = 42', 'supported', 1).verified, true);
-});
-
-it('routeQuery routes simple questions direct and cross-source/evidence questions to research', () => {
-  assert.equal(routeQuery('what is the exit code of this command?').mode, 'direct');
-  assert.equal(routeQuery('compare the error handling in a.ts and b.ts').mode, 'research');
-  assert.equal(routeQuery('find evidence across all three roots about the retry loop').mode, 'research');
-  assert.equal(routeQuery('why is the build failing').mode, 'direct');
-  assert.equal(routeQuery('investigate why the build fails across the gateway and web packages').mode, 'research');
 });
 
 function fixture() {
@@ -53,16 +44,5 @@ it('verify_retrieval_evidence tool grounds a real citation and falsifies a fabri
     const wrongSnip = await verify.execute({ root: root.id, path: 'src/alpha.ts', line: 1, snippet: 'the quick brown fox', proposedGrounding: 'entailed' }, f);
     assert.equal(wrongSnip.reason, 'SNIPPET_NOT_FOUND');
     await assert.rejects(verify.execute({ root: 'nope', path: 'src/alpha.ts', line: 1, snippet: 'x', proposedGrounding: 'entailed' }, f), /MACHINE_ROOT_NOT_FOUND/);
-  } finally { f.db.close(); rmSync(f.dir, { recursive: true, force: true }); }
-});
-
-it('route_query tool returns a mode with the signals that drove it', async () => {
-  const f = fixture();
-  try {
-    const tools = Object.fromEntries(createDeepResearchTools().map(t => [t.name, t]));
-    const route = tools.route_query!;
-    const out = await route.execute({ query: 'trace the retry loop across src and lib' }, f);
-    assert.equal(out.mode, 'research');
-    assert.ok(Array.isArray(out.signals) && out.signals.length > 0);
   } finally { f.db.close(); rmSync(f.dir, { recursive: true, force: true }); }
 });

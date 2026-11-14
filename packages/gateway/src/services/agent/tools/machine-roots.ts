@@ -42,7 +42,7 @@ export function createMachineRootTools(): AgentTool[] {
   return [
     {
       name: "register_machine_root",
-      description: "Register an existing local directory as a read-only search root so machine_search can traverse it. Owner-approved.",
+      description: "Register an existing local directory as a read-only search root. Once a root exists, machine_search, read_machine_file and machine_tree become available for it. Owner-approved.",
       risk: "operate",
       requiresApproval: true,
       riskClass: "medium",

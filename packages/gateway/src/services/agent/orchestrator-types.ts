@@ -10,6 +10,12 @@ export interface AgentLlmMessage {
   providerReplay?: ProviderReplay;
   toolCallId?: string;
   toolCalls?: Array<{ id: string; name: string; arguments: string }>;
+  /**
+   * Marks the end of the stable, append-only part of the request. Providers
+   * with explicit prompt caching (Anthropic) place a cache breakpoint here;
+   * other transports ignore it. Never persisted.
+   */
+  cacheBreakpoint?: true;
 }
 
 export interface AgentLlmToolSchema {
@@ -47,11 +53,4 @@ export interface AgentLlmClient {
   summarize(input: { messages: AgentLlmMessage[]; modelId?: string; signal?: AbortSignal }): Promise<string>;
   /** Generate a short conversation title from the first user/assistant exchange. */
   generateTitle(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<string>;
-  /** Propose durable memory entries from a completed turn (memory curation). */
-  proposeMemory(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<Array<{
-    kind: "fact" | "preference" | "decision" | "project_note";
-    scope: "global" | "project" | "session";
-    text: string;
-    projectId?: string;
-  }>>;
 }

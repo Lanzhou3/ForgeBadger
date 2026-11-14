@@ -1,9 +1,3 @@
-import type { TaskReviewOrigin } from './task-review.js';
-import { repairIdentity, type RepairOrigin } from './development-repair.js';
-import { validateRepairJob } from '../development/repair-scope.js';
-import { ProjectManagerRepository } from '../../db/repositories/project-manager-repository.js';
-import { readTaskDispatchAttempt } from '../project-manager/task-execution.js';
-import { verifiedDispatchEvidence } from '../project-manager/task-progress.js';
 import { assertChannelRunScope, prepareChannelAdmission, type ChannelRunScope } from '../channels/channel-run-scope.js';
 import { projectActionReceipt } from "../platform-commands/receipt-projection.js";
 import { PlatformActionRepository } from "../../db/repositories/platform-action-repository.js";
@@ -18,24 +12,21 @@ import { PARENT_CHAIN_MAX_DEPTH, parseRunInput } from './run-authorization.js';
 export interface TurnInput {
     /** Server-derived conversation project scope plus optional channel authority; historical JSON field name, never accepted from HTTP/model JSON. */
     channelScope?: ChannelRunScope;
-    executionMode?: 'research' | 'review' | 'repair' | 'coding';
+    executionMode?: 'research' | 'coding';
     delegateTaskId?: string;
-    repairOrigin?: RepairOrigin;
-    repairFailedChecks?: boolean;
-    reviewOrigin?: TaskReviewOrigin;
     parentRunId?: string;
-    reviewTaskResults?: boolean;
     userId: string;
     conversationId: string;
     userText: string;
     modelId?: string;
     projectId?: string;
     goalId?: string;
+    /** Driver-enqueued goal continuation: starts from the goal state, not the old transcript. */
+    goalContinuation?: boolean;
     source?: "user" | "reactive" | "scheduled";
     skipUserMessage?: boolean;
     clientRequestId?: string;
     editMessageId?: string;
-    toolDiscovery?: boolean;
 }
 export interface RunRecord {
     id: string;
@@ -82,11 +73,7 @@ function requestDigest(input: TurnInput): string {
     return inputDigest(JSON.stringify({ content: input.userText, modelId: input.modelId ?? null,
         projectId: input.projectId ?? null,
         source: input.source ?? 'user', skipUserMessage: input.skipUserMessage ?? false,
-        ...(input.toolDiscovery === true ? { toolDiscovery: true } : {}),
-        ...(input.executionMode ? { executionMode: input.executionMode, parentRunId: input.parentRunId, reviewOrigin: input.reviewOrigin ?? null } : {}),
-        ...(input.reviewTaskResults ? { reviewTaskResults: true } : {}),
-        ...(input.repairFailedChecks ? { repairFailedChecks: true } : {}),
-        ...(input.repairOrigin ? { repairOrigin: input.repairOrigin } : {}),
+        ...(input.executionMode ? { executionMode: input.executionMode, parentRunId: input.parentRunId } : {}),
         ...(input.goalId ? { goalId: input.goalId } : {}),
         ...(input.editMessageId ? { editMessageId: input.editMessageId } : {}) }));
 }
@@ -104,14 +91,14 @@ export class CopilotRunLedger {
         // Descend the parent chain running each level's restricted-origin checks
         // (nested executionMode is forbidden, so valid chains are short; the
         // shared depth-8 cap fails closed regardless), then walk the collected
-        // levels deepest-first — per level the repair/review checks then the
-        // common checks, exactly like the former recursion.
+        // levels deepest-first with the common checks. Retired modes
+        // (review/repair) persisted on old runs fail closed here.
         const levels: TurnInput[] = [];
         let current = input;
         for (let depth = 0; ; depth += 1) {
             if (!current.executionMode) { levels.push(current); break; }
             const parent = current.parentRunId ? this.get(current.parentRunId) : undefined;
-            if (!current.projectId || !['research', 'review', 'repair', 'coding'].includes(current.executionMode) || !parent
+            if (!current.projectId || !['research', 'coding'].includes(current.executionMode) || !parent
                 || ['cancelled', 'failed', 'indeterminate'].includes(parent.status))
                 throw new AgentError('COPILOT_RESTRICTED_ORIGIN', 'Read-only task origin is no longer valid');
             if (depth >= PARENT_CHAIN_MAX_DEPTH - 1)
@@ -123,24 +110,6 @@ export class CopilotRunLedger {
             current = origin;
         }
         for (const level of levels.reverse()) {
-            if (level.executionMode === 'repair') {
-                const { root } = validateRepairJob(this.db, this.userId, repairIdentity(this.userId, level));
-                if (root.project_id !== level.projectId) throw new AgentError('COPILOT_REPAIR_SCOPE', 'Repair project mismatch');
-            }
-            if (level.executionMode === 'review') {
-                const parent = level.parentRunId ? this.get(level.parentRunId) : undefined;
-                const origin = parent ? parseRunInput(parent) : undefined;
-                const evidence = level.reviewOrigin;
-                const item = evidence && new ProjectManagerRepository(this.db, this.userId).getWorkItem(evidence.projectId, evidence.workItemId);
-                const attempt = item && readTaskDispatchAttempt(item);
-                if (!evidence || evidence.projectId !== level.projectId || !attempt || attempt.id !== evidence.attemptId
-                    || attempt.originIntentId !== evidence.intentId || attempt.consumedNotificationId !== evidence.notificationId
-                    || !verifiedDispatchEvidence({ db: this.db, userId: this.userId }, evidence.projectId, evidence.workItemId, evidence.notificationId)?.notifications.some(row => row.id === evidence.notificationId))
-                    throw new AgentError('COPILOT_REVIEW_ORIGIN', 'Task review evidence changed or was revoked');
-                const action = new PlatformActionRepository(this.db, this.userId).get(evidence.intentId);
-                if (!parent || action?.origin_run_id !== parent.id || !origin?.reviewTaskResults)
-                    throw new AgentError('COPILOT_REVIEW_ORIGIN', 'Task review is not authorized by this origin');
-            }
             this.validateScopeCommon(level);
         }
     }
@@ -155,8 +124,6 @@ export class CopilotRunLedger {
 
     /** Conversation/user/channel/project invariants, per chain level, deepest first. */
     private validateScopeCommon(input: TurnInput): void {
-        if (input.toolDiscovery !== undefined && typeof input.toolDiscovery !== 'boolean')
-            throw new AgentError('COPILOT_TOOL_DISCOVERY_INVALID', 'Tool discovery must be a boolean');
         this.validateConversationOrigin(input);
         assertChannelRunScope(this.db, this.userId, input);
     }

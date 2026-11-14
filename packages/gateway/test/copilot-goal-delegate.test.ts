@@ -151,7 +151,6 @@ describe("goal_delegate coding sub-run", () => {
     assert.equal(childInput.delegateTaskId, fixture2.taskId);
     assert.equal(child.goal_id, fixture2.goalId);
     assert.equal(child.max_steps, 24);
-    assert.ok((child.max_duration_ms as number) <= 1_800_000);
 
     // The write landed in the sandbox only.
     assert.equal(fs.readFileSync(path.join(fixture2.sandboxDir, "delegated.txt"), "utf8"), "fixed by delegate\n");

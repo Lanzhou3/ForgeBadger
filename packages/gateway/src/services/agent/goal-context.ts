@@ -9,9 +9,13 @@ import { boardStatusOf } from './goal-board.js';
  * recent handover journal without changing the system prompt for non-goal
  * conversations.
  */
-const SPEC_MAX_CHARS = 2000;
+const SPEC_MAX_CHARS = 8000;
 const TASK_EVIDENCE_MAX_CHARS = 500;
 const TASK_MAX_ENTRIES = 30;
+// Continuation runs start without the earlier transcript, so the handover
+// journal is their only narrative memory: keep more of it than task evidence.
+const JOURNAL_ENTRIES = 5;
+const JOURNAL_NOTE_MAX_CHARS = 1500;
 
 export function goalContextMessage(db: Database, userId: string, goalId: string): string | undefined {
   const store = new CopilotGoalStore(db, userId);
@@ -19,7 +23,7 @@ export function goalContextMessage(db: Database, userId: string, goalId: string)
   if (!goal) return undefined;
   const allTasks = store.listTasks(goalId);
   const shownTasks = allTasks.slice(0, TASK_MAX_ENTRIES);
-  const journal = store.recentJournal(goalId, 3);
+  const journal = store.recentJournal(goalId, JOURNAL_ENTRIES);
   const grants = parseGoalGrants(goal.grants_json);
   const grantedTools = grants.flatMap(grant => GOAL_GRANT_TOOLS[grant]);
   const clip = (value: string | null, max: number) => {
@@ -40,7 +44,7 @@ export function goalContextMessage(db: Database, userId: string, goalId: string)
       })),
       ...(allTasks.length > shownTasks.length ? [{ seq: null, description: `… ${allTasks.length - shownTasks.length} more tasks`, status: 'summary', evidence: null }] : [])
     ],
-    recentJournal: journal.map(entry => clip(entry.note, TASK_EVIDENCE_MAX_CHARS)).reverse(),
+    recentJournal: journal.map(entry => clip(entry.note, JOURNAL_NOTE_MAX_CHARS)).reverse(),
     grants: grants.length
       ? `预授权可自动执行（免逐次审批）：${grants.join(', ')} → ${grantedTools.join(', ')}`
       : '无预授权：operate 类工具仍需逐次审批',

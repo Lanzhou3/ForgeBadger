@@ -171,8 +171,6 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
     conversationId,
     projectId,
     modelId,
-    reviewTaskResults: false,
-    repairFailedChecks: false,
     savingPreferences: savingPreferences || projectSaving,
     conversations: [],
     messages,
@@ -349,8 +347,6 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
   const followups = useCopilotFollowups({
     conversationId,
     ...(modelId ? { modelId } : {}),
-    reviewTaskResults: false,
-    repairFailedChecks: false,
     active: isBusy,
   });
   const enqueueRef = useRef(followups.enqueue);

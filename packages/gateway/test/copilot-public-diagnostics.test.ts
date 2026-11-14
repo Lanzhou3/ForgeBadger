@@ -22,7 +22,7 @@ it('persists safe HTTP classifications and visible diagnostics without provider 
       const conversation = ledger.log.createConversation();
       const orchestrator = createCopilotOrchestrator({ db, masterKey: 'a'.repeat(32), eventBus: new ForgeBadgerEventBus(), toolRegistry: createAgentToolRegistry([]),
         llm: { async stream() { throw await providerRejection(new Response('SYNTHETIC_PRIVATE_BODY', { status }), new AbortController().signal); },
-          async summarize() { return ''; }, async generateTitle() { return ''; }, async proposeMemory() { return []; } } });
+          async summarize() { return ''; }, async generateTitle() { return ''; } } });
       await assert.rejects(orchestrator.runTurn({ userId: user.id, conversationId: conversation.id, userText: 'Fixture.' }), { code: 'AGENT_HTTP_ERROR' });
       const run = ledger.log.listRuns(conversation.id)[0]!;
       const result = JSON.parse(ledger.steps(run.id)[0]!.result_json!);

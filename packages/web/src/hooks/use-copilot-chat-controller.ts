@@ -10,8 +10,6 @@ export interface CopilotChatControllerOptions {
   conversationId: string | null;
   projectId: string;
   modelId: string | null;
-  reviewTaskResults: boolean;
-  repairFailedChecks: boolean;
   savingPreferences: boolean;
   conversations: CopilotConversation[];
   /** Current transcript; the follow-bottom effect reacts to it. */
@@ -96,8 +94,8 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const lastSentRef = useRef<{ conversationId: string; text: string; modelId?: string; clientRequestId: string; reviewTaskResults?: boolean; repairFailedChecks?: boolean } | null>(null);
-  const lastEditRef = useRef<{ signature: string; clientRequestId: string; reviewTaskResults?: boolean; repairFailedChecks?: boolean } | null>(null);
+  const lastSentRef = useRef<{ conversationId: string; text: string; modelId?: string; clientRequestId: string } | null>(null);
+  const lastEditRef = useRef<{ signature: string; clientRequestId: string } | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   const selectionEpochRef = useRef(0);
   const messageSerialRef = useRef(0);
@@ -149,7 +147,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     if (retry && (!prior || prior.conversationId !== id)) return;
     const epoch = selectionEpochRef.current;
     messageSerialRef.current++;
-    const request = prior ?? { conversationId: id, text, ...(opts.modelId ? { modelId: opts.modelId } : {}), clientRequestId: crypto.randomUUID(), reviewTaskResults: opts.reviewTaskResults, repairFailedChecks: opts.repairFailedChecks };
+    const request = prior ?? { conversationId: id, text, ...(opts.modelId ? { modelId: opts.modelId } : {}), clientRequestId: crypto.randomUUID() };
     lastSentRef.current = request;
     if (!retry) opts.appendUserMessage(text);
     if (!textOverride) setInputState("");
@@ -162,7 +160,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     opts.markPending(id);
     onStarted?.();
     try {
-      await opts.startRun(id, text, request.modelId, { clientRequestId: request.clientRequestId, ...(request.repairFailedChecks ? { repairFailedChecks: true } : {}), ...(request.reviewTaskResults ? { reviewTaskResults: true } : {}) });
+      await opts.startRun(id, text, request.modelId, { clientRequestId: request.clientRequestId });
       if (epoch !== selectionEpochRef.current) return;
       const wasUntitled = !opts.conversations.find((item) => item.id === id)?.title;
       if (wasUntitled) await opts.autoTitleIfUntitled(id, text.slice(0, AUTO_TITLE_MAX_CHARS));
@@ -215,13 +213,13 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     const epoch = selectionEpochRef.current;
     messageSerialRef.current++;
     const signature = JSON.stringify([id, targetId, content, opts.modelId]);
-    const request = lastEditRef.current?.signature === signature ? lastEditRef.current : { signature, clientRequestId: crypto.randomUUID(), reviewTaskResults: opts.reviewTaskResults, repairFailedChecks: opts.repairFailedChecks };
+    const request = lastEditRef.current?.signature === signature ? lastEditRef.current : { signature, clientRequestId: crypto.randomUUID() };
     lastEditRef.current = request;
     editSubmittingRef.current = true;
     setEditSubmitting(true);
     opts.clearActive();
     try {
-      await opts.startEditedRun(id, targetId, content, { clientRequestId: request.clientRequestId, ...(opts.modelId ? { modelId: opts.modelId } : {}), ...(request.repairFailedChecks ? { repairFailedChecks: true } : {}), ...(request.reviewTaskResults ? { reviewTaskResults: true } : {}) });
+      await opts.startEditedRun(id, targetId, content, { clientRequestId: request.clientRequestId, ...(opts.modelId ? { modelId: opts.modelId } : {}) });
       if (epoch !== selectionEpochRef.current) return;
       setEditingMessageId(null);
       setEditDraft("");

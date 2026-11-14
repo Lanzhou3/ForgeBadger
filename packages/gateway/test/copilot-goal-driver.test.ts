@@ -239,3 +239,60 @@ describe("GoalDriver continuation", () => {
     } finally { fixture.driver.stop(); fixture.db.close(); }
   });
 });
+
+describe("Goal run context layout", () => {
+  it("puts goal state after the transcript and starts automatic continuations from a clean turn", async () => {
+    const db = createTestDb();
+    const user = new UserRepository(db).create("goal-context@example.com", "hash");
+    const log = new CopilotConversationLog(db, user.id);
+    const conversation = log.createConversation();
+    const eventBus = new ForgeBadgerEventBus();
+    const store = new CopilotGoalStore(db, user.id);
+    const requests: Array<Array<{ role: string; content: string; cacheBreakpoint?: true }>> = [];
+    const orchestrator = createCopilotOrchestrator({
+      db, masterKey, eventBus, maxSteps: 4, toolRegistry: createAgentToolRegistry([]),
+      llm: {
+        async stream(request) { requests.push(request.messages.map(m => ({ ...m }))); return { message: "run output" }; },
+        async summarize() { return ""; },
+        async generateTitle() { return ""; }
+      }
+    });
+    const goalId = store.createGoal({ conversationId: conversation.id, title: "Translate README", spec: "Translate the README" }).id;
+    store.addTasks(goalId, ["Task A"]);
+    const driver = attachGoalDriver({ db, masterKey, eventBus }, { minIntervalMs: 10, enqueue: (_userId, input) => orchestrator.enqueue(input) });
+    try {
+      const first = orchestrator.enqueue({ userId: user.id, conversationId: conversation.id, goalId,
+        userText: "owner kickoff instructions", source: "user", clientRequestId: randomUUID() });
+      await orchestrator.executeRun(user.id, first);
+      await waitFor(() => requests.length >= 2, "the continuation run to call the model");
+      store.setStatus(goalId, "cancelled");
+
+      const [initial, continuation] = requests as [typeof requests[number], typeof requests[number]];
+      assert.equal(initial[0]!.content, "owner kickoff instructions");
+      assert.equal(initial[0]!.cacheBreakpoint, true);
+      assert.match(initial.at(-1)!.content, /^Goal mode run/);
+      assert.equal(initial.at(-1)!.cacheBreakpoint, undefined);
+
+      // The automatic continuation carries the checklist, not the earlier transcript.
+      assert.equal(continuation.length, 2);
+      assert.match(continuation[0]!.content, /Goal 自动续跑/);
+      assert.match(continuation[1]!.content, /^Goal mode run/);
+      assert.match(continuation[1]!.content, /Task A/);
+      assert.doesNotMatch(JSON.stringify(continuation), /owner kickoff instructions|run output/);
+      // The stored conversation still holds every turn for the owner.
+      assert.ok(log.listMessages(conversation.id).some(row => row.content === "owner kickoff instructions"));
+
+      // An owner-authored continuation (answer / resume note) keeps the full transcript.
+      await waitFor(() => !store.hasActiveRun(conversation.id), "runs to settle");
+      store.setStatus(goalId, "active");
+      const before = requests.length;
+      const decision = evaluateGoalContinuation({ db, masterKey, eventBus }, user.id, goalId,
+        input => orchestrator.enqueue(input), { userText: "owner answer" });
+      assert.equal(decision.action, "enqueued");
+      await waitFor(() => requests.length > before, "the owner-authored run to call the model");
+      store.setStatus(goalId, "cancelled");
+      assert.match(JSON.stringify(requests[before]), /owner kickoff instructions/);
+      assert.match(requests[before]!.at(-1)!.content, /^Goal mode run/);
+    } finally { driver.stop(); await delay(100); db.close(); }
+  });
+});

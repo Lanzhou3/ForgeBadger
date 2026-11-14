@@ -25,7 +25,7 @@ it('archives a real oversized project read and retrieves its redacted tail via t
       async stream(request) {
         if (++calls === 1) request.onEvent({ type: 'tool_call', toolCall: { id: 'get', name: 'get_project', arguments: JSON.stringify({ projectId: project.id }) } });
         return { message: 'Read evidence', usage: { totalTokens: 10 } };
-      }, async summarize() { return 'summary'; }, async generateTitle() { return ''; }, async proposeMemory() { return []; }
+      }, async summarize() { return 'summary'; }, async generateTitle() { return ''; }
     } });
     const runId = await orchestrator.runTurn({ userId, conversationId: conversation.id, userText: 'Inspect' });
     const receipt = ledger.log.listMessages(conversation.id).find(m => m.kind === 'tool_result')!;
@@ -91,7 +91,7 @@ it('keeps the successful tool receipt when optional archive persistence fails, w
     async stream(request) {
       if (++calls === 1) request.onEvent({type:'tool_call',toolCall:{id:'read',name:'get_project',arguments:JSON.stringify({projectId:f.project.id})}});
       return {message:'done',usage:{totalTokens:10}};
-    }, async summarize(){return 'summary';},async generateTitle(){return '';},async proposeMemory(){return [];}
+    }, async summarize(){return 'summary';},async generateTitle(){return '';}
   }});
   const runId = await orchestrator.runTurn({userId:f.userId,conversationId:f.conversationId,userText:'Read project'});
   assert.equal(f.ledger.get(runId)?.status,'completed');

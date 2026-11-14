@@ -30,9 +30,6 @@ function stubLlm(): AgentLlmClient {
     },
     async generateTitle() {
       return "";
-    },
-    async proposeMemory() {
-      return [];
     }
   } as unknown as AgentLlmClient;
 }

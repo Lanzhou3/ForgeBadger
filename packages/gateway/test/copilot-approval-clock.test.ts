@@ -11,6 +11,13 @@ import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { CopilotRunLedger, type Claim } from '../src/services/agent/run-ledger.js';
 import { runDuration } from '../src/services/agent/approval-clock.js';
 
+/** Charged (non-approval) time against the fixture's nominal 60s window; the stored budget column is retired. */
+function remaining(db: Database.Database, userId: string, runId: string, now = Date.now()): number {
+  const row = db.prepare('SELECT started_at FROM copilot_runs WHERE id=?').get(runId) as { started_at: number | null };
+  const elapsed = row.started_at === null ? 0 : Math.max(0, now - row.started_at);
+  return Math.max(0, 60_000 - (elapsed - runDuration(db, userId, runId, now).approvalWaitMs));
+}
+
 // The approval clock still meters approval-only pauses (approval_wait_ms) for
 // audit; it no longer gates execution. These tests cover the accounting and
 // its reopen/durability behavior.
@@ -22,7 +29,6 @@ function fixture(filename = ':memory:') {
   const ledger = new CopilotRunLedger(db, userId);
   const conversationId = ledger.log.createConversation().id;
   const runId = ledger.admit({ userId, conversationId, userText: 'bounded task' }, 16);
-  db.prepare('UPDATE copilot_runs SET max_duration_ms=60000 WHERE id=?').run(runId);
   const claim = ledger.claim(runId, 'clock-worker', 30_000)!;
   return { db, ledger, userId, runId, claim };
 }
@@ -50,18 +56,18 @@ it('persists approval-only pause across database reopen without resetting origin
     now += 20_000;
     const action = wait(f.ledger, f.claim, 'pause-1');
     now += 40 * 60_000;
-    assert.equal(runDuration(f.db, f.userId, f.runId, now).remainingMs, 40_000);
+    assert.equal(remaining(f.db, f.userId, f.runId, now), 40_000);
     f.db.close();
     restored = new Database(filename);
     const ledger = new CopilotRunLedger(restored, f.userId);
-    assert.equal(runDuration(restored, f.userId, f.runId, now).remainingMs, 40_000);
+    assert.equal(remaining(restored, f.userId, f.runId, now), 40_000);
     assert.equal(ledger.decide(f.runId, action.id, true), true);
     assert.deepEqual(clockRow(restored, f.runId), { started_at: startedAt, approval_wait_ms: 40 * 60_000, approval_wait_started_at: null });
     ledger.claim(f.runId, 'reopened-worker', 60_000);
     now += 39_999;
-    assert.ok(runDuration(restored, f.userId, f.runId, now).remainingMs > 0);
+    assert.ok(remaining(restored, f.userId, f.runId, now) > 0);
     now++;
-    assert.equal(runDuration(restored, f.userId, f.runId, now).remainingMs, 0);
+    assert.equal(remaining(restored, f.userId, f.runId, now), 0);
     assert.deepEqual(restored.pragma('foreign_key_check'), []);
   } finally {
     if (f.db.open) f.db.close();
@@ -87,9 +93,9 @@ it('accumulates multiple waits once and charges ordinary pending downtime after 
     now += 180_000;
     assert.equal(f.ledger.decide(f.runId, second.id, false), true);
     assert.equal(clockRow(f.db, f.runId).approval_wait_ms, 300_000);
-    assert.equal(runDuration(f.db, f.userId, f.runId, now).remainingMs, 50_000);
+    assert.equal(remaining(f.db, f.userId, f.runId, now), 50_000);
     now += 50_000;
-    assert.equal(runDuration(f.db, f.userId, f.runId, now).remainingMs, 0);
+    assert.equal(remaining(f.db, f.userId, f.runId, now), 0);
   } finally { f.db.close(); }
 });
 
@@ -243,13 +249,13 @@ it('never grants time credit from forged stored digests and bounds persisted cum
     now += 90_000;
     f.db.prepare("UPDATE copilot_pending_actions SET input_digest='forged' WHERE id=?").run(action.id);
     f.db.prepare("UPDATE copilot_run_steps SET input_digest='forged' WHERE id=?").run(action.stepId);
-    assert.equal(runDuration(f.db, f.userId, f.runId, now).remainingMs, 0);
+    assert.equal(remaining(f.db, f.userId, f.runId, now), 0);
     assert.equal(f.ledger.decide(f.runId, action.id, true), false);
     assert.equal(f.ledger.cancel(f.runId), true);
     assert.equal(clockRow(f.db, f.runId).approval_wait_ms, 0);
     f.db.prepare('UPDATE copilot_runs SET approval_wait_ms=-1 WHERE id=?').run(f.runId);
-    assert.equal(runDuration(f.db, f.userId, f.runId, now).remainingMs, 0);
+    assert.equal(remaining(f.db, f.userId, f.runId, now), 0);
     f.db.prepare('UPDATE copilot_runs SET approval_wait_ms=900000 WHERE id=?').run(f.runId);
-    assert.equal(runDuration(f.db, f.userId, f.runId, now).remainingMs, 60_000);
+    assert.equal(remaining(f.db, f.userId, f.runId, now), 60_000);
   } finally { f.db.close(); }
 });

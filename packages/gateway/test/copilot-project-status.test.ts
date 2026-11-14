@@ -13,7 +13,6 @@ import { ProjectRepository } from '../src/db/repositories/project-repository.js'
 import { readProjectGitStatus, summarizeGitStatus } from '../src/services/development/project-git-status.js';
 import { createPlatformTools } from '../src/services/agent/tools/index.js';
 import { executeAgentTool, createAgentToolRegistry } from '../src/services/agent/tool-registry.js';
-import { selectDiscoveredTools } from '../src/services/agent/tool-discovery.js';
 
 const configKeys = ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_NOSYSTEM'] as const;
 let savedConfig: Array<string | undefined>;
@@ -115,7 +114,7 @@ it('registers a core read tool and enforces tenant and research project scope', 
   const project = new ProjectRepository(db, owner.id).create({ name: 'Status', path: f.root, aiTool: 'codex' });
   const registry = createAgentToolRegistry(createPlatformTools());
   const tool = registry.tools.get('get_project_git_status')!; assert.ok(tool); assert.equal(tool.requiresApproval, false);
-  const schemas = selectDiscoveredTools({ allVisible: registry.toModelSchemas(), steps: [], userId: owner.id, runId: 'run', masterKey: 'key', enabled: true });
+  const schemas = registry.toModelSchemas();
   assert.ok(schemas.some(s => s.name === tool.name));
   const context = { db, userId: owner.id, masterKey: 'key', executionMode: 'research', projectId: project.id };
   assert.equal((await executeAgentTool(tool, { projectId: project.id }, context)).ok, true);

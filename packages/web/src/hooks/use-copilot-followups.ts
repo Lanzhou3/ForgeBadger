@@ -11,9 +11,6 @@ export interface UseCopilotFollowupsOptions {
   conversationId: string | null;
   projectId?: string;
   modelId?: string;
-  reviewTaskResults?: boolean;
-  repairFailedChecks?: boolean;
-  toolDiscovery?: boolean;
   /** Poll while a run is in flight so items leave the queue as they drain. */
   active: boolean;
 }
@@ -33,7 +30,7 @@ export interface CopilotFollowupsController {
  * ambiguous response is deduplicated by the server instead of creating a
  * second turn.
  */
-export function useCopilotFollowups({ conversationId, projectId, modelId, reviewTaskResults, repairFailedChecks, toolDiscovery, active }: UseCopilotFollowupsOptions): CopilotFollowupsController {
+export function useCopilotFollowups({ conversationId, projectId, modelId, active }: UseCopilotFollowupsOptions): CopilotFollowupsController {
   const { t } = useLanguage();
   const client = useQueryClient();
   const queryKey = ["copilot-followups", conversationId];
@@ -74,9 +71,6 @@ export function useCopilotFollowups({ conversationId, projectId, modelId, review
       clientRequestId: crypto.randomUUID(),
       ...(projectId ? { projectId } : {}),
       ...(modelId ? { modelId } : {}),
-      ...(reviewTaskResults !== undefined ? { reviewTaskResults } : {}),
-      ...(repairFailedChecks !== undefined ? { repairFailedChecks } : {}),
-      ...(toolDiscovery !== undefined ? { toolDiscovery } : {}),
     } };
     const submitted = request.current;
     setEnqueuing(true);
@@ -94,7 +88,7 @@ export function useCopilotFollowups({ conversationId, projectId, modelId, review
     } finally {
       if (epoch.current === generation) setEnqueuing(false);
     }
-  }, [conversationId, enqueuing, modelId, projectId, reviewTaskResults, repairFailedChecks, toolDiscovery, query, t]);
+  }, [conversationId, enqueuing, modelId, projectId, query, t]);
 
   const cancel = useCallback(async (id: string) => {
     if (!conversationId) return;

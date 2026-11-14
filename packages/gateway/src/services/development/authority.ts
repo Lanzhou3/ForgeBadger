@@ -1,4 +1,3 @@
-import { repairJob, validateRepairJob, assertRepairPlan } from './repair-scope.js';
 import { CopilotToolPreferenceRepository } from '../../db/repositories/copilot-tool-preference-repository.js';
 import { PlatformActionRepository } from '../../db/repositories/platform-action-repository.js';
 import { ProjectRepository } from '../../db/repositories/project-repository.js';
@@ -51,9 +50,6 @@ export function assertDevelopmentAuthority(db:Database,row:DevelopmentTaskRow,ch
   if(origin.source==='user'&&!input.executionMode&&!hasUserMessageAuthorization(db,row.user_id,origin.conversation_id,input.userText,row.origin_run_id!,input.editMessageId))throw new Error('DEVELOPMENT_ORIGIN_REVOKED');
   assertChannelConversationAuthority(db,row.user_id,origin.conversation_id);
   assertChannelRunScope(db,row.user_id,input,{projectIds:[row.project_id],rootPaths:[row.project_root]});
-  const repair=repairJob(db,row.user_id,row.origin_run_id!);
-  if(repair){validateRepairJob(db,row.user_id,repair);assertRepairPlan(db,row.user_id,row.origin_run_id!,row.origin_step_id!,JSON.parse(row.plan_json));
-    if(repair.submitted_task_id!==row.id)throw new Error('COPILOT_REPAIR_SUBMISSION_MISMATCH');}
 
  } else if(intent.origin_kind!=='owner_api'||row.origin_run_id||row.origin_step_id)throw new Error('DEVELOPMENT_ORIGIN_MISSING');
  const projects=new ProjectRepository(db,row.user_id),project=projects.getById(row.project_id);

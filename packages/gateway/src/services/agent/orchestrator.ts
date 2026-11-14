@@ -11,7 +11,6 @@ import { evaluateGoalContinuation } from './goal-driver.js';
 import { goalGrantForTool } from './goal-grants.js';
 import { clearGoalFailureCooldown } from './goal-driver.js';
 import { bindGoalCommand, resolveLocalCommandReply, type SlashCommandContext } from "./slash-commands.js";
-import { reserveRepairSubmission } from '../development/repair-scope.js';
 import { CopilotToolArtifactRepository } from '../../db/repositories/copilot-tool-artifact-repository.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { readSource } from "../development/workspace.js";
@@ -40,7 +39,6 @@ import { AgentError } from "./types.js";
 import { CopilotRunLedger, inputDigest, type TurnInput, type Claim, type RunStep } from "./run-ledger.js";
 import { loadRunFacts } from "./run-authorization.js";
 import { executionControl } from "./execution-control.js";
-import { selectDiscoveredTools } from './tool-discovery.js';
 import { PublicTextStream } from './public-text-stream.js';
 import { appendProvisionalText, clearProvisionalText } from './provisional-text.js';
 import { nextReadBatch } from './read-batch.js';
@@ -90,7 +88,8 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     // Plane A tool surface: the catalog and the execution-time gate below are
     // projections of one computeToolSurface call.
     const toolSurface = (input: TurnInput): ToolSurface => computeToolSurface(input, {
-        registry: deps.toolRegistry, hasSessionManager: !!deps.sessionManager, isToolDisabled: deps.isToolDisabled });
+        registry: deps.toolRegistry, hasSessionManager: !!deps.sessionManager, isToolDisabled: deps.isToolDisabled,
+        hasMachineRoots: new CopilotMachineRootRepository(deps.db, input.userId).list().length > 0 });
     const allVisibleTools = (input: TurnInput) => toolSurface(input).visible;
     const effect = (name: string) => deps.toolRegistry.tools.get(name)?.risk === "operate" || name === "write_memory" ? "write" as const : "read" as const;
     function enqueue(input: TurnInput): string {
@@ -233,7 +232,6 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             stream: (input) => { setPhase('model'); return baseLlm.stream(input); },
             summarize: (input) => { setPhase('summarizing'); return baseLlm.summarize(input); },
             generateTitle: (input) => baseLlm.generateTitle(input),
-            proposeMemory: (input) => baseLlm.proposeMemory(input),
         };
         ledger.validateScope(input);
         const live = () => {
@@ -268,7 +266,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 ledger.finish(c, 'stopped', 'COPILOT_NO_PROGRESS');
                 emit(ledger, c.runId); return;
             }
-            // DSH-style advisory repeat guard: reminders only at the exact
+            // Advisory repeat guard: reminders only at the exact
             // threshold streaks (3/5/8), never a stop. A repeating run ends by
             // its step budget or by the owner cancelling it — the guard
             // advises, it does not decide for the owner.
@@ -304,22 +302,22 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 text = command;
             else {
                 const allVisible = allVisibleTools(input);
-                const tools = selectDiscoveredTools({ allVisible, steps: ledger.steps(c.runId), userId: input.userId,
-                    runId: c.runId, masterKey: deps.masterKey, enabled: input.toolDiscovery === true });
+                const tools = allVisible;
                 const availableToolNames = allVisible.map(tool => tool.name);
                 const skillCatalog = availableToolNames.includes("load_playbook")
                     ? listAvailableCopilotSkillSummaries(deps.db, input.userId, { availableToolNames }) : [];
                 const prefixMessages: import("./orchestrator-types.js").AgentLlmMessage[] = [];
-                if (input.executionMode && input.executionMode !== 'repair' && input.executionMode !== 'coding') prefixMessages.push({ role: 'user', content: 'This is a bounded read-only investigation. Inspect evidence, cite paths and IDs, and report uncertainty. Never claim tests passed from a CLI completion notice. Do not perform writes or delegate.' });
+                // Volatile per-call context goes after the transcript: it changes
+                // between model calls and must not invalidate the cached prefix.
+                const suffixMessages: import("./orchestrator-types.js").AgentLlmMessage[] = [];
+                if (input.executionMode && input.executionMode !== 'coding') prefixMessages.push({ role: 'user', content: 'This is a bounded read-only investigation. Inspect evidence, cite paths and IDs, and report uncertainty. Never claim tests passed from a CLI completion notice. Do not perform writes or delegate.' });
                 if (input.executionMode === 'coding') prefixMessages.push({ role: 'user', content:
                     'This is a delegated coding sub-run. Edit files ONLY through the goal sandbox tools (goal_file_write, goal_file_edit, goal_run_checks); the real project is untouched until the owner merges. '
                     + 'Update only the delegated task. Keep changes minimal and focused on the instructions. '
                     + 'Verify with goal_run_checks before reporting success, and end with a short report: what changed, how it was verified, and any remaining risks.' });
-                if (input.toolDiscovery) prefixMessages.push({ role: 'user', content:
-                    'Tool discovery mode is enabled. Use discover_tools to find additional current platform capabilities. Successful selections become available on the next model round; discovery does not change permissions or approvals.' });
                 if (input.goalId) {
                     const goalMessage = goalContextMessage(deps.db, input.userId, input.goalId);
-                    if (goalMessage) prefixMessages.push({ role: 'user', content: goalMessage });
+                    if (goalMessage) suffixMessages.push({ role: 'user', content: goalMessage });
                 }
                 if (input.projectId) {
                     const project = new ProjectRepository(deps.db, input.userId).getById(input.projectId);
@@ -340,7 +338,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     + " Load the full instructions using load_playbook by ID"
                     + (availableToolNames.includes("read_skill_resource") ? ". Use read_skill_resource for bundled references." : ".")
                     + "\n" + skillCatalog.map(skill => `- ${skill.name} (${skill.id}): ${skill.description}`).join("\n") });
-                if (repeatReminder) prefixMessages.push({ role: 'user', content: repeatReminder });
+                if (repeatReminder) suffixMessages.push({ role: 'user', content: repeatReminder });
                 const machineRoots = new CopilotMachineRootRepository(deps.db, input.userId).list();
                 if (machineRoots.length && availableToolNames.includes("machine_search")) prefixMessages.push({ role: "user", content:
                     "Owner-registered local search roots (read-only). Use the root id with machine_search to grep, read_machine_file to open a file, or machine_tree to map the directory structure. List them with list_machine_roots." + "\n" + JSON.stringify(machineRoots.map(r => ({ id: r.id, label: r.label, path: r.path }))) });
@@ -351,7 +349,8 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     assistantMessages: modelResponses.list(input.conversationId),
                     ...(!input.executionMode ? { memory: new AgentMemoryRepository(deps.db, input.userId) } : {}), memoryConversationId: input.conversationId, signal,
                     ...(input.projectId ? { memoryProjectId: input.projectId } : {}), memoryGlobalAllowed: !input.channelScope, canCommit: live,
-                    tools, prefixMessages, reservedTokens: 4096,
+                    tools, prefixMessages, suffixMessages, reservedTokens: 4096,
+                    ...(input.goalId && input.goalContinuation ? { latestTurnOnly: true } : {}),
                     ...(deps.llm.contextBudget ? { maxContextTokens: deps.llm.contextBudget(modelId) } : {}),
                     ...(recoveryBudget === undefined ? {} : {maxContextTokens:recoveryBudget,strictCompression:true})
                 });
@@ -410,8 +409,6 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     if (command === null && !control.stopped && ledger.get(c.runId)?.status === "completed") {
                         ledger.validateScope(input);
                         await maybeAutoTitle({ log: ledger.log, userId: input.userId, conversationId: input.conversationId, userText: input.userText, assistantText: text, source: input.source ?? "user", signal, canCommit: () => { if(control.stopped || !deps.db.open)return false; ledger.validateScope(input); return !!ledger.log.getConversation(input.conversationId) && ledger.log.listRuns(input.conversationId)[0]?.id === c.runId; }, runId: c.runId, eventBus: deps.eventBus, llm, ...(input.modelId ? { modelId: input.modelId } : {}) }).catch(() => undefined);
-                        // Durable memory writes are platform commands; background curation
-                        // cannot bypass tenant scope or exact one-shot approval.
                     }
                 }
                 return;
@@ -467,9 +464,6 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         let policyReason: string | null = null;
         if (!rejection && tool) {
             try { checkAgentScope(context, tool.name, raw); } catch (error) { rejection = error instanceof Error ? error.message : "Tool scope rejected"; }
-            if (!rejection && input.executionMode === 'repair' && tool.name === 'submit_development_task') {
-                try { reserveRepairSubmission(deps.db,input.userId,c.runId,step.id,raw); } catch(error) { rejection=error instanceof Error?error.message:'Repair scope rejected'; }
-            }
             const decision = policy.evaluate({ userId: input.userId, toolName: tool.name, toolRisk: tool.risk, requiresApproval: tool.requiresApproval, input: raw });
             policyReason = decision.reason;
             const autoApproved = (input.source ?? "user") === "user" && decision.action === "auto_approve";

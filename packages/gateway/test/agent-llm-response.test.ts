@@ -211,9 +211,9 @@ it("rejects the actual OpenAI wire expansion of complete historical tool batches
   const { client, db, user, requests } = setup(t, "openai-compatible", json({ choices: [{ message: { content: "okay" } }] }));
   const log = new CopilotConversationLog(db, user.id);
   const conversation = log.createConversation();
-  const goal = "x".repeat(32_000);
+  const goal = "x".repeat(64_000);
   log.appendMessage(conversation.id, { role: "user", kind: "text", content: goal });
-  for (let batch = 0; batch < 6; batch++) {
+  for (let batch = 0; batch < 12; batch++) {
     for (let offset = 0; offset < 32; offset++) log.appendMessage(conversation.id, {
       role: "assistant", kind: "tool_call", content: "", toolCallId: `tc${batch * 32 + offset}`, toolName: "list_projects", toolInputJson: "{}"
     });
@@ -235,23 +235,23 @@ for (const format of ["openai-compatible", "anthropic"] as const) {
   const validResponse = () => json(format === "openai-compatible" ? { choices: [{ message: { content: "okay" } }] } : { content: [{ type: "text", text: "okay" }] });
   it(`${format} rejects final wire overflow caused by JSON escaping`, async t => {
     const { client, requests } = setup(t, format, validResponse());
-    const messages = [{ role: "user" as const, content: "\n".repeat(49_000) }];
+    const messages = [{ role: "user" as const, content: "\n".repeat(98_000) }];
     await assert.rejects(client.stream({ messages, tools: [], onEvent() {} }), { code: "COPILOT_CONTEXT_TOO_LARGE" });
     assert.equal(requests.length, 0);
-    assert.equal(messages[0]!.content.length, 49_000);
+    assert.equal(messages[0]!.content.length, 98_000);
   });
   it(`${format} applies the same final wire limit to system overrides and summarization`, async t => {
     const { client, requests } = setup(t, format, validResponse());
-    await assert.rejects(client.stream({ messages: [{ role: "user", content: "keep this goal" }], system: "s".repeat(96_000), tools: [], onEvent() {} }), { code: "COPILOT_CONTEXT_TOO_LARGE" });
-    await assert.rejects(client.summarize({ messages: [{ role: "user", content: "s".repeat(96_000) }] }), { code: "COPILOT_CONTEXT_TOO_LARGE" });
+    await assert.rejects(client.stream({ messages: [{ role: "user", content: "keep this goal" }], system: "s".repeat(192_000), tools: [], onEvent() {} }), { code: "COPILOT_CONTEXT_TOO_LARGE" });
+    await assert.rejects(client.summarize({ messages: [{ role: "user", content: "s".repeat(192_000) }] }), { code: "COPILOT_CONTEXT_TOO_LARGE" });
     assert.equal(requests.length, 0);
   });
   it(`${format} sends a request immediately below the final wire limit without truncating it`, async t => {
     const { client, requests } = setup(t, format, { ok: true, json: async () => format === "openai-compatible" ? { choices: [{ message: { content: "okay" } }] } : { content: [{ type: "text", text: "okay" }] } } as Response);
     await client.stream({ messages: [{ role: "user", content: "g" }], tools: [], onEvent() {} });
     const overhead = (requests[0]!.body as string).length - 1;
-    // 60k Latin chars * 6/15 = exactly MAX_CONTEXT_TOKENS estimated tokens.
-    const targetChars = 60_000;
+    // 120k Latin chars * 6/15 = exactly MAX_CONTEXT_TOKENS estimated tokens.
+    const targetChars = 120_000;
     const content = "g".repeat(targetChars - overhead);
     await client.stream({ messages: [{ role: "user", content }], tools: [], onEvent() {} });
     assert.equal((requests[1]!.body as string).length, targetChars);

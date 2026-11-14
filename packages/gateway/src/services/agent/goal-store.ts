@@ -14,7 +14,6 @@ export const GOAL_STATUSES = ['active', 'paused', 'completed', 'blocked', 'cance
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
 export const GOAL_TASK_STATUSES = ['pending', 'in_progress', 'passes', 'failed', 'cancelled'] as const;
 /** Statuses the model may set; `cancelled` only comes from the owner's board. */
-export const MODEL_TASK_STATUSES = ['pending', 'in_progress', 'passes', 'failed'] as const;
 /** Tasks that no longer gate goal completion. */
 export const RESOLVED_TASK_STATUSES: readonly GoalTaskStatus[] = ['passes', 'cancelled'];
 export type GoalTaskStatus = (typeof GOAL_TASK_STATUSES)[number];
@@ -26,7 +25,6 @@ export interface GoalWorkspaceRecord { kind: GoalWorkspaceKind; path: string; br
 export interface GoalRow {
   id: string; user_id: string; conversation_id: string; project_id: string | null;
   title: string; spec: string; status: GoalStatus;
-  token_budget: number; max_duration_ms: number; max_runs: number;
   blocked_reason: string | null; pending_question: string | null;
   grants_json: string;
   workspace_kind: GoalWorkspaceKind | null; workspace_path: string | null; workspace_branch: string | null;
@@ -79,9 +77,8 @@ export class CopilotGoalStore {
     const grants = parseGoalGrants(JSON.stringify(input.grants ?? []));
     const id = input.id ?? randomUUID();
     const now = Date.now();
-    // The budget columns are legacy (no longer enforced); defaults keep rows populated.
-    this.db.prepare(`INSERT INTO copilot_goals(id,user_id,conversation_id,project_id,title,spec,status,token_budget,max_duration_ms,max_runs,grants_json,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,'active',5000000,28800000,50,?,?,?)`)
+    this.db.prepare(`INSERT INTO copilot_goals(id,user_id,conversation_id,project_id,title,spec,status,grants_json,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,'active',?,?,?)`)
       .run(id, this.userId, input.conversationId, projectId, input.title, input.spec,
         JSON.stringify(grants), now, now);
     return this.getGoal(id)!;

@@ -1,5 +1,4 @@
 import { CopilotFollowups } from "../services/agent/followups.js";
-import { revokeDevelopmentRepairs } from "../services/agent/development-repair.js";
 import { publicModelResponse } from "../db/repositories/copilot-model-response-repository.js";
 import { createCopilotDevelopmentRoutes } from './copilot-development.js';
 import { provisionalText, clearProvisionalText } from '../services/agent/provisional-text.js';
@@ -48,9 +47,6 @@ const sendMessageSchema = z.object({
   modelId: modelIdSchema,
   projectId: idSchema.optional(),
   clientRequestId: idSchema.optional(),
-  reviewTaskResults: z.boolean().optional(),
-  repairFailedChecks: z.boolean().optional(),
-  toolDiscovery: z.boolean().optional()
 }).strict();
 const memoryScopeSchema = z.enum(["global", "project", "session"]);
 const writeMemorySchema = z.object({
@@ -209,9 +205,6 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
           ...(value.clientRequestId ? { clientRequestId: value.clientRequestId } : {}),
           ...(value.projectId ? { projectId: value.projectId } : {}),
           ...(value.modelId ? { modelId: value.modelId } : {}),
-          ...(value.repairFailedChecks !== undefined ? {repairFailedChecks:value.repairFailedChecks}:{}),
-          ...(value.reviewTaskResults !== undefined ? { reviewTaskResults: value.reviewTaskResults } : {}),
-          ...(value.toolDiscovery !== undefined ? { toolDiscovery: value.toolDiscovery } : {}),
         };
         const runId = deps.db.transaction(() => {
           const existing = new CopilotRunLedger(deps.db, userId(req)).findRequest(input);
@@ -241,9 +234,6 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
           ...(value.modelId !== undefined ? { modelId: value.modelId } : {}),
           ...(value.projectId ? {projectId:value.projectId}: {}),
           ...(value.clientRequestId ? { clientRequestId: value.clientRequestId } : {}),
-          ...(value.repairFailedChecks !== undefined ? {repairFailedChecks:value.repairFailedChecks}:{}),
-          ...(value.reviewTaskResults !== undefined ? { reviewTaskResults: value.reviewTaskResults } : {}),
-          ...(value.toolDiscovery !== undefined ? { toolDiscovery: value.toolDiscovery } : {})
         });
         res.status(201).json(ok({ runId }));
       } catch (error) {
@@ -258,10 +248,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
       const queue = new CopilotFollowups(deps.db, userId(req));
       const item = queue.enqueue({ userId: userId(req), conversationId: id, userText: value.content,
         clientRequestId: value.clientRequestId, ...(value.modelId ? { modelId: value.modelId } : {}),
-        ...(value.projectId ? { projectId: value.projectId } : {}),
-        ...(value.repairFailedChecks !== undefined ? {repairFailedChecks:value.repairFailedChecks}:{}),
-          ...(value.reviewTaskResults !== undefined ? { reviewTaskResults: value.reviewTaskResults } : {}),
-          ...(value.toolDiscovery !== undefined ? { toolDiscovery: value.toolDiscovery } : {}) });
+        ...(value.projectId ? { projectId: value.projectId } : {}), });
       res.status(201).json(ok({ followup: { id: item.id, status: item.status, runId: item.run_id } }));
     });
   });
@@ -283,7 +270,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     const id=parseId(req.params.id,res);if(!id)return;
     const {log}=buildAgentStack(deps,userId(req));if(!log.getConversation(id))return notFound(res);
     const runs=log.listRuns(id);
-    res.json(ok({runs:runs.slice(0,50),repairRunIds:log.listRepairRunIds(id),activeRun:runs.find(r=>["pending","running","awaiting_approval"].includes(r.status)) ?? null}));
+    res.json(ok({runs:runs.slice(0,50),activeRun:runs.find(r=>["pending","running","awaiting_approval"].includes(r.status)) ?? null}));
   });
 
   router.get("/runs/:id", (req, res) => {
@@ -306,13 +293,6 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     const { orchestrator } = buildAgentStack(deps, userId(req));
     const result = await orchestrator.cancelRun({ userId: userId(req), runId: id });
     res.json(ok(result));
-  });
-
-  router.delete("/runs/:id/repairs", (req, res) => {
-    const id = parseId(req.params.id, res); if (!id) return;
-    if (!new CopilotRunLedger(deps.db, userId(req)).get(id)) return notFound(res);
-    revokeDevelopmentRepairs(deps.db, userId(req), id);
-    res.json(ok({ revoked: true }));
   });
 
   const approveSchema = z.object({ approved: z.boolean() }).strict();

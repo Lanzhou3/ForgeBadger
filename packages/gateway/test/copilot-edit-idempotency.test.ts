@@ -33,7 +33,7 @@ it("deduplicates edited turns before truncation, preserves context, and rejects 
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const url = `http://127.0.0.1:${address.port}/api/v1/copilot/conversations/${conversation.id}/edit-message`;
   const post = (body: unknown, actor = user) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${signJwt({ userId: actor.id, email: actor.email }, secret)}` }, body: JSON.stringify(body) });
-  const input = { messageId: message.id, content: "/skills", clientRequestId: randomUUID(), projectId: project.id, modelId: "chosen-model", toolDiscovery: true };
+  const input = { messageId: message.id, content: "/skills", clientRequestId: randomUUID(), projectId: project.id, modelId: "chosen-model" };
   try {
     const first = await post(input);
     assert.equal(first.status, 201);
@@ -49,7 +49,6 @@ it("deduplicates edited turns before truncation, preserves context, and rejects 
     const persisted = JSON.parse(ledger.get(runId)!.input_json);
     assert.equal(persisted.projectId, project.id);
     assert.equal(persisted.modelId, "chosen-model");
-    assert.equal(persisted.toolDiscovery, true);
     assert.equal(persisted.editMessageId, message.id);
     assert.equal((await post({ ...input, messageId: later.id })).status, 409);
     assert.equal((await post({ ...input, content: "Changed payload" })).status, 409);

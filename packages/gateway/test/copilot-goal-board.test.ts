@@ -217,13 +217,13 @@ describe("goal tasks on the project board", () => {
     } finally { delete process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS; }
   });
 
-  it("offers board planning tools to goal and discovery runs, not to plain chat", () => {
+  it("offers board planning tools to goal runs, not to plain chat", () => {
     const registry = createAgentToolRegistry(createPlatformTools());
     const visible = (input: Record<string, unknown>) => new Set(computeToolSurface(input, { registry, hasSessionManager: true }).visible.map(tool => tool.name));
     const planning = ["pm_get_plan", "pm_set_goal", "pm_update_task_plan", "pm_manage_stage", "pm_manage_dependency", "pm_attach_evidence"];
     const chat = visible({ source: "user" });
     for (const name of planning) assert.equal(chat.has(name), false, `${name} hidden in plain chat`);
-    for (const input of [{ source: "user", goalId: randomUUID() }, { source: "user", toolDiscovery: true }]) {
+    for (const input of [{ source: "user", goalId: randomUUID() }]) {
       const surface = visible(input);
       for (const name of planning) assert.ok(surface.has(name), `${name} visible for ${JSON.stringify(Object.keys(input))}`);
     }

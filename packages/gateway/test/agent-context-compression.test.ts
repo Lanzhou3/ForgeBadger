@@ -198,14 +198,71 @@ it("compresses at user-turn boundaries and includes tool facts in the summary re
       log.appendMessage(conversation.id, { role: "user", kind: "text", content: `inspect ${id}` });
       log.appendMessage(conversation.id, { role: "assistant", kind: "tool_call", content: "", toolName: "read", toolCallId: id, toolInputJson: "{}" });
       log.appendMessage(conversation.id, { role: "tool", kind: "tool_result", content: `${id} fact ${"x".repeat(60_000)}`, toolCallId: id });
+      // Oversized prose: clearing earlier tool results alone cannot make this fit.
+      if (id === "old") log.appendMessage(conversation.id, { role: "assistant", kind: "text", content: "a".repeat(240_000) });
     }
     let folded: AgentLlmMessage[] = [];
     const llm = { async summarize(input: { messages: AgentLlmMessage[] }) { folded = input.messages; return "old fact"; } } as unknown as AgentLlmClient;
     const result = await buildCompressedContext(log, conversation.id, llm);
-    assert.deepEqual(folded.map((message) => message.role), ["user", "assistant", "tool"]);
+    assert.deepEqual(folded.map((message) => message.role), ["user", "assistant", "tool", "assistant"]);
     assert.equal(folded[2]?.toolCallId, "old");
     assert.deepEqual(result.messages.slice(1).map((message) => message.role), ["user", "assistant", "tool"]);
     assert.equal(result.messages.at(-1)?.toolCallId, "new");
+  } finally { db.close(); }
+});
+
+it("clears earlier-turn tool results before summarizing and keeps the current turn intact", async () => {
+  const db = createTestDb();
+  try {
+    const user = new UserRepository(db).create("toolclear@example.com", "hash");
+    const log = new CopilotConversationLog(db, user.id);
+    const conversation = log.createConversation();
+    for (const id of ["old", "new"]) {
+      log.appendMessage(conversation.id, { role: "user", kind: "text", content: `inspect ${id}` });
+      log.appendMessage(conversation.id, { role: "assistant", kind: "tool_call", content: "", toolName: "read", toolCallId: id, toolInputJson: "{}" });
+      log.appendMessage(conversation.id, { role: "tool", kind: "tool_result", content: `${id} fact ${"x".repeat(60_000)}`, toolCallId: id });
+    }
+    const llm = { async summarize() { throw new Error("must not summarize"); } } as unknown as AgentLlmClient;
+    const first = await buildCompressedContext(log, conversation.id, llm);
+    assert.equal(first.compressed, true);
+    assert.deepEqual(first.messages.map((message) => message.role), ["user", "assistant", "tool", "user", "assistant", "tool"]);
+    const cleared = JSON.parse(first.messages[2]!.content) as { contextCleared: boolean; preview: string; readback: { tool: string; messageId: string } };
+    assert.equal(cleared.contextCleared, true);
+    assert.match(cleared.preview, /^old fact/);
+    assert.equal(cleared.readback.tool, "read_tool_result");
+    assert.equal(cleared.readback.messageId, log.listMessages(conversation.id)[2]!.id);
+    assert.equal(first.messages.at(-1)?.content.length, "new fact ".length + 60_000);
+    assert.equal(first.messages.at(-1)?.cacheBreakpoint, true);
+    // Same turn, more steps: the cleared prefix must stay byte-identical (cacheable).
+    log.appendMessage(conversation.id, { role: "assistant", kind: "tool_call", content: "", toolName: "read", toolCallId: "next", toolInputJson: "{}" });
+    log.appendMessage(conversation.id, { role: "tool", kind: "tool_result", content: "next fact", toolCallId: "next" });
+    const second = await buildCompressedContext(log, conversation.id, llm);
+    const stable = (messages: AgentLlmMessage[]) => JSON.stringify(messages.map(({ cacheBreakpoint: _flag, ...rest }) => rest));
+    assert.equal(stable(second.messages.slice(0, first.messages.length)), stable(first.messages));
+    // The stored transcript is untouched.
+    assert.equal(log.listMessages(conversation.id)[2]!.content.length, "old fact ".length + 60_000);
+  } finally { db.close(); }
+});
+
+it("appends volatile suffix context after the cache breakpoint and can scope to the latest turn", async () => {
+  const db = createTestDb();
+  try {
+    const user = new UserRepository(db).create("suffix@example.com", "hash");
+    const log = new CopilotConversationLog(db, user.id);
+    const conversation = log.createConversation();
+    log.appendMessage(conversation.id, { role: "user", kind: "text", content: "earlier turn" });
+    log.appendMessage(conversation.id, { role: "assistant", kind: "text", content: "earlier answer" });
+    log.appendMessage(conversation.id, { role: "user", kind: "text", content: "continue" });
+    const llm = { async summarize() { throw new Error("must not summarize"); } } as unknown as AgentLlmClient;
+    const suffixMessages: AgentLlmMessage[] = [{ role: "user", content: "goal state" }];
+    const full = await buildCompressedContext(log, conversation.id, llm, undefined, { suffixMessages });
+    assert.deepEqual(full.messages.map((message) => message.content), ["earlier turn", "earlier answer", "continue", "goal state"]);
+    assert.deepEqual(full.messages.map((message) => message.cacheBreakpoint), [undefined, undefined, true, undefined]);
+    const scoped = await buildCompressedContext(log, conversation.id, llm, undefined, { suffixMessages, latestTurnOnly: true });
+    assert.deepEqual(scoped.messages.map((message) => message.content), ["continue", "goal state"]);
+    // The suffix is mandatory: when it cannot fit next to the latest user text, fail instead of dropping either.
+    await assert.rejects(buildCompressedContext(log, conversation.id, llm, undefined, {
+      suffixMessages: [{ role: "user", content: "g".repeat(400) }], maxContextTokens: 120 }), /COPILOT_CONTEXT_TOO_LARGE/);
   } finally { db.close(); }
 });
 
@@ -237,6 +294,7 @@ it('bounds summarizer input and oversized output without cutting tool argument J
     log.appendMessage(c.id,{role:'user',kind:'text',content:'old goal'});
     for (const id of ['a','b','c']) log.appendMessage(c.id,{role:'assistant',kind:'tool_call',content:'',toolName:'read',toolCallId:id,toolInputJson:JSON.stringify({value:'escape "\\'})});
     for (const id of ['a','b','c']) log.appendMessage(c.id,{role:'tool',kind:'tool_result',content:'"\\'.repeat(90000),toolCallId:id});
+    log.appendMessage(c.id,{role:'assistant',kind:'text',content:'a'.repeat(240_000)});
     log.appendMessage(c.id,{role:'user',kind:'text',content:'newest goal'});
     let called=false;
     const llm={async summarize({messages}:{messages:AgentLlmMessage[]}) {

@@ -1,21 +1,9 @@
-import { assertRepairPlan, repairJob } from '../development/repair-scope.js';
 import { CODING_READS, PROJECT_READS } from './tool-surface.js';
 import type { AgentToolContext } from './tool-registry.js';
-import type { TurnInput } from './run-ledger.js';
-
-/** Read-only project task gate: the restricted-mode layer of computeToolSurface. */
-export function restrictedToolAllowed(input: TurnInput, name: string): boolean {
-  if (input.executionMode === 'coding') return CODING_READS.has(name);
-  return !input.executionMode || PROJECT_READS.has(name) || (input.executionMode === 'repair' && name === 'submit_development_task');
-}
 
 /** Execution-time enforcement also covers forged calls and recovered steps. */
 export function assertRestrictedTool(context: AgentToolContext, name: string, raw: unknown): void {
   if (!context.executionMode) return;
-  if (context.executionMode === 'repair' && name === 'submit_development_task') {
-    if(typeof context.runId !== 'string' || typeof context.stepId !== 'string' || !repairJob(context.db,context.userId,context.runId)) throw new Error('COPILOT_REPAIR_ORIGIN_MISSING');
-    assertRepairPlan(context.db,context.userId,context.runId,context.stepId,raw);return;
-  }
   // Coding sub-runs: the delegate contract surface (sandbox tools + reads).
   // Sandbox tools address the goal sandbox, not the raw project, so the
   // projectId-in-input check of the read-only modes does not apply.

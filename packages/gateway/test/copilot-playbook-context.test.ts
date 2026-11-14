@@ -46,8 +46,7 @@ function fixture(disabled = new Set<string>()) {
         return { message: 'Observed tool results.' };
       },
       async summarize() { return ''; },
-      async generateTitle() { return ''; },
-      async proposeMemory() { return []; }
+      async generateTitle() { return ''; }
     }
   });
   function effective(scheduled = false) {

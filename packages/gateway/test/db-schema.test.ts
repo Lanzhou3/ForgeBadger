@@ -72,7 +72,6 @@ describe("db schema", () => {
       "companion_host",
       "companion_outbox",
       "companion_pairings",
-      "copilot_automation_run_projects",
       "copilot_automation_runs",
       "copilot_automation_suggestions",
       "copilot_automations",
@@ -80,7 +79,6 @@ describe("db schema", () => {
       "copilot_conversations",
       "copilot_development_events",
       "copilot_development_tasks",
-      "copilot_dsh_config",
       "copilot_followups",
       "copilot_goal_journal",
       "copilot_goal_tasks",
@@ -95,17 +93,14 @@ describe("db schema", () => {
       "copilot_memory_fts_idx",
       "copilot_memory_search_index",
       "copilot_messages",
-      "copilot_model_calls",
       "copilot_operation_log",
       "copilot_pending_actions",
-      "copilot_repair_jobs",
       "copilot_research_jobs",
       "copilot_run_steps",
       "copilot_run_trace",
       "copilot_runs",
       "copilot_skill_heads",
       "copilot_skill_revisions",
-      "copilot_token_rates",
       "copilot_tool_artifacts",
       "copilot_tool_preferences",
       "delivery_operations",
@@ -119,7 +114,6 @@ describe("db schema", () => {
       "feishu_channel_logical_claims",
       "feishu_channel_outbox",
       "feishu_conversation_bindings",
-      "feishu_copilot_channels",
       "feishu_notification_deliveries",
       "feishu_notification_groups",
       "feishu_notification_settings",
@@ -624,5 +618,55 @@ describe("db schema", () => {
       `).run("wakeup-2", "pm-user", "pm-project", "pm-work-1", "attempt-1", "dispatch"),
       /UNIQUE constraint failed/
     );
+  });
+});
+
+describe("0150 retired Copilot cleanup", () => {
+  it("drops retired tables and columns from a populated database without touching live rows", async () => {
+    const { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const nodePath = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const Sqlite = (await import("better-sqlite3")).default;
+    const { drizzle: orm } = await import("drizzle-orm/better-sqlite3");
+    const { migrate: run } = await import("drizzle-orm/better-sqlite3/migrator");
+    const source = fileURLToPath(new URL("../src/db/migrations", import.meta.url));
+    const dir = mkdtempSync(nodePath.join(tmpdir(), "fb-0150-"));
+    const before = nodePath.join(dir, "before");
+    cpSync(source, before, { recursive: true });
+    rmSync(nodePath.join(before, "0150_copilot_retired_cleanup.sql"));
+    const journalPath = nodePath.join(before, "meta", "_journal.json");
+    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: Array<{ tag: string }> };
+    journal.entries = journal.entries.filter(entry => entry.tag !== "0150_copilot_retired_cleanup");
+    writeFileSync(journalPath, JSON.stringify(journal));
+    const db = new Sqlite(nodePath.join(dir, "fixture.db"));
+    try {
+      db.pragma("foreign_keys=ON");
+      run(orm(db), { migrationsFolder: before });
+      const now = Date.now();
+      db.prepare("INSERT INTO users(id,username,email,password_hash) VALUES('u1','cleanup','cleanup@test.dev','hash')").run();
+      db.prepare("INSERT INTO copilot_conversations(id,user_id,status,dsh_session_id,created_at,updated_at) VALUES('c1','u1','active','legacy-dsh',?,?)").run(now, now);
+      db.prepare("INSERT INTO copilot_runs(id,user_id,conversation_id,status,token_budget,max_duration_ms,repair_revoked_at,created_at,updated_at) VALUES('r1','u1','c1','completed',123,456,789,?,?)").run(now, now);
+      db.prepare("INSERT INTO copilot_goals(id,user_id,conversation_id,title,spec,status,token_budget,max_duration_ms,max_runs,grants_json,created_at,updated_at) VALUES('g1','u1','c1','Goal','Spec','active',1,2,3,'[]',?,?)").run(now, now);
+      db.prepare("INSERT INTO copilot_model_calls(id,user_id,run_id,kind,charged_tokens,created_at) VALUES('m1','u1','r1','model',10,?)").run(now);
+      db.prepare("INSERT INTO copilot_dsh_config(user_id,updated_at) VALUES('u1',?)").run(now);
+
+      run(orm(db), { migrationsFolder: source });
+
+      const tables = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>).map(row => row.name));
+      for (const table of ["copilot_model_calls", "copilot_token_rates", "copilot_repair_jobs", "copilot_dsh_config", "feishu_copilot_channels", "copilot_automation_run_projects"])
+        assert.equal(tables.has(table), false, `${table} dropped`);
+      const columns = (table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(row => row.name);
+      for (const column of ["token_budget", "max_duration_ms", "repair_revoked_at"]) assert.equal(columns("copilot_runs").includes(column), false);
+      for (const column of ["token_budget", "max_duration_ms", "max_runs"]) assert.equal(columns("copilot_goals").includes(column), false);
+      assert.equal(columns("copilot_conversations").includes("dsh_session_id"), false);
+      assert.deepEqual(db.prepare("SELECT id,status,conversation_id FROM copilot_runs").all(), [{ id: "r1", status: "completed", conversation_id: "c1" }]);
+      assert.deepEqual(db.prepare("SELECT id,title,status,grants_json FROM copilot_goals").all(), [{ id: "g1", title: "Goal", status: "active", grants_json: "[]" }]);
+      assert.deepEqual(db.prepare("SELECT id,status FROM copilot_conversations").all(), [{ id: "c1", status: "active" }]);
+      assert.deepEqual(db.pragma("foreign_key_check"), []);
+      assert.equal((db.pragma("integrity_check") as Array<{ integrity_check: string }>)[0]!.integrity_check, "ok");
+      // Re-running is a no-op.
+      run(orm(db), { migrationsFolder: source });
+    } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
   });
 });

@@ -45,6 +45,14 @@ export interface CompressedContextOptions {
   tools?: unknown[];
   /** Immutable system-adjacent Skills/project context; returned in messages. */
   prefixMessages?: AgentLlmMessage[];
+  /**
+   * Per-call volatile context (goal state, loop reminders). Appended after the
+   * transcript so a change never invalidates the cached request prefix, and so
+   * the current objective sits at the end of the window.
+   */
+  suffixMessages?: AgentLlmMessage[];
+  /** Project only the newest user turn; older turns are not sent or summarized. */
+  latestTurnOnly?: boolean;
   memory?: AgentMemoryRepository;
   memoryProjectId?: string;
   memoryConversationId?: string;
@@ -73,12 +81,24 @@ export async function buildCompressedContext(
   modelId?: string,
   options: CompressedContextOptions = {}
 ): Promise<CompressedContext> {
-  const result = await buildBaseContext(log, conversationId, llm, modelId, options);
+  const suffix = options.suffixMessages ?? [];
+  // The suffix is mandatory request content: budget for it up front.
+  const base = suffix.length ? { ...options, reservedTokens: (options.reservedTokens ?? 0)
+    + suffix.reduce((sum, message) => sum + Math.ceil((messageWireTokens(message) * 6) / 5), 0) } : options;
+  const result = await buildBaseContext(log, conversationId, llm, modelId, base);
   for (const observation of options.observations ?? []) {
     const messages = assemble([], result.messages, observation);
-    if (fits(messages, options)) result.messages = messages;
+    if (fits(messages, base)) result.messages = messages;
   }
+  result.messages = [...markCacheBreakpoint(result.messages), ...suffix];
   return result;
+}
+
+/** Flag the last stable message; assistant turns can end in provider-private blocks, so skip those. */
+function markCacheBreakpoint(messages: AgentLlmMessage[]): AgentLlmMessage[] {
+  const last = messages.at(-1);
+  if (!last || last.role === 'assistant') return messages;
+  return [...messages.slice(0, -1), { ...last, cacheBreakpoint: true }];
 }
 
 async function buildBaseContext(
@@ -88,8 +108,9 @@ async function buildBaseContext(
   modelId?: string,
   options: CompressedContextOptions = {}
 ): Promise<CompressedContext> {
-  const rows = log.listMessages(conversationId);
-  const sourceFingerprint = JSON.stringify(rows);
+  const allRows = log.listMessages(conversationId);
+  const rows = options.latestTurnOnly ? latestTurn(allRows) : allRows;
+  const sourceFingerprint = JSON.stringify(allRows);
   let recall: AgentLlmMessage | undefined;
   try { recall = buildRecallBlock(rows, options); } catch { /* Optional recall must not fail the turn. */ }
 
@@ -97,6 +118,12 @@ async function buildBaseContext(
   const initial = projectTranscript(rows, options.assistantMessages);
   if (fits(assemble(prefix, initial, recall), options)) {
     return { messages: assemble(prefix, initial, recall), compressed: false };
+  }
+  // Cheapest compaction first: drop the bodies of tool results from earlier
+  // turns (each stays readable through read_tool_result) before any summary.
+  const cleared = projectTranscript(clearEarlierToolResults(rows), options.assistantMessages);
+  if (fits(assemble(prefix, cleared, recall), options)) {
+    return { messages: assemble(prefix, cleared, recall), compressed: true };
   }
   // Fail before calling the summarizer if immutable instructions or the current
   // user goal cannot fit. No user instruction is silently cut.
@@ -241,6 +268,33 @@ function splitAtBudget(messages: AgentMessage[], budget: number, assistants?: Re
     }
   }
   return 0;
+}
+
+const CLEARED_RESULT_MIN_CHARS = 512;
+const CLEARED_RESULT_PREVIEW_CHARS = 200;
+
+function latestUserIndex(rows: AgentMessage[]): number {
+  for (let index = rows.length - 1; index >= 0; index -= 1)
+    if (rows[index]!.role === 'user' && rows[index]!.kind === 'text') return index;
+  return 0;
+}
+
+function latestTurn(rows: AgentMessage[]): AgentMessage[] {
+  return rows.slice(latestUserIndex(rows));
+}
+
+/**
+ * Replace large tool results from turns before the newest user turn with a
+ * readback stub. The boundary only moves when a new user turn starts, so the
+ * projection stays byte-stable (cacheable) for the whole run.
+ */
+function clearEarlierToolResults(rows: AgentMessage[]): AgentMessage[] {
+  const boundary = latestUserIndex(rows);
+  return rows.map((row, index) => index >= boundary || row.kind !== 'tool_result'
+    || row.content.length <= CLEARED_RESULT_MIN_CHARS ? row : { ...row, content: JSON.stringify({
+      contextCleared: true, preview: row.content.slice(0, CLEARED_RESULT_PREVIEW_CHARS),
+      readback: { tool: 'read_tool_result', messageId: row.id },
+      evidence: 'Earlier tool output removed from context; read it back if it is still needed.' }) });
 }
 
 /** Historical incomplete batches are observations, never executable calls. */

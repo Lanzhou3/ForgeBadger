@@ -24,7 +24,6 @@ export function checkAgentScope(context: AgentToolContext, name: string, raw: un
         }
         throw error;
     }
-    if (context.executionMode === 'repair') assertRestrictedTool(context,name,raw);
     if (name === 'machine_search' || name === 'read_machine_file' || name === 'machine_tree' || name === 'verify_retrieval_evidence') {
         const input = raw as { root?: string };
         if (typeof input.root !== 'string' || !new CopilotMachineRootRepository(context.db, context.userId).getById(input.root))

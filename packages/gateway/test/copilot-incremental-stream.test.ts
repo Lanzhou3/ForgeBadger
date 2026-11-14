@@ -27,7 +27,7 @@ for(const prefix of ['Normal progress is visible.\n','正在读取项目文件�
     onEvent({type:'thinking_delta',text:'PRIVATE_THINKING'});
     assert.doesNotMatch(JSON.stringify(events),/ordinary-fixture|fixtureBearer|PRIVATE_THINKING/);
     return {message:text};
-   },async summarize(){return '';},async generateTitle(){return '';},async proposeMemory(){return [];}
+   },async summarize(){return '';},async generateTitle(){return '';}
   }});
   await orchestrator.runTurn({userId,conversationId,userText:'Inspect'});
   const streamed=events.map(e=>e.textDelta??'').join('');

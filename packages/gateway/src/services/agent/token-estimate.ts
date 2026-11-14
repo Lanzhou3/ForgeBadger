@@ -13,7 +13,13 @@ import type { AgentLlmMessage } from './orchestrator-types.js';
 export const MESSAGE_OVERHEAD_TOKENS = 12;
 export const SAFETY_MARGIN_NUMERATOR = 6;
 export const SAFETY_MARGIN_DENOMINATOR = 5;
-export const MAX_CONTEXT_TOKENS = 24_000;
+/**
+ * Projection budget when a model profile declares no context window. Sized so
+ * the full goal tool catalog (~18k estimated tokens) leaves real room for the
+ * conversation; a provider that rejects it gets one recovery attempt at 60%
+ * (context-recovery.ts), which still fits a 32k window.
+ */
+export const MAX_CONTEXT_TOKENS = 48_000;
 
 /** Weighted char cost per code point: Latin 1, common CJK 4, other BMP 2, supplementary 8. */
 export function weightedCharCost(text: string): number {

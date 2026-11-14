@@ -32,6 +32,8 @@ export interface AgentLlmMessage {
   toolCallId?: string;
   /** Tool calls emitted by the assistant, when role === "assistant". */
   toolCalls?: Array<{ id: string; name: string; arguments: string }>;
+  /** End of the stable request prefix; Anthropic gets a cache breakpoint here. */
+  cacheBreakpoint?: true;
 }
 
 export interface AgentToolSchema {
@@ -158,8 +160,7 @@ export function createAgentLlmClient(input: {
   /**
    * Internal stream implementation. `applyPreferencesThinking` gates the
    * user's thinking-strength preference: the main conversational request
-   * applies it, while the auxiliary calls (summarize / title / memory
-   * proposal) keep their requests lean. The model fallback to the preference
+   * applies it, while the auxiliary calls (summarize / title) keep their requests lean. The model fallback to the preference
    * applies on every path — only the thinking parameters are gated.
    */
   async function streamInternal(request: AgentLlmRequest, applyPreferencesThinking: boolean): Promise<LlmResult> {
@@ -259,35 +260,7 @@ export function createAgentLlmClient(input: {
     return sanitizeTitle(text);
   }
 
-  /**
-   * Propose durable memory entries from a completed turn. Returns an empty
-   * array on parse failure or an unusable model response — curation is always
-   * best-effort and never throws.
-   */
-  async function proposeMemory(input: { userText: string; assistantText: string; modelId?: string; signal?: AbortSignal }): Promise<Array<{
-    kind: "fact" | "preference" | "decision" | "project_note";
-    scope: "global" | "project" | "session";
-    text: string;
-    projectId?: string;
-  }>> {
-    let text = "";
-    const response = await streamInternal({
-      messages: [
-        { role: "user", content: input.userText },
-        { role: "assistant", content: input.assistantText }
-      ],
-      tools: [],
-      system: MEMORY_PROPOSAL_SYSTEM_PROMPT,
-      ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
-      ...(input.signal ? { signal: input.signal } : {}),
-      onEvent: (event) => {
-        if (event.type === "text_delta") text += event.text ?? "";
-      }
-    }, false);
-    return parseMemoryProposals(text);
-  }
-
-  return { resolveProvider, stream, summarize, generateTitle, proposeMemory,
+  return { resolveProvider, stream, summarize, generateTitle,
     modelInfo: (modelId?: string) => { const r=resolveProvider(modelId); return {modelProfileId:r.modelProfileId,modelId:r.modelId,apiFormat:r.apiFormat}; },
     contextBudget: (modelId?: string) => contextTokenBudget(resolveProvider(modelId).contextWindow) };
 }
@@ -363,6 +336,9 @@ async function streamAnthropic(
       ? [{ type: "tool_result", tool_use_id: message.toolCallId, content: message.content }]
       : [...(message.content ? [{ type: "text", text: message.content }] : []),
         ...(message.toolCalls ?? []).map((call) => ({ type: "tool_use", id: call.id, name: call.name, input: safeJsonParse(call.arguments) }))];
+    const tail = content.at(-1);
+    if (message.cacheBreakpoint && tail && tail.type !== 'thinking' && tail.type !== 'redacted_thinking')
+      content[content.length - 1] = { ...tail, cache_control: { type: 'ephemeral' } };
     const previous = apiMessages.at(-1);
     if (previous?.role === role) previous.content.push(...content);
     else apiMessages.push({ role, content });
@@ -506,10 +482,6 @@ function safeJsonParse(value: string): unknown {
 }
 
 
-export function toolSchemaToModelFormat(tool: { name: string; description: string; inputSchema: Record<string, unknown> }): AgentToolSchema {
-  return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema };
-}
-
 const TITLE_SYSTEM_PROMPT = [
   "You generate the sidebar title for a single Copilot conversation.",
   "Read the user message and the assistant's first reply, then return ONLY a",
@@ -521,49 +493,6 @@ const TITLE_SYSTEM_PROMPT = [
   "- user asks for a haiku about autumn → 'Autumn haiku'",
   "- 用户让 Copilot 总结最近一周项目状态 → '本周项目状态回顾'"
 ].join("\n");
-
-const MEMORY_PROPOSAL_SYSTEM_PROMPT = [
-  "You extract durable memory entries from a single Copilot turn.",
-  "From the user message and the assistant reply, identify facts, preferences,",
-  "or decisions that will be useful in FUTURE turns, and return them as a JSON",
-  "array. Each entry is {\"kind\": \"fact\"|\"preference\"|\"decision\"|\"project_note\",",
-  "\"scope\": \"global\"|\"project\"|\"session\", \"text\": \"...\"}.",
-  "Rules:",
-  "- Write only concrete, non-transient information; skip trivial chatter.",
-  "- Prefer 'global' scope unless the fact is clearly project-specific.",
-  "- Return [] when nothing is worth remembering. Return ONLY the JSON array,",
-  "no prose, no markdown fences."
-].join("\n");
-
-function parseMemoryProposals(raw: string): Array<{
-  kind: "fact" | "preference" | "decision" | "project_note";
-  scope: "global" | "project" | "session";
-  text: string;
-  projectId?: string;
-}> {
-  try {
-    const parsed = JSON.parse(raw.trim()) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    const valid: Array<{ kind: "fact" | "preference" | "decision" | "project_note"; scope: "global" | "project" | "session"; text: string; projectId?: string }> = [];
-    for (const item of parsed) {
-      if (!item || typeof item !== "object") continue;
-      const record = item as Record<string, unknown>;
-      const kind = record.kind;
-      const scope = record.scope;
-      const text = record.text;
-      if (
-        (kind === "fact" || kind === "preference" || kind === "decision" || kind === "project_note")
-        && (scope === "global" || scope === "project" || scope === "session")
-        && typeof text === "string" && text.trim().length > 0
-      ) {
-        valid.push({ kind, scope, text: text.trim().slice(0, 8 * 1024) });
-      }
-    }
-    return valid;
-  } catch {
-    return [];
-  }
-}
 
 const TITLE_MAX_CHARS = 24;
 

@@ -79,12 +79,12 @@ it('does not enqueue without a conversation', async () => {
 it('keeps a complete execution options snapshot and request identity after an uncertain enqueue', async () => {
   api.listFollowups.mockResolvedValue({ followups: [] });
   api.queueFollowup.mockRejectedValueOnce(new Error('lost response')).mockResolvedValue({});
-  const { result, rerender } = renderHook(({ modelId, reviewTaskResults, repairFailedChecks }) => useCopilotFollowups({
-    conversationId: 'c1', projectId: 'p1', modelId, reviewTaskResults, repairFailedChecks, active: true,
-  }), { wrapper, initialProps: { modelId: 'm1', reviewTaskResults: true, repairFailedChecks: true } });
+  const { result, rerender } = renderHook(({ modelId }) => useCopilotFollowups({
+    conversationId: 'c1', projectId: 'p1', modelId, active: true,
+  }), { wrapper, initialProps: { modelId: 'm1' } });
   await act(async () => { expect(await result.current.enqueue('continue')).toBe(false); });
-  rerender({ modelId: 'm2', reviewTaskResults: false, repairFailedChecks: false });
+  rerender({ modelId: 'm2' });
   await act(async () => { expect(await result.current.enqueue('continue')).toBe(true); });
-  expect(api.queueFollowup.mock.calls[0]![2]).toMatchObject({ projectId: 'p1', modelId: 'm1', reviewTaskResults: true, repairFailedChecks: true });
+  expect(api.queueFollowup.mock.calls[0]![2]).toMatchObject({ projectId: 'p1', modelId: 'm1' });
   expect(api.queueFollowup.mock.calls[1]).toEqual(api.queueFollowup.mock.calls[0]);
 });

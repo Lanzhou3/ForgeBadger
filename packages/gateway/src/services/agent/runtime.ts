@@ -1,8 +1,6 @@
 import { recoverLegacyChannelRuns } from '../channels/channel-run-authority.js';
 import { MemorySearchIndex } from './memory-search-index.js';
 import { CopilotToolArtifactRepository } from '../../db/repositories/copilot-tool-artifact-repository.js';
-import { recoverDevelopmentRepairs } from './development-repair.js';
-import { publishTaskReviews } from "./task-review.js";
 import { CopilotFollowups } from "./followups.js";
 import { startDevelopmentRuntime } from '../development/runtime.js';
 import { PlatformActionRepository } from "../../db/repositories/platform-action-repository.js";
@@ -48,8 +46,6 @@ export function startCopilotRuntime(deps: AgentStackDeps) {
             isolated('artifacts', user.id, () => { new CopilotToolArtifactRepository(deps.db, user.id, deps.masterKey).cleanup(); });
             isolated('followups', user.id, () => { new CopilotFollowups(deps.db, user.id).promote(); });
             isolated('reports', user.id, () => publishTaskReports(deps, user.id));
-            isolated('reviews', user.id, () => publishTaskReviews(deps, user.id));
-            isolated('repairs', user.id, () => recoverDevelopmentRepairs(deps.db, user.id, deps.eventBus));
             isolated('actions', user.id, () => { new PlatformActionRepository(deps.db,user.id).recoverExpired(); });
             isolated('runs', user.id, () => {
             const rows = deps.db.prepare("SELECT id FROM copilot_runs WHERE user_id=? AND runtime_version=1 AND status IN ('pending','running') AND (lease_expires_at IS NULL OR lease_expires_at<=?)")

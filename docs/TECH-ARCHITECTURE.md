@@ -1991,15 +1991,8 @@ steps. Synchronous research inherits the parent's cancellation.
 Cross-worker recovery waits for the same durable child instead of spawning a
 replacement or claiming a pending analysis is complete.
 
-Optional task review is admitted atomically with the original verified completion
-report, keyed by dispatch attempt. Fresh checks bind origin run, project, intent,
-confirmed receipt, exact task attempt, prompt/runtime identity and persisted
-notification evidence. Delayed reviews use their own 5-minute execution window,
-retain aggregate parent usage accounting and inherit its explicit model. A
-bounded cursor publishes the review once into the original conversation; revoked
-origins cannot publish. Analysis never changes a work item to accepted, dispatches
-repairs or substitutes for independent tests. The UI opt-in states that extra
-model usage is involved.
+Optional model review of completed tasks was retired in 2026-11 (no UI entry
+point); the deterministic completion report is unchanged.
 
 Migration 0110 adds tenant/run/step-bound encrypted tool artifacts. Only explicit
 project-scoped built-in reads can retain full redacted snapshots beyond the
@@ -2034,7 +2027,7 @@ only. Official MiniMax endpoints request separated reasoning, and OpenAI-compati
 streams request final usage. Unknown providers retain protocol validation.
 
 Read concurrency is an explicit whitelist, at most three pending local reads.
-Writes, approvals, external tools, discovery and delegation are serial barriers.
+Writes, approvals, external tools and delegation are serial barriers.
 Each operation retains authorization and lease fencing; all in-flight reads
 settle before advancing. Asynchronous receipts are reconstructed in original
 model tool-call order. Cancelled/superseded workers cannot publish or advance.
@@ -2044,15 +2037,8 @@ per-million-token pricing, integer nano-USD costs) are no longer recorded;
 the columns are retained for historical rows. There is no universal
 exact preflight tokenizer or provider invoice reconciliation.
 
-Migration 0112 adds tenant-bound repair jobs and an explicit root revocation
-timestamp. The opt-in root and immutable failed sandbox evidence authorize at most
-two attempts. Each child is a project-restricted run with one submission slot,
-fixed original source/check scope, fresh patch approval and independent retesting.
-Current parent conversation/message provenance, owner/tool/project authority,
-receipt identity and source digests are rechecked at admission, approval and
-sandbox execution. Edits, including identical-text edits, revoke old authority.
-The existing durable child relation supplies cancellation. Recovery and reporting use bounded rotating cursors; transactional
-uniqueness prevents duplicate admission. No candidate is applied or accepted.
+The failed-check repair loop from migration 0112 was retired in 2026-11 together
+with its `copilot_repair_jobs` table and the per-run revocation timestamp.
 
 The reproducible evaluation script is
 `packages/gateway/scripts/evaluate-copilot.ts`; retained reports are under

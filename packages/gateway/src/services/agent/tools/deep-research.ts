@@ -4,7 +4,6 @@ import { sourcePathSchema } from '../../development/contracts.js';
 import { redactAgentText } from '../redaction.js';
 import { CopilotMachineRootRepository } from '../../../db/repositories/copilot-machine-root-repository.js';
 import { GROUNDING_LEVELS, type GroundingLevel, verifyEvidence } from '../retrieval-grounding.js';
-import { routeQuery } from '../retrieval-routing.js';
 import type { AgentTool } from '../tool-registry.js';
 
 const id = z.string().min(1).max(128);
@@ -20,10 +19,6 @@ const evidenceInput = z.object({
   snippet: z.string().trim().min(1).max(500),
   /** The grounding level the agent proposes for this evidence. */
   proposedGrounding: groundingSchema,
-}).strict();
-
-const routeInput = z.object({
-  query: z.string().trim().min(1).max(4000),
 }).strict();
 
 export function createDeepResearchTools(): AgentTool[] {
@@ -45,17 +40,6 @@ export function createDeepResearchTools(): AgentTool[] {
         const lines = source.content.split('\n');
         const result = verifyEvidence(lines[input.line - 1], input.snippet, input.proposedGrounding, input.line);
         return { ...result, line: input.line, snippet: redactAgentText(input.snippet), lineText: redactAgentText(lines[input.line - 1] ?? '').slice(0, 500) };
-      },
-    },
-    {
-      name: 'route_query',
-      description: 'Decide whether a document question warrants multi-step research or a direct answer (RouteDRAG-style routing). Returns mode (direct|research) with the signals that drove it. Heuristic, not learned.',
-      risk: 'read',
-      requiresApproval: false,
-      inputSchema: routeInput,
-      async execute(raw) {
-        const input = routeInput.parse(raw);
-        return { ...routeQuery(input.query) };
       },
     },
   ];

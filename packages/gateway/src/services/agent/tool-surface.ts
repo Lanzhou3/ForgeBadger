@@ -6,29 +6,31 @@ import type { TurnInput } from './run-ledger.js';
  * Plane A of the tool surface: one named, ordered layer computation that both
  * the model-visible catalog and the execution-time gate project from. Layers
  * run retired → scheduled-readonly → restricted-mode → session-runtime →
- * mcp-source → owner-disabled → goal-catalog → on-demand; each exclusion
+ * mcp-source → owner-disabled → goal-catalog → context-catalog; each exclusion
  * records its layer so rejection provenance (e.g. the run-trace tool_gate
  * reason) names the plane that closed the tool. The execution gate in
  * orchestrator.toolStep preserves its historical check ORDER — ordering is
  * behavior there.
  */
 export const RETIRED_TOOLS = new Set(['pm_start_task_packet', 'list_skills', 'load_skill']);
-/**
- * On-demand tools: surfaced only to runs that opt into tool discovery.
- * In a normal run the model-visible catalog is already complete, and a
- * permanent "search for tools" affordance was pulling runs into search loops
- * that the step budget then ended. (2026-11-11 remediation WP4.)
- */
-export const ON_DEMAND_TOOLS = new Set(['discover_tools']);
 /** Local paths and contents stay out of channel-originated model context. */
 export const LOCAL_MACHINE_ROOT_TOOLS = new Set(['machine_search', 'read_machine_file', 'machine_tree',
   'list_machine_roots', 'register_machine_root', 'unregister_machine_root', 'verify_retrieval_evidence']);
+/**
+ * Tools that only work against an owner-registered local root. Until the
+ * owner has at least one root they are dead weight in the catalog (~3.5 KB of
+ * schema, 5 of ~60 tools), so they stay out of it; register_machine_root and
+ * list_machine_roots remain as the entry points. Visibility only: execution
+ * is still guarded by the root lookup in agent-scope.
+ */
+export const MACHINE_ROOT_DEPENDENT_TOOLS = new Set(['machine_search', 'read_machine_file', 'machine_tree',
+  'verify_retrieval_evidence', 'unregister_machine_root']);
 export const SESSION_RUNTIME_TOOLS = new Set(['takeover_session', 'get_session_writer', 'get_session_output', 'start_session', 'stop_session', 'dispatch_task_to_session', 'create_session', 'pm_execute_task_packet', 'terminal_run', 'terminal_open', 'terminal_close']);
 /** Goal self-management and sandbox tools are only visible to runs carrying a goal (or a coding sub-run). */
 export const GOAL_TOOLS = new Set(['goal_add_tasks', 'goal_update_task', 'goal_write_journal', 'goal_ask_user',
   'goal_file_read', 'goal_file_write', 'goal_file_edit', 'goal_run_checks', 'goal_delegate', 'goal_dispatch_task']);
-/** Read-only project task catalog (research/review) plus the repair submission exception. */
-export const PROJECT_READS = new Set(['get_project_git_status', 'read_project_diff', 'read_tool_result', 'get_project', 'list_project_files', 'read_project_file', 'search_project_files', 'machine_search', 'read_machine_file', 'machine_tree', 'list_machine_roots', 'verify_retrieval_evidence', 'route_query',
+/** Read-only project task catalog (research sub-runs). */
+export const PROJECT_READS = new Set(['get_project_git_status', 'read_project_diff', 'read_tool_result', 'get_project', 'list_project_files', 'read_project_file', 'search_project_files', 'machine_search', 'read_machine_file', 'machine_tree', 'list_machine_roots', 'verify_retrieval_evidence',
   'project_graph_search', 'project_graph_symbol_detail', 'project_graph_impact', 'project_graph_affected_paths',
   'get_development_task', 'list_development_tasks', 'pm_get_task_progress']);
 /**
@@ -46,15 +48,14 @@ export const CODING_READS: ReadonlySet<string> = new Set([...PROJECT_READS,
  */
 export const CODING_OPERATES: ReadonlySet<string> = new Set(['goal_run_checks']);
 /** Layer names in evaluation order. */
-export const TOOL_SURFACE_LAYERS = ['retired', 'scheduled-readonly', 'restricted-mode', 'session-runtime', 'mcp-source', 'owner-disabled', 'goal-catalog', 'on-demand'] as const;
+export const TOOL_SURFACE_LAYERS = ['retired', 'scheduled-readonly', 'restricted-mode', 'session-runtime', 'mcp-source', 'owner-disabled', 'goal-catalog', 'context-catalog'] as const;
 export type ToolSurfaceLayer = (typeof TOOL_SURFACE_LAYERS)[number];
 
-export interface ToolSurfaceInput { source?: TurnInput['source']; executionMode?: TurnInput['executionMode']; channelScope?: TurnInput['channelScope']; goalId?: TurnInput['goalId']; toolDiscovery?: TurnInput['toolDiscovery'] }
+export interface ToolSurfaceInput { source?: TurnInput['source']; executionMode?: TurnInput['executionMode']; channelScope?: TurnInput['channelScope']; goalId?: TurnInput['goalId'] }
 
 /**
- * Project board planning tools (~2.4k schema tokens). Offered to goal runs —
- * where long-lived planning happens — and to discovery-mode runs, which load
- * them on demand; plain chat keeps its default tool budget.
+ * Project board planning tools (~2.4k schema tokens). Offered to goal runs,
+ * where long-lived planning happens; plain chat keeps its default tool budget.
  */
 export const BOARD_PLANNING_TOOLS: ReadonlySet<string> = new Set(['pm_get_plan', 'pm_get_handoff', 'pm_set_goal',
   'pm_update_task_plan', 'pm_manage_stage', 'pm_manage_dependency', 'pm_attach_evidence']);
@@ -62,6 +63,8 @@ export interface ToolSurfaceContext {
   registry: AgentToolRegistry;
   hasSessionManager: boolean;
   isToolDisabled?: ((name: string) => boolean) | undefined;
+  /** False hides root-dependent machine tools. Omitted means unknown: keep them visible. */
+  hasMachineRoots?: boolean | undefined;
 }
 export interface ToolExclusion { layer: ToolSurfaceLayer; reason: string }
 
@@ -78,7 +81,6 @@ export interface ToolSurface {
 const NON_USER_HIDDEN_TOOLS = ['takeover_session', 'submit_development_task', 'cancel_development_task', 'accept_development_task'];
 
 function exclusionReasons(input: ToolSurfaceInput, context: ToolSurfaceContext, name: string, risk: string | undefined): ToolExclusion[] {
-  const repairSubmit = input.executionMode === 'repair' && name === 'submit_development_task';
   const scheduled = input.source === 'scheduled';
   const nonUser = scheduled || input.source === 'reactive';
   const verdicts: ToolExclusion[] = [];
@@ -88,13 +90,13 @@ function exclusionReasons(input: ToolSurfaceInput, context: ToolSurfaceContext, 
   if (input.channelScope && LOCAL_MACHINE_ROOT_TOOLS.has(name))
     verdicts.push({ layer: 'restricted-mode', reason: 'CHANNEL_LOCAL_MACHINE_ROOTS_CLOSED' });
   const codingOperate = input.executionMode === 'coding' && CODING_OPERATES.has(name);
-  if (input.executionMode && !repairSubmit && (!(input.executionMode === 'coding' ? CODING_READS : PROJECT_READS).has(name) || (risk !== 'read' && !codingOperate))) verdicts.push({ layer: 'restricted-mode', reason: 'RESTRICTED_MODE' });
+  if (input.executionMode && (!(input.executionMode === 'coding' ? CODING_READS : PROJECT_READS).has(name) || (risk !== 'read' && !codingOperate))) verdicts.push({ layer: 'restricted-mode', reason: 'RESTRICTED_MODE' });
   if (SESSION_RUNTIME_TOOLS.has(name) && !context.hasSessionManager) verdicts.push({ layer: 'session-runtime', reason: 'SESSION_RUNTIME_UNAVAILABLE' });
   if (name.startsWith('mcp_') && input.source && input.source !== 'user') verdicts.push({ layer: 'mcp-source', reason: 'MCP_SOURCE_AUTHORITY' });
   if (context.isToolDisabled?.(name)) verdicts.push({ layer: 'owner-disabled', reason: 'OWNER_DISABLED' });
   if (GOAL_TOOLS.has(name) && !input.goalId && input.executionMode !== 'coding') verdicts.push({ layer: 'goal-catalog', reason: 'GOAL_CATALOG' });
-  if (BOARD_PLANNING_TOOLS.has(name) && !input.goalId && input.toolDiscovery !== true) verdicts.push({ layer: 'goal-catalog', reason: 'GOAL_CATALOG' });
-  if (ON_DEMAND_TOOLS.has(name) && input.toolDiscovery !== true) verdicts.push({ layer: 'on-demand', reason: 'ON_DEMAND_TOOL' });
+  if (BOARD_PLANNING_TOOLS.has(name) && !input.goalId) verdicts.push({ layer: 'goal-catalog', reason: 'GOAL_CATALOG' });
+  if (context.hasMachineRoots === false && MACHINE_ROOT_DEPENDENT_TOOLS.has(name)) verdicts.push({ layer: 'context-catalog', reason: 'NO_MACHINE_ROOT' });
   return verdicts;
 }
 

@@ -14,7 +14,6 @@ import { InMemorySessionManager } from '../src/services/session-manager.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
 import { attachNotificationPersistence } from '../src/services/notification-events.js';
 import { attachDispatchSupervisor } from '../src/services/agent/dispatch-supervisor.js';
-import { publishTaskReviews } from '../src/services/agent/task-review.js';
 import { publishTaskReports } from '../src/services/agent/task-reports.js';
 import { createCopilotOrchestrator } from '../src/services/agent/orchestrator.js';
 import { createAgentToolRegistry } from '../src/services/agent/tool-registry.js';
@@ -25,7 +24,7 @@ import { readTaskDispatchAttempt } from '../src/services/project-manager/task-ex
 const cleanups: Array<() => void> = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 
-function fixture(options: { cancelAfterDispatch?: boolean; maxSteps?: number; reviewTaskResults?: boolean; modelId?: string } = {}) {
+function fixture(options: { cancelAfterDispatch?: boolean; maxSteps?: number; modelId?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'fb-task-report-'));
   const db = new Database(':memory:');
   migrate(drizzle(db), { migrationsFolder: fileURLToPath(new URL('../src/db/migrations', import.meta.url)) });
@@ -72,7 +71,7 @@ function fixture(options: { cancelAfterDispatch?: boolean; maxSteps?: number; re
     }
   };
   const run = async () => {
-    const runId = await orchestrator.runTurn({ userId: user.id, conversationId: conversation.id, projectId: project.id, userText: 'Create and dispatch this task, then report completion here.', reviewTaskResults: options.reviewTaskResults, modelId: options.modelId });
+    const runId = await orchestrator.runTurn({ userId: user.id, conversationId: conversation.id, projectId: project.id, userText: 'Create and dispatch this task, then report completion here.', modelId: options.modelId });
     await approveAll(runId);
     return runId;
   };
@@ -216,48 +215,22 @@ describe('Copilot durable task reports', () => {
 });
 
 
-it('admits one opt-in read-only review and publishes once; revoked notification blocks recovery', async () => {
-  const f = fixture({ reviewTaskResults: true, modelId: 'owner-model' });
-  const origin = await f.run(); f.notify();
-  publishTaskReports(f.deps, f.user.id); publishTaskReports(f.deps, f.user.id);
-  const jobs = f.db.prepare('SELECT child_run_id FROM copilot_research_jobs WHERE origin_run_id=?').all(origin) as Array<{ child_run_id: string }>;
-  assert.equal(jobs.length, 1);
-  const child = jobs[0]!.child_run_id;
-  const input = JSON.parse(f.ledger.get(child)!.input_json);
-  assert.equal(input.modelId, 'owner-model'); assert.equal(input.executionMode, 'review'); assert.equal(input.parentRunId, origin);
-  f.ledger.validateScope(input);
-  f.db.prepare('UPDATE copilot_runs SET started_at=1 WHERE id=?').run(origin);
-  await f.orchestrator.executeRun(f.user.id, child);
-  assert.equal(f.ledger.get(child)?.status, 'completed');
-  publishTaskReviews(f.deps, f.user.id); publishTaskReviews(f.deps, f.user.id);
-  assert.equal(f.ledger.log.listMessages(f.conversation.id).filter(m => m.toolName === 'pm_task_review').length, 1);
-  assert.equal(f.enterCount(), 1);
-  f.db.prepare('DELETE FROM notifications').run();
-  assert.throws(() => f.ledger.validateScope(input), /evidence changed/);
-});
-
-it('does not admit model reviews without explicit opt-in', async () => {
+it('never admits a model review child for a completion report', async () => {
   const f = fixture(); await f.run(); f.notify(); publishTaskReports(f.deps, f.user.id);
-  assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_research_jobs').get() as { n: number }).n, 0);
-});
-
-
-it('does not lose the deterministic report when optional review conflicts with selected project context', async () => {
-  const f = fixture({ reviewTaskResults: true }); const run = await f.run(); f.notify();
-  const selected = new ProjectRepository(f.db, f.user.id).create({ name: 'Other selected context', path: '/tmp', aiTool: 'codex' });
-  const input = JSON.parse(f.ledger.get(run)!.input_json); input.projectId = selected.id;
-  f.db.prepare('UPDATE copilot_runs SET input_json=? WHERE id=?').run(JSON.stringify(input), run);
-  publishTaskReports(f.deps, f.user.id);
   assert.equal(f.reports().length, 1);
   assert.equal((f.db.prepare('SELECT count(*) n FROM copilot_research_jobs').get() as { n: number }).n, 0);
 });
 
+it('fails closed for runs persisted with the retired review/repair modes', async () => {
+  const f = fixture(); const origin = await f.run();
+  const base = JSON.parse(f.ledger.get(origin)!.input_json);
+  for (const executionMode of ['review', 'repair'])
+    assert.throws(() => f.ledger.validateScope({ ...base, executionMode, parentRunId: origin }), /origin is no longer valid/);
+});
+
 for (const revocation of ['deleted-conversation', 'inactive-user'] as const) {
-  it(`does not publish a report after ${revocation} even when optional review conflicts`, async () => {
-    const f = fixture({ reviewTaskResults: true }); const run = await f.run(); f.notify();
-    const selected = new ProjectRepository(f.db, f.user.id).create({ name: 'Other selected context', path: '/tmp', aiTool: 'codex' });
-    const input = JSON.parse(f.ledger.get(run)!.input_json); input.projectId = selected.id;
-    f.db.prepare('UPDATE copilot_runs SET input_json=? WHERE id=?').run(JSON.stringify(input), run);
+  it(`does not publish a report after ${revocation}`, async () => {
+    const f = fixture(); await f.run(); f.notify();
     if (revocation === 'deleted-conversation') f.ledger.log.deleteConversation(f.conversation.id);
     else f.db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(f.user.id);
     publishTaskReports(f.deps, f.user.id);

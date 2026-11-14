@@ -20,7 +20,7 @@ function fixture(t:TestContext) {
   const userId=new UserRepository(db).create('efficiency@test.invalid','hash').id;
   return {db,userId};
 }
-const llm:AgentLlmClient={async stream(){return {message:'done'};},async summarize(){throw new Error('summary unavailable');},async generateTitle(){return '';},async proposeMemory(){return [];}};
+const llm:AgentLlmClient={async stream(){return {message:'done'};},async summarize(){throw new Error('summary unavailable');},async generateTitle(){return '';}};
 
 it('keeps old prompt prefix stable and recalls only complete identified memory entries',async t=>{
   const {db,userId}=fixture(t),log=new CopilotConversationLog(db,userId),memory=new AgentMemoryRepository(db,userId);
@@ -73,4 +73,14 @@ for(const apiFormat of ['anthropic','openai-compatible'] as const)it(`${apiForma
     assert.deepEqual((bodies[0]!.system as Array<{cache_control:unknown}>)[0]?.cache_control,{type:'ephemeral'});
     assert.doesNotMatch(JSON.stringify(bodies[0]!.messages),/cache_control/);
   }else assert.doesNotMatch(JSON.stringify(bodies),/cache_control/);
+  // A flagged stable tail gets the second breakpoint; the volatile suffix after it stays unmarked.
+  await client.stream({messages:[{role:'user',content:'goal'},{role:'assistant',content:'',toolCalls:[{id:'t1',name:'read',arguments:'{}'}]},
+    {role:'tool',toolCallId:'t1',content:'result',cacheBreakpoint:true},{role:'user',content:'volatile state'}],tools:[],onEvent(){}});
+  const wire=JSON.stringify(bodies[2]);
+  assert.doesNotMatch(wire,/cacheBreakpoint/);
+  if(apiFormat==='anthropic'){
+    const last=(bodies[2]!.messages as Array<{role:string;content:Array<Record<string,unknown>>}>).at(-1)!;
+    assert.deepEqual(last.content.map(block=>[block.type,block.cache_control]),[['tool_result',{type:'ephemeral'}],['text',undefined]]);
+    assert.equal(wire.match(/cache_control/g)?.length,2);
+  }else assert.doesNotMatch(wire,/cache_control/);
 });

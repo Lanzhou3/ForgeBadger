@@ -33,9 +33,6 @@ describe("CopilotGoalStore", () => {
       const goal = createGoal(store, conversation.id);
       assert.equal(goal.status, "active");
       // Legacy budget columns stay populated with defaults; they are not enforced.
-      assert.equal(goal.token_budget, 5_000_000);
-      assert.equal(goal.max_duration_ms, 28_800_000);
-      assert.equal(goal.max_runs, 50);
       assert.equal(goal.conversation_id, conversation.id);
       assert.equal(store.getGoal(goal.id)?.title, "Translate README");
       assert.equal(store.listGoals(conversation.id).length, 1);

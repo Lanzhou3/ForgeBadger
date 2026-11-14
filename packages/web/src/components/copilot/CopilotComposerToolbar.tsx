@@ -6,7 +6,6 @@ import { useLanguage } from "@/hooks/use-language";
 import type { Project } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { CopilotStatusBar, copilotContextTriggerClassName } from "./copilot-runtime-panel";
-import { CopilotRepairControl } from "./CopilotRepairControl";
 
 const NO_PROJECT_VALUE = "__no_project__";
 
@@ -45,7 +44,6 @@ export function CopilotComposerToolbar({ projects, projectId, conversationId, on
       </Select>
       <CopilotStatusBar variant="compact" showRuntimeBadge={showRuntimeBadge} onModelChange={onModelChange}
         onSavingChange={onSavingChange} controlsDisabled={disabled} />
-      {conversationId && <CopilotRepairControl key={conversationId} conversationId={conversationId} />}
     </div>
   );
 }

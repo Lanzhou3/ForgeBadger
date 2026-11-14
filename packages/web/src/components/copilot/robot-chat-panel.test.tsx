@@ -25,7 +25,6 @@ const {
   cancelRunMock,
   getRunMock,
   listRunsMock,
-  revokeRunRepairsMock,
   getCopilotPreferencesMock,
   updateCopilotPreferencesMock,
   listProjectsMock,
@@ -43,7 +42,6 @@ const {
   cancelRunMock: vi.fn(),
   getRunMock: vi.fn(),
   listRunsMock: vi.fn(),
-  revokeRunRepairsMock: vi.fn(),
   getCopilotPreferencesMock: vi.fn(),
   updateCopilotPreferencesMock: vi.fn(),
   listProjectsMock: vi.fn(),
@@ -66,7 +64,6 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     cancelRun: cancelRunMock,
     getRun: getRunMock,
     listConversationRuns: listRunsMock,
-    revokeRunRepairs: revokeRunRepairsMock,
     getCopilotPreferences: getCopilotPreferencesMock,
     updateCopilotPreferences: updateCopilotPreferencesMock,
     listFollowups: vi.fn().mockResolvedValue({ followups: [] }),
@@ -311,15 +308,6 @@ describe("RobotChatPanel", () => {
     expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
     expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("lets the floating panel withdraw a restored repair authorization", async () => {
-    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
-    listRunsMock.mockResolvedValue({ runs: [], activeRun: null, repairRunIds: ["legacy-root"] });
-    revokeRunRepairsMock.mockResolvedValue({ revoked: true });
-    renderPanel();
-    fireEvent.click(await screen.findByRole("button", { name: "停止此对话的后续修复" }));
-    await waitFor(() => expect(revokeRunRepairsMock).toHaveBeenCalledWith("legacy-root"));
   });
 
   it("offers cancellation for a restored awaiting approval run", async () => {

@@ -83,10 +83,6 @@ export function createAgentToolRegistry(tools: AgentTool[]): AgentToolRegistry {
   };
 }
 
-export function getAgentTool(registry: AgentToolRegistry, name: string): AgentTool | undefined {
-  return registry.tools.get(name);
-}
-
 /**
  * Validate and execute a single tool call. Returns the (redacted + capped)
  * output. Throws AgentToolValidationError on bad input; execute errors are
@@ -104,7 +100,6 @@ export async function executeAgentTool(
   try {
     context = channelToolContext(context);
     if (context.executionMode && tool.risk !== 'read'
-      && !(context.executionMode === 'repair' && tool.name === 'submit_development_task')
       && !(context.executionMode === 'coding' && CODING_OPERATES.has(tool.name))) throw new Error('COPILOT_RESTRICTED_TOOL: read-only tools required');
     assertRestrictedTool(context, tool.name, parsed.data);
     checkAgentScope(context, tool.name, parsed.data);
