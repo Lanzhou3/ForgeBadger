@@ -118,6 +118,16 @@ describe("db schema", () => {
       "feishu_notification_groups",
       "feishu_notification_settings",
       "feishu_typing_reactions",
+      "hub_link_tasks",
+      "hub_links",
+      "hub_node_tokens",
+      "hub_project_sync",
+      "hub_projects",
+      "hub_remote_credentials",
+      "hub_submission_checks",
+      "hub_task_confirmations",
+      "hub_task_modules",
+      "hub_task_submissions",
       "integration_feishu_configs",
       "integration_feishu_user_mappings",
       "integration_feishu_webhook_rate_windows",
@@ -637,7 +647,10 @@ describe("0150 retired Copilot cleanup", () => {
     rmSync(nodePath.join(before, "0150_copilot_retired_cleanup.sql"));
     const journalPath = nodePath.join(before, "meta", "_journal.json");
     const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: Array<{ tag: string }> };
-    journal.entries = journal.entries.filter(entry => entry.tag !== "0150_copilot_retired_cleanup");
+    // Stop the "before" database just short of 0150. Later migrations must be
+    // left out too: the migrator skips anything older than the newest applied
+    // entry, so applying them first would hide 0150 from the second run.
+    journal.entries = journal.entries.filter(entry => entry.tag < "0150_copilot_retired_cleanup");
     writeFileSync(journalPath, JSON.stringify(journal));
     const db = new Sqlite(nodePath.join(dir, "fixture.db"));
     try {

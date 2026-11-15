@@ -2324,3 +2324,158 @@ export const companionCommands = sqliteTable('companion_commands', {
   validState: check('companion_command_state', sql`${table.status} IN ('accepted','running','succeeded','rejected','failed','unknown')`),
   validEffect: check('companion_command_effect', sql`${table.effectStatus} IN ('none','confirmed','unknown')`)
 }));
+
+// Team hub coordination (migration 0151). Raw SQL in services/hub owns the
+// queries; these declarations keep the Drizzle schema in step with the DB.
+export const hubNodeTokens = sqliteTable("hub_node_tokens", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  createdAt: integer("created_at").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  lastUsedAt: integer("last_used_at"),
+  revokedAt: integer("revoked_at")
+}, (table) => ({
+  user: index("idx_hub_node_tokens_user").on(table.userId, table.createdAt)
+}));
+
+export const hubProjects = sqliteTable("hub_projects", {
+  projectId: text("project_id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider"),
+  remoteUrl: text("remote_url"),
+  defaultBranch: text("default_branch"),
+  confirmationPolicy: text("confirmation_policy").notNull().default("human_only"),
+  revision: integer("revision").notNull().default(1),
+  updatedBy: text("updated_by").notNull().references(() => users.id, { onDelete: "restrict" }),
+  updatedAt: integer("updated_at").notNull()
+}, (table) => ({
+  tenant: foreignKey({ columns: [table.userId, table.projectId], foreignColumns: [projects.userId, projects.id] }).onDelete("cascade"),
+  provider: check("hub_projects_provider_check", sql`${table.provider} IN ('github','gitee')`)
+}));
+
+export const hubTaskSubmissions = sqliteTable("hub_task_submissions", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull(),
+  workItemId: text("work_item_id").notNull(),
+  actorId: text("actor_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  branch: text("branch").notNull(),
+  commitSha: text("commit_sha").notNull(),
+  prUrl: text("pr_url"),
+  checksStatus: text("checks_status").notNull(),
+  checksSummary: text("checks_summary").notNull().default(""),
+  taskSemanticRevision: integer("task_semantic_revision").notNull(),
+  createdAt: integer("created_at").notNull()
+}, (table) => ({
+  task: foreignKey({
+    columns: [table.userId, table.projectId, table.workItemId],
+    foreignColumns: [projectManagerWorkItems.userId, projectManagerWorkItems.projectId, projectManagerWorkItems.id]
+  }).onDelete("restrict"),
+  byTask: index("idx_hub_task_submissions_task").on(table.userId, table.projectId, table.workItemId, table.createdAt),
+  checks: check("hub_task_submissions_checks_check", sql`${table.checksStatus} IN ('passed','failed','not_run')`)
+}));
+
+export const hubTaskConfirmations = sqliteTable("hub_task_confirmations", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull(),
+  workItemId: text("work_item_id").notNull(),
+  submissionId: text("submission_id").notNull().references(() => hubTaskSubmissions.id, { onDelete: "cascade" }),
+  actorId: text("actor_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  actorKind: text("actor_kind").notNull(),
+  effect: text("effect").notNull(),
+  decision: text("decision").notNull(),
+  note: text("note").notNull(),
+  commitSha: text("commit_sha").notNull(),
+  taskSemanticRevision: integer("task_semantic_revision").notNull(),
+  createdAt: integer("created_at").notNull()
+}, (table) => ({
+  bySubmission: index("idx_hub_task_confirmations_submission").on(table.submissionId, table.createdAt),
+  binding: uniqueIndex("idx_hub_task_confirmations_binding").on(table.submissionId).where(sql`${table.effect}='binding'`),
+  actorKind: check("hub_task_confirmations_actor_kind_check", sql`${table.actorKind} IN ('human','copilot','system')`),
+  effectCheck: check("hub_task_confirmations_effect_check", sql`${table.effect} IN ('binding','advisory')`),
+  decisionCheck: check("hub_task_confirmations_decision_check", sql`${table.decision} IN ('accepted','changes_requested')`)
+}));
+
+// Node side of the team hub (migration 0152).
+export const hubLinks = sqliteTable("hub_links", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  hubUrl: text("hub_url").notNull(),
+  hubProjectId: text("hub_project_id").notNull(),
+  hubProjectName: text("hub_project_name").notNull().default(""),
+  hubActorId: text("hub_actor_id").notNull(),
+  tokenEncrypted: text("token_encrypted").notNull(),
+  localProjectId: text("local_project_id").notNull(),
+  lastSyncedAt: integer("last_synced_at"),
+  lastError: text("last_error"),
+  createdAt: integer("created_at").notNull()
+}, (table) => ({
+  project: foreignKey({ columns: [table.userId, table.localProjectId], foreignColumns: [projects.userId, projects.id] }).onDelete("cascade"),
+  localProject: uniqueIndex("idx_hub_links_local_project").on(table.userId, table.localProjectId)
+}));
+
+export const hubLinkTasks = sqliteTable("hub_link_tasks", {
+  linkId: text("link_id").notNull().references(() => hubLinks.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  hubTaskId: text("hub_task_id").notNull(),
+  snapshotJson: text("snapshot_json").notNull(),
+  localWorkItemId: text("local_work_item_id").references(() => projectManagerWorkItems.id, { onDelete: "set null" }),
+  syncedAt: integer("synced_at").notNull()
+}, (table) => ({
+  pk: primaryKey({ columns: [table.linkId, table.hubTaskId] })
+}));
+
+// Team hub insights (migration 0153): derived, refreshed-in-place state.
+export const hubTaskModules = sqliteTable("hub_task_modules", {
+  workItemId: text("work_item_id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull(),
+  pattern: text("pattern").notNull(),
+  updatedBy: text("updated_by").notNull().references(() => users.id, { onDelete: "restrict" }),
+  updatedAt: integer("updated_at").notNull()
+}, (table) => ({
+  task: foreignKey({
+    columns: [table.userId, table.projectId, table.workItemId],
+    foreignColumns: [projectManagerWorkItems.userId, projectManagerWorkItems.projectId, projectManagerWorkItems.id]
+  }).onDelete("cascade")
+}));
+
+export const hubSubmissionChecks = sqliteTable("hub_submission_checks", {
+  submissionId: text("submission_id").notNull().references(() => hubTaskSubmissions.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull(),
+  kind: text("kind").notNull(),
+  status: text("status").notNull(),
+  detailsJson: text("details_json").notNull().default("{}"),
+  checkedAt: integer("checked_at").notNull()
+}, (table) => ({
+  pk: primaryKey({ columns: [table.submissionId, table.kind] }),
+  byProject: index("idx_hub_submission_checks_project").on(table.userId, table.projectId),
+  kindCheck: check("hub_submission_checks_kind_check", sql`${table.kind} IN ('base_conflict','peer_conflict','scope','pull_request','ci')`),
+  statusCheck: check("hub_submission_checks_status_check", sql`${table.status} IN ('ok','attention','unknown')`)
+}));
+
+export const hubRemoteCredentials = sqliteTable("hub_remote_credentials", {
+  projectId: text("project_id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenEncrypted: text("token_encrypted").notNull(),
+  updatedBy: text("updated_by").notNull().references(() => users.id, { onDelete: "restrict" }),
+  updatedAt: integer("updated_at").notNull()
+}, (table) => ({
+  tenant: foreignKey({ columns: [table.userId, table.projectId], foreignColumns: [projects.userId, projects.id] }).onDelete("cascade")
+}));
+
+export const hubProjectSync = sqliteTable("hub_project_sync", {
+  projectId: text("project_id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  mirrorFetchedAt: integer("mirror_fetched_at"),
+  mirrorError: text("mirror_error"),
+  remotePolledAt: integer("remote_polled_at"),
+  remoteError: text("remote_error")
+}, (table) => ({
+  tenant: foreignKey({ columns: [table.userId, table.projectId], foreignColumns: [projects.userId, projects.id] }).onDelete("cascade")
+}));
