@@ -146,6 +146,50 @@ eye.
 | Snapshot restore fails | Attach anyway; show history restoration warning |
 | config rollback fails | Return affected files for manual recovery |
 
+### Goal check isolation
+
+Turned on by an admin in Copilot settings → General → "Goal check isolation"
+(runtime setting `goal_check_sandbox`, default off, applied immediately to the
+whole Gateway; there is no environment variable). macOS only: Copilot goal
+checks (`goal_run_checks`) then run inside `sandbox-exec`, and a check that
+cannot be isolated is refused rather than run on the host. On hosts that
+cannot isolate (Linux, Windows) the switch is disabled and
+`PUT /api/v1/runtime-settings` refuses to turn it on (409
+`GOAL_CHECK_SANDBOX_UNAVAILABLE`); if a saved `on` meets such a host anyway,
+the Gateway logs a warning and every check needs `unsandboxed: true` plus
+owner approval until the switch is turned off.
+
+What does not work inside the sandbox, and needs an `unsandboxed` run that the
+owner approves call by call (a `sandbox_checks` grant does not cover it):
+
+- dependency installs and anything else that needs the network, including
+  tests that start or call a server on localhost;
+- `git add` / `commit` / `stash` / `checkout` (Git metadata is read-only;
+  `git status` / `diff` / `log` work);
+- tests that need a real PTY, and tools that start their own `sandbox-exec`;
+- creating a `.claude` directory in the workspace (existing ones accept new
+  files, but CLI settings and hooks stay read-only);
+- toolchains installed under the home directory outside the directories on
+  the Gateway's `PATH`, the Node install running the Gateway and the usual
+  version-manager trees (nvm, fnm, volta, asdf, mise, pyenv, rbenv, rustup,
+  cargo/bun/deno/go bin directories, corepack, pnpm).
+
+An unattended goal that holds the `sandbox_checks` grant stops at the first
+`unsandboxed` request and waits for approval; no separate goal notification
+is sent for that wait, so check pending approvals when such a goal goes quiet.
+
+Limits to keep in mind: workspace files are still read by dispatched CLI
+sessions on the host; system locations outside the home directory (`/opt`,
+`/etc`, `/Library`) stay readable, as does the project's whole shared `.git`
+directory (every branch, stash and object, and a credential embedded in a
+`.git/config` remote URL); a process that detaches with `setsid`
+outlives the check (still sandboxed) and can keep editing the workspace until
+it exits, so review the diff again before merging if a check misbehaved.
+`sandbox-exec` is deprecated by Apple; if it stops working the mode refuses
+checks instead of downgrading. CI runs on Linux and skips the enforcement
+tests: run `pnpm --dir packages/gateway test test/copilot-goal-check-sandbox.test.ts`
+on a Mac before a release that touches `command-sandbox.ts`.
+
 ## 7. Manual Session Troubleshooting
 
 Session inspection goes through the Gateway API and WebSocket event stream;

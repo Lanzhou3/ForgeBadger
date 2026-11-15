@@ -15,13 +15,15 @@ export type RuntimeSettingKey =
   | "registration"
   | "mcp_enabled"
   | "session_prefix"
-  | "pm_auto_dispatch";
+  | "pm_auto_dispatch"
+  | "goal_check_sandbox";
 
 export const RUNTIME_SETTING_KEYS: readonly RuntimeSettingKey[] = [
   "registration",
   "mcp_enabled",
   "session_prefix",
-  "pm_auto_dispatch"
+  "pm_auto_dispatch",
+  "goal_check_sandbox"
 ];
 
 /** Per-key metadata surfaced to the settings page. */
@@ -31,7 +33,8 @@ export const RUNTIME_SETTING_META: Readonly<Record<RuntimeSettingKey, { hot: boo
   registration: { hot: true },
   mcp_enabled: { hot: false },
   session_prefix: { hot: true },
-  pm_auto_dispatch: { hot: true }
+  pm_auto_dispatch: { hot: true },
+  goal_check_sandbox: { hot: true }
 };
 
 export interface RuntimeSettingsEffective {
@@ -39,6 +42,11 @@ export interface RuntimeSettingsEffective {
   mcpEnabled: boolean;
   sessionPrefix: string;
   pmAutoDispatch: boolean;
+  /**
+   * macOS seatbelt isolation for Copilot goal checks. Settings-page only:
+   * there is no environment variable, the default is off.
+   */
+  goalCheckSandbox: boolean;
   /** true when FORGEBADGER_RUNTIME_SETTINGS_READONLY forbids API writes. */
   readonly: boolean;
 }
@@ -85,7 +93,8 @@ const patchSchema = z
     registration: registrationModeSchema.optional(),
     mcp_enabled: booleanInput.optional(),
     session_prefix: sessionPrefixSchema.optional(),
-    pm_auto_dispatch: booleanInput.optional()
+    pm_auto_dispatch: booleanInput.optional(),
+    goal_check_sandbox: booleanInput.optional()
   })
   .strict();
 
@@ -95,6 +104,7 @@ export function envToEffective(env: GatewayEnv): RuntimeSettingsEffective {
     mcpEnabled: env.FORGEBADGER_MCP_ENABLED,
     sessionPrefix: env.FORGEBADGER_SESSION_PREFIX,
     pmAutoDispatch: env.FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED,
+    goalCheckSandbox: false,
     readonly: env.FORGEBADGER_RUNTIME_SETTINGS_READONLY
   };
 }
@@ -150,6 +160,10 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
       const value = z.boolean().safeParse(overrides.get("pm_auto_dispatch"));
       if (value.success) merged.pmAutoDispatch = value.data;
     }
+    if (overrides.has("goal_check_sandbox")) {
+      const value = z.boolean().safeParse(overrides.get("goal_check_sandbox"));
+      if (value.success) merged.goalCheckSandbox = value.data;
+    }
     return merged;
   }
 
@@ -163,6 +177,8 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
         return current.sessionPrefix;
       case "pm_auto_dispatch":
         return current.pmAutoDispatch;
+      case "goal_check_sandbox":
+        return current.goalCheckSandbox;
     }
   }
 
@@ -173,7 +189,8 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
       registration: current.registration,
       mcp_enabled: current.mcpEnabled,
       session_prefix: current.sessionPrefix,
-      pm_auto_dispatch: current.pmAutoDispatch
+      pm_auto_dispatch: current.pmAutoDispatch,
+      goal_check_sandbox: current.goalCheckSandbox
     };
     return RUNTIME_SETTING_KEYS.map((key) => ({
       key,
@@ -206,7 +223,8 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
       registration: data.registration,
       mcp_enabled: data.mcp_enabled === undefined ? undefined : toBoolean(data.mcp_enabled),
       session_prefix: data.session_prefix,
-      pm_auto_dispatch: data.pm_auto_dispatch === undefined ? undefined : toBoolean(data.pm_auto_dispatch)
+      pm_auto_dispatch: data.pm_auto_dispatch === undefined ? undefined : toBoolean(data.pm_auto_dispatch),
+      goal_check_sandbox: data.goal_check_sandbox === undefined ? undefined : toBoolean(data.goal_check_sandbox)
     };
 
     const now = Date.now();

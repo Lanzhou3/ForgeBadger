@@ -189,3 +189,48 @@ it('reconciles proven effects during recovery without replaying uncertain comman
     assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM copilot_goal_journal WHERE note=?').get('Owner answer: Do not replay').n, 0);
   } finally { f.db.close(); }
 });
+
+import { setGoalCheckSandboxMode } from '../src/services/agent/command-sandbox.js';
+
+it('keeps approving an unsandboxed goal check off the phone, in the snapshot and on the server', async () => {
+  const f = fixture();
+  setGoalCheckSandboxMode('on');
+  try {
+    const log = new CopilotConversationLog(f.db, f.owner.id);
+    const run = log.createRun(f.conversation.id, {});
+    const goal = f.goals.createGoal({ conversationId: f.conversation.id, projectId: 'command-project', title: 'Check goal', spec: 'spec' });
+    log.updateRun(run.id, { status: 'awaiting_approval' });
+    f.db.prepare('UPDATE copilot_runs SET input_json=? WHERE id=?').run(JSON.stringify({
+      userId: f.owner.id, conversationId: f.conversation.id, projectId: 'command-project', goalId: goal.id, source: 'user', userText: 'test'
+    }), run.id);
+    const inputJson = JSON.stringify({ command: 'pnpm install', unsandboxed: true });
+    const inputDigest = createHash('sha256').update(inputJson).digest('hex');
+    const action = log.createPendingAction({ runId: run.id, tool: 'goal_run_checks', inputJson, inputDigest });
+    const stepId = randomUUID();
+    f.db.prepare(`INSERT INTO copilot_run_steps(id,user_id,run_id,ordinal,kind,status,tool_call_id,tool_name,input_json,input_digest,effect)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(stepId, f.owner.id, run.id, 1, 'tool', 'awaiting_approval', 'call-1', 'goal_run_checks', inputJson, inputDigest, 'write');
+    f.db.prepare('UPDATE copilot_pending_actions SET step_id=?,tool_call_id=? WHERE id=?').run(stepId, 'call-1', action.id);
+
+    const projected = f.companion.getDeviceSnapshot(f.device.id, 1).approvals.find(entry => entry.id === action.id);
+    assert.equal(projected?.decisionAllowed, false);
+
+    // A forged or stale client that approves anyway is refused server-side.
+    const approved = await f.commands.execute(command(f, 'approval.decide', { runId: run.id, actionId: action.id, approved: true, inputDigest }));
+    assert.equal(approved.status, 'failed');
+    assert.equal(approved.errorCode, 'COMPANION_AUTHORITY_REJECTED');
+    assert.equal(log.getPendingAction(action.id)?.status, 'pending');
+
+    // Rejecting from the phone stays allowed.
+    const rejected = await f.commands.execute(command(f, 'approval.decide', { runId: run.id, actionId: action.id, approved: false, inputDigest }));
+    assert.equal(rejected.status, 'succeeded', rejected.errorCode ?? undefined);
+    assert.equal(log.getPendingAction(action.id)?.status, 'rejected');
+
+    // With isolation off the same call is an ordinary approval again.
+    setGoalCheckSandboxMode('off');
+    const ordinary = log.createPendingAction({ runId: run.id, tool: 'goal_run_checks', inputJson, inputDigest });
+    assert.equal(f.companion.getDeviceSnapshot(f.device.id, 1).approvals.find(entry => entry.id === ordinary.id)?.decisionAllowed, true);
+  } finally {
+    setGoalCheckSandboxMode('off');
+    f.db.close();
+  }
+});

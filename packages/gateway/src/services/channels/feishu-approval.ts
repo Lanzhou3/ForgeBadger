@@ -10,6 +10,7 @@ import type { TrustedChannelPeer } from './channel-identity-service.js';
 import { CopilotRunLedger, inputDigest } from '../agent/run-ledger.js';
 import type { AgentPendingAction } from '../agent/types.js';
 import { redactAgentText } from '../agent/redaction.js';
+import { isUnsandboxedCheckRequest } from '../agent/command-sandbox.js';
 import { normalizeFeishuEvent } from '../integrations/feishu-event-normalizer.js';
 
 export const FEISHU_APPROVAL_PHASE = 'approval-card-v1:';
@@ -55,6 +56,8 @@ export class FeishuApprovalService {
             && value?.observationId === target.observationId && value?.expectedTitle === target.taskTitle);
         if (complete) detail = `停止目标（整个会话进程组）：\n${JSON.stringify(target, null, 2)}\n\n参数：\n${detail}`;
       }
+      if (action.tool === 'goal_run_checks' && isUnsandboxedCheckRequest(input))
+        detail = `⚠ 无隔离执行：该命令将直接在宿主机上运行，不受系统沙箱限制。\n\n${detail}`;
     } catch { complete = false; }
     const safe = redactAgentText(detail);
     // Count the complete redacted representation before clipping, never approve an incomplete preview.

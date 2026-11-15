@@ -18,6 +18,7 @@ vi.mock("@/lib/copilot-extensions-api", () => ({
 }));
 vi.mock("./copilot-memory-panel", () => ({ CopilotMemoryPanel: () => <div>Memory</div> }));
 vi.mock("./copilot-autonomy-panel", () => ({ CopilotAutonomyPanel: () => null }));
+vi.mock("./copilot-goal-sandbox-panel", () => ({ CopilotGoalSandboxPanel: () => null }));
 function mount() {
   render(
     <LanguageProvider>

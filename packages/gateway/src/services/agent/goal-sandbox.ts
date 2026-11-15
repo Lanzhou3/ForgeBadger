@@ -6,6 +6,7 @@ import path from 'node:path';
 import { SHELL_COMMAND_DEFAULT_TIMEOUT_MS, SHELL_COMMAND_MAX_LENGTH, SHELL_COMMAND_MAX_TIMEOUT_MS } from '../shell-command-execution.js';
 import { safeResolve } from '../../lib/safe-resolve.js';
 import { AgentError } from './types.js';
+import { PROTECTED_CLI_CONFIG_DIRECTORIES, PROTECTED_CLI_CONFIG_FILES, type CheckSandboxPlan } from './command-sandbox.js';
 import type { Database } from '../../db/types.js';
 
 /**
@@ -138,8 +139,8 @@ export function ensureGoalSandbox(projectRoot: string, sandboxDir: string): stri
  * pointer inside a worktree) and CLI configuration that a dispatched CLI
  * would execute from (hooks, MCP servers, plugins) are owner territory.
  */
-const PROTECTED_CLI_CONFIG = new Set(['.claude/settings.json', '.claude/settings.local.json', '.mcp.json', 'opencode.json', 'opencode.jsonc']);
-const PROTECTED_CLI_DIRECTORIES = ['.claude/hooks/', '.codex/', '.opencode/', '.grok/', '.kimi/', '.pi/'];
+const PROTECTED_CLI_CONFIG = new Set<string>(PROTECTED_CLI_CONFIG_FILES);
+const PROTECTED_CLI_DIRECTORIES = PROTECTED_CLI_CONFIG_DIRECTORIES.map(directory => `${directory}/`);
 
 function assertGoalToolPath(relative: string, write: boolean): void {
   const normalized = relative.replace(/\\/gu, '/').split('/').filter(part => part && part !== '.').join('/');
@@ -453,17 +454,22 @@ export function sandboxCommandEnv(source: NodeJS.ProcessEnv = process.env): Node
 /**
  * Run a shell command with the sandbox as cwd. Reuses the shell-command
  * length/timeout ceilings (default 5 min, max 10 min) and the 48 KiB output
- * truncation convention. v1 runs with a minimal, secret-free environment
- * inside the copy; isolation is by convention, not an OS-level sandbox.
+ * truncation convention. Without an isolation plan the command runs on the
+ * host with a minimal, secret-free environment; with one (see
+ * command-sandbox.ts) it runs inside the macOS sandbox.
  */
-export function runSandboxCommand(cwd: string, command: string, timeoutMs?: number, signal?: AbortSignal): Promise<SandboxCommandResult> {
+export function runSandboxCommand(cwd: string, command: string, timeoutMs?: number, signal?: AbortSignal, isolation?: CheckSandboxPlan): Promise<SandboxCommandResult> {
   const trimmed = command.trim();
   if (!trimmed) return Promise.reject(new AgentError('COPILOT_GOAL_INPUT_INVALID', 'command must be non-empty'));
   if (trimmed.length > SHELL_COMMAND_MAX_LENGTH) return Promise.reject(new AgentError('COPILOT_GOAL_INPUT_INVALID', `command exceeds ${SHELL_COMMAND_MAX_LENGTH} characters`));
   const limit = timeoutMs === undefined ? SHELL_COMMAND_DEFAULT_TIMEOUT_MS : Math.min(SHELL_COMMAND_MAX_TIMEOUT_MS, Math.max(1, Math.trunc(timeoutMs)));
   const started = Date.now();
   return new Promise(resolve => {
-    const child = spawn(trimmed, { cwd, shell: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: sandboxCommandEnv() });
+    // An isolation plan already wraps the command in `sandbox-exec ... /bin/sh -c`; it execs in place,
+    // so the child stays the leader of its own process group either way.
+    const child = isolation
+      ? spawn(isolation.file, isolation.args, { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: isolation.env })
+      : spawn(trimmed, { cwd, shell: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: sandboxCommandEnv() });
     let stdout = ''; let stderr = ''; let truncated = false;
     const cap = (value: string) => {
       if (Buffer.byteLength(value) <= COMMAND_OUTPUT_CAP) return value;
@@ -485,6 +491,25 @@ export function runSandboxCommand(cwd: string, command: string, timeoutMs?: numb
     timer.unref?.();
     const onAbort = () => { kill(); finish({ exitCode: null, stdout, stderr, timedOut: false }); };
     signal?.addEventListener('abort', onAbort, { once: true });
+    // Isolated runs reap background children once the command itself exits. This must hang off
+    // 'exit': 'close' waits for the pipes, which a lingering child keeps open.
+    // One signal is not enough: a member that is mid-fork when it lands leaves a child behind, so repeat
+    // until the group is empty (ESRCH).
+    if (isolation) child.on('exit', code => {
+      // A child that left the group (setsid) still holds the pipes, so 'close' would wait for it:
+      // after a short drain, report the command's own exit status.
+      setTimeout(() => {
+        if (settled) return;
+        child.stdout.destroy(); child.stderr.destroy();
+        finish({ exitCode: code, stdout, stderr, timedOut: false });
+      }, 1_000).unref?.();
+      const pid = child.pid!;
+      const reap = (attempt: number) => {
+        try { process.kill(-pid, 'SIGKILL'); } catch { return; }
+        if (attempt < 20) setTimeout(reap, Math.min(25 * 2 ** attempt, 1_000), attempt + 1).unref?.();
+      };
+      reap(0);
+    });
     child.on('error', () => finish({ exitCode: null, stdout, stderr, timedOut: false }));
     child.on('close', code => finish({ exitCode: code, stdout, stderr, timedOut: false }));
   });

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { LanguageProvider } from "@/hooks/use-language";
 import { CopilotAutonomyPanel } from "@/components/copilot/copilot-autonomy-panel";
+import { runtimeSettingsQueryKey } from "@/components/settings/InstanceRuntimeSettings";
 
 vi.stubGlobal(
   "ResizeObserver",
@@ -98,6 +99,26 @@ describe("CopilotAutonomyPanel", () => {
     await waitFor(() =>
       expect(updateRuntimeSettingsMock).toHaveBeenCalledWith({ pm_auto_dispatch: true })
     );
+  });
+
+  it("keeps an unsaved toggle when another card saves runtime settings", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <LanguageProvider>
+        <QueryClientProvider client={queryClient}>
+          <CopilotAutonomyPanel />
+        </QueryClientProvider>
+      </LanguageProvider>
+    );
+    const switchEl = await screen.findByRole("switch", { name: "项目任务自动推进" });
+    fireEvent.click(switchEl);
+    expect(switchEl.getAttribute("data-state")).toBe("checked");
+    // Another card (goal check isolation) writes a fresh settings object into the shared query.
+    const fresh = settingsState();
+    fresh.settings = [...fresh.settings, { key: "goal_check_sandbox", value: true, source: "settings", hot: true }];
+    act(() => queryClient.setQueryData(runtimeSettingsQueryKey, fresh));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "项目任务自动推进" }).getAttribute("data-state")).toBe("checked"));
+    expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("is hidden for non-admin users", async () => {

@@ -1,3 +1,4 @@
+import { isUnsandboxedCheckRequest } from '../agent/command-sandbox.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { decryptSecret, encryptSecret, type EncryptedSecret } from '../../crypto/secret-box.js';
@@ -323,7 +324,9 @@ export class CompanionService {
           tool: row.tool,
           input: safeJsonObject(row.inputJson),
           inputDigest: row.inputDigest,
-          decisionAllowed: Buffer.byteLength(row.inputJson, 'utf8') <= 32 * 1024,
+          // The mobile approval screen cannot label a host-run (unsandboxed) check, so that decision stays on the console.
+          decisionAllowed: Buffer.byteLength(row.inputJson, 'utf8') <= 32 * 1024
+            && !(row.tool === 'goal_run_checks' && isUnsandboxedCheckRequest(safeJsonObject(row.inputJson))),
           createdAt: row.createdAt
         }));
       }) : [];

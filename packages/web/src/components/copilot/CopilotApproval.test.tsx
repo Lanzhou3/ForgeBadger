@@ -66,3 +66,19 @@ it('shows an expired authority remedy and immediately reconciles a failed decisi
   expect(onDecided).toHaveBeenCalledOnce();
   expect(decide).toHaveBeenCalledOnce();
 });
+
+it("labels a goal check that asks to run on the host, above the raw input", () => {
+  const unsandboxed: CopilotPendingAction = { ...action, tool: "goal_run_checks", inputJson: JSON.stringify({ command: "pnpm install", unsandboxed: true }) };
+  const { unmount } = render(<LanguageProvider><CopilotApproval action={unsandboxed} onDecided={() => {}} /></LanguageProvider>);
+  const note = screen.getByRole("note");
+  expect(note.textContent).toContain("无隔离执行");
+  expect(note.compareDocumentPosition(screen.getByText(/pnpm install/)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  unmount();
+  for (const inputJson of [JSON.stringify({ command: "pnpm test" }), JSON.stringify({ command: "x", unsandboxed: "true" }), "not json"]) {
+    const view = render(<LanguageProvider><CopilotApproval action={{ ...action, tool: "goal_run_checks", inputJson }} onDecided={() => {}} /></LanguageProvider>);
+    expect(screen.queryByRole("note")).toBeNull();
+    view.unmount();
+  }
+  render(<LanguageProvider><CopilotApproval action={{ ...action, tool: "terminal_run", inputJson: JSON.stringify({ unsandboxed: true }) }} onDecided={() => {}} /></LanguageProvider>);
+  expect(screen.queryByRole("note")).toBeNull();
+});

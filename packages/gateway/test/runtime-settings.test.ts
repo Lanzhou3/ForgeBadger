@@ -18,6 +18,7 @@ import {
   RuntimeSettingsError,
   type RuntimeSettingsEffective
 } from "../src/services/runtime-settings.js";
+import { goalCheckSandboxCapability } from "../src/services/agent/command-sandbox.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 
@@ -103,6 +104,17 @@ describe("runtime settings store", () => {
     assert.match(entries[0]!.resourceId ?? "", /pm_auto_dispatch/);
   });
 
+  it("keeps goal check isolation off by default and settable only through the store", () => {
+    // The retired environment variable is not part of the schema and is ignored.
+    const store = createRuntimeSettingsStore(db, { env: baseEnv({ FORGEBADGER_GOAL_CHECK_SANDBOX: "on" }) });
+    assert.equal(store.effective().goalCheckSandbox, false);
+    const view = store.views().find((entry) => entry.key === "goal_check_sandbox");
+    assert.deepEqual({ value: view?.value, hot: view?.hot }, { value: false, hot: true });
+    store.update("tester", { goal_check_sandbox: true });
+    assert.equal(createRuntimeSettingsStore(db, { env }).effective().goalCheckSandbox, true);
+    assert.throws(() => store.update("tester", { goal_check_sandbox: "on" }), RuntimeSettingsError);
+  });
+
   it("honours FORGEBADGER_RUNTIME_SETTINGS_READONLY", () => {
     const readonlyEnv = baseEnv({ FORGEBADGER_RUNTIME_SETTINGS_READONLY: "true" });
     const store = createRuntimeSettingsStore(db, { env: readonlyEnv });
@@ -163,6 +175,32 @@ describe("runtime settings routes", () => {
     assert.equal(byKey.get("registration")?.source, "settings");
     assert.equal(byKey.get("session_prefix")?.value, "fb-local");
     assert.equal(byKey.get("mcp_enabled")?.value, false);
+  });
+
+  it("reports host isolation support and only enables goal check isolation where it works", async () => {
+    const token = signJwt({ userId: admin.id, email: admin.email }, secretJwt);
+    const capability = goalCheckSandboxCapability();
+    const read = await makeRequest(app, "GET", "/api/v1/runtime-settings", undefined, {
+      Authorization: `Bearer ${token}`
+    });
+    assert.deepEqual(read.body.data.capabilities.goalCheckSandbox, capability);
+
+    const put = await makeRequest(app, "PUT", "/api/v1/runtime-settings", { goal_check_sandbox: true }, {
+      Authorization: `Bearer ${token}`
+    });
+    if (capability.available) {
+      assert.equal(put.status, 200);
+      const view = put.body.data.settings.find((entry: { key: string }) => entry.key === "goal_check_sandbox");
+      assert.equal(view.value, true);
+    } else {
+      assert.equal(put.status, 409);
+      assert.equal(put.body.details.code, "GOAL_CHECK_SANDBOX_UNAVAILABLE");
+    }
+    // Turning it off is always allowed.
+    const off = await makeRequest(app, "PUT", "/api/v1/runtime-settings", { goal_check_sandbox: false }, {
+      Authorization: `Bearer ${token}`
+    });
+    assert.equal(off.status, 200);
   });
 
   it("surfaces validation errors as 400", async () => {

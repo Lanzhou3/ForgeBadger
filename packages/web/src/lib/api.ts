@@ -3706,7 +3706,8 @@ export type RuntimeSettingKey =
   | "registration"
   | "mcp_enabled"
   | "session_prefix"
-  | "pm_auto_dispatch";
+  | "pm_auto_dispatch"
+  | "goal_check_sandbox";
 
 export interface RuntimeSettingView {
   key: RuntimeSettingKey;
@@ -3720,6 +3721,10 @@ export interface RuntimeSettingsState {
   settings: RuntimeSettingView[];
   /** true when FORGEBADGER_RUNTIME_SETTINGS_READONLY forbids writes. */
   readonly: boolean;
+  /** Host support for switches the Gateway cannot honor everywhere. */
+  capabilities?: {
+    goalCheckSandbox?: { available: boolean; reason: string | null };
+  };
 }
 
 export function runtimeSettingsValue<T>(state: RuntimeSettingsState, key: RuntimeSettingKey): T | undefined {

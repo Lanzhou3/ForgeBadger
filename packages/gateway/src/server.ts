@@ -26,6 +26,7 @@ import {
   type RuntimeSettingsEffective,
   type RuntimeSettingsStore
 } from "./services/runtime-settings.js";
+import { goalCheckSandboxStartupWarning, setGoalCheckSandboxMode } from "./services/agent/command-sandbox.js";
 import type { GatewayEnv } from "./config/env.js";
 
 import { mountRoutes } from "./routes/index.js";
@@ -162,6 +163,9 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
         env: options.env,
         apply: (effective: RuntimeSettingsEffective) => {
           options.sessionManager.setSessionPrefix(effective.sessionPrefix);
+          setGoalCheckSandboxMode(effective.goalCheckSandbox ? "on" : "off");
+          const sandboxWarning = goalCheckSandboxStartupWarning();
+          if (sandboxWarning) console.warn(`[gateway] ${sandboxWarning}`);
           // The supervisor only advances already-dispatched work items from
           // CLI completion evidence; it never launches or retries a CLI, so
           // it follows the behavior preference alone.

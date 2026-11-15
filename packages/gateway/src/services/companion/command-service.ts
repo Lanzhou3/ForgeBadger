@@ -1,3 +1,4 @@
+import { isUnsandboxedCheckRequest } from '../agent/command-sandbox.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Database } from '../../db/types.js';
@@ -194,6 +195,9 @@ export class CompanionCommandService {
         || pending.inputDigest !== payload.inputDigest || pending.status !== 'pending') {
         throw new CompanionError(pending?.inputDigest === payload.inputDigest ? 'COMPANION_AUTHORITY_REJECTED' : 'COMPANION_APPROVAL_STALE', 409);
       }
+      // The mobile screen cannot label a host-run (unsandboxed) goal check, so approving one stays a console decision.
+      if (payload.approved && pending.tool === 'goal_run_checks' && isUnsandboxedCheckRequest(parseJsonOrNull(pending.inputJson)))
+        throw new CompanionError('COMPANION_AUTHORITY_REJECTED', 409);
       const resumed = await buildAgentStack(this.agentDeps, userId).orchestrator.resumeAfterApproval({
         userId,
         runId: payload.runId,
@@ -253,4 +257,8 @@ function stableCode(error: unknown): string {
   if (error instanceof AgentError) return error.code;
   if (error instanceof CompanionError) return error.code;
   return 'COMPANION_INPUT_INVALID';
+}
+
+function parseJsonOrNull(value: string): unknown {
+  try { return JSON.parse(value); } catch { return null; }
 }

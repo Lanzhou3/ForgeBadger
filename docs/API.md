@@ -2969,12 +2969,36 @@ and `goal_run_checks` (shell command with the sandbox as cwd, default
 exit 0 refreshes the task verify record; operate-class: per-call owner
 approval unless the goal holds the `sandbox_checks` grant, and the shell
 denylist applies) take sandbox-relative paths only —
-absolute paths, `..` traversal and symlink escapes are refused. v1 runs
-commands with the host environment; the isolation boundary is the copy
+absolute paths, `..` traversal and symlink escapes are refused. By default
+commands run with the host environment; the isolation boundary is the copy
 convention, not an
 OS sandbox. Commands run with a minimal secret-free environment: a small
 name allowlist (PATH/HOME/LANG/TZ/TERM/USER/TMPDIR and friends) with every
-`FORGEBADGER_*` or KEY/SECRET/TOKEN/PASSWORD-named variable stripped. `goal_ask_user {question}` blocks the goal
+`FORGEBADGER_*` or KEY/SECRET/TOKEN/PASSWORD-named variable stripped.
+
+With goal check isolation on (admin switch in Copilot settings, runtime setting
+`goal_check_sandbox`; macOS only, default off) every
+`goal_run_checks` command runs inside `sandbox-exec`: writes are limited to
+the goal workspace and a per-call scratch directory (which is also `HOME`
+and `TMPDIR`); Git metadata, the copy-sandbox manifest and CLI configuration
+stay read-only; the home directory, the ForgeBadger state directory and the
+real project are unreadable apart from the shared `.git` directory and
+toolchain install trees; there is no network (localhost included), no Mach
+service beyond user lookup, and no view of other processes. A host that
+cannot isolate refuses the check with `COPILOT_GOAL_SANDBOX_UNAVAILABLE`;
+there is no fallback. The result then carries `isolation: "seatbelt" |
+"none"`, a failed isolated check adds `sandboxHint`, and the verify record
+notes `sandboxed` / `unsandboxed`. Input `unsandboxed: true` runs the command
+on the host instead: it is never covered by the `sandbox_checks` grant, needs
+the owner's approval of that exact call (console or Feishu card; Companion
+shows it with `decisionAllowed: false` and its `approval.decide` approval is
+rejected with `COMPANION_AUTHORITY_REJECTED`), and is refused inside delegated
+coding sub-runs. With isolation off, `unsandboxed` is accepted and
+ignored and results are unchanged. The sandbox constrains the check process,
+not workspace content: files the model writes are still read by dispatched
+CLI sessions on the host.
+
+`goal_ask_user {question}` blocks the goal
 with `blockedReason: awaiting_user`, stores the question (exposed as
 `pendingQuestion` on the goal detail response), journals it, notifies the
 owner and lets the current run settle as `stopped` (`stop_reason:

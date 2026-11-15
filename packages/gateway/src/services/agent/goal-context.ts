@@ -2,6 +2,7 @@ import type { Database } from '../../db/types.js';
 import { GOAL_GRANT_TOOLS, parseGoalGrants } from './goal-grants.js';
 import { CopilotGoalStore } from './goal-store.js';
 import { boardStatusOf } from './goal-board.js';
+import { goalCheckSandboxMode } from './command-sandbox.js';
 
 /**
  * Model-facing projection of one goal's current state. Injected as a prefix
@@ -52,6 +53,11 @@ export function goalContextMessage(db: Database, userId: string, goalId: string)
       + 'which must exit 0 via goal_run_checks (pass taskId) before the task can pass. '
       + 'Edit files only inside the goal sandbox with goal_file_write / goal_file_edit (paths are sandbox-relative; the real project stays untouched). '
       + 'Verify work with goal_run_checks in the sandbox (owner approval per call unless the goal holds the sandbox_checks grant). '
+      + (goalCheckSandboxMode() === 'on'
+        ? 'Checks run inside an OS sandbox: no network (including localhost), Git metadata read-only, nothing outside the workspace readable or writable. '
+          + 'Steps that cannot work there (dependency installs, local servers, commits) need goal_run_checks with unsandboxed: true, which the owner approves call by call even when a grant is held; '
+          + 'do not retry a sandbox-limited command unchanged — request the unsandboxed run once, or use goal_ask_user if the owner should decide. '
+        : '')
       + 'Use goal_delegate to run a sandboxed coding sub-run for one task, or goal_dispatch_task (needs the pm_dispatch grant and an autonomy-listed adapter) to hand a task to a real CLI session working in the same goal workspace (a git worktree for git projects); '
       + 'the goal pauses until that CLI reports its turn finished, then verify its result with goal_run_checks — dispatch and a finished turn are not completion. '
       + 'For owner-only decisions use goal_ask_user, which pauses the goal until the owner answers. '

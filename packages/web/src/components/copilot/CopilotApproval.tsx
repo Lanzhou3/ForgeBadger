@@ -23,6 +23,15 @@ function approvalRemedy(error: unknown): TranslationKey {
   return "copilot.approvalUncertain";
 }
 
+/** A goal check the model asked to run on the host instead of inside the OS sandbox. */
+function isUnsandboxedCheck(action: CopilotPendingAction): boolean {
+  if (action.tool !== 'goal_run_checks') return false;
+  try {
+    const input = JSON.parse(action.inputJson) as { unsandboxed?: unknown } | null;
+    return input?.unsandboxed === true;
+  } catch { return false; }
+}
+
 /** One exact server-issued action; approval never grants future authority. */
 export function CopilotApproval({ action, onDecided }: Props) {
   const { t } = useLanguage();
@@ -66,6 +75,9 @@ export function CopilotApproval({ action, onDecided }: Props) {
       <p className="text-sm font-medium">{t("copilot.approvalTitle")}</p>
       <p className="break-all font-mono text-xs">{action.tool}</p>
       {action.tool === 'stop_session' && <SessionStopApprovalTarget target={stopTarget} />}
+      {isUnsandboxedCheck(action) && (
+        <p role="note" className="rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs font-medium text-destructive">{t("copilot.approvalUnsandboxed")}</p>
+      )}
       <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 text-xs">{action.inputJson}</pre>
       <p className="text-xs text-muted-foreground">{t("copilot.approvalScope")}</p>
       <div className="flex flex-wrap gap-2">

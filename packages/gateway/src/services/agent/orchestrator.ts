@@ -9,6 +9,7 @@ import { goalContextMessage } from './goal-context.js';
 import { CopilotGoalStore } from './goal-store.js';
 import { evaluateGoalContinuation } from './goal-driver.js';
 import { goalGrantForTool } from './goal-grants.js';
+import { isUnsandboxedCheckRequest } from './command-sandbox.js';
 import { clearGoalFailureCooldown } from './goal-driver.js';
 import { bindGoalCommand, resolveLocalCommandReply, type SlashCommandContext } from "./slash-commands.js";
 import { CopilotToolArtifactRepository } from '../../db/repositories/copilot-tool-artifact-repository.js';
@@ -473,14 +474,19 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             // restrictions above are unchanged.
             // Delegated coding sub-runs carry the goal only on the run row.
             const grantGoalId = input.goalId ?? ledger.get(c.runId)?.goal_id ?? undefined;
-            const goalGrant = grantGoalId && (input.source ?? "user") === "user"
+            // A host-run check under enabled isolation is never covered by a
+            // grant: only the owner's approval of this exact call lets it run.
+            const unsandboxedCheck = tool.name === 'goal_run_checks' && isUnsandboxedCheckRequest(raw);
+            const goalGrant = grantGoalId && (input.source ?? "user") === "user" && !unsandboxedCheck
                 ? goalGrantForTool(deps.db, input.userId, grantGoalId, tool.name) : null;
             logSecurityDecision({ db: deps.db, userId: input.userId, operation: tool.name, input: raw, action: decision.action, reason: decision.reason });
             if (decision.action === "deny") rejection = `Denied by security policy: ${decision.reason}`;
             // Coding delegates run unattended inside a waiting parent: an
             // approval parked there would stall the parent until its deadline.
             if (!rejection && input.executionMode === "coding" && tool.risk === "operate" && !goalGrant && action?.status !== "approved")
-                rejection = `${tool.name} needs owner approval, which delegated sub-runs cannot wait for; grant the goal ${tool.name === 'goal_run_checks' ? 'sandbox_checks' : 'the matching grant'} or run it from the parent goal run`;
+                rejection = unsandboxedCheck
+                    ? 'goal_run_checks with unsandboxed: true needs the owner to approve that exact call, which delegated sub-runs cannot wait for; run the sandboxed check here and report that the parent goal run must perform the unsandboxed step'
+                    : `${tool.name} needs owner approval, which delegated sub-runs cannot wait for; grant the goal ${tool.name === 'goal_run_checks' ? 'sandbox_checks' : 'the matching grant'} or run it from the parent goal run`;
             if (!rejection && tool.risk === "operate" && TOOL_COMMANDS[tool.name]) {
                 try {
                     const actions = agentActions(context);

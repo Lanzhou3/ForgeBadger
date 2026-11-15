@@ -275,3 +275,25 @@ it('wires authenticated SDK card callbacks through the default Gateway compositi
   } finally { await app.close(); }
   assert.equal(await handlers?.onCardAction?.(event), undefined);
 });
+
+import { setGoalCheckSandboxMode } from '../src/services/agent/command-sandbox.js';
+
+it('warns on the card when an unsandboxed goal check would run on the host', async () => {
+  for (const mode of ['on', 'off'] as const) {
+    const f = fixture();
+    setGoalCheckSandboxMode(mode);
+    try {
+      f.db.prepare('UPDATE copilot_pending_actions SET input_json=?,tool=? WHERE id=?')
+        .run(JSON.stringify({ command: 'pnpm install', unsandboxed: true }), 'goal_run_checks', f.action.id);
+      await f.worker.runOnce(new AbortController().signal);
+      const content = f.sent.content as string;
+      assert.match(content, /pnpm install/);
+      // The warning only means something while isolation is on; off keeps today's card.
+      if (mode === 'on') assert.match(content, /无隔离执行/);
+      else assert.doesNotMatch(content, /无隔离执行/);
+    } finally {
+      setGoalCheckSandboxMode('off');
+      f.db.close();
+    }
+  }
+});

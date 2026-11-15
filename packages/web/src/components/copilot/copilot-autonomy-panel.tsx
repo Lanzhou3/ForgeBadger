@@ -42,11 +42,16 @@ export function CopilotAutonomyPanel() {
     enabled: user?.role === "admin",
   });
 
+  // Sync on this card's own value only: other cards save through the same
+  // query, and that must not discard an unsaved toggle here.
+  const savedAutoDispatch = settings.data
+    ? runtimeSettingsValue<boolean>(settings.data, "pm_auto_dispatch") ?? false
+    : undefined;
   useEffect(() => {
-    if (!settings.data) return;
-    setAutoDispatch(runtimeSettingsValue<boolean>(settings.data, "pm_auto_dispatch") ?? false);
+    if (savedAutoDispatch === undefined) return;
+    setAutoDispatch(savedAutoDispatch);
     setDirty(false);
-  }, [settings.data]);
+  }, [savedAutoDispatch]);
 
   const save = useMutation({
     mutationFn: () => updateRuntimeSettings({ pm_auto_dispatch: autoDispatch }),

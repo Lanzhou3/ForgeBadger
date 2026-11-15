@@ -5,6 +5,16 @@ import { UserRepository } from "../db/repositories/user-repository.js";
 import type { Database } from "../db/types.js";
 import type { RuntimeSettingsStore } from "../services/runtime-settings.js";
 import { RuntimeSettingsError } from "../services/runtime-settings.js";
+import { goalCheckSandboxCapability } from "../services/agent/command-sandbox.js";
+
+/** Host facts the settings page needs to render switches it cannot honor. */
+function hostCapabilities() {
+  return { goalCheckSandbox: goalCheckSandboxCapability() };
+}
+
+function enablesGoalCheckSandbox(body: Record<string, unknown>): boolean {
+  return body.goal_check_sandbox === true || body.goal_check_sandbox === "true";
+}
 
 export function createRuntimeSettingsRoutes(db: Database, store?: RuntimeSettingsStore): Router {
   const router = Router();
@@ -26,7 +36,7 @@ export function createRuntimeSettingsRoutes(db: Database, store?: RuntimeSetting
     }
     res.json({
       code: 0,
-      data: { settings: store.views(), readonly: store.effective().readonly },
+      data: { settings: store.views(), readonly: store.effective().readonly, capabilities: hostCapabilities() },
       message: ""
     });
   });
@@ -37,9 +47,21 @@ export function createRuntimeSettingsRoutes(db: Database, store?: RuntimeSetting
       return;
     }
     const userId = (req as unknown as AuthenticatedRequest).userId;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    // Isolation never falls back, so turning it on where it cannot work would
+    // make every goal check need an unsandboxed approval.
+    const sandbox = enablesGoalCheckSandbox(body) ? goalCheckSandboxCapability() : null;
+    if (sandbox && !sandbox.available) {
+      res.status(409).json({
+        code: 1,
+        message: `Goal check isolation is not available on this host: ${sandbox.reason}`,
+        details: { code: "GOAL_CHECK_SANDBOX_UNAVAILABLE" }
+      });
+      return;
+    }
     try {
-      const settings = store.update(userId, (req.body ?? {}) as Record<string, unknown>, req.ip);
-      res.json({ code: 0, data: { settings, readonly: store.effective().readonly }, message: "" });
+      const settings = store.update(userId, body, req.ip);
+      res.json({ code: 0, data: { settings, readonly: store.effective().readonly, capabilities: hostCapabilities() }, message: "" });
     } catch (error) {
       if (error instanceof RuntimeSettingsError) {
         res.status(error.status).json({ code: 1, message: error.message });
