@@ -118,6 +118,12 @@ describe("db schema", () => {
       "feishu_notification_groups",
       "feishu_notification_settings",
       "feishu_typing_reactions",
+      "fleet_events",
+      "fleet_journal",
+      "fleet_notes",
+      "fleet_tasks",
+      "fleet_timers",
+      "fleets",
       "hub_link_tasks",
       "hub_links",
       "hub_node_tokens",
@@ -628,6 +634,34 @@ describe("db schema", () => {
       `).run("wakeup-2", "pm-user", "pm-project", "pm-work-1", "attempt-1", "dispatch"),
       /UNIQUE constraint failed/
     );
+  });
+
+  it("scopes fleet tables to the tenant, one fleet per project, cascading with the fleet", () => {
+    db.pragma("foreign_keys = ON");
+    for (const tableName of ["fleets", "fleet_tasks", "fleet_events", "fleet_timers", "fleet_notes", "fleet_journal"]) {
+      const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+      assert.equal(columns.some((column) => column.name === "user_id"), true, `${tableName} must include user_id`);
+    }
+    const insertUser = db.prepare("INSERT INTO users (id, username, email, password_hash, role, status) VALUES (?, ?, ?, ?, 'user', 'active')");
+    insertUser.run("fleet-a", "fleet-a", "fleet-a@example.com", "hash");
+    insertUser.run("fleet-b", "fleet-b", "fleet-b@example.com", "hash");
+    db.prepare("INSERT INTO projects (id, user_id, name, path, ai_tool, status) VALUES ('fleet-project', 'fleet-a', 'F', '/tmp/fleet', 'claude', 'active')").run();
+    db.prepare("INSERT INTO copilot_conversations (id, user_id, created_at, updated_at) VALUES ('fleet-conv', 'fleet-a', 1, 1)").run();
+    const insertFleet = db.prepare("INSERT INTO fleets (id, user_id, project_id, conversation_id, title, created_at, updated_at) VALUES (?, ?, 'fleet-project', 'fleet-conv', 'Fleet', 1, 1)");
+    insertFleet.run("fleet-1", "fleet-a");
+    assert.throws(() => insertFleet.run("fleet-2", "fleet-a"), /UNIQUE constraint failed/);
+    assert.throws(() => insertFleet.run("fleet-3", "fleet-b"), /FOREIGN KEY constraint failed/, "another tenant cannot attach a fleet to this project");
+    const insertTask = db.prepare("INSERT INTO fleet_tasks (id, user_id, fleet_id, seq, description, created_at, updated_at) VALUES (?, ?, 'fleet-1', ?, 'd', 1, 1)");
+    insertTask.run("fleet-task-1", "fleet-a", 1);
+    assert.throws(() => insertTask.run("fleet-task-2", "fleet-b", 2), /FOREIGN KEY constraint failed/);
+    assert.throws(() => db.prepare("UPDATE fleet_tasks SET status='done' WHERE id='fleet-task-1'").run(), /CHECK constraint failed/);
+    db.prepare("INSERT INTO fleet_events (id, user_id, fleet_id, kind, dedupe_key, created_at) VALUES ('e1', 'fleet-a', 'fleet-1', 'task_added', 'k', 1)").run();
+    assert.throws(() => db.prepare("INSERT INTO fleet_events (id, user_id, fleet_id, kind, dedupe_key, created_at) VALUES ('e2', 'fleet-a', 'fleet-1', 'task_added', 'k', 1)").run(), /UNIQUE constraint failed/);
+    assert.equal((db.prepare("SELECT idle_lead_runs FROM fleets WHERE id='fleet-1'").get() as { idle_lead_runs: number }).idle_lead_runs, 0);
+    assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_fleet_events_run'").get(), "claimed events are found by run id");
+    db.prepare("DELETE FROM fleets WHERE id='fleet-1'").run();
+    for (const tableName of ["fleet_tasks", "fleet_events"])
+      assert.equal((db.prepare(`SELECT count(*) AS count FROM ${tableName}`).get() as { count: number }).count, 0, `${tableName} cascades`);
   });
 });
 

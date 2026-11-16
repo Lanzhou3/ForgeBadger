@@ -1634,6 +1634,138 @@ export const copilotGoalJournal = sqliteTable("copilot_goal_journal", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date())
 }, (table) => ({ goalCreated: index("idx_copilot_goal_journal_goal_created").on(table.goalId, table.createdAt), goalParent: foreignKey({ columns: [table.userId, table.goalId], foreignColumns: [copilotGoals.userId, copilotGoals.id] }).onDelete("cascade") }));
 
+// ---------------------------------------------------------------------------
+// Fleet (migration 0154): a standing per-project agent team. FleetStore owns
+// these tables through parameterized raw SQL; timestamps are epoch ms.
+// ---------------------------------------------------------------------------
+
+export const fleets = sqliteTable("fleets", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull(),
+  conversationId: text("conversation_id").notNull(),
+  title: text("title").notNull(),
+  instructions: text("instructions").notNull().default(""),
+  status: text("status").notNull().default("active"), // active | paused
+  pausedReason: text("paused_reason"),
+  idleLeadRuns: integer("idle_lead_runs").notNull().default(0),
+  grantsJson: text("grants_json").notNull().default("[]"),
+  workspaceKind: text("workspace_kind"), // copy | worktree
+  workspacePath: text("workspace_path"),
+  workspaceBranch: text("workspace_branch"),
+  workspaceBaseCommit: text("workspace_base_commit"),
+  workspaceTargetBranch: text("workspace_target_branch"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull()
+}, (table) => ({
+  tenant: uniqueIndex("idx_fleets_tenant").on(table.userId, table.id),
+  project: uniqueIndex("idx_fleets_project").on(table.userId, table.projectId),
+  conversation: index("idx_fleets_conversation").on(table.userId, table.conversationId),
+  projectParent: foreignKey({ columns: [table.userId, table.projectId], foreignColumns: [projects.userId, projects.id] }).onDelete("cascade"),
+  conversationParent: foreignKey({ columns: [table.userId, table.conversationId], foreignColumns: [copilotConversations.userId, copilotConversations.id] }).onDelete("cascade"),
+  statusCheck: check("fleets_status_check", sql`${table.status} IN ('active','paused')`),
+  workspaceKindCheck: check("fleets_workspace_kind_check", sql`${table.workspaceKind} IS NULL OR ${table.workspaceKind} IN ('copy','worktree')`)
+}));
+
+export const fleetTasks = sqliteTable("fleet_tasks", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  fleetId: text("fleet_id").notNull(),
+  seq: integer("seq").notNull(),
+  description: text("description").notNull(),
+  details: text("details"),
+  status: text("status").notNull().default("pending"), // pending | in_progress | passes | failed | cancelled
+  evidence: text("evidence"),
+  verifyCommand: text("verify_command"),
+  verifiedAt: integer("verified_at"),
+  verifyExitCode: integer("verify_exit_code"),
+  dispatchedSessionId: text("dispatched_session_id"),
+  dispatchStatus: text("dispatch_status"), // running | completed | failed | ended
+  dispatchUpdatedAt: integer("dispatch_updated_at"),
+  memberId: text("member_id"),
+  fileScopeJson: text("file_scope_json"),
+  holdQuestion: text("hold_question"),
+  holdAskedAt: integer("hold_asked_at"),
+  workItemId: text("work_item_id"),
+  createdBy: text("created_by").notNull().default("lead"), // owner | lead
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull()
+}, (table) => ({
+  seq: uniqueIndex("idx_fleet_tasks_seq").on(table.userId, table.fleetId, table.seq),
+  workItem: uniqueIndex("idx_fleet_tasks_work_item").on(table.userId, table.fleetId, table.workItemId).where(sql`${table.workItemId} IS NOT NULL`),
+  session: index("idx_fleet_tasks_session").on(table.userId, table.dispatchedSessionId).where(sql`${table.dispatchedSessionId} IS NOT NULL`),
+  fleetParent: foreignKey({ columns: [table.userId, table.fleetId], foreignColumns: [fleets.userId, fleets.id] }).onDelete("cascade"),
+  statusCheck: check("fleet_tasks_status_check", sql`${table.status} IN ('pending','in_progress','passes','failed','cancelled')`),
+  dispatchCheck: check("fleet_tasks_dispatch_status_check", sql`${table.dispatchStatus} IS NULL OR ${table.dispatchStatus} IN ('running','completed','failed','ended')`),
+  createdByCheck: check("fleet_tasks_created_by_check", sql`${table.createdBy} IN ('owner','lead')`)
+}));
+
+export const fleetEvents = sqliteTable("fleet_events", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  fleetId: text("fleet_id").notNull(),
+  kind: text("kind").notNull(),
+  taskId: text("task_id"),
+  dedupeKey: text("dedupe_key").notNull(),
+  payloadJson: text("payload_json").notNull().default("{}"),
+  status: text("status").notNull().default("pending"), // pending | claimed | done | failed
+  runId: text("run_id"),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  createdAt: integer("created_at").notNull(),
+  claimedAt: integer("claimed_at"),
+  processedAt: integer("processed_at")
+}, (table) => ({
+  dedupe: uniqueIndex("idx_fleet_events_dedupe").on(table.fleetId, table.dedupeKey),
+  byStatus: index("idx_fleet_events_status").on(table.userId, table.fleetId, table.status, table.createdAt),
+  byRun: index("idx_fleet_events_run").on(table.userId, table.runId).where(sql`${table.runId} IS NOT NULL`),
+  fleetParent: foreignKey({ columns: [table.userId, table.fleetId], foreignColumns: [fleets.userId, fleets.id] }).onDelete("cascade"),
+  statusCheck: check("fleet_events_status_check", sql`${table.status} IN ('pending','claimed','done','failed')`)
+}));
+
+export const fleetTimers = sqliteTable("fleet_timers", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  fleetId: text("fleet_id").notNull(),
+  taskId: text("task_id"),
+  dueAt: integer("due_at").notNull(),
+  note: text("note").notNull(),
+  status: text("status").notNull().default("pending"), // pending | fired | cancelled
+  createdAt: integer("created_at").notNull(),
+  firedAt: integer("fired_at")
+}, (table) => ({
+  due: index("idx_fleet_timers_due").on(table.status, table.dueAt),
+  byFleet: index("idx_fleet_timers_fleet").on(table.userId, table.fleetId, table.status),
+  fleetParent: foreignKey({ columns: [table.userId, table.fleetId], foreignColumns: [fleets.userId, fleets.id] }).onDelete("cascade"),
+  statusCheck: check("fleet_timers_status_check", sql`${table.status} IN ('pending','fired','cancelled')`)
+}));
+
+export const fleetNotes = sqliteTable("fleet_notes", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  fleetId: text("fleet_id").notNull(),
+  scope: text("scope").notNull(), // fleet | task | member
+  refId: text("ref_id").notNull().default(""),
+  body: text("body").notNull(),
+  updatedAt: integer("updated_at").notNull()
+}, (table) => ({
+  ref: uniqueIndex("idx_fleet_notes_ref").on(table.fleetId, table.scope, table.refId),
+  fleetParent: foreignKey({ columns: [table.userId, table.fleetId], foreignColumns: [fleets.userId, fleets.id] }).onDelete("cascade"),
+  scopeCheck: check("fleet_notes_scope_check", sql`${table.scope} IN ('fleet','task','member')`)
+}));
+
+export const fleetJournal = sqliteTable("fleet_journal", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  fleetId: text("fleet_id").notNull(),
+  runId: text("run_id"),
+  taskId: text("task_id"),
+  note: text("note").notNull(),
+  createdAt: integer("created_at").notNull()
+}, (table) => ({
+  created: index("idx_fleet_journal_created").on(table.userId, table.fleetId, table.createdAt),
+  fleetParent: foreignKey({ columns: [table.userId, table.fleetId], foreignColumns: [fleets.userId, fleets.id] }).onDelete("cascade")
+}));
+
 export const copilotPendingActions = sqliteTable("copilot_pending_actions", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   runId: text("run_id").notNull().references(() => copilotRuns.id, { onDelete: "cascade" }),
