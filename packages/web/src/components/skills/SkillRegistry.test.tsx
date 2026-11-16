@@ -13,12 +13,16 @@ import { LanguageProvider } from "@/hooks/use-language";
 import { SkillPackageReview } from "./SkillPackageReview";
 import { SkillDiscoveryPage } from "./SkillDiscoveryPage";
 import { SkillNavigation } from "./SkillNavigation";
+import { SkillSourcesPage } from "./SkillSourcesPage";
 import * as registry from "@/lib/skill-registry-api";
 vi.mock("next/navigation", () => ({ usePathname: () => "/skills/discover" }));
 vi.mock("@/lib/api", () => ({
   listProjects: vi.fn().mockResolvedValue({ projects: [] }),
 }));
 vi.mock("@/lib/skill-registry-api", () => ({
+  listSkillRegistrySources: vi.fn().mockResolvedValue({ sources: [] }),
+  refreshSkillRegistrySource: vi.fn().mockResolvedValue({}),
+  removeSkillRegistrySource: vi.fn().mockResolvedValue({}),
   bootstrapSkillRegistry: vi.fn().mockResolvedValue({}),
   searchSkillRegistry: vi.fn().mockResolvedValue({
     items: [
@@ -108,7 +112,7 @@ it("keeps usable search results visible when a provider fails and debounces keyw
   wrapper(<SkillDiscoveryPage />);
   expect(await screen.findByText("Review code")).toBeTruthy();
   expect(screen.getByText(/clawhub: 暂不可用/)).toBeTruthy();
-  fireEvent.change(screen.getByRole("textbox", { name: "搜索 Skills" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "搜索 Skills" }), {
     target: { value: "testing" },
   });
   await waitFor(() =>
@@ -117,14 +121,14 @@ it("keeps usable search results visible when a provider fails and debounces keyw
       expect.any(AbortSignal),
     ),
   );
-  fireEvent.click(screen.getByRole("button", { name: "预览安装" }));
+  fireEvent.click(await screen.findByRole("button", { name: "预览安装" }));
   expect(await screen.findByRole("dialog")).toBeTruthy();
 });
 it("renders Traditional Chinese navigation for zh-TW instead of Simplified Chinese or English", () => {
   window.localStorage.setItem("forgebadger-language", "zh-TW");
   try {
     wrapper(<SkillNavigation />);
-    expect(screen.getByRole("link", { name: "已安裝" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "我的 Skills" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "已安装" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Installed" })).toBeNull();
   } finally {
@@ -137,14 +141,18 @@ it("disables installation once the preview has expired", async () => {
   try {
     wrapper(
       <SkillPackageReview
-        input={{ locator: { kind: "github", repo: "demo/review", path: "SKILL.md" } }}
+        input={{
+          locator: { kind: "github", repo: "demo/review", path: "SKILL.md" },
+        }}
         onClose={() => {}}
       />,
     );
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    const installButton = screen.getByRole("button", { name: "已审阅，确认安装" }) as HTMLButtonElement;
+    const installButton = screen.getByRole("button", {
+      name: "已审阅，确认安装",
+    }) as HTMLButtonElement;
     expect(installButton.disabled).toBe(false);
 
     // Advance past the 5-minute preview TTL; the interval re-checks expiry.
@@ -152,10 +160,34 @@ it("disables installation once the preview has expired", async () => {
       vi.advanceTimersByTime(5 * 60 * 1000 + 15_000);
     });
     expect(screen.getByRole("alert").textContent).toContain("预览已过期");
-    expect((screen.getByRole("button", { name: "已审阅，确认安装" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "已审阅，确认安装",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
     expect(screen.getByRole("button", { name: "重新获取预览" })).toBeTruthy();
     expect(registry.installSkillPackage).not.toHaveBeenCalled();
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("adds a repository through a labelled dialog and keeps the management list primary", async () => {
+  wrapper(<SkillSourcesPage />);
+  expect(await screen.findByText("尚未添加仓库")).toBeTruthy();
+  expect(screen.queryByRole("textbox")).toBeNull();
+  fireEvent.click(screen.getAllByRole("button", { name: "添加仓库" })[0]!);
+  fireEvent.change(await screen.findByRole("textbox", { name: "仓库来源" }), {
+    target: { value: "demo/skills" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "添加并同步" }));
+  await waitFor(() =>
+    expect(registry.refreshSkillRegistrySource).toHaveBeenCalledWith(
+      "demo/skills",
+      expect.anything(),
+    ),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });

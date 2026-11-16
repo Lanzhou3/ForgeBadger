@@ -1,730 +1,631 @@
 "use client";
 
 import Link from "next/link";
-import { type FormEvent, useState } from "react";
+import { useDeferredValue, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CircleArrowUp, Eye, Github, Pencil, Plus, RefreshCw, Save, Sparkles, Trash2, Wrench, X } from "lucide-react";
-
-import { Badge } from "@/components/ui/badge";
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileCode2,
+  Github,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { QueryState } from "@/components/ui/query-state";
 import { Switch } from "@/components/ui/switch";
 import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
   checkAllSkillUpdates,
   checkSkillUpdate,
-  createSkill,
   deleteSkill,
   listSkills,
-  listSkillSources,
-  listSkillTemplates,
   parseSkillRemoteProvenance,
   syncLocalSkills,
   toggleSkill,
-  updateSkill,
   type Skill,
-  type SkillInput,
-  type SkillTemplate,
 } from "@/lib/api";
 import {
   filterByVisibility,
   normalizeVisibility,
-  visibilityDescriptionKey,
   visibilityLabelKey,
   visibilityOptions,
   type VisibilityFilter,
 } from "@/lib/visibility";
 import { useLanguage } from "@/hooks/use-language";
-import { SkillNavigation } from '@/components/skills/SkillNavigation';
-import { SkillPackageReview } from '@/components/skills/SkillPackageReview';
-import { SkillHistory } from '@/components/skills/SkillHistory';
-import { cn } from "@/lib/utils";
+import { useTrilingual } from "@/hooks/use-trilingual";
+import { SkillWorkspace } from "@/components/skills/SkillWorkspace";
+import { SkillScanStatus } from "@/components/skills/SkillScanStatus";
+import { SkillEditor } from "@/components/skills/SkillEditor";
+import { SkillDetails } from "@/components/skills/SkillDetails";
+import { SkillInfo } from "@/components/skills/SkillInfo";
+import { SkillPackageReview } from "@/components/skills/SkillPackageReview";
+import {
+  hasSkillUpdate,
+  matchesSkillStatus,
+  skillSource,
+  type SkillStatus,
+} from "@/components/skills/skill-library";
 
-const emptySkillForm: SkillInput = {
-  name: "",
-  description: "",
-  source: "local",
-  content: "",
-  version: "1.0.0",
-  visibility: "private",
-};
+const PAGE_SIZE = 20;
 
 export default function SkillsPage() {
   const { t } = useLanguage();
+  const pick = useTrilingual();
+  const client = useQueryClient();
+  const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search.trim().toLowerCase());
+  const [source, setSource] = useState("all");
+  const [visibility, setVisibility] = useState<VisibilityFilter>("all");
+  const [status, setStatus] = useState<SkillStatus>("all");
+  const [page, setPage] = useState(0);
+  const [editor, setEditor] = useState<{ skill: Skill | null } | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [updateId, setUpdateId] = useState<string | null>(null);
-  const queryClient = useQueryClient();
-  const [form, setForm] = useState<SkillInput>(emptySkillForm);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [previewSkillId, setPreviewSkillId] = useState<string | null>(null);
-  const [sourceFilter, setSourceFilter] = useState("all");
-  const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>("all");
-  const [error, setError] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<{ name?: string; content?: string }>({});
-  const [dismissedError, setDismissedError] = useState<Error | null>(null);
-
-  const { data, isLoading, error: listError, refetch } = useQuery({
-    queryKey: ["skills"],
-    queryFn: listSkills,
-  });
-  const [deletingSkill, setDeletingSkill] = useState<Skill | null>(null);
-
-  const { data: sourcesData } = useQuery({
-    queryKey: ["skill-sources"],
-    queryFn: listSkillSources,
-  });
-
-  const { data: templatesData } = useQuery({
-    queryKey: ["skill-templates"],
-    queryFn: listSkillTemplates,
-  });
-
-  const sources = sourcesData?.sources ?? [];
-  const templates = templatesData?.templates ?? [];
-  const sourceFilteredSkills =
-    sourceFilter === "all"
-      ? data?.skills ?? []
-      : (data?.skills ?? []).filter((skill) => skill.source === sourceFilter);
-  const filteredSkills = filterByVisibility(sourceFilteredSkills, visibilityFilter);
-  const remoteSkillCount = (data?.skills ?? []).filter(
-    (skill) => parseSkillRemoteProvenance(skill) !== null
-  ).length;
-
-  const toggleMutation = useMutation({
+  const [deleting, setDeleting] = useState<Skill | null>(null);
+  const [actionError, setActionError] = useState("");
+  const query = useQuery({ queryKey: ["skills"], queryFn: listSkills });
+  const skills = query.data?.skills ?? [];
+  const detail = skills.find((skill) => skill.id === detailId);
+  const sourceOptions = [...new Set(skills.map(skillSource))];
+  const sourceLabel = (value: string) =>
+    value === "github"
+      ? "GitHub"
+      : value === "clawhub"
+        ? "ClawHub"
+        : value === "local"
+          ? "Local"
+          : value;
+  const base = filterByVisibility(skills, visibility).filter(
+    (skill) =>
+      (source === "all" || skillSource(skill) === source) &&
+      (!deferredSearch ||
+        `${skill.name} ${skill.description ?? ""} ${skillSource(skill)}`
+          .toLowerCase()
+          .includes(deferredSearch)),
+  );
+  const filtered = base.filter((skill) => matchesSkillStatus(skill, status));
+  const lastPage = Math.max(0, Math.ceil(filtered.length / PAGE_SIZE) - 1);
+  const currentPage = Math.min(page, lastPage);
+  const visible = filtered.slice(
+    currentPage * PAGE_SIZE,
+    (currentPage + 1) * PAGE_SIZE,
+  );
+  const invalidate = () => client.invalidateQueries({ queryKey: ["skills"] });
+  const fail = (error: Error) => setActionError(error.message);
+  const toggle = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
       toggleSkill(id, enabled),
     onMutate: async ({ id, enabled }) => {
-      await queryClient.cancelQueries({ queryKey: ["skills"] });
-      const previousSkills = queryClient.getQueryData(["skills"]);
-      queryClient.setQueryData(["skills"], (old: { skills: { id: string; isEnabled: boolean }[] } | undefined) => {
-        if (!old) return old;
-        return {
-          ...old,
-          skills: old.skills.map((skill) =>
-            skill.id === id ? { ...skill, isEnabled: enabled } : skill
-          ),
-        };
-      });
-      return { previousSkills };
+      await client.cancelQueries({ queryKey: ["skills"] });
+      const previous = client.getQueryData<
+        Awaited<ReturnType<typeof listSkills>>
+      >(["skills"]);
+      client.setQueryData<Awaited<ReturnType<typeof listSkills>>>(
+        ["skills"],
+        (old) =>
+          old
+            ? {
+                ...old,
+                skills: old.skills.map((skill) =>
+                  skill.id === id ? { ...skill, isEnabled: enabled } : skill,
+                ),
+              }
+            : old,
+      );
+      return { previous };
     },
-    onError: (_err, _vars, context) => {
-      if (context?.previousSkills) {
-        queryClient.setQueryData(["skills"], context.previousSkills);
-      }
+    onError: (error, _variables, context) => {
+      if (context?.previous) client.setQueryData(["skills"], context.previous);
+      fail(error);
     },
+    onSettled: invalidate,
   });
-
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const payload = compactSkillInput(form);
-    const nextFieldErrors: { name?: string; content?: string } = {};
-    if (!payload.name) nextFieldErrors.name = t("skills.fieldRequired");
-    if (!payload.content) nextFieldErrors.content = t("skills.fieldRequired");
-    setFieldErrors(nextFieldErrors);
-    if (nextFieldErrors.name || nextFieldErrors.content) return;
-    saveMutation.mutate();
-  };
-
-  const saveMutation = useMutation({
-    mutationFn: () => {
-      const payload = compactSkillInput(form);
-      if (!payload.name || !payload.content) {
-        throw new Error(t("skills.required"));
-      }
-      return editingId ? updateSkill(editingId, payload) : createSkill(payload);
-    },
-    onSuccess: () => {
-      setForm(emptySkillForm);
-      setEditingId(null);
-      setError("");
-      queryClient.invalidateQueries({ queryKey: ["skills"] });
-    },
-    onError: (err) => {
-      setError(err instanceof Error ? err.message : t("skills.saveFailed"));
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: deleteSkill,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
-  });
-
-  const syncMutation = useMutation({
+  const sync = useMutation({
     mutationFn: syncLocalSkills,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
+    onSuccess: async () => {
+      await invalidate();
+      toast.success(
+        pick("本地同步完成", "本機同步完成", "Local sync complete"),
+      );
+    },
+    onError: fail,
   });
-
-  const checkUpdateMutation = useMutation({
+  const check = useMutation({
     mutationFn: checkSkillUpdate,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
+    onSuccess: invalidate,
+    onError: fail,
   });
-
-  const checkAllUpdatesMutation = useMutation({
+  const checkAll = useMutation({
     mutationFn: checkAllSkillUpdates,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["skills"] }),
+    onSuccess: async (result) => {
+      await invalidate();
+      if (!result.results.some((item) => item.error))
+        toast.success(
+          pick("更新检查完成", "更新檢查完成", "Update check complete"),
+        );
+    },
+    onError: fail,
   });
-
-  // A failed list fetch with no cached data must surface as an error state, not
-  // as an error banner stacked on top of the empty card.
-  const listFailedWithoutData = listError instanceof Error && !data;
-  const actionError =
-    (listFailedWithoutData ? null : listError) ??
-    toggleMutation.error ??
-    deleteMutation.error ??
-    syncMutation.error ??
-    checkUpdateMutation.error ??
-    checkAllUpdatesMutation.error;
-  const failedChecks = checkAllUpdatesMutation.data?.results.filter(result => result.error) ?? [];
-
-  const startEdit = (skill: Skill) => {
-    setEditingId(skill.id);
-    setForm({
-      name: skill.name,
-      description: skill.description ?? "",
-      source: skill.source,
-      content: skill.content ?? "",
-      version: skill.version ?? "1.0.0",
-      visibility: normalizeVisibility(skill.visibility),
-    });
-    setError("");
-    setFieldErrors({});
-  };
-
-  const applyTemplate = (template: SkillTemplate) => {
-    setEditingId(null);
-    setForm({
-      name: template.name,
-      description: template.description,
-      source: template.source,
-      content: template.content,
-      version: template.version,
-      visibility: "private",
-    });
-    setError("");
-    setFieldErrors({});
-  };
-
-  const isCustomSource = !sources.some((source) => source.id === form.source);
-
-  const sourceLabel = (sourceId: string) => {
-    switch (sourceId) {
-      case "local":
-        return t("skills.sourceLocal");
-      case "clawhub":
-        return t("skills.sourceClawHub");
-      case "github":
-        return t("skills.sourceGitHub");
-      default:
-        return sourceId;
-    }
-  };
+  const remove = useMutation({
+    mutationFn: deleteSkill,
+    onSuccess: async () => {
+      setDeleting(null);
+      await invalidate();
+    },
+    onError: (error) => {
+      setDeleting(null);
+      fail(error);
+    },
+  });
+  const filteredActive = Boolean(
+    search || source !== "all" || visibility !== "all" || status !== "all",
+  );
+  function resetFilters() {
+    setSearch("");
+    setSource("all");
+    setVisibility("all");
+    setStatus("all");
+    setPage(0);
+  }
+  const statusOptions: Array<{ value: SkillStatus; label: string }> = [
+    { value: "all", label: pick("全部", "全部", "All") },
+    { value: "enabled", label: pick("已启用", "已啟用", "Enabled") },
+    { value: "disabled", label: pick("未启用", "未啟用", "Disabled") },
+    { value: "updates", label: pick("可更新", "可更新", "Updates") },
+  ];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("skills.title")}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t("skills.subtitle")}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild size="sm" variant="brand">
-            <Link href="/skills/discover">
-              <Plus className="size-4" />
-              {t("skills.install")}
-            </Link>
-          </Button>
+    <SkillWorkspace
+      title="Skills"
+      count={query.data ? skills.length : undefined}
+      actions={
+        <>
           <Button
-            type="button"
-            size="sm"
             variant="outline"
-            onClick={() => syncMutation.mutate()}
-            disabled={syncMutation.isPending}
+            size="sm"
+            disabled={sync.isPending}
+            onClick={() => sync.mutate()}
           >
-            <RefreshCw className={syncMutation.isPending ? "size-4 animate-spin" : "size-4"} />
-            {t("skills.syncLocal")}
+            <RefreshCw
+              className={sync.isPending ? "motion-safe:animate-spin" : ""}
+            />
+            {pick("同步本地", "同步本機", "Sync local")}
           </Button>
-          {remoteSkillCount > 0 && (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => checkAllUpdatesMutation.mutate()}
-              disabled={checkAllUpdatesMutation.isPending}
-            >
-              <RefreshCw className={checkAllUpdatesMutation.isPending ? "size-4 animate-spin" : "size-4"} />
-              {checkAllUpdatesMutation.isPending
-                ? t("skills.checkingAllUpdates")
-                : t("skills.checkAllUpdates")}
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <SkillNavigation />
-      {actionError && actionError !== dismissedError ? (
-        <div role="alert" className="flex items-start justify-between gap-3">
-          <p className="text-sm text-destructive">{actionError.message}</p>
           <Button
-            type="button"
+            id="skill-create"
+            variant="brand"
+            size="sm"
+            onClick={() => setEditor({ skill: null })}
+          >
+            <Plus />
+            {pick("新建 Skill", "新增 Skill", "New Skill")}
+          </Button>
+        </>
+      }
+    >
+      {query.data?.discovery ? (
+        <SkillScanStatus discovery={query.data.discovery} />
+      ) : null}
+      {actionError ? (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 px-4 py-3 text-sm text-destructive"
+        >
+          <span>{actionError}</span>
+          <Button
             variant="ghost"
             size="icon-xs"
             aria-label={t("common.close")}
-            onClick={() => setDismissedError(actionError)}
+            onClick={() => setActionError("")}
           >
-            <X className="size-3.5" />
+            <X />
           </Button>
         </div>
       ) : null}
-      {failedChecks.length ? <div role="alert" className="space-y-1 text-sm text-destructive">{failedChecks.map(result => <p key={result.skillId}>{result.name}: {result.error}</p>)}</div> : null}
-      {updateId ? <SkillPackageReview input={{ skillId: updateId }} onClose={() => setUpdateId(null)} /> : null}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant={sourceFilter === "all" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setSourceFilter("all")}
-        >
-          {t("skills.sourceAll")}
-        </Button>
-        {sources.map((source) => (
-          <Button
-            key={source.id}
-            variant={sourceFilter === source.id ? "default" : "outline"}
-            size="sm"
-            onClick={() => setSourceFilter(source.id)}
+      {checkAll.data?.results
+        .filter((item) => item.error)
+        .map((item) => (
+          <p
+            role="alert"
+            key={item.skillId}
+            className="text-sm text-destructive"
           >
-            {source.label}
-          </Button>
+            {item.name}: {item.error}
+          </p>
         ))}
-        <div className="mx-1 h-6 w-px bg-border" />
-        <Button
-          variant={visibilityFilter === "all" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setVisibilityFilter("all")}
-        >
-          {t("visibility.all")}
-        </Button>
-        {visibilityOptions.map((visibility) => (
-          <Button
-            key={visibility}
-            variant={visibilityFilter === visibility ? "default" : "outline"}
-            size="sm"
-            onClick={() => setVisibilityFilter(visibility)}
+      <search
+        className="flex flex-col gap-4"
+        aria-label={pick("筛选 Skills", "篩選 Skills", "Filter Skills")}
+      >
+        <div className="flex flex-wrap gap-2">
+          <div className="relative min-w-0 flex-1 basis-64">
+            <Search className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" />
+            <label htmlFor="skill-search" className="sr-only">
+              {pick("搜索 Skills", "搜尋 Skills", "Search Skills")}
+            </label>
+            <Input
+              id="skill-search"
+              name="q"
+              type="search"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={pick(
+                "搜索名称、描述…",
+                "搜尋名稱、描述…",
+                "Search name or description…",
+              )}
+              className="h-10 pl-9"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(0);
+              }}
+            />
+          </div>
+          <select
+            aria-label={pick("来源筛选", "來源篩選", "Source filter")}
+            className="h-10 min-w-32 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-2 focus-visible:outline-ring sm:flex-none"
+            value={source}
+            onChange={(event) => {
+              setSource(event.target.value);
+              setPage(0);
+            }}
           >
-            {t(visibilityLabelKey(visibility))}
-          </Button>
-        ))}
-      </div>
-
-      {data?.discovery && (
-        <Card className="forgebadger-animate-in">
-          <CardContent className="space-y-3 py-4">
-            <div className="flex flex-wrap items-center gap-3 text-sm">
-              <Badge variant="outline">
-                {t("skills.discoveredLocal")}: {data.discovery.discoveredCount}
-              </Badge>
-              <Badge variant="outline">
-                {t("skills.discoveryRoots")}: {data.discovery.discoveredRoots?.length ?? 0} / {data.discovery.roots.length}
-              </Badge>
-              <span className="text-muted-foreground">
-                {t("skills.localSyncSummary")}: {data.discovery.createdCount} / {data.discovery.updatedCount} / {data.discovery.deletedCount} / {data.discovery.skippedCount}
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">{t("skills.discoveryHint")}</p>
-            {(data.discovery.rejectedSkills?.length ?? 0) > 0 && (
-              <div role="alert" className="space-y-2 rounded-md border border-amber-500/40 p-3 text-xs">
-                <p className="font-medium text-amber-500">{t("skills.packagesRejected")}</p>
-                <ul className="max-h-40 space-y-1 overflow-y-auto text-muted-foreground">
-                  {data.discovery.rejectedSkills?.map((item) => (
-                    <li key={item.path} className="break-all"><code>{item.path}</code>: {item.reason}</li>
-                  ))}
-                </ul>
+            <option value="all">{t("skills.sourceAll")}</option>
+            {sourceOptions.map((value) => (
+              <option key={value} value={value}>
+                {sourceLabel(value)}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label={t("common.visibility")}
+            className="h-10 min-w-32 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-2 focus-visible:outline-ring sm:flex-none"
+            value={visibility}
+            onChange={(event) => {
+              setVisibility(event.target.value as VisibilityFilter);
+              setPage(0);
+            }}
+          >
+            <option value="all">{t("visibility.all")}</option>
+            {visibilityOptions.map((value) => (
+              <option key={value} value={value}>
+                {t(visibilityLabelKey(value))}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <fieldset className="flex max-w-full flex-nowrap gap-1 overflow-x-auto pb-1">
+            <legend className="sr-only">
+              {pick("Skill 状态", "Skill 狀態", "Skill status")}
+            </legend>
+            {statusOptions.map((option) => (
+              <label
+                key={option.value}
+                className="relative shrink-0 cursor-pointer"
+              >
+                <input
+                  className="skills-filter sr-only"
+                  type="radio"
+                  name="skill-status"
+                  value={option.value}
+                  checked={status === option.value}
+                  onChange={() => {
+                    setStatus(option.value);
+                    setPage(0);
+                  }}
+                />
+                <span className="flex items-center gap-2 rounded-full border border-transparent px-3 py-1.5 text-xs text-muted-foreground">
+                  <span>{option.label}</span>
+                  <span className="tabular-nums opacity-70">
+                    {
+                      base.filter((skill) =>
+                        matchesSkillStatus(skill, option.value),
+                      ).length
+                    }
+                  </span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          {skills.some((skill) => parseSkillRemoteProvenance(skill)) ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="hidden sm:inline-flex"
+              disabled={checkAll.isPending}
+              onClick={() => checkAll.mutate()}
+            >
+              <RefreshCw
+                className={checkAll.isPending ? "motion-safe:animate-spin" : ""}
+              />
+              {t("skills.checkAllUpdates")}
+            </Button>
+          ) : null}
+        </div>
+      </search>
+      <QueryState
+        isLoading={query.isPending}
+        isError={Boolean(query.error && !query.data)}
+        isEmpty={!filtered.length}
+        onRetry={() => void query.refetch()}
+        empty={
+          <div className="skills-enter flex flex-col items-center gap-4 rounded-lg border border-dashed border-border px-6 py-16 text-center">
+            <FileCode2 className="size-8 text-muted-foreground" />
+            <h2 className="text-base font-medium">
+              {filteredActive
+                ? pick(
+                    "没有匹配的 Skill",
+                    "沒有相符的 Skill",
+                    "No matching Skills",
+                  )
+                : pick("还没有 Skill", "尚無 Skill", "No Skills yet")}
+            </h2>
+            {filteredActive ? (
+              <Button variant="outline" onClick={resetFilters}>
+                {pick("清除筛选", "清除篩選", "Clear filters")}
+              </Button>
+            ) : (
+              <div className="flex gap-2">
+                <Button variant="brand" asChild>
+                  <Link href="/skills/discover">
+                    {pick("发现 Skills", "探索 Skills", "Discover Skills")}
+                  </Link>
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setEditor({ skill: null })}
+                >
+                  {pick("新建 Skill", "新增 Skill", "New Skill")}
+                </Button>
               </div>
             )}
-            <div className="grid gap-2 md:grid-cols-2">
-              {(data.discovery.discoveredRoots ?? []).slice(0, 6).map((root) => (
-                <code key={root} className="truncate rounded-md border border-border/70 bg-muted/30 px-2 py-1 text-xs">
-                  {root}
-                </code>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card className="forgebadger-animate-in">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">
-            {editingId ? t("skills.editSkill") : t("skills.createSkill")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-          {templates.length > 0 && (
-            <div className="rounded-md border border-border/70 bg-muted/20 p-3">
-              <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-                <Sparkles className="size-4 text-brand" />
-                {t("skills.quickCreateTemplates")}
-              </div>
-              <div className="grid gap-2 md:grid-cols-5">
-                {templates.map((template) => (
-                  <Button
-                    key={template.id}
+          </div>
+        }
+      >
+        <div
+          className="skills-enter overflow-hidden rounded-lg border border-border bg-card"
+          aria-busy={query.isFetching}
+        >
+          <div
+            aria-hidden="true"
+            className="skills-row skills-list-heading border-b border-border/70 bg-muted/20 px-4 py-2 text-xs text-muted-foreground"
+          >
+            <span>Skill</span>
+            <span className="hidden md:block">{t("skills.source")}</span>
+            <span className="flex items-center gap-1">
+              {pick("默认启用", "預設啟用", "Default")}
+            </span>
+            <span />
+          </div>
+          <ul className="divide-y divide-border/70">
+            {visible.map((skill) => {
+              const provenance = parseSkillRemoteProvenance(skill);
+              return (
+                <li
+                  key={skill.id}
+                  className="skills-row min-h-18 px-4 py-3 hover:bg-muted/30"
+                >
+                  <button
                     type="button"
-                    variant="outline"
-                    className="h-auto justify-start px-3 py-2 text-left"
-                    onClick={() => applyTemplate(template)}
+                    id={`skill-open-${skill.id}`}
+                    className="flex min-w-0 items-center gap-3 rounded-md text-left focus-visible:outline-2 focus-visible:outline-ring"
+                    onClick={() => setDetailId(skill.id)}
                   >
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">{template.title}</span>
-                      <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">
-                        {template.description}
+                    <span className="hidden size-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/30 text-muted-foreground sm:flex">
+                      <FileCode2 className="size-4" />
+                    </span>
+                    <span className="flex min-w-0 flex-col gap-1">
+                      <span className="truncate text-sm font-medium">
+                        {skill.name}
+                      </span>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {skill.description || `v${skill.version ?? "1.0.0"}`}
+                      </span>
+                      <span className="text-xs text-muted-foreground md:hidden">
+                        {sourceLabel(skillSource(skill))}
                       </span>
                     </span>
-                  </Button>
-                ))}
-              </div>
-              <p className="mt-2 text-xs text-muted-foreground">
-                {t("skills.templatesDescription")}
-              </p>
-            </div>
-          )}
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="skill-name">{t("common.name")}</Label>
-              <Input
-                id="skill-name"
-                value={form.name}
-                onChange={(event) => {
-                  setForm((current) => ({ ...current, name: event.target.value }));
-                  if (fieldErrors.name) setFieldErrors((current) => ({ ...current, name: undefined }));
-                }}
-                placeholder="safe-review"
-                aria-invalid={Boolean(fieldErrors.name)}
-                aria-describedby={fieldErrors.name ? "skill-name-error" : undefined}
-              />
-              {fieldErrors.name ? (
-                <p id="skill-name-error" className="text-xs text-destructive">{fieldErrors.name}</p>
-              ) : null}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="skill-source">{t("skills.source")}</Label>
-              <div className="flex flex-wrap gap-2">
-                {sources.map((source) => (
-                  <Button
-                    key={source.id}
-                    type="button"
-                    variant={form.source === source.id ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setForm((current) => ({ ...current, source: source.id }))}
-                  >
-                    {source.label}
-                  </Button>
-                ))}
-                <Button
-                  type="button"
-                  variant={isCustomSource ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setForm((current) => ({ ...current, source: "" }))}
-                >
-                  {t("skills.sourceCustom")}
-                </Button>
-              </div>
-              {isCustomSource ? (
-                <Input
-                  id="skill-source"
-                  value={form.source}
-                  onChange={(event) => setForm((current) => ({ ...current, source: event.target.value }))}
-                  placeholder="local"
-                />
-              ) : null}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="skill-version">{t("skills.version")}</Label>
-              <Input
-                id="skill-version"
-                value={form.version}
-                onChange={(event) => setForm((current) => ({ ...current, version: event.target.value }))}
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>{t("common.visibility")}</Label>
-            <div className="flex flex-wrap gap-2">
-              {visibilityOptions.map((visibility) => (
-                <Button
-                  key={visibility}
-                  type="button"
-                  variant={normalizeVisibility(form.visibility) === visibility ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setForm((current) => ({ ...current, visibility }))}
-                >
-                  {t(visibilityLabelKey(visibility))}
-                </Button>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {t(visibilityDescriptionKey(normalizeVisibility(form.visibility)))}
-            </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="skill-description">{t("common.description")}</Label>
-            <Input
-              id="skill-description"
-              value={form.description}
-              onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="skill-content">{t("skills.content")}</Label>
-            <textarea
-              id="skill-content"
-              className="min-h-36 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              value={form.content}
-              onChange={(event) => {
-                setForm((current) => ({ ...current, content: event.target.value }));
-                if (fieldErrors.content) setFieldErrors((current) => ({ ...current, content: undefined }));
-              }}
-              aria-invalid={Boolean(fieldErrors.content)}
-              aria-describedby={fieldErrors.content ? "skill-content-error" : undefined}
-            />
-            {fieldErrors.content ? (
-              <p id="skill-content-error" className="text-xs text-destructive">{fieldErrors.content}</p>
-            ) : null}
-          </div>
-          <div className="rounded-md border border-border/70 bg-muted/20 p-3">
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-              <Eye className="size-4 text-muted-foreground" />
-              {t("skills.preview")}
-            </div>
-            <div className="mb-2 flex flex-wrap gap-2">
-              <Badge variant="outline">{form.source || "local"}</Badge>
-              <Badge variant="outline">{form.version || "1.0.0"}</Badge>
-              <Badge variant="secondary">{t(visibilityLabelKey(normalizeVisibility(form.visibility)))}</Badge>
-            </div>
-            <pre className="max-h-56 overflow-auto rounded-md border border-border/70 bg-background p-3 text-xs">
-              {form.content.trim() || t("skills.previewEmpty")}
-            </pre>
-          </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="submit"
-              size="sm"
-              variant="brand"
-              disabled={saveMutation.isPending}
-            >
-              {editingId ? <Save className="size-4" /> : <Plus className="size-4" />}
-              {saveMutation.isPending ? t("skills.saving") : editingId ? t("skills.saveSkill") : t("skills.createSkill")}
-            </Button>
-            {editingId && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setEditingId(null);
-                  setForm(emptySkillForm);
-                  setError("");
-                  setFieldErrors({});
-                }}
-              >
-                {t("common.cancel")}
-              </Button>
-            )}
-          </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      {listFailedWithoutData ? (
-        <QueryState
-          isLoading={false}
-          isError
-          isEmpty={false}
-          onRetry={() => void refetch()}
-          empty={null}
-        />
-      ) : isLoading ? (
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            {t("skills.loading")}
-          </CardContent>
-        </Card>
-      ) : filteredSkills.length === 0 ? (
-        <Card className="forgebadger-animate-in">
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-              <Wrench className="size-5" />
-            </div>
-            <div>
-              <div className="text-sm font-medium">{t("skills.emptyTitle")}</div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {t("skills.emptyDescription")}
-              </p>
-            </div>
-            <Button asChild size="sm" variant="outline">
-              <Link href="/skills/discover">
-                <Plus className="size-4" />
-                {t("skills.install")}
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
-          {filteredSkills.map((skill, index) => {
-            const isPreviewing = previewSkillId === skill.id;
-            const provenance = parseSkillRemoteProvenance(skill);
-            const updateAvailable = provenance?.lastCheck?.updateAvailable === true;
-            return (
-              <div key={skill.id}>
-                <div
-                  className="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
-                  style={{ animationDelay: `${index * 40}ms` }}
-                >
-                  <span
-                    className={cn(
-                      "size-2 shrink-0 rounded-full",
-                      skill.isEnabled ? "bg-emerald-400" : "bg-muted-foreground/40"
-                    )}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{skill.name}</div>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {t(skill.resourceManifest ? "skills.resourcePackage" : "skills.markdownOnly")}
-                    </p>
-                    {provenance && (provenance.storage !== 'database' || provenance.legacyGlobalMirror) ? <p className="mt-1 text-xs text-amber-600 dark:text-amber-300">{t("skills.legacyGlobalCopy")}</p> : null}
-                    {skill.description && (
-                      <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {skill.description}
-                      </div>
-                    )}
+                  </button>
+                  <span className="hidden min-w-0 flex-col gap-1 md:flex">
+                    <span className="flex items-center gap-1.5 text-xs">
+                      {skillSource(skill) === "github" ? (
+                        <Github className="size-3.5 text-muted-foreground" />
+                      ) : null}
+                      {sourceLabel(skillSource(skill))}
+                    </span>
+                    <span className="truncate text-[11px] text-muted-foreground">
+                      v{skill.version ?? "1.0.0"} ·{" "}
+                      {t(
+                        visibilityLabelKey(
+                          normalizeVisibility(skill.visibility),
+                        ),
+                      )}
+                    </span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="hidden text-xs text-muted-foreground lg:block">
+                      {skill.isEnabled
+                        ? pick("已启用", "已啟用", "Enabled")
+                        : pick("未启用", "未啟用", "Disabled")}
+                    </span>
+                    <Switch
+                      checked={skill.isEnabled}
+                      disabled={toggle.isPending}
+                      onCheckedChange={(enabled) =>
+                        toggle.mutate({ id: skill.id, enabled })
+                      }
+                      aria-label={`${skill.name} ${pick("默认启用", "預設啟用", "enabled by default")}`}
+                    />
                   </div>
-                  <div className="hidden shrink-0 items-center gap-1.5 md:flex">
-                    <Badge variant="outline">{sourceLabel(skill.source)}</Badge>
-                    <Badge variant="outline">{skill.version ?? "1.0.0"}</Badge>
-                    {provenance && (
-                      <Badge variant="outline" title={provenance.sourceUrl ?? `${provenance.repo}@${provenance.resolvedCommitSha}`}>
-                        {provenance.repo ? <Github className="mr-1 size-3" /> : null}
-                        {provenance.repo || provenance.kind}@{provenance.resolvedCommitSha.slice(0, 7)}
-                      </Badge>
-                    )}
-                    {updateAvailable && (
-                      <Badge variant="secondary" className="bg-amber-500/10 text-amber-600">
-                        {t("skills.updateAvailable")}
-                      </Badge>
-                    )}
-                    <Badge variant="secondary">
-                      {t(visibilityLabelKey(normalizeVisibility(skill.visibility)))}
-                    </Badge>
-                  </div>
-                  <Switch
-                    checked={skill.isEnabled}
-                    onCheckedChange={(enabled) => toggleMutation.mutate({ id: skill.id, enabled })}
-                    disabled={toggleMutation.isPending && toggleMutation.variables?.id === skill.id}
-                    aria-label={`${skill.name} ${t("common.enabled")}`}
-                  />
-                  <div className="flex shrink-0 items-center gap-1">
-                    {provenance && (
-                      <>
+                  <div className="flex items-center justify-end gap-1">
+                    {hasSkillUpdate(skill) ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        title={t("skills.updateSkill")}
+                        aria-label={`${skill.name} ${t("skills.updateSkill")}`}
+                        onClick={() => setUpdateId(skill.id)}
+                      >
+                        <span className="text-brand">
+                          {t("skills.updateSkill")}
+                        </span>
+                      </Button>
+                    ) : null}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
                         <Button
                           variant="ghost"
-                          size="icon"
-                          onClick={() => checkUpdateMutation.mutate(skill.id)}
-                          disabled={checkUpdateMutation.isPending}
+                          size="icon-sm"
+                          aria-label={`${skill.name} ${pick("更多操作", "更多操作", "more actions")}`}
                         >
-                          <RefreshCw
-                            className={
-                              checkUpdateMutation.isPending ? "size-4 animate-spin" : "size-4"
-                            }
-                          />
-                          <span className="sr-only">{t("skills.checkUpdate")}</span>
+                          <MoreHorizontal />
                         </Button>
-                        {updateAvailable && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-amber-600"
-                            onClick={() => {
-                              setUpdateId(skill.id);
-                            }}
-                            disabled={false}
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuGroup>
+                          <DropdownMenuItem
+                            onSelect={() => setDetailId(skill.id)}
                           >
-                            <CircleArrowUp className="size-4" />
-                            <span className="sr-only">{t("skills.updateSkill")}</span>
-                          </Button>
-                        )}
-                      </>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setPreviewSkillId(isPreviewing ? null : skill.id)}
-                    >
-                      <Eye className="size-4" />
-                      <span className="sr-only">{t("skills.preview")}</span>
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => startEdit(skill)}>
-                      <Pencil className="size-4" />
-                      <span className="sr-only">{t("skills.editSkill")}</span>
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                      onClick={() => setDeletingSkill(skill)}
-                    >
-                      <Trash2 className="size-4" />
-                      <span className="sr-only">{t("common.delete")}</span>
-                    </Button>
+                            <FileCode2 />
+                            {t("skills.preview")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => setEditor({ skill })}
+                          >
+                            <Pencil />
+                            {t("skills.editSkill")}
+                          </DropdownMenuItem>
+                          {provenance ? (
+                            <DropdownMenuItem
+                              disabled={check.isPending}
+                              onSelect={() => check.mutate(skill.id)}
+                            >
+                              <RefreshCw />
+                              {t("skills.checkUpdate")}
+                            </DropdownMenuItem>
+                          ) : null}
+                        </DropdownMenuGroup>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuGroup>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => setDeleting(skill)}
+                          >
+                            <Trash2 />
+                            {t("common.delete")}
+                          </DropdownMenuItem>
+                        </DropdownMenuGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
-                </div>
-                {isPreviewing && (
-                  <div className="border-t border-border/70 bg-muted/20 px-4 py-3">
-                    <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background p-3 text-xs">
-                      {skill.content?.trim() || t("skills.previewEmpty")}
-                    </pre>
-                    {provenance ? <SkillHistory skillId={skill.id} /> : null}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                </li>
+              );
+            })}
+          </ul>
         </div>
-      )}
-
+        <footer className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+          <span role="status">
+            {filtered.length
+              ? `${currentPage * PAGE_SIZE + 1}–${Math.min((currentPage + 1) * PAGE_SIZE, filtered.length)} / ${filtered.length}`
+              : "0"}{" "}
+            {pick("项", "項", "Skills")}
+          </span>
+          <div className="flex items-center gap-2">
+            <SkillInfo label={pick("启用说明", "啟用說明", "About enabling")}>
+              {pick(
+                "默认启用供项目继承。请到项目中预览并同步配置，使变更生效。",
+                "預設啟用供專案繼承。請至專案預覽並同步配置，使變更生效。",
+                "Projects inherit this default. Preview and sync project configuration to activate changes.",
+              )}
+            </SkillInfo>
+            {lastPage > 0 ? (
+              <>
+                <Button
+                  size="icon-sm"
+                  variant="outline"
+                  aria-label={pick("上一页", "上一頁", "Previous page")}
+                  disabled={!currentPage}
+                  onClick={() => setPage(currentPage - 1)}
+                >
+                  <ChevronLeft />
+                </Button>
+                <span className="px-2 tabular-nums">
+                  {currentPage + 1} / {lastPage + 1}
+                </span>
+                <Button
+                  size="icon-sm"
+                  variant="outline"
+                  aria-label={pick("下一页", "下一頁", "Next page")}
+                  disabled={currentPage === lastPage}
+                  onClick={() => setPage(currentPage + 1)}
+                >
+                  <ChevronRight />
+                </Button>
+              </>
+            ) : null}
+          </div>
+        </footer>
+      </QueryState>
+      {detail ? (
+        <SkillDetails
+          key={detail.id}
+          skill={detail}
+          onClose={() => setDetailId(null)}
+          onEdit={() => {
+            setDetailId(null);
+            setEditor({ skill: detail });
+          }}
+        />
+      ) : null}
+      {editor ? (
+        <SkillEditor
+          key={editor.skill?.id ?? "new"}
+          skill={editor.skill}
+          onClose={() => setEditor(null)}
+        />
+      ) : null}
+      {updateId ? (
+        <SkillPackageReview
+          input={{ skillId: updateId }}
+          onClose={() => setUpdateId(null)}
+        />
+      ) : null}
       <ConfirmDialog
-        open={deletingSkill !== null}
+        open={Boolean(deleting)}
         destructive
-        pending={deleteMutation.isPending}
+        pending={remove.isPending}
         title={t("skills.deleteConfirmTitle")}
         description={
-          deletingSkill
-            ? t("skills.deleteConfirmNamed").replace("{name}", deletingSkill.name)
+          deleting
+            ? t("skills.deleteConfirmNamed").replace("{name}", deleting.name)
             : ""
         }
         confirmLabel={t("common.delete")}
         onOpenChange={(open) => {
-          if (!open) setDeletingSkill(null);
+          if (!open && !remove.isPending) setDeleting(null);
         }}
         onConfirm={() => {
-          if (deletingSkill) deleteMutation.mutate(deletingSkill.id);
-          setDeletingSkill(null);
+          if (deleting) remove.mutate(deleting.id);
         }}
       />
-    </div>
+    </SkillWorkspace>
   );
-}
-
-function compactSkillInput(input: SkillInput): SkillInput {
-  return {
-    name: input.name.trim(),
-    content: input.content.trim(),
-    ...(input.description?.trim() ? { description: input.description.trim() } : {}),
-    ...(input.source?.trim() ? { source: input.source.trim() } : {}),
-    ...(input.version?.trim() ? { version: input.version.trim() } : {}),
-    visibility: normalizeVisibility(input.visibility),
-  };
 }

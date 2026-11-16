@@ -33,7 +33,7 @@ test("Skill discovery, reviewed installation, project handoff and retained resto
     page.getByRole("heading", { name: "发现 Skills" }),
   ).toBeVisible();
   await page.getByRole("combobox", { name: "来源筛选" }).selectOption("github");
-  await page.getByRole("textbox", { name: "搜索 Skills" }).fill("template");
+  await page.getByRole("searchbox", { name: "搜索 Skills" }).fill("template");
   await expect(
     page.getByRole("heading", { name: "template-skill" }),
   ).toBeVisible();
@@ -79,11 +79,7 @@ test("Skill discovery, reviewed installation, project handoff and retained resto
   expect(await readFile(`${auth.state}/project/.claude/skills/template-skill/SKILL.md`, 'utf8')).toContain('name: template-skill');
   await page.goto("/skills");
   await expect(page.getByText("template-skill", { exact: true })).toBeVisible();
-  const row = page
-    .getByText("template-skill", { exact: true })
-    .locator("..")
-    .locator("..");
-  await row.getByRole("button", { name: "预览", exact: true }).click();
+  await page.getByText("template-skill", { exact: true }).click();
   await page.getByRole("button", { name: "预览恢复" }).click();
   await page.getByRole("button", { name: "已审阅，恢复此版本" }).click();
   await expect(
@@ -97,7 +93,7 @@ test("Skill discovery, reviewed installation, project handoff and retained resto
     .click();
   await page.goto("/skills/sources");
   await expect(
-    page.getByRole("heading", { name: "Skill 来源管理" }),
+    page.getByRole("heading", { name: /^Skill 来源/ }),
   ).toBeVisible();
   await page
     .getByRole("button", { name: "停用", exact: true })
@@ -110,7 +106,7 @@ test("Skill discovery, reviewed installation, project handoff and retained resto
   await expect(
     page.getByRole("heading", { name: "发现 Skills" }),
   ).toBeVisible();
-  await expect(page.getByText("暂时没有匹配的 Skill")).toBeVisible();
+  await expect(page.getByText("没有匹配的 Skill")).toBeVisible();
   await page.screenshot({
     path: "/tmp/skill-discover-mobile.png",
     fullPage: true,

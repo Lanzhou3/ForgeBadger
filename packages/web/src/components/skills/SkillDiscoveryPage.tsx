@@ -2,7 +2,16 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Search, ExternalLink, Github } from "lucide-react";
+import {
+  Search,
+  ExternalLink,
+  Github,
+  ArrowUpRight,
+  FileCode2,
+  Plus,
+  AlertTriangle,
+  RefreshCw,
+} from "lucide-react";
 import { useTrilingual } from "@/hooks/use-trilingual";
 import {
   bootstrapSkillRegistry,
@@ -11,8 +20,16 @@ import {
 } from "@/lib/skill-registry-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SkillNavigation } from "./SkillNavigation";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { SkillWorkspace } from "./SkillWorkspace";
 import { SkillPackageReview } from "./SkillPackageReview";
+import { SkillInfo } from "./SkillInfo";
 
 export function SkillDiscoveryPage() {
   const pick = useTrilingual();
@@ -22,6 +39,7 @@ export function SkillDiscoveryPage() {
   const [page, setPage] = useState(0);
   const [includeSkillsSh, setIncludeSkillsSh] = useState(false);
   const [review, setReview] = useState<PreviewInput | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [repo, setRepo] = useState("");
   const [path, setPath] = useState("");
   const [ref, setRef] = useState("");
@@ -46,225 +64,235 @@ export function SkillDiscoveryPage() {
         ? 2500
         : false,
   });
+  const { refetch } = results;
   useEffect(() => {
-    if (bootstrap.isSuccess) void results.refetch();
-  }, [bootstrap.isSuccess, results.refetch]); // refresh once after background sources are scheduled
+    if (bootstrap.isSuccess) void refetch();
+  }, [bootstrap.isSuccess, refetch]);
+  const notices =
+    results.data?.statuses.filter(
+      (item) => item.status === "error" || item.status === "syncing",
+    ) ?? [];
   return (
-    <div className="mx-auto max-w-6xl space-y-5 p-4 pt-16 md:p-6">
-      <div>
-        <h1 className="text-xl font-semibold">
-          {pick("发现 Skills", "發現 Skills", "Discover Skills")}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {pick(
-            "搜索社区 Skill，审阅完整资源包，再选择项目使用。",
-            "搜尋社群 Skill，審閱完整資源包，再選擇專案使用。",
-            "Search community Skills, inspect every file, and choose where to use them.",
-          )}
-        </p>
-      </div>
-      <SkillNavigation />
-      <div className="space-y-3 rounded-lg border border-border bg-card p-4">
-        <div className="flex flex-wrap gap-3">
+    <SkillWorkspace
+      title={pick("发现 Skills", "探索 Skills", "Discover Skills")}
+      actions={
+        <Button
+          id="skill-repository-import"
+          size="sm"
+          variant="outline"
+          onClick={() => setImportOpen(true)}
+        >
+          <Plus />
+          {pick("从仓库导入", "從倉庫匯入", "Import repository")}
+        </Button>
+      }
+    >
+      <search
+        aria-label={pick(
+          "搜索社区 Skills",
+          "搜尋社群 Skills",
+          "Search community Skills",
+        )}
+        className="flex flex-col gap-3"
+      >
+        <div className="flex flex-wrap gap-2">
           <div className="relative min-w-0 flex-1 basis-64">
-            <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" />
+            <label htmlFor="discover-search" className="sr-only">
+              {pick("搜索 Skills", "搜尋 Skills", "Search Skills")}
+            </label>
             <Input
-              aria-label={pick("搜索 Skills", "搜尋 Skills", "Search Skills")}
+              id="discover-search"
+              name="q"
+              type="search"
+              autoComplete="off"
+              spellCheck={false}
               placeholder={pick(
                 "搜索 React、testing、code review…",
                 "搜尋 React、testing、code review…",
-                "Try React, testing, code review…",
+                "Search React, testing, code review…",
               )}
-              className="pl-9"
+              className="h-10 pl-9"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(event) => setSearch(event.target.value)}
             />
           </div>
           <select
             aria-label={pick("来源筛选", "來源篩選", "Source filter")}
-            className="rounded-md border border-input bg-background px-3 text-sm"
+            className="h-10 min-w-36 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-2 focus-visible:outline-ring"
             value={provider}
-            onChange={(e) => {
-              setProvider(e.target.value);
+            onChange={(event) => {
+              setProvider(event.target.value);
               setPage(0);
             }}
           >
-            <option value="all">{pick("全部来源", "全部來源", "All sources")}</option>
+            <option value="all">
+              {pick("全部来源", "全部來源", "All sources")}
+            </option>
             <option value="github">GitHub</option>
             <option value="clawhub">ClawHub</option>
             {includeSkillsSh ? (
               <option value="skills-sh">skills.sh</option>
             ) : null}
           </select>
-        </div>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={includeSkillsSh}
-            onChange={(e) => {
-              setIncludeSkillsSh(e.target.checked);
-              setPage(0);
-              if (!e.target.checked && provider === "skills-sh")
-                setProvider("all");
-            }}
-          />
-          {pick(
-            "同时搜索 skills.sh（实验性兼容来源）",
-            "同時搜尋 skills.sh（實驗性相容來源）",
-            "Include skills.sh (experimental compatibility source)",
-          )}
-        </label>
-        <p className="text-xs text-muted-foreground">
-          {pick(
-            "GitHub 搜索已同步仓库；输入至少 2 个字符后，同时检索 ClawHub。",
-            "GitHub 搜尋已同步倉庫；輸入至少 2 個字元後，同時檢索 ClawHub。",
-            "GitHub searches synced repositories. Enter at least 2 characters to also search ClawHub.",
-          )}
-        </p>
-      </div>
-      <details className="rounded-lg border border-border bg-card p-4">
-        <summary className="cursor-pointer text-sm font-medium">
-          {pick("从 GitHub 仓库安装", "從 GitHub 倉庫安裝", "Install from a GitHub repository")}
-        </summary>
-        <form
-          className="mt-3 grid gap-3 sm:grid-cols-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setReview({
-              locator: {
-                kind: "github",
-                repo: repo.trim(),
-                path: path.trim(),
-                ...(ref.trim() ? { ref: ref.trim() } : {}),
-              },
-            });
-          }}
-        >
-          <Input
-            required
-            aria-label={pick("仓库", "倉庫", "Repository")}
-            placeholder="owner/repo"
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-          />
-          <Input
-            required
-            aria-label={pick("Skill 路径", "Skill 路徑", "Skill path")}
-            placeholder="skills/review/SKILL.md"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-          />
-          <Input
-            aria-label={pick("分支或提交", "分支或提交", "Branch or commit")}
-            placeholder={pick(
-              "分支 / 提交（可选）",
-              "分支 / 提交（可選）",
-              "Branch / commit (optional)",
+          <SkillInfo label={pick("搜索范围", "搜尋範圍", "Search coverage")}>
+            {pick(
+              "GitHub 搜索已同步仓库；输入至少 2 个字符后同时检索 ClawHub。",
+              "GitHub 搜尋已同步倉庫；輸入至少 2 個字元後同時檢索 ClawHub。",
+              "GitHub searches synced repositories. Enter at least 2 characters to also search ClawHub.",
             )}
-            value={ref}
-            onChange={(e) => setRef(e.target.value)}
-          />
-          <Button type="submit" variant="outline">
-            {pick("预览资源包", "預覽資源包", "Preview package")}
-          </Button>
-        </form>
-      </details>
+          </SkillInfo>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+          <span role="status">
+            {results.data?.total ?? 0} {pick("项结果", "項結果", "results")}
+            {results.isFetching
+              ? ` · ${pick("搜索中…", "搜尋中…", "Searching…")}`
+              : ""}
+          </span>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              name="include-skills-sh"
+              className="size-3.5 accent-[hsl(var(--brand))]"
+              checked={includeSkillsSh}
+              onChange={(event) => {
+                setIncludeSkillsSh(event.target.checked);
+                setPage(0);
+                if (!event.target.checked && provider === "skills-sh")
+                  setProvider("all");
+              }}
+            />
+            {pick(
+              "包含 skills.sh（实验性）",
+              "包含 skills.sh（實驗性）",
+              "Include skills.sh (experimental)",
+            )}
+          </label>
+        </div>
+      </search>
       {bootstrap.error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {bootstrap.error.message}{" "}
+        <div role="alert" className="text-sm text-destructive">
+          {bootstrap.error.message}
           <Button variant="link" onClick={() => bootstrap.mutate()}>
             {pick("重试", "重試", "Retry")}
           </Button>
-        </p>
+        </div>
       ) : null}
-      <div
-        aria-live="polite"
-        className="space-y-2 text-xs text-muted-foreground"
-      >
-        {results.data?.statuses.map((status) => (
-          <p
-            key={status.provider}
-            className={
-              status.status === "error"
-                ? "text-amber-600 dark:text-amber-300"
-                : ""
-            }
-          >
-            {status.provider}:{" "}
-            {status.status === "syncing"
-              ? pick("仓库同步中…", "倉庫同步中…", "Synchronizing repositories…")
-              : status.status === "error"
-                ? pick("暂不可用，其他来源仍可使用", "暫不可用，其他來源仍可使用", "Unavailable; other sources remain usable")
-                : pick("可用", "可用", "Available")}
-            {status.message ? ` · ${status.message}` : ""}
-          </p>
-        ))}
-      </div>
+      {notices.length ? (
+        <div className="flex flex-col gap-2 text-xs" aria-live="polite">
+          {notices.map((notice) => (
+            <div
+              key={notice.provider}
+              className="flex items-center gap-2 text-muted-foreground"
+            >
+              {notice.status === "error" ? (
+                <AlertTriangle className="size-3.5 text-amber-500" />
+              ) : (
+                <RefreshCw className="size-3.5 motion-safe:animate-spin" />
+              )}
+              <span>
+                {notice.provider}:{" "}
+                {notice.status === "error"
+                  ? pick(
+                      "暂不可用，其他来源仍可使用",
+                      "暫不可用，其他來源仍可使用",
+                      "Unavailable; other sources remain usable",
+                    )
+                  : pick("同步中…", "同步中…", "Synchronizing…")}
+              </span>
+              {notice.message ? (
+                <SkillInfo
+                  label={`${notice.provider} ${pick("详情", "詳情", "details")}`}
+                >
+                  {notice.message}
+                </SkillInfo>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
       {results.error ? (
         <div
           role="alert"
-          className="rounded-lg border border-border p-5 text-sm"
+          className="rounded-lg border border-destructive/30 p-5 text-sm"
         >
           {results.error.message}
-          <Button variant="link" onClick={() => results.refetch()}>
+          <Button variant="link" onClick={() => refetch()}>
             {pick("重试", "重試", "Retry")}
           </Button>
         </div>
       ) : results.isPending ? (
-        <p role="status" className="py-12 text-center text-muted-foreground">
+        <p
+          role="status"
+          className="py-16 text-center text-sm text-muted-foreground"
+        >
           {pick("正在搜索…", "正在搜尋…", "Searching…")}
         </p>
-      ) : results.data?.items.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border p-10 text-center">
-          <p>{pick("暂时没有匹配的 Skill", "暫時沒有匹配的 Skill", "No matching Skills yet")}</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {pick(
-              "尝试其他关键词，或在来源管理中同步仓库。",
-              "嘗試其他關鍵詞，或在來源管理中同步倉庫。",
-              "Try another keyword or sync repositories in Sources.",
-            )}
-          </p>
-          <Button asChild variant="link">
-            <Link href="/skills/sources">
-              {pick("管理来源", "管理來源", "Manage sources")}
-            </Link>
-          </Button>
+      ) : !results.data?.items.length ? (
+        <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-border py-16">
+          <Search className="size-7 text-muted-foreground" />
+          <h2 className="text-sm font-medium">
+            {pick("没有匹配的 Skill", "沒有相符的 Skill", "No matching Skills")}
+          </h2>
+          <div className="flex gap-2">
+            {search ? (
+              <Button variant="outline" onClick={() => setSearch("")}>
+                {pick("清除搜索", "清除搜尋", "Clear search")}
+              </Button>
+            ) : null}
+            <Button variant="outline" asChild>
+              <Link href="/skills/sources">
+                {pick("管理来源", "管理來源", "Manage sources")}
+              </Link>
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="grid gap-3 lg:grid-cols-2">
-          {results.data?.items.map((item) => (
+          {results.data.items.map((item) => (
             <article
               key={item.id}
-              className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-4"
+              className="skills-result skills-enter flex min-w-0 flex-col gap-4 rounded-lg border border-border bg-card p-5"
             >
               <div className="flex items-start justify-between gap-3">
-                <h2 className="break-words font-medium">{item.name}</h2>
-                <span className="shrink-0 rounded border border-border/70 px-2 py-0.5 text-xs text-muted-foreground">
-                  {item.provider}
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/30 text-muted-foreground">
+                    <FileCode2 className="size-4" />
+                  </span>
+                  <h2 className="truncate text-sm font-semibold">
+                    {item.name}
+                  </h2>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {item.provider === "github"
+                    ? "GitHub"
+                    : item.provider === "clawhub"
+                      ? "ClawHub"
+                      : item.provider}
                 </span>
               </div>
-              <p className="line-clamp-3 flex-1 text-sm text-muted-foreground">
-                {item.description ||
-                  pick(
-                    "预览资源包以查看说明。",
-                    "預覽資源包以查看說明。",
-                    "Preview the package to read its description.",
-                  )}
-              </p>
-              <div className="flex items-center justify-between gap-3">
+              {item.description ? (
+                <p className="line-clamp-2 flex-1 text-sm leading-relaxed text-muted-foreground">
+                  {item.description}
+                </p>
+              ) : null}
+              <div className="mt-auto flex items-center justify-between gap-3 border-t border-border/70 pt-3">
                 <a
                   href={item.sourceUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                  className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
                 >
-                  <Github className="size-3 shrink-0" />
+                  <Github className="size-3.5 shrink-0" />
                   <span className="truncate">{item.sourceLabel}</span>
                   <ExternalLink className="size-3 shrink-0" />
                 </a>
                 {item.installedSkillId ? (
-                  <Button asChild size="sm" variant="outline">
-                    <Link href="/skills">{pick("已安装", "已安裝", "Installed")}</Link>
+                  <Button asChild size="sm" variant="ghost">
+                    <Link href="/skills">
+                      {pick("已安装", "已安裝", "Installed")}
+                    </Link>
                   </Button>
                 ) : (
                   <Button
@@ -273,6 +301,7 @@ export function SkillDiscoveryPage() {
                     onClick={() => setReview({ locator: item.locator })}
                   >
                     {pick("预览安装", "預覽安裝", "Preview & install")}
+                    <ArrowUpRight />
                   </Button>
                 )}
               </div>
@@ -280,30 +309,114 @@ export function SkillDiscoveryPage() {
           ))}
         </div>
       )}
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">
-          {results.data?.total ?? 0} {pick("项结果", "項結果", "results")}
-          {results.isFetching ? ` · ${pick("正在刷新…", "正在重新整理…", "Refreshing…")}` : ""}
-        </span>
-        <div className="flex gap-2">
+      {page > 0 || results.data?.hasMore ? (
+        <nav
+          aria-label={pick("搜索结果分页", "搜尋結果分頁", "Search pages")}
+          className="flex items-center justify-end gap-2"
+        >
           <Button
             variant="outline"
             size="sm"
-            disabled={page === 0}
-            onClick={() => setPage((p) => p - 1)}
+            disabled={!page}
+            onClick={() => setPage((value) => value - 1)}
           >
             {pick("上一页", "上一頁", "Previous")}
           </Button>
+          <span className="px-2 text-xs text-muted-foreground">{page + 1}</span>
           <Button
             variant="outline"
             size="sm"
             disabled={!results.data?.hasMore}
-            onClick={() => setPage((p) => p + 1)}
+            onClick={() => setPage((value) => value + 1)}
           >
             {pick("下一页", "下一頁", "Next")}
           </Button>
-        </div>
-      </div>
+        </nav>
+      ) : null}
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent
+          className="skills-dialog"
+          aria-describedby={undefined}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (!review)
+              document.getElementById("skill-repository-import")?.focus();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {pick(
+                "从 GitHub 仓库导入",
+                "從 GitHub 倉庫匯入",
+                "Import from GitHub",
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setImportOpen(false);
+              setReview({
+                locator: {
+                  kind: "github",
+                  repo: repo.trim(),
+                  path: path.trim(),
+                  ...(ref.trim() ? { ref: ref.trim() } : {}),
+                },
+              });
+            }}
+          >
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="import-repo">
+                {pick("仓库", "倉庫", "Repository")}
+              </Label>
+              <Input
+                id="import-repo"
+                name="repo"
+                required
+                placeholder="owner/repo"
+                autoCapitalize="none"
+                spellCheck={false}
+                value={repo}
+                onChange={(event) => setRepo(event.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="import-path">
+                {pick("Skill 路径", "Skill 路徑", "Skill path")}
+              </Label>
+              <Input
+                id="import-path"
+                name="path"
+                required
+                placeholder="skills/review/SKILL.md"
+                spellCheck={false}
+                value={path}
+                onChange={(event) => setPath(event.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="import-ref">
+                {pick(
+                  "分支或提交（可选）",
+                  "分支或提交（選填）",
+                  "Branch or commit (optional)",
+                )}
+              </Label>
+              <Input
+                id="import-ref"
+                name="ref"
+                value={ref}
+                onChange={(event) => setRef(event.target.value)}
+              />
+            </div>
+            <Button type="submit" variant="brand">
+              {pick("预览资源包", "預覽資源包", "Preview package")}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
       {review ? (
         <SkillPackageReview
           key={JSON.stringify(review)}
@@ -311,6 +424,6 @@ export function SkillDiscoveryPage() {
           onClose={() => setReview(null)}
         />
       ) : null}
-    </div>
+    </SkillWorkspace>
   );
 }

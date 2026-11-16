@@ -1,0 +1,116 @@
+.skills-workspace {
+  --skill-row-columns: minmax(0, 1fr) 9rem 8.5rem 6.5rem;
+}
+.skills-row {
+  display: grid;
+  grid-template-columns: var(--skill-row-columns);
+  align-items: center;
+  gap: 1rem;
+}
+.skills-row:focus-within {
+  background: hsl(var(--muted));
+}
+.skills-filter:checked + span {
+  border-color: hsl(var(--brand) / 0.35);
+  background: hsl(var(--brand) / 0.1);
+  color: hsl(var(--foreground));
+}
+.skills-filter:focus-visible + span {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 3px;
+}
+.skills-enter {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .skills-panel[data-state="open"] {
+    animation-duration: 200ms;
+  }
+  .skills-panel[data-state="closed"] {
+    animation-duration: 150ms;
+  }
+  .skills-enter {
+    animation: skills-enter 180ms ease-out both;
+  }
+  .skills-row,
+  .skills-result {
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease;
+  }
+  .skills-result:hover {
+    border-color: hsl(var(--brand) / 0.4);
+  }
+  @keyframes skills-enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skills-panel,
+  .skills-dialog {
+    animation: none;
+    transition: none;
+  }
+  .skills-workspace [data-slot="switch-thumb"] {
+    transition: none;
+  }
+}
+@media (max-width: 767px) {
+  .skills-workspace {
+    --skill-row-columns: minmax(0, 1fr) 2rem 6.5rem;
+  }
+  .skills-row {
+    gap: 0.5rem;
+  }
+  .skills-list-heading {
+    display: none;
+  }
+}
+@media (max-width: 639px) {
+  .skills-dialog {
+    width: calc(100% - 2rem);
+    max-width: calc(100% - 2rem);
+  }
+}
+@media (pointer: coarse) {
+  .skills-workspace button:not([role="switch"]),
+  .skills-workspace input:not([type="radio"], [type="checkbox"]),
+  .skills-workspace select,
+  .skills-workspace summary,
+  .skills-workspace nav a,
+  .skills-panel button,
+  .skills-dialog button {
+    min-height: 48px;
+  }
+  .skills-workspace button:not([role="switch"]),
+  .skills-panel button,
+  .skills-dialog button {
+    min-width: 48px;
+  }
+  .skills-workspace [role="switch"] {
+    position: relative;
+  }
+  .skills-workspace [role="switch"]::before {
+    content: "";
+    position: absolute;
+    inset: -15px -8px;
+  }
+  .skills-workspace label:has(> input[type="radio"]) > span,
+  .skills-workspace label:has(> input[type="checkbox"]) {
+    min-height: 48px;
+  }
+  .skills-workspace input,
+  .skills-workspace select,
+  .skills-dialog input,
+  .skills-dialog select,
+  .skills-dialog textarea {
+    font-size: 1rem;
+  }
+}

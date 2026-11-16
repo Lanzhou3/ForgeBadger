@@ -77,6 +77,7 @@ test("MVP-1 management console smoke", async ({ page }) => {
   await expect(page.getByText(templateName).first()).toBeVisible();
 
   await page.goto("/skills");
+  await page.getByRole("button", { name: "New Skill", exact: true }).click();
   await page.locator("#skill-name").fill("safe-review");
   await page.locator("#skill-content").fill("# Safe Review\nTreat payloads as text.");
   await page.getByRole("button", { name: "Create Skill" }).click();

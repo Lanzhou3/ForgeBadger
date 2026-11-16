@@ -10,6 +10,7 @@ import {
   type PreviewInput,
 } from "@/lib/skill-registry-api";
 import { Button } from "@/components/ui/button";
+import { SkillInfo } from "./SkillInfo";
 import {
   Dialog,
   DialogContent,
@@ -70,6 +71,12 @@ const warnings: Record<string, [string, string, string]> = {
 export function SkillPackageReview({ input, onClose }: Props) {
   const pick = useTrilingual();
   const queryClient = useQueryClient();
+  const [returnFocus] = useState(() =>
+    typeof document !== "undefined" &&
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
   const [file, setFile] = useState("SKILL.md");
   const [projectId, setProjectId] = useState("");
   const [now, setNow] = useState(() => Date.now());
@@ -118,13 +125,23 @@ export function SkillPackageReview({ input, onClose }: Props) {
         if (!open && !install.isPending) onClose();
       }}
     >
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
+      <DialogContent
+        className="skills-dialog max-h-[90dvh] overflow-y-auto sm:max-w-4xl"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (returnFocus?.isConnected) returnFocus.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>
-            {pick("审阅 Skill 资源包", "審閱 Skill 資源包", "Review Skill package")}
+            {pick(
+              "审阅 Skill 资源包",
+              "審閱 Skill 資源包",
+              "Review Skill package",
+            )}
             {pkg ? ` · ${pkg.name}` : ""}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="sr-only">
             {pick(
               "确认来源与文件后保存。项目生效需通过配置同步。",
               "確認來源與檔案後儲存。專案生效需透過配置同步。",
@@ -134,7 +151,11 @@ export function SkillPackageReview({ input, onClose }: Props) {
         </DialogHeader>
         {preview.isPending ? (
           <p role="status">
-            {pick("正在下载并校验完整资源包…", "正在下載並校驗完整資源包…", "Downloading and validating…")}
+            {pick(
+              "正在下载并校验完整资源包…",
+              "正在下載並校驗完整資源包…",
+              "Downloading and validating…",
+            )}
           </p>
         ) : preview.error ? (
           <div role="alert" className="space-y-3 text-sm text-destructive">
@@ -158,13 +179,20 @@ export function SkillPackageReview({ input, onClose }: Props) {
                 {preview.data.canonicalId}
               </a>
               <p className="text-muted-foreground">
-                v{pkg.version} · {pkg.files.length} {pick("个文件", "個檔案", "files")} ·{" "}
+                v{pkg.version} · {pkg.files.length}{" "}
+                {pick("个文件", "個檔案", "files")} ·{" "}
                 {(pkg.sizeBytes / 1024).toFixed(1)} KiB ·{" "}
-                {pkg.license ?? pick("未声明许可证", "未宣告授權條款", "License unspecified")}
+                {pkg.license ??
+                  pick("未声明许可证", "未宣告授權條款", "License unspecified")}
               </p>
-              <p className="break-all font-mono text-xs text-muted-foreground">
-                {preview.data.revision} · {pkg.packageHash.slice(0, 23)}…
-              </p>
+              <details className="text-xs text-muted-foreground">
+                <summary className="cursor-pointer">
+                  {pick("版本详情", "版本詳情", "Revision details")}
+                </summary>
+                <p className="mt-2 break-all font-mono">
+                  {preview.data.revision} · {pkg.packageHash.slice(0, 23)}…
+                </p>
+              </details>
               {pkg.compatibility ? <p>{pkg.compatibility}</p> : null}
               {pkg.warnings.length > 0 ? (
                 <ul className="space-y-1 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-amber-600 dark:text-amber-300">
@@ -239,7 +267,11 @@ export function SkillPackageReview({ input, onClose }: Props) {
                   onChange={(e) => setProjectId(e.target.value)}
                 >
                   <option value="">
-                    {pick("仅保存 · 默认禁用", "僅儲存 · 預設停用", "Save only · disabled by default")}
+                    {pick(
+                      "仅保存 · 默认禁用",
+                      "僅儲存 · 預設停用",
+                      "Save only · disabled by default",
+                    )}
                   </option>
                   {projects.data?.projects.map((project) => (
                     <option key={project.id} value={project.id}>
@@ -257,7 +289,14 @@ export function SkillPackageReview({ input, onClose }: Props) {
             {install.error ? (
               <div role="alert" className="space-y-2 text-sm text-destructive">
                 <p>{install.error.message}</p>
-                <Button variant="outline" onClick={() => { install.reset(); setFile("SKILL.md"); void preview.refetch(); }}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    install.reset();
+                    setFile("SKILL.md");
+                    void preview.refetch();
+                  }}
+                >
                   {pick("重新获取预览", "重新取得預覽", "Refresh preview")}
                 </Button>
               </div>
@@ -292,16 +331,35 @@ export function SkillPackageReview({ input, onClose }: Props) {
             ) : (
               <div className="flex flex-wrap items-center justify-between gap-3">
                 {previewExpired ? (
-                  <p role="alert" className="text-xs text-amber-600 dark:text-amber-300">
-                    {pick("预览已过期，请重新获取后再安装。", "預覽已過期，請重新取得後再安裝。", "Preview expired. Fetch a fresh preview before installing.")}
+                  <p
+                    role="alert"
+                    className="text-xs text-amber-600 dark:text-amber-300"
+                  >
+                    {pick(
+                      "预览已过期，请重新获取后再安装。",
+                      "預覽已過期，請重新取得後再安裝。",
+                      "Preview expired. Fetch a fresh preview before installing.",
+                    )}
                   </p>
                 ) : (
-                  <p className="text-xs text-muted-foreground">
-                    {pick("预览有效期 5 分钟。", "預覽有效期 5 分鐘。", "Preview expires in 5 minutes.")}
-                  </p>
+                  <SkillInfo
+                    label={pick("预览有效期", "預覽有效期", "Preview validity")}
+                  >
+                    {pick(
+                      "预览有效期 5 分钟。",
+                      "預覽有效期 5 分鐘。",
+                      "Preview expires in 5 minutes.",
+                    )}
+                  </SkillInfo>
                 )}
                 {previewExpired ? (
-                  <Button variant="outline" onClick={() => { install.reset(); void preview.refetch(); }}>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      install.reset();
+                      void preview.refetch();
+                    }}
+                  >
                     {pick("重新获取预览", "重新取得預覽", "Refresh preview")}
                   </Button>
                 ) : null}
@@ -312,10 +370,22 @@ export function SkillPackageReview({ input, onClose }: Props) {
                   {install.isPending
                     ? pick("正在保存…", "正在儲存…", "Saving…")
                     : preview.data.operation === "install"
-                      ? pick("已审阅，确认安装", "已審閱，確認安裝", "Reviewed · install")
+                      ? pick(
+                          "已审阅，确认安装",
+                          "已審閱，確認安裝",
+                          "Reviewed · install",
+                        )
                       : preview.data.operation === "rollback"
-                        ? pick("已审阅，恢复此版本", "已審閱，復原此版本", "Reviewed · restore")
-                        : pick("已审阅，确认更新", "已審閱，確認更新", "Reviewed · update")}
+                        ? pick(
+                            "已审阅，恢复此版本",
+                            "已審閱，復原此版本",
+                            "Reviewed · restore",
+                          )
+                        : pick(
+                            "已审阅，确认更新",
+                            "已審閱，確認更新",
+                            "Reviewed · update",
+                          )}
                 </Button>
               </div>
             )}
