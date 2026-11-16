@@ -1,4 +1,8 @@
 import {createTeamRoutes} from './teams.js';
+import { createHubConsoleRoutes, createHubNodeRoutes } from './hub.js';
+import { createHubLinkRoutes } from './hub-links.js';
+import { createHubInsightRoutes } from './hub-insights.js';
+import { createHubRemoteRoutes } from './hub-remote.js';
 import {TeamService} from '../services/teams/service.js';
 import {createDeliveryActionsRoutes} from './collaboration-delivery-actions.js';
 import { homedir } from 'node:os';
@@ -73,6 +77,11 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use('/api/v1/collaboration',createDeliveryActionsRoutes(delivery));
   app.use('/api/v1/collaboration',createTaskArtifactLinkRoutes(deps.db));
   app.use('/api/v1/teams',createTeamRoutes(delivery));
+  app.use('/api/v1/hub-console', createHubConsoleRoutes(deps.db));
+  app.use('/api/v1/hub-console', createHubInsightRoutes(deps.db));
+  app.use('/api/v1/hub-console', createHubRemoteRoutes(deps.db, deps.masterKey));
+  app.use('/api/v1/hub', createHubNodeRoutes(deps.db));
+  app.use('/api/v1/hub-links', createHubLinkRoutes(deps.db, deps.masterKey));
   app.use("/api/v1/gate-a/dependencies", createDependencyRoutes(deps.sessionManager));
   app.use("/api/v1/adapters", createAdapterRoutes(deps.sessionManager));
   app.use(
