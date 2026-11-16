@@ -499,7 +499,6 @@ export default function ModelsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3 forgebadger-animate-in">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{t("models.title")}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t("models.providerCenterSubtitle")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button

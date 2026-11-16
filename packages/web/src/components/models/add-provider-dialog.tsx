@@ -6,7 +6,6 @@ import { CliBrandIcon } from "@/components/cli-brand-icon";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -24,9 +23,7 @@ import {
 
 import {
   adapterLabel,
-  apiFormatHint,
   apiFormatLabel,
-  authTypeHint,
   authTypeLabel,
   customProviderHasEndpoint,
   customProviderHasPlaintextHttp,
@@ -123,7 +120,7 @@ export function AddProviderDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={editing ? "max-h-[90vh] overflow-y-auto sm:max-w-2xl" : "max-h-[90vh] overflow-hidden sm:max-w-4xl"}>
+      <DialogContent aria-describedby={undefined} className={editing ? "max-h-[90vh] overflow-y-auto sm:max-w-2xl" : "max-h-[90vh] overflow-hidden sm:max-w-4xl"}>
         <form
           className={editing ? "space-y-4" : "grid max-h-[80vh] gap-5 md:grid-cols-[240px_minmax(0,1fr)]"}
           onSubmit={onSubmit}
@@ -132,7 +129,6 @@ export function AddProviderDialog({
           <div className="flex min-h-0 flex-col gap-2">
             <div className="space-y-1">
               <span className="text-sm font-medium">{t("models.presets")}</span>
-              <p className="text-xs text-muted-foreground">{t("models.presetsDescription")}</p>
             </div>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -155,14 +151,13 @@ export function AddProviderDialog({
                     key={preset.id}
                     type="button"
                     onClick={() => applyPreset(preset)}
+                    aria-pressed={customProvider.providerKey === preset.id}
                     className={`w-full rounded px-3 py-2 text-left hover:bg-muted/50 ${
                       customProvider.providerKey === preset.id ? "bg-muted/40" : ""
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium">{preset.name}</span>
-                      <span className="shrink-0 text-xs text-muted-foreground">{apiFormatLabel(preset.apiFormat, t)}</span>
-                    </div>
+                    <div className="text-sm font-medium leading-snug break-words">{preset.name}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{apiFormatLabel(preset.apiFormat, t)}</div>
                     <div className="mt-0.5 truncate text-xs text-muted-foreground">
                       {preset.openaiBaseUrl ?? preset.anthropicBaseUrl}
                     </div>
@@ -177,13 +172,11 @@ export function AddProviderDialog({
           {!editing && (
           <DialogHeader>
             <DialogTitle>{t("models.addProvider")}</DialogTitle>
-            <DialogDescription>{t("models.addProviderDescription")}</DialogDescription>
           </DialogHeader>
           )}
           {editing && (
           <DialogHeader>
             <DialogTitle>{t("models.editProvider")}</DialogTitle>
-            <DialogDescription>{t("models.editProviderDescription")}</DialogDescription>
           </DialogHeader>
           )}
 
@@ -228,7 +221,6 @@ export function AddProviderDialog({
                   <option key={format} value={format}>{apiFormatLabel(format, t)}</option>
                 ))}
               </select>
-              <p className="text-xs text-muted-foreground">{apiFormatHint(customProvider.apiFormat, t)}</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="provider-auth-type">{t("models.authType")}</Label>
@@ -244,7 +236,6 @@ export function AddProviderDialog({
                   <option key={authType} value={authType}>{authTypeLabel(authType, t)}</option>
                 ))}
               </select>
-              <p className="text-xs text-muted-foreground">{authTypeHint(customProvider.authType, t)}</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="provider-openai-base-url">{t("models.openaiBaseUrl")}</Label>

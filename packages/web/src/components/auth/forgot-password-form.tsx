@@ -58,7 +58,7 @@ export function ForgotPasswordForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="forgebadger-animate-in flex flex-col gap-4">
+    <form method="post" noValidate onSubmit={handleSubmit(onSubmit)} className="forgebadger-animate-in flex flex-col gap-4">
       <p className="rounded-md border border-border/70 bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
         {t("auth.recoveryInstructions")}
       </p>
@@ -94,11 +94,13 @@ export function ForgotPasswordForm() {
         error={errors.confirmPassword?.message}
         registration={register("confirmPassword")}
       />
-      {errors.root && (
-        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          {errors.root.message}
-        </p>
-      )}
+      <div aria-live="polite" aria-atomic="true" className={errors.root ? undefined : "sr-only"}>
+        {errors.root && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {errors.root.message}
+          </p>
+        )}
+      </div>
       <Button type="submit" disabled={isSubmitting} variant="brand" className="mt-1">
         {isSubmitting ? t("auth.resetting") : t("auth.resetPassword")}
       </Button>
@@ -141,8 +143,16 @@ function RecoveryField({
   return (
     <div className="flex flex-col gap-1.5">
       <Label htmlFor={id} className="text-xs font-medium">{label}</Label>
-      <Input id={id} type={type} autoComplete={autoComplete} {...registration} />
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      <Input
+        id={id}
+        type={type}
+        autoComplete={autoComplete}
+        required
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+        {...registration}
+      />
+      {error && <p id={`${id}-error`} className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }

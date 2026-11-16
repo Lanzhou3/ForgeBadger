@@ -81,6 +81,9 @@ describe("ForgotPasswordForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "重置密码" }));
 
     await waitFor(() => expect(screen.getByText("两次输入的密码不一致")).toBeTruthy());
+    const confirmation = screen.getByLabelText("确认新密码");
+    expect(confirmation.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(confirmation.getAttribute("aria-describedby")!)?.textContent).toBe("两次输入的密码不一致");
     expect(resetPasswordMock).not.toHaveBeenCalled();
   });
 

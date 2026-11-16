@@ -40,6 +40,21 @@ describe("LoginForm", () => {
     expect(link.getAttribute("href")).toBe("/forgot-password");
   });
 
+  it("associates validation errors with fields and clears invalid state after correction", async () => {
+    renderForm();
+    const email = screen.getByLabelText("电子邮箱");
+    expect(email.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+    await waitFor(() => expect(email.getAttribute("aria-invalid")).toBe("true"));
+    const error = document.getElementById(email.getAttribute("aria-describedby")!);
+    expect(error?.textContent).toBe("请输入有效的邮箱地址");
+    expect(document.activeElement).toBe(email);
+    expect(loginMock).not.toHaveBeenCalled();
+    fireEvent.change(email, { target: { value: "owner@example.com" } });
+    await waitFor(() => expect(email.getAttribute("aria-invalid")).toBeNull());
+    expect(email.getAttribute("aria-describedby")).toBeNull();
+  });
+
   it("does not expose an English transport error on the localized form", async () => {
     loginMock.mockRejectedValueOnce(new Error("Gateway request failed"));
     renderForm();
@@ -56,6 +71,7 @@ describe("LoginForm", () => {
       expect(screen.getByText("登录失败，请检查邮箱和密码。")).toBeTruthy();
     });
     expect(screen.queryByText("Gateway request failed")).toBeNull();
+    expect(screen.getByText("登录失败，请检查邮箱和密码。").closest('[aria-live="polite"]')).toBeTruthy();
   });
 
   it("shows the unreachable-gateway message with the target address instead of a credential hint", async () => {

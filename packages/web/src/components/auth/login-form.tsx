@@ -62,6 +62,7 @@ export function LoginForm() {
   return (
     <form
       method="post"
+      noValidate
       onSubmit={handleSubmit(onSubmit)}
       className="forgebadger-animate-in flex flex-col gap-4"
       style={{ animationDelay: "60ms" }}
@@ -74,10 +75,13 @@ export function LoginForm() {
           id="email"
           type="email"
           autoComplete="email"
+          required
+          aria-invalid={errors.email ? true : undefined}
+          aria-describedby={errors.email ? "email-error" : undefined}
           {...register("email")}
         />
         {errors.email && (
-          <p className="text-xs text-destructive">{errors.email.message}</p>
+          <p id="email-error" className="text-xs text-destructive">{errors.email.message}</p>
         )}
       </div>
       <div className="flex flex-col gap-1.5">
@@ -96,10 +100,13 @@ export function LoginForm() {
           id="password"
           type="password"
           autoComplete="current-password"
+          required
+          aria-invalid={errors.password ? true : undefined}
+          aria-describedby={errors.password ? "password-error" : undefined}
           {...register("password")}
         />
         {errors.password && (
-          <p className="text-xs text-destructive">{errors.password.message}</p>
+          <p id="password-error" className="text-xs text-destructive">{errors.password.message}</p>
         )}
       </div>
       {searchParams.get("passwordReset") === "1" && (
@@ -107,11 +114,13 @@ export function LoginForm() {
           {t("auth.passwordResetSuccess")}
         </p>
       )}
-      {errors.root && (
-        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          {errors.root.message}
-        </p>
-      )}
+      <div aria-live="polite" aria-atomic="true" className={errors.root ? undefined : "sr-only"}>
+        {errors.root && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {errors.root.message}
+          </p>
+        )}
+      </div>
       <Button
         type="submit"
         disabled={!isHydrated || isSubmitting}

@@ -7,6 +7,7 @@ import { collaborationApi, hasCapability } from "@/lib/collaboration-api";
 import { ErrorNotice, Field, inputClass } from "@/components/workspaces/WorkspaceShared";
 import { ArchiveProject } from "@/components/workspaces/ArchiveProject";
 import { ProjectMembers } from "./ProjectMembers";
+import { HubProjectPanel } from "@/components/hub/HubProjectPanel";
 export function ProjectAccess({projectId}:{projectId:string|null}) {
   const {user}=useAuth();const {t}=useLanguage();const router=useRouter();
   const query=useQuery({queryKey:["collaboration","projects",user?.id],queryFn:collaborationApi.projects,enabled:!!user});
@@ -27,5 +28,5 @@ function ProjectAccessDetail({projectId}:{projectId:string}) {
   const query=useQuery({queryKey:["collaboration",projectId,"project",user?.id],queryFn:()=>collaborationApi.project(projectId),enabled:!!user,retry:false,refetchInterval:15000});
   if(query.isError)return <ErrorNotice error={query.error} retry={()=>void query.refetch()}/>;
   if(!query.data)return <p role="status">{t("common.loading")}</p>;
-  return <><ProjectMembers detail={query.data}/>{hasCapability(query.data.project,"manage")&&<details className="rounded-lg border border-border p-4"><summary className="cursor-pointer text-sm">{t("workspace.archive")}</summary><div className="mt-3"><ArchiveProject projectId={projectId}/></div></details>}</>;
+  return <><ProjectMembers detail={query.data}/><HubProjectPanel projectId={projectId} canManage={hasCapability(query.data.project,"manage")} canReview={hasCapability(query.data.project,"review")}/>{hasCapability(query.data.project,"manage")&&<details className="rounded-lg border border-border p-4"><summary className="cursor-pointer text-sm">{t("workspace.archive")}</summary><div className="mt-3"><ArchiveProject projectId={projectId}/></div></details>}</>;
 }

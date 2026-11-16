@@ -11,12 +11,12 @@ export default function MembersPage() {
   const { user, isLoading } = useAuth();
   const { t } = useLanguage();
   const search = useSearchParams();
-  if (isLoading || !user) return <main className="p-6" role="status">{t("common.loading")}</main>;
+  if (isLoading || !user) return <div className="p-6" role="status">{t("common.loading")}</div>;
   const isAdmin = user.role === "admin";
   const requested = search.get("project") ? "projects" : search.get("team") ? "collaboration" : search.get("view");
   const view = requested === "projects" || requested === "collaboration" ? requested : isAdmin ? "accounts" : "collaboration";
   const tabs = [...(isAdmin ? ["accounts"] as const : []), "collaboration", "projects"] as const;
-  return <main className="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
+  return <div className="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
     <header>
       <h1 className="text-xl font-semibold">{t("members.title")}</h1>
       <p className="mt-1 text-sm text-muted-foreground">{t("membersHub.intro")}</p>
@@ -27,5 +27,5 @@ export default function MembersPage() {
     {view === "accounts" && isAdmin && <AccountMembers key={user.id} />}
     {view === "collaboration" && <MemberCollaboration key={user.id} selectedTeamId={search.get("team")} />}
     {view === "projects" && <ProjectAccess key={user.id} projectId={search.get("project")} />}
-  </main>;
+  </div>;
 }

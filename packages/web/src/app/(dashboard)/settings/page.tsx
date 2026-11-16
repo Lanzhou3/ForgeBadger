@@ -59,16 +59,15 @@ const languageOptions = [
 type SectionId = "appearance" | "account" | "adapters" | "integrations" | "instance";
 
 const SECTION_DEFS = [
-  { id: "appearance", icon: Palette, labelKey: "settings.section.appearance", descriptionKey: "settings.section.appearanceDescription" },
-  { id: "account", icon: ShieldCheck, labelKey: "settings.section.account", descriptionKey: "settings.section.accountDescription" },
-  { id: "adapters", icon: Cpu, labelKey: "settings.section.adapters", descriptionKey: "settings.section.adaptersDescription" },
-  { id: "integrations", icon: Plug, labelKey: "settings.section.integrations", descriptionKey: "settings.section.integrationsDescription" },
-  { id: "instance", icon: Server, labelKey: "settings.section.instance", descriptionKey: "settings.section.instanceDescription" },
+  { id: "appearance", icon: Palette, labelKey: "settings.section.appearance" },
+  { id: "account", icon: ShieldCheck, labelKey: "settings.section.account" },
+  { id: "adapters", icon: Cpu, labelKey: "settings.section.adapters" },
+  { id: "integrations", icon: Plug, labelKey: "settings.section.integrations" },
+  { id: "instance", icon: Server, labelKey: "settings.section.instance" },
 ] as const satisfies ReadonlyArray<{
   id: SectionId;
   icon: LucideIcon;
   labelKey: TranslationKey;
-  descriptionKey: TranslationKey;
 }>;
 
 export default function SettingsPage() {
@@ -135,9 +134,6 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-6xl space-y-6 p-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">{t("settings.title")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("settings.subtitle")}
-        </p>
       </div>
 
       <div className="lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-8">
@@ -170,7 +166,7 @@ export default function SettingsPage() {
 
         <div key={active.id} className="min-w-0">
           {active.id === "appearance" && (
-            <SettingsSection title={t(active.labelKey)} description={t(active.descriptionKey)}>
+            <SettingsSection title={t(active.labelKey)}>
               <Card className="forgebadger-animate-in">
                 <SettingsCardHeader
                   icon={<Globe2 className="size-4" />}
@@ -273,7 +269,7 @@ export default function SettingsPage() {
           )}
 
           {active.id === "account" && (
-            <SettingsSection title={t(active.labelKey)} description={t(active.descriptionKey)}>
+            <SettingsSection title={t(active.labelKey)}>
               <div className="forgebadger-animate-in">
                 <AccountSecuritySettings />
               </div>
@@ -284,7 +280,7 @@ export default function SettingsPage() {
           )}
 
           {active.id === "adapters" && (
-            <SettingsSection title={t(active.labelKey)} description={t(active.descriptionKey)}>
+            <SettingsSection title={t(active.labelKey)}>
               <div className="forgebadger-animate-in">
                 <AdapterSettings />
               </div>
@@ -295,7 +291,7 @@ export default function SettingsPage() {
           )}
 
           {active.id === "integrations" && (
-            <SettingsSection title={t(active.labelKey)} description={t(active.descriptionKey)}>
+            <SettingsSection title={t(active.labelKey)}>
               <div className="forgebadger-animate-in">
                 <McpIntegrationSettings />
               </div>
@@ -303,7 +299,7 @@ export default function SettingsPage() {
           )}
 
           {active.id === "instance" && isAdmin && (
-            <SettingsSection title={t(active.labelKey)} description={t(active.descriptionKey)}>
+            <SettingsSection title={t(active.labelKey)}>
               <div className="forgebadger-animate-in">
                 <InstanceRuntimeSettings />
               </div>

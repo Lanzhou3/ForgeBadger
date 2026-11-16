@@ -31,6 +31,18 @@ describe("RegisterForm", () => {
     vi.clearAllMocks();
   });
 
+  it("identifies required fields and associates validation errors after submission", async () => {
+    render(<LanguageProvider><RegisterForm /></LanguageProvider>);
+    const email = screen.getByLabelText("电子邮箱") as HTMLInputElement;
+    expect(email.getAttribute("aria-invalid")).toBeNull();
+    expect(email.required).toBe(true);
+    expect((screen.getByLabelText("注册邀请码（如需要）") as HTMLInputElement).required).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "创建账户" }));
+    await waitFor(() => expect(email.getAttribute("aria-invalid")).toBe("true"));
+    expect(document.getElementById(email.getAttribute("aria-describedby")!)?.textContent).toBe("请输入有效的邮箱地址");
+    expect(registerMock).not.toHaveBeenCalled();
+  });
+
   it("preserves return context and submits invitation with local registration", async () => {
     render(
       <LanguageProvider>

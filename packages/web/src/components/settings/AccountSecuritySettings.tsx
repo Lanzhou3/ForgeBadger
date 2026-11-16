@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, LogOut, MonitorSmartphone } from "lucide-react";
+import { LogOut, MonitorSmartphone } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,6 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import { useAdminCopy } from "@/components/settings/admin-copy";
-import { SettingsCardHeader } from "@/components/settings/ui";
 import { logout } from "@/lib/auth";
 import {
   changePassword,
@@ -116,11 +115,6 @@ export function AccountSecuritySettings() {
 
   return (
     <Card className="forgebadger-animate-in">
-      <SettingsCardHeader
-        icon={<KeyRound className="size-4" />}
-        title={t("settings.account.title")}
-        description={t("settings.account.description")}
-      />
       <CardContent className="space-y-6">
         {passwordNotice && (
           // Rendered outside the form-open branch: on success the form closes
@@ -225,9 +219,6 @@ export function AccountSecuritySettings() {
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-sm font-medium">
-                {t("settings.account.passwordSubmit")}
-              </div>
               <div className="mt-0.5 text-xs text-muted-foreground">
                 {t("settings.account.passwordHint")}
               </div>
@@ -250,9 +241,6 @@ export function AccountSecuritySettings() {
               <div className="min-w-0">
                 <div className="text-sm font-medium">
                   {t("settings.account.devicesTitle")}
-                </div>
-                <div className="mt-0.5 text-xs text-muted-foreground">
-                  {t("settings.account.devicesDescription")}
                 </div>
               </div>
             </div>

@@ -11,17 +11,15 @@ import { Switch } from "@/components/ui/switch";
 
 interface SettingsSectionProps {
   title: string;
-  description: string;
   children: ReactNode;
 }
 
 /** Grouped settings section: heading plus a spaced stack of cards. */
-export function SettingsSection({ title, description, children }: SettingsSectionProps) {
+export function SettingsSection({ title, children }: SettingsSectionProps) {
   return (
     <section className="max-w-3xl space-y-4">
       <div>
         <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
-        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
       </div>
       {children}
     </section>
