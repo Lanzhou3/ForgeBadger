@@ -1,13 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, ScrollText } from "lucide-react";
+import { ScrollText } from "lucide-react";
 
 import { SettingsCardHeader } from "@/components/settings/ui";
 import { auditActionLabel, useAdminCopy } from "@/components/settings/admin-copy";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import { listAuditLogs } from "@/lib/api";
@@ -28,14 +26,6 @@ export function AuditHistorySettings() {
         icon={<ScrollText className="size-4" />}
         title={t("settings.auditHistory")}
         description={t("settings.auditDescription")}
-        action={
-          <Button asChild size="sm" variant="ghost" className="text-muted-foreground">
-            <Link href="/history">
-              {adminCopy.auditViewAll}
-              <ArrowRight className="size-3.5" />
-            </Link>
-          </Button>
-        }
       />
       <CardContent>
         {auditLoading ? (

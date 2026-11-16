@@ -62,8 +62,5 @@ describe("AuditHistorySettings", () => {
     await screen.findByText("应用提供商配置");
     // Unknown actions fall back to the raw string instead of rendering blank.
     expect(screen.getByText("future.unknown_action")).toBeTruthy();
-
-    const viewAll = screen.getByRole("link", { name: /查看全部/ });
-    expect(viewAll.getAttribute("href")).toBe("/history");
   });
 });

@@ -4,7 +4,6 @@ const zh = {
   securityBaselineGuaranteed: "设计保证",
   securityBaselineGuaranteedHint:
     "JWT 认证与租户隔离为架构层保证，非运行时检测值；密钥加密与终端持久化为实际配置。",
-  auditViewAll: "查看全部",
   auditActions: {
     apply_provider: "应用提供商配置",
     model_sync: "同步模型列表",
@@ -38,7 +37,6 @@ const zhTW: typeof zh = {
   securityBaselineGuaranteed: "設計保證",
   securityBaselineGuaranteedHint:
     "JWT 認證與租戶隔離為架構層保證，非執行時檢測值；金鑰加密與終端機持久化為實際設定。",
-  auditViewAll: "查看全部",
   auditActions: {
     apply_provider: "套用供應商設定",
     model_sync: "同步模型清單",
@@ -72,7 +70,6 @@ const en: typeof zh = {
   securityBaselineGuaranteed: "By design",
   securityBaselineGuaranteedHint:
     "JWT auth and tenant isolation are architectural guarantees, not runtime detections; key encryption and terminal persistence are actual configured values.",
-  auditViewAll: "View all",
   auditActions: {
     apply_provider: "Apply provider config",
     model_sync: "Sync model list",
