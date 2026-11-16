@@ -34,6 +34,13 @@ const envSchema = z.object({
   FORGEBADGER_MCP_ENABLED: strictEnvBoolean,
   FORGEBADGER_COMPANION_ENABLED: strictEnvBoolean,
   /**
+   * Set when a TLS-terminating reverse proxy on this host fronts the Gateway
+   * (the LAN team-hub topology). Forwarding headers are then trusted from
+   * loopback peers only, so `req.secure` and `req.ip` reflect the real client.
+   * Leave off when the Gateway is reached directly.
+   */
+  FORGEBADGER_TRUST_PROXY: strictEnvBoolean,
+  /**
    * Operator escape hatch: when true the runtime-settings API rejects writes
    * and the console renders the settings page read-only (.env stays the only
    * source of truth).

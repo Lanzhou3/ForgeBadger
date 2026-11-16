@@ -56,6 +56,8 @@ export interface ServerDeps {
   companionEnabled?: boolean | undefined;
   /** DB-backed runtime settings (absent in minimal test apps → API 503). */
   runtimeSettings?: RuntimeSettingsStore | undefined;
+  /** Trust forwarding headers from a reverse proxy on this host (FORGEBADGER_TRUST_PROXY). */
+  trustProxy?: boolean | undefined;
 }
 
 export interface GatewayApp {
@@ -114,6 +116,9 @@ export interface GatewayAppOptions {
 
 export function createServer(deps: ServerDeps): express.Express {
   const app = express();
+  // Only a proxy on this host is trusted to describe the original client;
+  // forwarding headers from any other peer are ignored by Express.
+  if (deps.trustProxy) app.set("trust proxy", "loopback");
   app.locals.jwtSecret = deps.jwtSecret;
   app.locals.db = deps.db;
 
@@ -222,7 +227,8 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
     runtimeAuthorizationInvalidator,
     mcpEnabled: runtimeSettings?.effective().mcpEnabled ?? options.mcpEnabled,
     companionEnabled: options.companionEnabled,
-    runtimeSettings
+    runtimeSettings,
+    trustProxy: options.env?.FORGEBADGER_TRUST_PROXY === true
   });
 
   const server = createHttpServer(app);

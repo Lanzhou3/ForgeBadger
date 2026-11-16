@@ -5,6 +5,7 @@ import {DeliveryActions} from '../services/collaboration/delivery-actions.js';
 import type {DeliveryService} from '../services/collaboration/delivery-service.js';
 import {CollaborationError} from '../services/collaboration/types.js';
 import {draftPullRequestInput} from '../services/collaboration/github-pull-requests.js';
+import {isDirectLoopbackRequest} from '../lib/request-origin.js';
 const id=z.string().uuid();
 export function createDeliveryActionsRoutes(service:DeliveryService):Router {
   const router=Router(),actions=new DeliveryActions(service);router.use(authenticate);
@@ -20,8 +21,8 @@ export function createDeliveryActionsRoutes(service:DeliveryService):Router {
     return actions.reconcile(...scope(req),input.expectedCommit,input.idempotencyKey);
   }));
   router.post('/projects/:projectId/runs/:runId/pull-request',handle(async req=>{
-    const address=req.socket.remoteAddress;
-    if(!req.secure&&!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(address??''))throw new CollaborationError(403,'SECURE_GITHUB_CREDENTIAL_TRANSPORT_REQUIRED');
+    // A proxied request must have arrived over TLS; only a direct loopback call may use plain HTTP.
+    if(!req.secure&&!isDirectLoopbackRequest(req))throw new CollaborationError(403,'SECURE_GITHUB_CREDENTIAL_TRANSPORT_REQUIRED');
     return actions.pullRequest(...scope(req),draftPullRequestInput.parse(req.body));
   }));
   return router;

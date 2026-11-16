@@ -18,6 +18,7 @@ import { AuthInviteRepository } from "../db/repositories/auth-invite-repository.
 import type { User, UserRepository } from "../db/repositories/user-repository.js";
 import type { Database } from "../db/types.js";
 import { createRateLimiter } from "../middleware/rate-limit.js";
+import { isDirectLoopbackRequest } from "../lib/request-origin.js";
 import { redactSensitiveErrorMessage } from "../lib/redaction.js";
 import type { LocalAccountRecovery } from "../services/local-account-recovery.js";
 
@@ -364,9 +365,13 @@ async function respondWithCredentials(
       userAgent
     });
     token = sessionToken;
+    // `req.secure` is true for direct TLS and, with FORGEBADGER_TRUST_PROXY,
+    // for requests a local HTTPS reverse proxy forwarded. Plain loopback HTTP
+    // keeps working without the flag.
     res.cookie(SESSION_COOKIE_NAME, token, {
       httpOnly: true,
       sameSite: "strict",
+      secure: req.secure,
       path: "/",
       maxAge: SESSION_ABSOLUTE_TTL_MS
     });
@@ -382,14 +387,6 @@ async function respondWithCredentials(
 
 function clearSessionCookie(res: Response): void {
   res.clearCookie(SESSION_COOKIE_NAME, { httpOnly: true, sameSite: "strict", path: "/" });
-}
-
-function isDirectLoopbackRequest(req: Request): boolean {
-  if (req.headers.forwarded || req.headers["x-forwarded-for"] || req.headers["x-real-ip"]) {
-    return false;
-  }
-  const address = req.socket.remoteAddress?.toLowerCase();
-  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
 }
 
 function toPublicUser(user: User) {
