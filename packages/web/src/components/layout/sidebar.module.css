@@ -1,0 +1,43 @@
+/* Reference palette, deepened on light surfaces for >= 3:1 icon contrast.
+   Scoped to navigation so other theme accents keep their existing palette. */
+.navigation {
+  --nav-icon-neutral: #0d0d0d;
+  --nav-icon-red: #db292f;
+  --nav-icon-orange: #c94e0b;
+  --nav-icon-yellow: #906500;
+  --nav-icon-green: #008535;
+  --nav-icon-blue: #006cdf;
+  --nav-icon-purple: #8338e8;
+  --nav-icon-pink: #c92e81;
+}
+
+:global(.dark) .navigation {
+  --nav-icon-neutral: #e6e6e8;
+  --nav-icon-red: #fa423e;
+  --nav-icon-orange: #fc6a21;
+  --nav-icon-yellow: #ffc300;
+  --nav-icon-green: #06b84c;
+  --nav-icon-blue: #0285ff;
+  --nav-icon-purple: #a16aff;
+  --nav-icon-pink: #ff66ad;
+}
+
+.neutral { color: var(--nav-icon-neutral); }
+.red { color: var(--nav-icon-red); }
+.orange { color: var(--nav-icon-orange); }
+.yellow { color: var(--nav-icon-yellow); }
+.green { color: var(--nav-icon-green); }
+.blue { color: var(--nav-icon-blue); }
+.purple { color: var(--nav-icon-purple); }
+.pink { color: var(--nav-icon-pink); }
+
+@media (forced-colors: active) {
+  .navigation svg {
+    color: LinkText;
+  }
+
+  .navigation [aria-current="page"] {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+}

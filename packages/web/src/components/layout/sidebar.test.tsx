@@ -79,7 +79,7 @@ describe("Sidebar mobile trigger", () => {
     renderSidebar();
 
     const groupLabel = screen.getByText("工作区");
-    expect(groupLabel.className).toContain("text-muted-foreground/70");
+    expect(groupLabel.className.split(/\s+/)).toContain("text-muted-foreground");
     expect(groupLabel.className).not.toContain("text-muted-foreground/50");
   });
 
