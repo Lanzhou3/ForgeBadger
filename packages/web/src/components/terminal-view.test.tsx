@@ -3,6 +3,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TERMINAL_FONT, setTerminalFont } from "@/lib/terminal-font";
+import { getColorThemeState, setColorTheme } from "@/lib/color-theme";
+import { getColorModeState, setColorMode } from "@/lib/color-mode";
+import { getTerminalPalette } from "@/lib/terminal-theme";
 import { TerminalView } from "./terminal-view";
 
 const fitMock = vi.hoisted(() => vi.fn());
@@ -29,7 +32,7 @@ const terminal = vi.hoisted(() => ({
     },
   },
 }));
-vi.mock("@xterm/xterm", () => ({ Terminal: class { constructor() { return terminal; } } }));
+vi.mock("@xterm/xterm", () => ({ Terminal: class { constructor(options: Record<string, unknown> = {}) { terminal.options = { ...options }; return terminal; } } }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { fit() { fitMock(); } } }));
 vi.mock("@/hooks/use-terminal-writer", () => ({ useTerminalWriter: () => ({ readOnly: writerState.readOnly, refresh: vi.fn() }) }));
 vi.mock("@/hooks/use-language", () => ({ useLanguage: () => ({ t: (key: string) => key, language: "zh-CN", useUiLocale: () => "en-US" })}));
@@ -82,6 +85,29 @@ async function start(aiTool?: string) {
   act(() => socket.dispatchEvent(new Event("open")));
   return { view, socket };
 }
+
+it("switches a connected terminal between native palettes without reconnecting", async () => {
+  const previousThemes = getColorThemeState();
+  const previousMode = getColorModeState().mode;
+  try {
+    setColorTheme("forgebadger-dark");
+    setColorMode("dark");
+    await start();
+    expect(terminal.options.theme).toEqual(getTerminalPalette("dark", "forgebadger-dark"));
+    act(() => {
+      setColorTheme("forgebadger-light");
+      setColorMode("light");
+    });
+    expect(terminal.options.theme).toEqual(getTerminalPalette("light", "forgebadger-light"));
+    expect(Socket.instances).toHaveLength(1);
+  } finally {
+    act(() => {
+      setColorTheme(previousThemes.dark);
+      setColorTheme(previousThemes.light);
+      setColorMode(previousMode);
+    });
+  }
+});
 it("sends the full trackpad distance to Codex's alternate-screen transcript", async () => {
   // Arrange
   await start("codex");

@@ -107,7 +107,7 @@ export function AdapterSelect({
 
   return (
     <Select
-      value={value || undefined}
+      value={value}
       onValueChange={(next) => onValueChange(next as RuntimeAdapterId)}
       disabled={disabled || isLoading}
     >

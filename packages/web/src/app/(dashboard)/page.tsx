@@ -45,6 +45,7 @@ import {
 import { useLanguage } from "@/hooks/use-language";
 import { useDashboardCopy, dashboardHealthDetail } from "@/components/dashboard/dashboard-copy";
 import { cn } from "@/lib/utils";
+import { HUE_CLASSES, type HueId } from "@/lib/hues";
 
 export default function DashboardPage() {
   const { t, language } = useLanguage();
@@ -115,12 +116,13 @@ export default function DashboardPage() {
 
   // A failed summary query must not masquerade as "everything is zero".
   const statsUnavailable = dashboardQuery.isError;
-  const stats: { label: string; value: number | string; sub?: string; icon: typeof FolderOpen; href: string }[] = [
+  const stats: { label: string; value: number | string; sub?: string; icon: typeof FolderOpen; href: string; hue: HueId }[] = [
     {
       label: t("nav.projects"),
       value: dashboardStats?.projects ?? (statsUnavailable ? "—" : 0),
       icon: FolderOpen,
       href: "/projects",
+      hue: "sky",
     },
     {
       label: t("nav.sessions"),
@@ -128,12 +130,14 @@ export default function DashboardPage() {
       sub: t("dashboard.runningNow").replace("{count}", String(runningCount)),
       icon: TerminalSquare,
       href: "/sessions",
+      hue: "mint",
     },
     {
       label: t("nav.skills"),
       value: dashboardStats?.skills ?? (statsUnavailable ? "—" : 0),
       icon: Wrench,
       href: "/skills",
+      hue: "gold",
     },
   ];
 
@@ -283,9 +287,9 @@ export default function DashboardPage() {
             data-motion="dashboard-stat"
             className="group"
           >
-            <Card className="h-full transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-brand/40 group-hover:shadow-lg group-hover:shadow-brand/5">
+            <Card className={cn("h-full transition-all duration-200 group-hover:-translate-y-0.5 group-hover:shadow-lg", HUE_CLASSES[stat.hue].hoverBorder)}>
               <CardContent className="flex items-center gap-3 p-4">
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+                <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg", HUE_CLASSES[stat.hue].tile)}>
                   <stat.icon className="size-4" />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -297,7 +301,7 @@ export default function DashboardPage() {
                     {stat.sub ? <span className="text-muted-foreground/70"> · {stat.sub}</span> : null}
                   </div>
                 </div>
-                <ArrowUpRight className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-brand" />
+                <ArrowUpRight className={cn("size-4 shrink-0 text-muted-foreground/30 transition-colors", HUE_CLASSES[stat.hue].hoverText)} />
               </CardContent>
             </Card>
           </Link>
@@ -323,7 +327,7 @@ export default function DashboardPage() {
                   aria-valuenow={readinessProgress}
                 >
                   <div
-                    className="h-full rounded-full bg-brand transition-all duration-500"
+                    className="h-full rounded-full bg-linear-to-r from-brand to-brand-accent transition-all duration-500"
                     style={{ width: `${readinessProgress}%` }}
                   />
                 </div>

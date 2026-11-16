@@ -1,4 +1,4 @@
-import type { ColorThemeId } from "./color-theme";
+import { COLOR_THEMES, DEFAULT_COLOR_THEMES, type ColorThemeId } from "./color-theme";
 import type { ResolvedColorMode } from "./color-mode";
 
 export interface TerminalPalette {
@@ -26,6 +26,52 @@ export interface TerminalPalette {
 }
 
 export const TERMINAL_PALETTES: Record<ColorThemeId, TerminalPalette> = {
+  "forgebadger-dark": {
+    background: "#161617",
+    foreground: "#e6e6e8",
+    cursor: "#2b95ff",
+    cursorAccent: "#161617",
+    selectionBackground: "rgba(1, 133, 255, 0.28)",
+    black: "#28282b",
+    red: "#f47a86",
+    green: "#7ad48e",
+    yellow: "#f0c96a",
+    blue: "#4aa3ff",
+    magenta: "#c9a2f0",
+    cyan: "#5fd0c4",
+    white: "#c8c8cc",
+    brightBlack: "#85858c",
+    brightRed: "#f899a2",
+    brightGreen: "#9ee2ae",
+    brightYellow: "#f6da98",
+    brightBlue: "#86c0ff",
+    brightMagenta: "#dcc2f6",
+    brightCyan: "#8ddfd6",
+    brightWhite: "#f4f4f5",
+  },
+  "forgebadger-light": {
+    background: "#fafafa",
+    foreground: "#18181b",
+    cursor: "#0185FF",
+    cursorAccent: "#fafafa",
+    selectionBackground: "rgba(1, 133, 255, 0.18)",
+    black: "#18181b",
+    red: "#c22a44",
+    green: "#1b7638",
+    yellow: "#8a6400",
+    blue: "#0168d6",
+    magenta: "#8e3cb8",
+    cyan: "#0b766c",
+    white: "#5f5f66",
+    brightBlack: "#6b6b72",
+    brightRed: "#a8203a",
+    brightGreen: "#13652d",
+    brightYellow: "#775600",
+    brightBlue: "#1555b0",
+    brightMagenta: "#7a2fa0",
+    brightCyan: "#07655c",
+    brightWhite: "#3f3f46",
+  },
   "one-dark": {
     background: "#282c34",
     foreground: "#abb2bf",
@@ -120,16 +166,10 @@ export const TERMINAL_PALETTES: Record<ColorThemeId, TerminalPalette> = {
   },
 };
 
-const DEFAULT_THEMES: Record<ResolvedColorMode, ColorThemeId> = {
-  dark: "one-dark",
-  light: "github-light",
-};
-
 export function getTerminalPalette(
   mode: ResolvedColorMode,
-  themeId: ColorThemeId = DEFAULT_THEMES[mode]
+  themeId: ColorThemeId = DEFAULT_COLOR_THEMES[mode]
 ): TerminalPalette {
-  const theme = TERMINAL_PALETTES[themeId];
-  const isDark = themeId === "one-dark" || themeId === "tokyo-night";
-  return (mode === "dark") === isDark ? theme : TERMINAL_PALETTES[DEFAULT_THEMES[mode]];
+  const matchesMode = COLOR_THEMES.some((theme) => theme.id === themeId && theme.mode === mode);
+  return TERMINAL_PALETTES[matchesMode ? themeId : DEFAULT_COLOR_THEMES[mode]];
 }

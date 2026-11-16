@@ -1,9 +1,8 @@
 import type { BrandStorage } from "./brand-storage";
 import type { ResolvedColorMode } from "./color-mode";
-import type { TranslationKey } from "./i18n";
 
-export type DarkColorThemeId = "one-dark" | "tokyo-night";
-export type LightColorThemeId = "github-light" | "solarized-light";
+export type DarkColorThemeId = "forgebadger-dark" | "one-dark" | "tokyo-night";
+export type LightColorThemeId = "forgebadger-light" | "github-light" | "solarized-light";
 export type ColorThemeId = DarkColorThemeId | LightColorThemeId;
 
 export interface ColorThemePreview {
@@ -22,13 +21,12 @@ export interface ColorTheme {
   id: ColorThemeId;
   name: string;
   mode: ResolvedColorMode;
-  descriptionKey: TranslationKey;
   preview: ColorThemePreview;
 }
 
 export const DEFAULT_COLOR_THEMES = {
-  dark: "one-dark",
-  light: "github-light",
+  dark: "forgebadger-dark",
+  light: "forgebadger-light",
 } as const;
 
 export const COLOR_THEME_STORAGE_KEYS = {
@@ -38,10 +36,25 @@ export const COLOR_THEME_STORAGE_KEYS = {
 
 export const COLOR_THEMES = [
   {
+    id: "forgebadger-dark",
+    name: "ForgeBadger Dark",
+    mode: "dark",
+    preview: {
+      background: "#161617",
+      sidebar: "#111112",
+      card: "#1c1c1e",
+      foreground: "#e6e6e8",
+      muted: "#a1a1a8",
+      accent: "#2b95ff",
+      purple: "#FB413E",
+      green: "#7ad48e",
+      yellow: "#f0c96a",
+    },
+  },
+  {
     id: "one-dark",
     name: "One Dark",
     mode: "dark",
-    descriptionKey: "settings.themeOneDarkDescription",
     preview: {
       background: "#282c34",
       sidebar: "#21252b",
@@ -58,7 +71,6 @@ export const COLOR_THEMES = [
     id: "tokyo-night",
     name: "Tokyo Night",
     mode: "dark",
-    descriptionKey: "settings.themeTokyoNightDescription",
     preview: {
       background: "#1a1b26",
       sidebar: "#16161e",
@@ -72,10 +84,25 @@ export const COLOR_THEMES = [
     },
   },
   {
+    id: "forgebadger-light",
+    name: "ForgeBadger Light",
+    mode: "light",
+    preview: {
+      background: "#fafafa",
+      sidebar: "#f4f4f5",
+      card: "#ffffff",
+      foreground: "#18181b",
+      muted: "#5f5f66",
+      accent: "#0185FF",
+      purple: "#FB413E",
+      green: "#1b7638",
+      yellow: "#c07a00",
+    },
+  },
+  {
     id: "github-light",
     name: "GitHub Light",
     mode: "light",
-    descriptionKey: "settings.themeGithubLightDescription",
     preview: {
       background: "#f6f8fa",
       sidebar: "#f6f8fa",
@@ -92,7 +119,6 @@ export const COLOR_THEMES = [
     id: "solarized-light",
     name: "Solarized Light",
     mode: "light",
-    descriptionKey: "settings.themeSolarizedLightDescription",
     preview: {
       background: "#eee8d5",
       sidebar: "#eee8d5",
@@ -149,11 +175,15 @@ export function readStoredColorTheme(
 ): ColorThemeId;
 export function readStoredColorTheme(
   mode: ResolvedColorMode,
-  storage: BrandStorage = window.localStorage
+  storage?: BrandStorage
 ): ColorThemeId {
-  const stored = storage.getItem(COLOR_THEME_STORAGE_KEYS[mode]);
-  const theme = COLOR_THEMES.find((candidate) => candidate.id === stored);
-  return theme?.mode === mode ? theme.id : DEFAULT_COLOR_THEMES[mode];
+  try {
+    const stored = (storage ?? window.localStorage).getItem(COLOR_THEME_STORAGE_KEYS[mode]);
+    const theme = COLOR_THEMES.find((candidate) => candidate.id === stored);
+    return theme?.mode === mode ? theme.id : DEFAULT_COLOR_THEMES[mode];
+  } catch {
+    return DEFAULT_COLOR_THEMES[mode];
+  }
 }
 
 function applyThemeAttributes(state: ColorThemeState): void {
@@ -180,7 +210,11 @@ export function setColorTheme(id: ColorThemeId): ColorThemeId {
     next.light = theme.id as LightColorThemeId;
   }
   colorThemeState = next;
-  window.localStorage.setItem(COLOR_THEME_STORAGE_KEYS[theme.mode], theme.id);
+  try {
+    window.localStorage.setItem(COLOR_THEME_STORAGE_KEYS[theme.mode], theme.id);
+  } catch {
+    // A blocked preference store must not prevent changing the current theme.
+  }
   applyThemeAttributes(next);
   notify();
   return theme.id;

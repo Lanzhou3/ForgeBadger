@@ -2,8 +2,7 @@
 
 import { Braces, Check, FileCode2, Moon, Palette, Sun, TerminalSquare } from "lucide-react";
 
-import { SettingsCardHeader } from "@/components/settings/ui";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { useColorMode } from "@/hooks/use-color-mode";
 import { useColorTheme } from "@/hooks/use-color-theme";
@@ -95,7 +94,7 @@ function ThemeChoice({ theme, preferred, active, followsSystem }: {
       data-theme-choice={theme.id}
       onClick={selectTheme}
       className={cn(
-        "group rounded-xl border p-2.5 text-left outline-none transition-[border-color,box-shadow,background-color] duration-150 focus-visible:ring-2 focus-visible:ring-ring/60",
+        "group rounded-lg border p-2.5 text-left outline-none transition-[border-color,box-shadow,background-color] duration-150 focus-visible:ring-2 focus-visible:ring-ring",
         active
           ? "border-brand/70 bg-brand/[0.06] shadow-[0_0_0_1px_hsl(var(--brand)/0.16)]"
           : "border-border bg-card hover:border-brand/35 hover:bg-muted/30"
@@ -105,7 +104,6 @@ function ThemeChoice({ theme, preferred, active, followsSystem }: {
       <div className="flex items-start gap-2 px-0.5 pb-0.5 pt-3">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-foreground">{theme.name}</div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">{t(theme.descriptionKey)}</p>
         </div>
         {preferred && !active ? (
           <span className="mt-0.5 shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
@@ -143,21 +141,20 @@ export function ColorThemeSettings() {
 
   return (
     <Card className="forgebadger-animate-in" style={{ animationDelay: "40ms" }}>
-      <SettingsCardHeader
-        icon={<Palette className="size-4" />}
-        title={t("settings.theme")}
-        description={t("settings.themeDescription")}
-        action={(
-          <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-            {t("settings.colorModeSystem")}
-            <Switch
-              aria-label={t("settings.colorModeSystem")}
-              checked={followsSystem}
-              onCheckedChange={(checked) => setColorMode(checked ? "system" : resolved)}
-            />
-          </label>
-        )}
-      />
+      <CardHeader className="flex items-center justify-between gap-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          <Palette className="size-4 text-brand" />
+          {t("settings.theme")}
+        </h3>
+        <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          {t("settings.colorModeSystem")}
+          <Switch
+            aria-label={t("settings.colorModeSystem")}
+            checked={followsSystem}
+            onCheckedChange={(checked) => setColorMode(checked ? "system" : resolved)}
+          />
+        </label>
+      </CardHeader>
       <CardContent className="space-y-6">
         {groups.map((group) => (
           <fieldset key={group.mode}>
@@ -165,7 +162,7 @@ export function ColorThemeSettings() {
               <group.icon className="size-3.5" strokeWidth={1.8} />
               {t(followsSystem ? group.systemLabelKey : group.labelKey)}
             </legend>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
               {COLOR_THEMES.filter((theme) => theme.mode === group.mode).map((theme) => {
                 const preferred = selected[group.mode] === theme.id;
                 return (

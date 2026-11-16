@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import type { ReactNode } from "react";
 import { Providers } from "./providers";
+import { APPEARANCE_INIT_SCRIPT } from "@/lib/appearance-init";
 
 import "@xterm/xterm/css/xterm.css";
 import "./globals.css";
@@ -11,6 +12,8 @@ import "./globals.css";
 const brandBannerUrl =
   "https://raw.githubusercontent.com/Lanzhou3/ForgeBadger/main/packages/web/public/brand/forgebadger-banner.png";
 const brandDescription = "Local-first workspace for your AI coding tools";
+
+export const viewport: Viewport = { colorScheme: "light dark" };
 
 export const metadata: Metadata = {
   title: "ForgeBadger",
@@ -43,7 +46,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <Script src="/forgebadger-runtime.js" strategy="beforeInteractive" />
         <Script id="appearance-theme" strategy="beforeInteractive">
-          {`try{var r=document.documentElement;var m=localStorage.getItem("forgebadger.color-mode");var d=m==="dark"||(m!=="light"&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches);var dt=localStorage.getItem("forgebadger.dark-theme");var lt=localStorage.getItem("forgebadger.light-theme");r.dataset.darkTheme=dt==="tokyo-night"?"tokyo-night":"one-dark";r.dataset.lightTheme=lt==="solarized-light"?"solarized-light":"github-light";if(d){r.classList.add("dark");r.style.colorScheme="dark";}else{r.style.colorScheme="light";}}catch(e){}`}
+          {APPEARANCE_INIT_SCRIPT}
         </Script>
         <Providers>{children}</Providers>
       </body>

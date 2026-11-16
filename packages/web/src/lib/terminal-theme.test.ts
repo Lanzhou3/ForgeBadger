@@ -56,7 +56,7 @@ function contrastRatio(first: string, second: string): number {
 }
 
 describe("terminal palettes", () => {
-  it("covers every xterm surface + ANSI 16 slot for all four themes", () => {
+  it("covers every xterm surface + ANSI 16 slot for every theme", () => {
     for (const theme of COLOR_THEMES) {
       const palette = TERMINAL_PALETTES[theme.id];
       for (const key of REQUIRED_KEYS) {
@@ -67,10 +67,12 @@ describe("terminal palettes", () => {
     }
   });
 
-  it("uses the One Dark palette for dark mode by default", () => {
-    expect(getTerminalPalette("dark").background).toBe("#282c34");
-    expect(getTerminalPalette("dark").foreground).toBe("#abb2bf");
-    expect(getTerminalPalette("dark").cursor).toBe("#61afef");
+  it("uses the native pair by default", () => {
+    expect(getTerminalPalette("dark").background).toBe("#161617");
+    expect(getTerminalPalette("dark").foreground).toBe("#e6e6e8");
+    expect(getTerminalPalette("dark").cursor).toBe("#2b95ff");
+    expect(getTerminalPalette("light").background).toBe("#fafafa");
+    expect(getTerminalPalette("light").cursor).toBe("#0185FF");
   });
 
   it("selects the requested named palette independently in each mode", () => {
@@ -81,14 +83,23 @@ describe("terminal palettes", () => {
   });
 
   it("does not apply a light palette to a dark terminal or vice versa", () => {
-    expect(getTerminalPalette("dark", "github-light").background).toBe("#282c34");
-    expect(getTerminalPalette("light", "tokyo-night").background).toBe("#f6f8fa");
+    expect(getTerminalPalette("dark", "github-light").background).toBe("#161617");
+    expect(getTerminalPalette("light", "tokyo-night").background).toBe("#fafafa");
   });
 
   it("keeps readable foreground contrast across light and dark themes", () => {
     for (const theme of COLOR_THEMES) {
       const palette = getTerminalPalette(theme.mode, theme.id);
       expect(contrastRatio(palette.background, palette.foreground), theme.id).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("keeps native terminal status colors readable on their backgrounds", () => {
+    for (const id of ["forgebadger-dark", "forgebadger-light"] as const) {
+      const palette = TERMINAL_PALETTES[id];
+      for (const key of ["red", "green", "yellow", "blue", "magenta", "cyan", "brightBlack"] as const) {
+        expect(contrastRatio(palette.background, palette[key]), `${id}.${key}`).toBeGreaterThanOrEqual(4.5);
+      }
     }
   });
 

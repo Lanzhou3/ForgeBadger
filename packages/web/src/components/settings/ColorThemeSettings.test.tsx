@@ -26,13 +26,13 @@ describe("ColorThemeSettings", () => {
     render(<ColorThemeSettings />);
     expect(screen.queryByRole("button", { name: "settings.colorModeLight" })).toBeNull();
     expect(screen.queryByRole("button", { name: "settings.colorModeDark" })).toBeNull();
-    expect(screen.getByRole("button", { name: "One Dark" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "ForgeBadger Dark" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "GitHub Light" }).getAttribute("aria-pressed")).toBe("false");
 
-    fireEvent.click(screen.getByRole("button", { name: "Solarized Light" }));
+    fireEvent.click(screen.getByRole("button", { name: "ForgeBadger Light" }));
 
     expect(getColorModeState()).toEqual({ mode: "light", resolved: "light" });
-    expect(screen.getByRole("button", { name: "Solarized Light" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "ForgeBadger Light" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getAllByRole("button", { pressed: true })).toHaveLength(1);
   });
 

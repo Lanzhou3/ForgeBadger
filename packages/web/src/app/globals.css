@@ -48,12 +48,22 @@
   --color-warning: hsl(var(--warning));
   --color-brand: hsl(var(--brand));
   --color-brand-foreground: hsl(var(--brand-foreground));
+  --color-brand-accent: hsl(var(--brand-accent));
+  --color-brand-accent-foreground: hsl(var(--brand-accent-foreground));
   --color-surface-raised: hsl(var(--surface-raised));
   --color-sidebar: hsl(var(--sidebar));
   --color-terminal: hsl(var(--terminal-bg));
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
+  --color-control: var(--control-background);
+  --color-control-hover: var(--control-hover-background);
   --color-ring: hsl(var(--ring));
+  --color-hue-iris: hsl(var(--hue-iris));
+  --color-hue-sky: hsl(var(--hue-sky));
+  --color-hue-mint: hsl(var(--hue-mint));
+  --color-hue-gold: hsl(var(--hue-gold));
+  --color-hue-coral: hsl(var(--hue-coral));
+  --color-hue-rose: hsl(var(--hue-rose));
   --shadow-card:
     0 1px 2px hsl(var(--shadow-color) / 0.08), 0 1px 3px hsl(var(--shadow-color) / 0.06);
   --shadow-raised:
@@ -70,6 +80,58 @@
 @layer base {
   :root {
     color-scheme: light;
+    accent-color: hsl(var(--brand));
+    caret-color: hsl(var(--brand-accent));
+    /* ForgeBadger Light: neutral zinc paper, ink text, a #0185FF blue primary,
+       a #FB413E spark accent (--brand-accent, decorative only: caret, progress,
+       unread markers, terminal cursor) and a six-hue spectrum (--hue-*) for section identity. Text tokens
+       hold >= 4.5:1 on background/card/muted; hues hold >= 3:1 for icons. */
+    --control-background: #ffffff;
+    --control-hover-background: hsl(var(--muted));
+    --background: 0 0% 98%;
+    --foreground: 240 5.9% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 5.9% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 5.9% 10%;
+    --primary: 208.8 100% 50.2%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 7.7% 94.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 7.7% 94.9%;
+    --muted-foreground: 240 3.6% 38.6%;
+    --accent: 240 7.7% 94.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 349.7 64.4% 46.3%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 139.1 62.8% 28.4%;
+    --warning: 26.4 100% 32.9%;
+    --border: 240 5.9% 90%;
+    --input: 240 5% 64.9%;
+    --ring: 208.8 100% 50.2%;
+    --brand: 208.8 100% 50.2%;
+    --brand-foreground: 0 0% 100%;
+    --surface-raised: 0 0% 100%;
+    --sidebar: 240 4.8% 95.9%;
+    --terminal-bg: 0 0% 98%;
+    --shadow-color: 240 5.9% 10%;
+    --hue-iris: 250.7 64% 58.6%;
+    --hue-sky: 215 75.1% 45.7%;
+    --hue-mint: 139.6 63.3% 33.1%;
+    --hue-gold: 38.1 100% 37.6%;
+    --hue-coral: 14.1 72.9% 50.8%;
+    --hue-rose: 331.7 64.9% 49.2%;
+    --brand-accent: 1 95.9% 61.4%;
+    --brand-accent-foreground: 0 0% 100%;
+    --radius: 0.625rem;
+    --forgebadger-motion-fast: 120ms;
+    --forgebadger-motion-base: 180ms;
+    --forgebadger-motion-slow: 260ms;
+    --forgebadger-ease-out: cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+
+  :root:not(.dark)[data-light-theme="github-light"] {
+    --control-background: transparent;
     --background: 210 28.6% 97.3%;
     --foreground: 213 12.7% 13.9%;
     --card: 0 0% 100%;
@@ -97,28 +159,32 @@
     --sidebar: 210 28.6% 97.3%;
     --terminal-bg: 210 28.6% 97.3%;
     --shadow-color: 210 20% 25%;
-    --radius: 0.625rem;
-    --forgebadger-motion-fast: 120ms;
-    --forgebadger-motion-base: 180ms;
-    --forgebadger-motion-slow: 260ms;
-    --forgebadger-ease-out: cubic-bezier(0.25, 0.1, 0.25, 1);
+    --hue-iris: 261 69.1% 59.4%;
+    --hue-sky: 212.4 92.1% 44.5%;
+    --hue-mint: 137.2 66% 30%;
+    --hue-gold: 40.1 100% 30.2%;
+    --hue-coral: 24.3 100% 36.9%;
+    --hue-rose: 324.2 54% 48.6%;
+    --brand-accent: 355.8 71.8% 47.3%;
+    --brand-accent-foreground: 0 0% 100%;
   }
 
-  :root[data-light-theme="solarized-light"] {
+  :root:not(.dark)[data-light-theme="solarized-light"] {
+    --control-background: transparent;
     --background: 46 42.4% 88.4%;
-    --foreground: 194 14.1% 40.2%;
+    --foreground: 194 14.1% 33.5%;
     --card: 44 86.7% 94.1%;
-    --card-foreground: 194 14.1% 40.2%;
+    --card-foreground: 194 14.1% 33.5%;
     --popover: 44 86.7% 94.1%;
-    --popover-foreground: 194 14.1% 40.2%;
+    --popover-foreground: 194 14.1% 33.5%;
     --primary: 205 69.4% 48.6%;
     --primary-foreground: 44 86.7% 94.1%;
     --secondary: 44 40.5% 85.5%;
-    --secondary-foreground: 194 14.1% 40.2%;
+    --secondary-foreground: 194 14.1% 33.5%;
     --muted: 44 40.5% 85.5%;
-    --muted-foreground: 196 12.9% 45.5%;
+    --muted-foreground: 196 12.9% 38%;
     --accent: 44 40.5% 85.5%;
-    --accent-foreground: 194 14.1% 40.2%;
+    --accent-foreground: 194 14.1% 33.5%;
     --destructive: 1 71.2% 52.4%;
     --destructive-foreground: 44 86.7% 94.1%;
     --success: 68 100% 30%;
@@ -132,9 +198,63 @@
     --sidebar: 46 42.4% 88.4%;
     --terminal-bg: 44 86.7% 94.1%;
     --shadow-color: 45 30% 25%;
+    --hue-iris: 236.6 42.7% 59.6%;
+    --hue-sky: 204.8 69.4% 48.6%;
+    --hue-mint: 67.8 100% 30%;
+    --hue-gold: 45.4 100% 35.5%;
+    --hue-coral: 17.6 80.4% 44.1%;
+    --hue-rose: 331 64.1% 52%;
+    --brand-accent: 1 71.2% 52.4%;
+    --brand-accent-foreground: 0 0% 100%;
   }
 
   .dark {
+    /* ForgeBadger Dark: untinted graphite surfaces stepped by lightness,
+       soft (not pure) white text, the #0185FF primary with the #FB413E spark
+       accent, and a softened six-hue
+       spectrum shared with the terminal ANSI palette. */
+    --control-background: #131314;
+    --control-hover-background: hsl(var(--muted));
+    --background: 240 2.2% 8.8%;
+    --foreground: 240 4.2% 90.6%;
+    --card: 240 3.4% 11.4%;
+    --card-foreground: 240 4.2% 90.6%;
+    --popover: 240 2.8% 14.1%;
+    --popover-foreground: 240 4.2% 90.6%;
+    --primary: 208.8 100% 50.2%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 3.6% 16.3%;
+    --secondary-foreground: 240 4.2% 90.6%;
+    --muted: 240 3.6% 16.3%;
+    --muted-foreground: 240 3.9% 64.5%;
+    --accent: 240 3.6% 16.3%;
+    --accent-foreground: 240 4.2% 90.6%;
+    --destructive: 354.1 84.7% 71.8%;
+    --destructive-foreground: 348.8 61.5% 10.2%;
+    --success: 133.3 51.1% 65.5%;
+    --warning: 42.5 81.7% 67.8%;
+    --border: 240 4.1% 19.2%;
+    --input: 240 3.8% 31%;
+    --ring: 208.8 100% 50.2%;
+    --brand: 208.8 100% 50.2%;
+    --brand-foreground: 0 0% 100%;
+    --surface-raised: 240 2.8% 14.1%;
+    --sidebar: 240 2.9% 6.9%;
+    --terminal-bg: 240 2.2% 8.8%;
+    --shadow-color: 240 9.1% 2.2%;
+    --hue-iris: 251.5 81.7% 78.6%;
+    --hue-sky: 209.5 81.9% 71.8%;
+    --hue-mint: 133.3 51.1% 65.5%;
+    --hue-gold: 42.5 81.7% 67.8%;
+    --hue-coral: 17.9 85.8% 72.4%;
+    --hue-rose: 333.6 76.9% 74.5%;
+    --brand-accent: 1 95.9% 61.4%;
+    --brand-accent-foreground: 0 0% 100%;
+  }
+
+  .dark[data-dark-theme="one-dark"] {
+    --control-background: hsl(var(--input) / 0.3);
+    --control-hover-background: hsl(var(--input) / 0.5);
     --background: 220 13% 18%;
     --foreground: 219 13.5% 71%;
     --card: 219 13.7% 20%;
@@ -146,7 +266,7 @@
     --secondary: 220 15.5% 22.7%;
     --secondary-foreground: 219 13.5% 71%;
     --muted: 220 15.5% 22.7%;
-    --muted-foreground: 220 6.2% 52.7%;
+    --muted-foreground: 220 6.2% 64%;
     --accent: 220 15.5% 22.7%;
     --accent-foreground: 219 13.5% 71%;
     --destructive: 355 65.2% 65.1%;
@@ -162,9 +282,19 @@
     --sidebar: 216 13.2% 14.9%;
     --terminal-bg: 220 13% 18%;
     --shadow-color: 220 30% 3%;
+    --hue-iris: 286.3 59.8% 66.9%;
+    --hue-sky: 207 81.6% 65.9%;
+    --hue-mint: 94.9 38.1% 62%;
+    --hue-gold: 39.1 67.1% 69%;
+    --hue-coral: 29.2 53.8% 61%;
+    --hue-rose: 355.3 65.2% 65.1%;
+    --brand-accent: 355.3 65.2% 65.1%;
+    --brand-accent-foreground: 220 13% 14%;
   }
 
   .dark[data-dark-theme="tokyo-night"] {
+    --control-background: hsl(var(--input) / 0.3);
+    --control-hover-background: hsl(var(--input) / 0.5);
     --background: 235 18.8% 12.5%;
     --foreground: 229 72.6% 85.7%;
     --card: 229 26.2% 16.5%;
@@ -176,7 +306,7 @@
     --secondary: 228 23.4% 21%;
     --secondary-foreground: 229 72.6% 85.7%;
     --muted: 228 23.4% 21%;
-    --muted-foreground: 229 21.8% 56.9%;
+    --muted-foreground: 229 21.8% 65%;
     --accent: 228 23.4% 21%;
     --accent-foreground: 229 72.6% 85.7%;
     --destructive: 349 89% 71.6%;
@@ -192,6 +322,14 @@
     --sidebar: 240 15.4% 10.2%;
     --terminal-bg: 235 18.8% 12.5%;
     --shadow-color: 240 40% 3%;
+    --hue-iris: 261.3 85.3% 78.6%;
+    --hue-sky: 220.8 88.7% 72.4%;
+    --hue-mint: 88.8 50.5% 61.2%;
+    --hue-gold: 35.5 65.9% 64.3%;
+    --hue-coral: 22.5 100% 69.6%;
+    --hue-rose: 348.8 89% 71.6%;
+    --brand-accent: 348.8 89% 71.6%;
+    --brand-accent-foreground: 235 18.8% 12.5%;
   }
 
   html.dark {
@@ -199,7 +337,20 @@
   }
 
   ::selection {
+    color: hsl(var(--foreground));
     background: hsl(var(--brand) / 0.28);
+  }
+}
+
+@media (forced-colors: active) {
+  [data-theme-choice][aria-pressed="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  [data-theme-choice]:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 4px;
   }
 }
 

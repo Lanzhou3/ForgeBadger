@@ -41,9 +41,13 @@ export function resolveColorMode(
   return mode;
 }
 
-export function readStoredColorMode(storage: BrandStorage = window.localStorage): ColorMode {
-  const stored = storage.getItem(COLOR_MODE_STORAGE_KEY);
-  return isColorMode(stored) ? stored : DEFAULT_COLOR_MODE;
+export function readStoredColorMode(storage?: BrandStorage): ColorMode {
+  try {
+    const stored = (storage ?? window.localStorage).getItem(COLOR_MODE_STORAGE_KEY);
+    return isColorMode(stored) ? stored : DEFAULT_COLOR_MODE;
+  } catch {
+    return DEFAULT_COLOR_MODE;
+  }
 }
 
 /**
@@ -53,14 +57,18 @@ export function readStoredColorMode(storage: BrandStorage = window.localStorage)
  */
 export function applyColorMode(
   mode: ColorMode,
-  storage: BrandStorage = window.localStorage
+  storage?: BrandStorage
 ): ResolvedColorMode {
   const modeId = isColorMode(mode) ? mode : DEFAULT_COLOR_MODE;
   const resolved = resolveColorMode(modeId);
   const root = document.documentElement;
   root.classList.toggle("dark", resolved === "dark");
   root.style.colorScheme = resolved;
-  storage.setItem(COLOR_MODE_STORAGE_KEY, modeId);
+  try {
+    (storage ?? window.localStorage).setItem(COLOR_MODE_STORAGE_KEY, modeId);
+  } catch {
+    // Keep the current appearance usable when persistence is unavailable.
+  }
   return resolved;
 }
 

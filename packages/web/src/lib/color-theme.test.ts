@@ -22,20 +22,24 @@ describe("color themes", () => {
     initColorThemes();
   });
 
-  it("offers two distinct dark and two distinct light themes", () => {
+  it("offers the native pair alongside the existing editor themes", () => {
     expect(COLOR_THEMES.filter((theme) => theme.mode === "dark").map((theme) => theme.id)).toEqual([
+      "forgebadger-dark",
       "one-dark",
       "tokyo-night",
     ]);
     expect(COLOR_THEMES.filter((theme) => theme.mode === "light").map((theme) => theme.id)).toEqual([
+      "forgebadger-light",
       "github-light",
       "solarized-light",
     ]);
-    expect(new Set(COLOR_THEMES.map((theme) => theme.preview.background)).size).toBe(4);
-    expect(new Set(COLOR_THEMES.map((theme) => theme.preview.accent)).size).toBe(4);
+    expect(new Set(COLOR_THEMES.map((theme) => theme.preview.background)).size).toBe(6);
+    expect(new Set(COLOR_THEMES.map((theme) => theme.preview.accent)).size).toBe(6);
   });
 
   it("validates theme ids and resolves named themes", () => {
+    expect(isColorThemeId("forgebadger-dark")).toBe(true);
+    expect(isColorThemeId("forgebadger-light")).toBe(true);
     expect(isColorThemeId("one-dark")).toBe(true);
     expect(isColorThemeId("tokyo-night")).toBe(true);
     expect(isColorThemeId("github-light")).toBe(true);
@@ -46,14 +50,14 @@ describe("color themes", () => {
   });
 
   it("reads each mode independently and rejects a theme from the other mode", () => {
-    expect(readStoredColorTheme("dark")).toBe("one-dark");
-    expect(readStoredColorTheme("light")).toBe("github-light");
+    expect(readStoredColorTheme("dark")).toBe("forgebadger-dark");
+    expect(readStoredColorTheme("light")).toBe("forgebadger-light");
     window.localStorage.setItem(COLOR_THEME_STORAGE_KEYS.dark, "tokyo-night");
     window.localStorage.setItem(COLOR_THEME_STORAGE_KEYS.light, "solarized-light");
     expect(readStoredColorTheme("dark")).toBe("tokyo-night");
     expect(readStoredColorTheme("light")).toBe("solarized-light");
     window.localStorage.setItem(COLOR_THEME_STORAGE_KEYS.dark, "github-light");
-    expect(readStoredColorTheme("dark")).toBe("one-dark");
+    expect(readStoredColorTheme("dark")).toBe("forgebadger-dark");
   });
 
   it("persists a dark selection without changing the light selection", () => {
