@@ -169,6 +169,9 @@ export class CopilotConversationLog {
       if (this.listRuns(id).some(run => ["pending", "running", "awaiting_approval"].includes(run.status))) {
         throw new AgentError("COPILOT_CONVERSATION_BUSY", "Cancel the active run before deleting this conversation");
       }
+      // A fleet's flagship conversation is the fleet's lead identity; a soft delete would strand the fleet.
+      if (this.db.prepare("SELECT 1 FROM fleets WHERE user_id=? AND conversation_id=? LIMIT 1").get(this.userId, id))
+        throw new AgentError("COPILOT_FLEET_CONVERSATION", "This conversation is a fleet's flagship conversation; it cannot be deleted while the fleet exists");
       // Hiding does not edit or resolve execution evidence. Unknown outcomes
       // and late receipts remain available in the ledger without replay.
       return this.db.prepare("UPDATE copilot_conversations SET status='deleted',updated_at=? WHERE id=? AND user_id=?").run(Date.now(),id,this.userId).changes>0;

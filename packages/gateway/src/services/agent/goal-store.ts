@@ -40,7 +40,11 @@ export interface GoalTaskRow {
   work_item_id: string | null;
   created_at: number; updated_at: number;
 }
-export interface GoalTaskInput { description: string; verifyCommand?: string | undefined; workItemId?: string | undefined }
+export interface GoalTaskInput {
+  description: string; verifyCommand?: string | undefined; workItemId?: string | undefined;
+  /** Fleet scope only (goals reject them at the tool boundary). */
+  details?: string | undefined; fileScope?: string[] | undefined;
+}
 export interface GoalJournalRow { id: string; user_id: string; goal_id: string; run_id: string | null; note: string; created_at: number }
 export interface GoalListRow extends GoalRow { task_total: number; task_passes: number }
 
@@ -242,6 +246,11 @@ export class CopilotGoalStore {
   runningDispatchesForSession(sessionId: string): GoalTaskRow[] {
     return this.db.prepare("SELECT * FROM copilot_goal_tasks WHERE user_id=? AND dispatched_session_id=? AND dispatch_status='running'")
       .all(this.userId, sessionId) as GoalTaskRow[];
+  }
+
+  /** Marks task activity without changing its status (the stagnation counter reads updated_at). */
+  touchTask(goalId: string, taskId: string): void {
+    this.db.prepare('UPDATE copilot_goal_tasks SET updated_at=? WHERE user_id=? AND id=? AND goal_id=?').run(Date.now(), this.userId, taskId, goalId);
   }
 
   listTasks(goalId: string): GoalTaskRow[] {

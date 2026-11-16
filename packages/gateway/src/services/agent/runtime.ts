@@ -10,6 +10,7 @@ import { clearAllProvisionalText } from './provisional-text.js';
 import { publishTaskReports } from './task-reports.js';
 import { attachDispatchSupervisor } from './dispatch-supervisor.js';
 import { attachGoalDriver, sweepStaleGoals } from './goal-driver.js';
+import { attachFleetWorker } from '../fleet/fleet-worker.js';
 /** Gateway-owned recovery pump. Scans users, then uses tenant repositories. */
 export function startCopilotRuntime(deps: AgentStackDeps) {
     // Migration fencing precedes both development recovery and native run recovery.
@@ -19,6 +20,8 @@ export function startCopilotRuntime(deps: AgentStackDeps) {
     const development = startDevelopmentRuntime(deps);
     const taskTracking = attachDispatchSupervisor(deps);
     const goalDriver = attachGoalDriver(deps);
+    // Fleet inbox worker: hooks, wake-ups and its own 5 s recovery pass (timers, dead members, claims).
+    const fleetWorker = attachFleetWorker(deps);
     const control = executionControl(deps.db);
     control.stopped = false;
     const failures = new Map<string, { count: number; retryAt: number }>();
@@ -73,6 +76,7 @@ export function startCopilotRuntime(deps: AgentStackDeps) {
         clearInterval(timer);
         taskTracking.stop();
         goalDriver.stop();
+        fleetWorker.stop();
         await development.stop();
         for (const { controller, stopLease } of control.active.values()) {
             stopLease();

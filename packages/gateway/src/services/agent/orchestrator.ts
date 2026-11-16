@@ -5,7 +5,8 @@ import { streamWithContextRecovery } from './context-recovery.js';
 import { hasNoProgress } from './no-progress.js';
 import { renderRunEnding } from './run-ending.js';
 import { repeatStallDecision, gentleRepeatReminder, detailedRepeatReminder } from './repeat-tool-guard.js';
-import { goalContextMessage } from './goal-context.js';
+import { scopeContextMessage } from '../fleet/fleet-context.js';
+import { scopeKind, workStore } from './work-store.js';
 import { CopilotGoalStore } from './goal-store.js';
 import { evaluateGoalContinuation } from './goal-driver.js';
 import { goalGrantForTool } from './goal-grants.js';
@@ -88,7 +89,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
     }
     // Plane A tool surface: the catalog and the execution-time gate below are
     // projections of one computeToolSurface call.
-    const toolSurface = (input: TurnInput): ToolSurface => computeToolSurface(input, {
+    // A run whose scope id is a fleet sees the fleet catalog (FLEET_TOOLS) and not goal_ask_user.
+    // fleetScope (set at admission) keeps the fleet restrictions even if the fleet row is gone.
+    const toolSurface = (input: TurnInput): ToolSurface => computeToolSurface({ ...input, fleet: input.fleetScope === true || (!!input.goalId && scopeKind(deps.db, input.userId, input.goalId) === 'fleet') }, {
         registry: deps.toolRegistry, hasSessionManager: !!deps.sessionManager, isToolDisabled: deps.isToolDisabled,
         hasMachineRoots: new CopilotMachineRootRepository(deps.db, input.userId).list().length > 0 });
     const allVisibleTools = (input: TurnInput) => toolSurface(input).visible;
@@ -247,7 +250,13 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             // paused it mid-run), stop this run gracefully instead of doing
             // more work under a stale authority.
             if (input.goalId) {
-                const goalStatus = (deps.db.prepare('SELECT status FROM copilot_goals WHERE user_id=? AND id=?').get(input.userId, input.goalId) as { status: string } | undefined)?.status;
+                // Scope-aware: a paused fleet stops its lead run the same way.
+                // A fleet run whose fleet vanished (project deleted → cascade) stops; goals are unchanged.
+                if (input.fleetScope && scopeKind(deps.db, input.userId, input.goalId) !== 'fleet') {
+                    ledger.finish(c, 'stopped', 'fleet_missing');
+                    emit(ledger, c.runId); return;
+                }
+                const goalStatus = workStore(deps.db, input.userId, input.goalId).getGoal(input.goalId)?.status;
                 if (goalStatus && goalStatus !== 'active') {
                     ledger.finish(c, 'stopped', `goal_${goalStatus}`);
                     emit(ledger, c.runId); return;
@@ -317,7 +326,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                     + 'Update only the delegated task. Keep changes minimal and focused on the instructions. '
                     + 'Verify with goal_run_checks before reporting success, and end with a short report: what changed, how it was verified, and any remaining risks.' });
                 if (input.goalId) {
-                    const goalMessage = goalContextMessage(deps.db, input.userId, input.goalId);
+                    const goalMessage = scopeContextMessage(deps.db, input.userId, input.goalId);
                     if (goalMessage) suffixMessages.push({ role: 'user', content: goalMessage });
                 }
                 if (input.projectId) {
@@ -449,6 +458,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         } else if (surface.excluded(tool.name, 'mcp-source')) {
             rejection = "External tools require direct owner authority";
             rejectionLayer = 'mcp-source';
+        } else if (surface.excluded(tool.name, 'fleet-authority')) {
+            rejection = "Fleet flagship runs cannot execute owner-only or external tools";
+            rejectionLayer = 'fleet-authority';
         } else if (input.source === "scheduled" && effect(tool.name) === "write") {
             rejection = "Scheduled runs are read only";
             rejectionLayer = 'scheduled-readonly';
@@ -509,7 +521,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             }
             if (!rejection && goalGrant && tool.risk === "operate") {
                 ledger.commit(c, () => {
-                    new CopilotGoalStore(deps.db, input.userId).appendJournal(grantGoalId!, c.runId, `自动执行 ${tool.name}（授权 ${goalGrant}）`);
+                    workStore(deps.db, input.userId, grantGoalId!).appendJournal(grantGoalId!, c.runId, `自动执行 ${tool.name}（授权 ${goalGrant}）`);
                 });
                 traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'tool_gate', { toolName: tool.name, decision: 'auto_approved', reason: `goal_grant:${goalGrant}` }, step.id);
             }
@@ -648,7 +660,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
             throw new AgentError('COPILOT_TOOL_DISABLED', 'This tool was disabled by its owner.');
         if (surface.excluded(tool.name, 'restricted-mode')
             || (origin.source === 'scheduled' && effect(tool.name) === 'write')
-            || surface.excluded(tool.name, 'mcp-source'))
+            || surface.excluded(tool.name, 'mcp-source') || surface.excluded(tool.name, 'fleet-authority'))
             throw new AgentError('COPILOT_APPROVAL_SCOPE', 'This run cannot execute the requested tool.');
         const raw = parse(pending.inputJson);
         if (!tool.inputSchema.safeParse(raw).success)

@@ -9,6 +9,7 @@ import { redactAgentText } from "./redaction.js";
 import { runDuration, settleApprovalWait } from './approval-clock.js';
 import { traceRunEvent } from './run-trace.js';
 import { PARENT_CHAIN_MAX_DEPTH, parseRunInput } from './run-authorization.js';
+import { scopeKind, workStore } from './work-store.js';
 export interface TurnInput {
     /** Server-derived conversation project scope plus optional channel authority; historical JSON field name, never accepted from HTTP/model JSON. */
     channelScope?: ChannelRunScope;
@@ -23,6 +24,8 @@ export interface TurnInput {
     goalId?: string;
     /** Driver-enqueued goal continuation: starts from the goal state, not the old transcript. */
     goalContinuation?: boolean;
+    /** Set at admission when the scope id is a fleet; a run that loses its fleet mid-way stops. Never accepted from HTTP/model JSON. */
+    fleetScope?: boolean;
     source?: "user" | "reactive" | "scheduled";
     skipUserMessage?: boolean;
     clientRequestId?: string;
@@ -147,7 +150,8 @@ export class CopilotRunLedger {
             if (existing) return existing;
             const digest = requestDigest(input);
             if (input.goalId) {
-                const goal = this.db.prepare('SELECT conversation_id FROM copilot_goals WHERE user_id=? AND id=?').get(this.userId, input.goalId) as { conversation_id: string } | undefined;
+                // Scope id: a goal or a fleet; either way it must belong to this conversation.
+                const goal = workStore(this.db, this.userId, input.goalId).getGoal(input.goalId);
                 if (!goal || goal.conversation_id !== input.conversationId)
                     throw new AgentError("COPILOT_NOT_FOUND", "Goal not found for this conversation");
             }
@@ -155,7 +159,8 @@ export class CopilotRunLedger {
                 throw new AgentError("COPILOT_CONVERSATION_BUSY", "Conversation already has an active run");
             const run = this.log.createRun(input.conversationId, input.modelId ? { model: input.modelId } : {});
             this.db.prepare("UPDATE copilot_runs SET runtime_version=1, input_json=?, source=?, max_steps=?,client_request_id=?,request_digest=? WHERE user_id=? AND id=?")
-                .run(JSON.stringify({ ...input, userText: redactAgentText(input.userText) }), input.source ?? "user", maxSteps,
+                .run(JSON.stringify({ ...input, userText: redactAgentText(input.userText),
+                    ...(input.goalId && scopeKind(this.db, this.userId, input.goalId) === 'fleet' ? { fleetScope: true } : {}) }), input.source ?? "user", maxSteps,
                     input.clientRequestId ?? null, input.clientRequestId ? digest : null, this.userId, run.id);
             if (input.goalId)
                 this.db.prepare("UPDATE copilot_runs SET goal_id=? WHERE user_id=? AND id=?").run(input.goalId, this.userId, run.id);

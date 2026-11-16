@@ -6,7 +6,7 @@ import type { TurnInput } from './run-ledger.js';
  * Plane A of the tool surface: one named, ordered layer computation that both
  * the model-visible catalog and the execution-time gate project from. Layers
  * run retired → scheduled-readonly → restricted-mode → session-runtime →
- * mcp-source → owner-disabled → goal-catalog → context-catalog; each exclusion
+ * mcp-source → fleet-authority → owner-disabled → goal-catalog → context-catalog; each exclusion
  * records its layer so rejection provenance (e.g. the run-trace tool_gate
  * reason) names the plane that closed the tool. The execution gate in
  * orchestrator.toolStep preserves its historical check ORDER — ordering is
@@ -28,7 +28,16 @@ export const MACHINE_ROOT_DEPENDENT_TOOLS = new Set(['machine_search', 'read_mac
 export const SESSION_RUNTIME_TOOLS = new Set(['takeover_session', 'get_session_writer', 'get_session_output', 'start_session', 'stop_session', 'dispatch_task_to_session', 'create_session', 'pm_execute_task_packet', 'terminal_run', 'terminal_open', 'terminal_close']);
 /** Goal self-management and sandbox tools are only visible to runs carrying a goal (or a coding sub-run). */
 export const GOAL_TOOLS = new Set(['goal_add_tasks', 'goal_update_task', 'goal_write_journal', 'goal_ask_user',
-  'goal_file_read', 'goal_file_write', 'goal_file_edit', 'goal_run_checks', 'goal_delegate', 'goal_dispatch_task']);
+  'goal_file_read', 'goal_file_write', 'goal_file_edit', 'goal_run_checks', 'goal_delegate', 'goal_dispatch_task', 'goal_integrate_task',
+  'goal_review_task', 'goal_get_review']);
+/**
+ * Fleet lead tools (tools/fleet.ts): visible only in runs whose scope is a
+ * fleet (ToolSurfaceInput.fleet); each tool also refuses a non-fleet run itself.
+ */
+export const FLEET_TOOLS: ReadonlySet<string> = new Set<string>(['fleet_hold_task', 'fleet_set_timer', 'fleet_cancel_timer',
+  'fleet_write_note', 'fleet_read_note']);
+/** Goal tools a fleet run does not see: a fleet holds one task (fleet_hold_task), never the whole scope. */
+export const FLEET_HIDDEN_GOAL_TOOLS: ReadonlySet<string> = new Set(['goal_ask_user']);
 /** Read-only project task catalog (research sub-runs). */
 export const PROJECT_READS = new Set(['get_project_git_status', 'read_project_diff', 'read_tool_result', 'get_project', 'list_project_files', 'read_project_file', 'search_project_files', 'machine_search', 'read_machine_file', 'machine_tree', 'list_machine_roots', 'verify_retrieval_evidence',
   'project_graph_search', 'project_graph_symbol_detail', 'project_graph_impact', 'project_graph_affected_paths',
@@ -37,7 +46,7 @@ export const PROJECT_READS = new Set(['get_project_git_status', 'read_project_di
  * Coding sub-run surface: the goal sandbox/self tools named by the delegate
  * contract, plus goal_delegate itself (a nested delegate attempt is refused
  * at admission with COPILOT_RESTRICTED_ORIGIN — the parent-chain depth rule).
- * goal_add_tasks / goal_ask_user / goal_dispatch_task stay parent-only.
+ * goal_add_tasks / goal_ask_user / goal_dispatch_task / goal_review_task stay parent-only.
  */
 export const CODING_READS: ReadonlySet<string> = new Set([...PROJECT_READS,
   'goal_file_read', 'goal_file_write', 'goal_file_edit', 'goal_run_checks', 'goal_update_task', 'goal_write_journal', 'goal_delegate']);
@@ -48,10 +57,14 @@ export const CODING_READS: ReadonlySet<string> = new Set([...PROJECT_READS,
  */
 export const CODING_OPERATES: ReadonlySet<string> = new Set(['goal_run_checks']);
 /** Layer names in evaluation order. */
-export const TOOL_SURFACE_LAYERS = ['retired', 'scheduled-readonly', 'restricted-mode', 'session-runtime', 'mcp-source', 'owner-disabled', 'goal-catalog', 'context-catalog'] as const;
+export const TOOL_SURFACE_LAYERS = ['retired', 'scheduled-readonly', 'restricted-mode', 'session-runtime', 'mcp-source', 'fleet-authority', 'owner-disabled', 'goal-catalog', 'context-catalog'] as const;
 export type ToolSurfaceLayer = (typeof TOOL_SURFACE_LAYERS)[number];
 
-export interface ToolSurfaceInput { source?: TurnInput['source']; executionMode?: TurnInput['executionMode']; channelScope?: TurnInput['channelScope']; goalId?: TurnInput['goalId'] }
+export interface ToolSurfaceInput {
+  source?: TurnInput['source']; executionMode?: TurnInput['executionMode']; channelScope?: TurnInput['channelScope']; goalId?: TurnInput['goalId'];
+  /** The run's scope id (goalId) is a fleet. Computed by the caller (scopeKind) wherever goalId is known; absent means a goal or no scope. */
+  fleet?: boolean;
+}
 
 /**
  * Project board planning tools (~2.4k schema tokens). Offered to goal runs,
@@ -93,9 +106,13 @@ function exclusionReasons(input: ToolSurfaceInput, context: ToolSurfaceContext, 
   if (input.executionMode && (!(input.executionMode === 'coding' ? CODING_READS : PROJECT_READS).has(name) || (risk !== 'read' && !codingOperate))) verdicts.push({ layer: 'restricted-mode', reason: 'RESTRICTED_MODE' });
   if (SESSION_RUNTIME_TOOLS.has(name) && !context.hasSessionManager) verdicts.push({ layer: 'session-runtime', reason: 'SESSION_RUNTIME_UNAVAILABLE' });
   if (name.startsWith('mcp_') && input.source && input.source !== 'user') verdicts.push({ layer: 'mcp-source', reason: 'MCP_SOURCE_AUTHORITY' });
+  // An event-woken flagship keeps source 'user' (grants depend on it) but never gets owner-only or external tools.
+  if (input.fleet && (name.startsWith('mcp_') || NON_USER_HIDDEN_TOOLS.includes(name))) verdicts.push({ layer: 'fleet-authority', reason: 'FLEET_AUTHORITY' });
   if (context.isToolDisabled?.(name)) verdicts.push({ layer: 'owner-disabled', reason: 'OWNER_DISABLED' });
   if (GOAL_TOOLS.has(name) && !input.goalId && input.executionMode !== 'coding') verdicts.push({ layer: 'goal-catalog', reason: 'GOAL_CATALOG' });
   if (BOARD_PLANNING_TOOLS.has(name) && !input.goalId) verdicts.push({ layer: 'goal-catalog', reason: 'GOAL_CATALOG' });
+  if (FLEET_TOOLS.has(name) && !(input.goalId && input.fleet)) verdicts.push({ layer: 'goal-catalog', reason: 'FLEET_CATALOG' });
+  if (FLEET_HIDDEN_GOAL_TOOLS.has(name) && input.fleet) verdicts.push({ layer: 'goal-catalog', reason: 'FLEET_CATALOG' });
   if (context.hasMachineRoots === false && MACHINE_ROOT_DEPENDENT_TOOLS.has(name)) verdicts.push({ layer: 'context-catalog', reason: 'NO_MACHINE_ROOT' });
   return verdicts;
 }

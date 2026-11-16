@@ -58,13 +58,19 @@ function currentScope(db: Database, userId: string, conversationId: string): Cha
     }) };
 }
 
+/** Project of a run scope id (goal or fleet), tenant scoped. */
+function scopeProject(db: Database, userId: string, scopeId: string): { project_id: string | null } | undefined {
+  return db.prepare('SELECT project_id FROM copilot_goals WHERE user_id=? AND id=? UNION ALL SELECT project_id FROM fleets WHERE user_id=? AND id=? LIMIT 1')
+    .get(userId, scopeId, userId, scopeId) as { project_id: string | null } | undefined;
+}
+
 function prepareConversationProject(db: Database, userId: string, input: TurnInput): TurnInput {
   const conversations = new CopilotConversationLog(db, userId);
   const conversation = conversations.getConversation(input.conversationId);
   if (!conversation) return input;
   const projectId = conversation.project_id;
   const goalProjectId = input.goalId
-    ? (db.prepare('SELECT project_id FROM copilot_goals WHERE user_id=? AND id=?').get(userId, input.goalId) as { project_id: string | null } | undefined)?.project_id
+    ? scopeProject(db, userId, input.goalId)?.project_id
     : undefined;
   if (input.projectId && goalProjectId && input.projectId !== goalProjectId)
     throw new AgentError('COPILOT_CONVERSATION_PROJECT_MISMATCH', 'Goal project does not match the message project');
@@ -173,7 +179,7 @@ export function assertChannelToolScope(context: AgentToolContext, name: string, 
   if (name.startsWith('goal_') && context.runId) {
     const run = context.db.prepare('SELECT goal_id,input_json FROM copilot_runs WHERE user_id=? AND id=?').get(context.userId, context.runId) as { goal_id: string | null; input_json: string } | undefined;
     const goalId = run?.goal_id ?? parseRunInput(run!).goalId;
-    const goal = goalId ? context.db.prepare('SELECT project_id FROM copilot_goals WHERE user_id=? AND id=?').get(context.userId, goalId) as { project_id: string | null } | undefined : undefined;
+    const goal = goalId ? scopeProject(context.db, context.userId, goalId) : undefined;
     if (goal?.project_id) projects.add(goal.project_id);
   }
   if (typeof input.projectId === 'string') projects.add(input.projectId);
