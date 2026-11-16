@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
 import TemplatesPage from "./page";
@@ -97,6 +97,12 @@ function renderPage() {
   );
 }
 
+async function openImport(name: RegExp) {
+  fireEvent.keyDown(screen.getByRole("button", { name: "导入" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitem", { name }));
+  await screen.findByRole("dialog");
+}
+
 describe("TemplatesPage sync block", () => {
   beforeEach(() => {
     cleanup();
@@ -159,9 +165,10 @@ describe("TemplatesPage sync block", () => {
       Element.prototype.scrollIntoView = vi.fn();
       createTemplateMock.mockResolvedValue({ template });
       renderPage();
+      fireEvent.click(screen.getByRole('button', { name: '新建模板' }));
       const name = document.querySelector('#new-template-name')!;
       fireEvent.change(name, { target: { value: 'Native memory template' } });
-      const trigger = await screen.findByRole('combobox');
+      const trigger = document.querySelector('#new-template-adapter')!;
       await waitFor(() => expect(trigger.hasAttribute('disabled')).toBe(false));
       fireEvent.keyDown(trigger, { key: 'Enter' });
       fireEvent.click(await screen.findByRole('option', { name: adapter }));
@@ -171,6 +178,67 @@ describe("TemplatesPage sync block", () => {
       })));
     });
   }
+
+  it("filters the library by search, CLI and built-in type without fetching details", async () => {
+    listTemplatesMock.mockResolvedValue({ templates: [
+      { ...template, id: "claude", name: "Claude base", adapter: "claude", isBuiltin: true },
+      { ...template, id: "codex", name: "Codex base", adapter: "codex" },
+    ] });
+    renderPage();
+    await screen.findByText("Claude base");
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索模板" }), { target: { value: "codex" } });
+    await waitFor(() => expect(screen.queryByText("Claude base")).toBeNull());
+    expect(screen.getByText("Codex base")).toBeTruthy();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "CLI 筛选" }), { target: { value: "claude" } });
+    await waitFor(() => expect(screen.queryByText("Codex base")).toBeNull());
+    fireEvent.change(screen.getByRole("combobox", { name: "CLI 筛选" }), { target: { value: "all" } });
+    fireEvent.click(screen.getByRole("radio", { name: /^内置/ }));
+    expect(screen.getByText("Claude base")).toBeTruthy();
+    expect(screen.queryByText("Codex base")).toBeNull();
+    expect(getTemplateMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps built-in files copyable and read-only with cloning as the edit entry", async () => {
+    const builtin = { ...template, isBuiltin: true, files: [{ filePath: "CLAUDE.md", content: "# Built-in", fileType: "markdown" }] };
+    listTemplatesMock.mockResolvedValue({ templates: [builtin] });
+    getTemplateMock.mockResolvedValue({ template: builtin });
+    renderPage();
+    fireEvent.click(await screen.findByText("My Template"));
+    await waitFor(() => expect(editorTextarea().value).toBe("# Built-in"));
+    expect(editorTextarea().readOnly).toBe(true);
+    expect(editorTextarea().disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: /保存模板/ })).toBeNull();
+    expect(screen.queryByRole("tab", { name: /版本历史/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "克隆" }));
+    expect(screen.getByRole("dialog", { name: "克隆模板" })).toBeTruthy();
+    expect(screen.getByPlaceholderText("克隆名称")).toBeTruthy();
+    expect(updateTemplateFileMock).not.toHaveBeenCalled();
+  });
+
+  it("saves metadata without adding an empty file to an empty template", async () => {
+    updateTemplateMock.mockResolvedValue({ template: { ...template, name: "Renamed" } });
+    renderPage();
+    fireEvent.click(await screen.findByText("My Template"));
+    await waitFor(() => expect(editorTextarea()).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "模板属性" }));
+    const dialog = screen.getByRole("dialog", { name: "模板属性" });
+    fireEvent.change(within(dialog).getByLabelText("名称"), { target: { value: "Renamed" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /保存模板/ }));
+    await waitFor(() => expect(updateTemplateMock).toHaveBeenCalledWith("tpl-1", expect.objectContaining({ name: "Renamed" })));
+    expect(updateTemplateFileMock).not.toHaveBeenCalled();
+  });
+
+  it("shows a retryable catalog failure rather than an empty catalog", async () => {
+    listCatalogItemsMock.mockRejectedValue(new Error("catalog unavailable"));
+    renderPage();
+    await screen.findByText("My Template");
+    expect(listCatalogItemsMock).not.toHaveBeenCalled();
+    await openImport(/从目录安装/);
+    await screen.findByText("catalog unavailable");
+    expect(within(screen.getByRole("dialog")).getByRole("button", { name: "重试" })).toBeTruthy();
+    expect(screen.queryByText(/暂无可安装模板/)).toBeNull();
+  });
 
   it("shows the error state with retry instead of the empty list when the query fails", async () => {
     listTemplatesMock.mockRejectedValue(new Error("gateway unreachable"));
@@ -194,6 +262,7 @@ describe("TemplatesPage sync block", () => {
 
     await waitFor(() => expect(screen.getByText("My Template")).toBeTruthy());
     fireEvent.click(screen.getByText("My Template"));
+    fireEvent.keyDown(screen.getByRole("tab", { name: /^关联项目/ }), { key: "Enter" });
 
     await waitFor(() => expect(screen.getByText(/2 个项目使用此模板/)).toBeTruthy());
     expect(screen.getByText("Alpha")).toBeTruthy();
@@ -212,10 +281,24 @@ describe("TemplatesPage sync block", () => {
     });
     renderPage();
 
-    await waitFor(() => expect(screen.getByText("治理中的模板")).toBeTruthy());
-    expect(screen.getByText("仅作初始化种子的模板")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("使用中")).toBeTruthy());
+    expect(screen.getByText("未关联项目")).toBeTruthy();
     expect(screen.getByText("Governed Template")).toBeTruthy();
     expect(screen.getByText("Seed Template")).toBeTruthy();
+  });
+
+  it("keeps unused templates focused on editing without unavailable sync controls", async () => {
+    getTemplateUsageMock.mockResolvedValue({ usageCount: 0, projects: [] });
+    renderPage();
+    fireEvent.click(await screen.findByText("My Template"));
+    expect(getTemplateUsageMock).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole("tab", { name: /^关联项目/ }), { key: "Enter" });
+    await waitFor(() => expect(getTemplateUsageMock).toHaveBeenCalledWith("tpl-1"));
+    expect(await screen.findByText("尚未关联项目")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /预览变更/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /应用到 0 个项目/ })).toBeNull();
+    });
   });
 
   it("previews sync and applies with overwrite decisions for modified files", async () => {
@@ -223,6 +306,7 @@ describe("TemplatesPage sync block", () => {
 
     await waitFor(() => expect(screen.getAllByText("My Template").length).toBeGreaterThan(0));
     fireEvent.click(screen.getAllByText("My Template")[0]!);
+    fireEvent.keyDown(screen.getByRole("tab", { name: /^关联项目/ }), { key: "Enter" });
     await waitFor(() => expect(screen.getByText(/2 个项目使用此模板/)).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: /预览变更/ }));
@@ -258,7 +342,8 @@ describe("TemplatesPage sync block", () => {
     await waitFor(() => expect(screen.getAllByText("My Template").length).toBeGreaterThan(0));
     fireEvent.click(screen.getAllByText("My Template")[0]!);
 
-    fireEvent.click(screen.getByRole("button", { name: /导出/ }));
+    await openImport(/导入.*导出/);
+    fireEvent.click(screen.getByRole("button", { name: /^导出/ }));
     const downloadButton = await screen.findByRole("button", { name: /下载 JSON/ });
     await waitFor(() => expect((downloadButton as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(downloadButton);
@@ -271,27 +356,27 @@ describe("TemplatesPage sync block", () => {
     renderPage();
     await waitFor(() => expect(screen.getAllByText("My Template").length).toBeGreaterThan(0));
 
+    await openImport(/导入.*导出/);
     fireEvent.change(screen.getByLabelText(/模板包 JSON/), { target: { value: "{ not json" } });
-    fireEvent.click(screen.getByRole("button", { name: /^导入$/ }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^导入$/ }));
 
     await waitFor(() =>
       expect(screen.getByText(/模板包不是有效的 JSON/)).toBeTruthy(),
     );
     expect(importTemplateMock).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByText(/模板包不是有效的 JSON/)).toBeNull());
   });
 
-  it("keeps the catalog install section collapsed by default", async () => {
+  it("opens catalog installation on demand without displacing the template list", async () => {
     renderPage();
 
     await waitFor(() => expect(screen.getAllByText("My Template").length).toBeGreaterThan(0));
-    const toggles = screen.getAllByRole("button", { name: /从目录安装/ });
-    const toggle = toggles.find((element) => element.getAttribute("aria-expanded") !== null);
-    expect(toggle).toBeTruthy();
-    expect(toggle!.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByText(/暂无可安装模板/)).toBeNull();
 
-    fireEvent.click(toggle!);
-    expect(toggle!.getAttribute("aria-expanded")).toBe("true");
+    await openImport(/从目录安装/);
+    expect(screen.getByRole("dialog", { name: /从目录安装/ })).toBeTruthy();
     await waitFor(() => expect(screen.getByText(/暂无可安装模板/)).toBeTruthy());
   });
 });
@@ -338,6 +423,38 @@ describe("TemplatesPage editor safety", () => {
     fireEvent.click(await screen.findByText("Template A"));
     await waitFor(() => expect(editorTextarea().value).toBe("# Alpha guide"));
     expect(updateTemplateFileMock).not.toHaveBeenCalled();
+  });
+
+  it("protects a draft when changing files and loads the chosen file after discard", async () => {
+    const withFiles = { ...templateA, files: [...templateA.files, { filePath: "rules.md", content: "# Rules", fileType: "markdown" }] };
+    getTemplateMock.mockResolvedValue({ template: withFiles });
+    renderPage();
+    fireEvent.click(await screen.findByText("Template A"));
+    await waitFor(() => expect(editorTextarea().value).toBe("# Alpha guide"));
+    fireEvent.change(editorTextarea(), { target: { value: "# Draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "rules.md" }));
+    expect(screen.getByRole("dialog", { name: "放弃未保存的修改？" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(editorTextarea().value).toBe("# Draft");
+    fireEvent.click(screen.getByRole("button", { name: "rules.md" }));
+    fireEvent.click(screen.getByRole("button", { name: "放弃修改" }));
+    await waitFor(() => expect(editorTextarea().value).toBe("# Rules"));
+    expect(screen.getByLabelText("文件路径").getAttribute("value")).toBe("rules.md");
+  });
+
+  it("blocks project sync for an unsaved draft and provides a return to the editor", async () => {
+    getTemplateUsageMock.mockResolvedValue({ usageCount: 1, projects: [{ id: "p1", name: "Alpha", path: "/tmp/alpha", configStatus: "stale" }] });
+    renderPage();
+    fireEvent.click(await screen.findByText("Template A"));
+    await waitFor(() => expect(editorTextarea().value).toBe("# Alpha guide"));
+    fireEvent.change(editorTextarea(), { target: { value: "# Draft" } });
+    fireEvent.keyDown(screen.getByRole("tab", { name: /^关联项目/ }), { key: "Enter" });
+    await screen.findByText("保存模板后再同步");
+    expect((screen.getByRole("button", { name: /预览变更/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(previewTemplateSyncMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "返回文件" }));
+    expect(editorTextarea().value).toBe("# Draft");
+    expect(saveButton().disabled).toBe(false);
   });
 
   it("updates the saved baseline and permits reverting to the original content", async () => {
@@ -397,6 +514,7 @@ describe("TemplatesPage editor safety", () => {
     await waitFor(() => expect(updateTemplateFileMock).toHaveBeenCalledTimes(1));
     fireEvent.change(document.querySelector("#template-file")!, { target: { value: "AGENTS.md" } });
     fireEvent.click(screen.getByRole("button", { name: /载入文件|加载文件/ }));
+    fireEvent.click(screen.getByRole("button", { name: "放弃修改" }));
     expect(editorTextarea().value).toBe("# Other file");
     await act(async () => { finish({ ok: true }); });
     await waitFor(() => expect(saveButton().disabled).toBe(true));
@@ -440,6 +558,7 @@ describe("TemplatesPage editor safety", () => {
     const newer = { ...templateA, files: [{ ...templateA.files[0], content: "# newer C" }] };
     getTemplateMock.mockResolvedValue({ template: newer });
     restoreTemplateVersionMock.mockResolvedValue({ template: newer });
+    fireEvent.keyDown(screen.getByRole("tab", { name: /^版本历史/ }), { key: "Enter" });
     fireEvent.click(await screen.findByRole("button", { name: "回滚" }));
     fireEvent.click(screen.getByRole("button", { name: "确认" }));
     await waitFor(() => expect(restoreTemplateVersionMock).toHaveBeenCalledWith("tpl-a", 1));

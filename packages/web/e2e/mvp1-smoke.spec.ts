@@ -71,8 +71,9 @@ test("MVP-1 management console smoke", async ({ page }) => {
 
   await page.goto("/templates");
   await page.getByRole("button", { name: /Claude Code/ }).click();
+  await page.getByRole("button", { name: "Clone", exact: true }).click();
   await page.getByPlaceholder("Clone name").fill(templateName);
-  await page.getByRole("button", { name: "Clone" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Clone", exact: true }).click();
   await expect(page.getByText(templateName).first()).toBeVisible();
 
   await page.goto("/skills");
