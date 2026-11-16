@@ -51,6 +51,41 @@ describe("adapter updates", () => {
     assert.equal(result.versionStillBehind, false);
   });
 
+  it("gives OpenCode's npm update enough time to fetch its platform binary", async () => {
+    let installed = "2.3.0";
+    const runner: CommandRunner = async (_command, args, options) => {
+      if (args[0] === "install") {
+        assert.equal(options?.timeoutMs, 900_000);
+        assert.equal(options?.killProcessTree, true);
+        installed = "2.4.0";
+      }
+      return { exitCode: 0, stdout: installed, stderr: "" };
+    };
+    const result = await updateAdapter("opencode", {
+      runner, resolveHost: publicResolver,
+      fetcher: async () => new Response(JSON.stringify({ version: "2.4.0" }))
+    });
+    assert.equal(result.versionStillBehind, false);
+  });
+
+  it("gives OpenCode's first-time install the same extended deadline", async () => {
+    let installed = false;
+    const runner: CommandRunner = async (command, args, options) => {
+      if (args[0] === "install") {
+        assert.equal(options?.timeoutMs, 900_000);
+        installed = true;
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      if (command === "npm") return { exitCode: 0, stdout: "11.19.1", stderr: "" };
+      return installed
+        ? { exitCode: 0, stdout: "2.4.0", stderr: "" }
+        : { exitCode: 127, stdout: "", stderr: "opencode not found" };
+    };
+    const result = await installAdapter("opencode", { runner, resolveHost: publicResolver });
+    assert.equal(result.commandAvailable, true);
+    assert.equal(result.installedVersion, "2.4.0");
+  });
+
   it("uses Kimi's legacy stable feed if the manifest is unavailable", async () => {
     const urls: string[] = [];
     const result = await checkAdapterUpdate("kimi", {

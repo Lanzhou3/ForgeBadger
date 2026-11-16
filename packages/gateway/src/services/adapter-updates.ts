@@ -213,7 +213,10 @@ export async function updateAdapter(
     const result = await (dependencies.runner ?? runCommand)(command, updateArgs(id, before.latestSource, before.latestVersion), {
       // The standalone Codex installer allows 300s per download and may retry
       // via GitHub. A 180s outer deadline killed healthy large downloads.
-      timeoutMs: id === "codex" ? 900_000 : command === "npm" ? 300_000 : 180_000,
+      // OpenCode's npm install pulls a ~250MB platform binary through its
+      // postinstall's nested npm and only links the bin shim afterwards; the
+      // 300s deadline killed cold downloads mid-reify, wiping a working shim.
+      timeoutMs: id === "codex" || id === "opencode" ? 900_000 : command === "npm" ? 300_000 : 180_000,
       maxOutputBytes: 16 * 1024,
       killGraceMs: 5000,
       killProcessTree: true,
@@ -261,7 +264,9 @@ export async function installAdapter(
     if (before.checkFailed) throw new AdapterUpdateError("CLI installation state could not be verified", 503);
     await assertNpmInstallationAvailable(id, dependencies);
     const result = await (dependencies.runner ?? runCommand)("npm", updateConfig[id].installArgs, {
-      timeoutMs: 300_000,
+      // A first-time OpenCode install is always a cold ~250MB download through
+      // the postinstall's nested npm; 300s left a stub binary and no shim.
+      timeoutMs: id === "opencode" ? 900_000 : 300_000,
       maxOutputBytes: 16 * 1024,
       killGraceMs: 5000,
       killProcessTree: true,
