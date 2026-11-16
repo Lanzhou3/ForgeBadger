@@ -16,7 +16,7 @@ const help = [
   '/stop — 停止当前对话的 Copilot 任务并取消排队消息，不关闭 CLI 终端',
   '/status — 查看当前对话的执行和排队状态',
   '/model — 查看或切换当前会话模型；/model list 列出可用配置',
-  '/project — 查看当前项目并列出可选项目；/project <项目ID> 切换会话项目',
+  '/project — 查看当前项目并列出可选项目；/project <项目名或ID> 切换会话项目',
   '/playbooks — 列出可用 Copilot 操作指南',
   '/skills — 查看 Skills 管理说明',
   '/pair <配对码> — 私聊配对，随后在 Web 确认'
@@ -89,10 +89,13 @@ export class ChannelCommands {
       const currentId = log.getConversation(conversationId)?.project_id;
       const current = currentId ? projects.getById(currentId) : undefined;
       const choices = projects.list().map(project => `${project.name}：${project.id}`).join('\n') || '暂无可用项目。';
-      return `当前项目：${current?.name ?? '未选择'}\n可切换项目：\n${choices}\n发送 /project <项目ID> 切换。`;
+      return `当前项目：${current?.name ?? '未选择'}\n可切换项目：\n${choices}\n发送 /project <项目名或ID> 切换。`;
     }
     if (busy()) return '当前会话仍有任务或排队消息，请结束后再切换项目。';
-    const project = projects.getById(args);
+    const byId = projects.getById(args);
+    const matches = projects.list().filter(project => project.name === args);
+    if (!byId && matches.length > 1) return `有 ${matches.length} 个项目重名，请使用项目 ID 切换。发送 /project 查看可选项目。`;
+    const project = byId ?? matches[0];
     if (!project) return '项目不存在或不可用。发送 /project 查看可选项目。';
     log.setConversationProject(conversationId,project.id);
     return `已将当前 Copilot 会话切换到项目：${project.name}（${project.id}）。`;

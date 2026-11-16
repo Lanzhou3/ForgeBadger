@@ -9,6 +9,7 @@ import { CopilotRunLedger } from '../agent/run-ledger.js';
 import { normalizeFeishuEvent } from '../integrations/feishu-event-normalizer.js';
 import { ChannelCommands, parseChannelCommand } from './channel-commands.js';
 import { executionControl } from '../agent/execution-control.js';
+import { AgentError } from '../agent/types.js';
 import { assertChannelRunScope } from './channel-run-scope.js';
 import type { TurnInput } from '../agent/run-ledger.js';
 
@@ -73,9 +74,12 @@ export class NativeChannelInbox {
       try {
         runId=new CopilotRunLedger(this.db,this.userId).admit({userId:this.userId,conversationId:admission.conversationId,userText:input.text,...(modelId?{modelId}:{})},16);
       } catch(error) {
-        if(!(error instanceof ChannelIdentityError))throw error;
+        const projectRequired=error instanceof AgentError&&error.code==='COPILOT_CONVERSATION_PROJECT_REQUIRED';
+        if(!(error instanceof ChannelIdentityError)&&!projectRequired)throw error;
         this.messages.reject(item.id);
-        const notice='当前对话的权限记录已失效，消息未执行。请发送 /new 开始新对话，旧历史将保留；如仍无法开始，请在 Web 检查渠道绑定。';
+        const notice=projectRequired
+          ?'当前会话尚未选择项目。请发送 /project 查看并选择项目，然后再发送任务。'
+          :'当前对话的权限记录已失效，消息未执行。请发送 /new 开始新对话，旧历史将保留；如仍无法开始，请在 Web 检查渠道绑定。';
         new ChannelDeliveryRepository(this.db,this.userId).enqueue(item.id,'admission_rejected',JSON.stringify(encryptSecret(notice,{key:this.masterKey})));
         return {status:'rejected'} as const;
       }

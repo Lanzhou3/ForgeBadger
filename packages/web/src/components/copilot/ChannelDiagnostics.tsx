@@ -3,10 +3,9 @@
 import { useEffect, useState } from "react";
 import { Activity, Check, ChevronDown, CircleDashed, Loader2, X } from "lucide-react";
 
-import { SettingsCardHeader } from "@/components/settings/ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { ChannelDiagnosticCheck } from "@/lib/api";
 import { useSettingsCopy } from "./settings-copy";
@@ -16,11 +15,9 @@ interface Props {
   isPending: boolean;
   isError: boolean;
   checks: ChannelDiagnosticCheck[] | undefined;
-  /** Reports how many checks are genuinely failing so the banner can hint it. */
   onFailedCountChange: (count: number) => void;
 }
 
-/** Collapsible per-channel diagnostics; failed checks are also surfaced in the status banner. */
 export function ChannelDiagnostics({ channelName, isPending, isError, checks, onFailedCountChange }: Props) {
   const copy = useSettingsCopy();
   const [expanded, setExpanded] = useState(false);
@@ -31,51 +28,39 @@ export function ChannelDiagnostics({ channelName, isPending, isError, checks, on
   }, [failedCount, onFailedCountChange]);
 
   return (
-    <Card className="forgebadger-animate-in">
-      <SettingsCardHeader
-        icon={<Activity className="size-4" />}
-        title={copy.diagnosticsTitle(channelName)}
-        description={copy.diagnosticsDescription}
-        action={
-          <Button type="button" variant="outline" size="sm" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
-            {expanded ? copy.diagnosticsCollapse : copy.diagnosticsExpand}
-            <ChevronDown className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
-          </Button>
-        }
-      />
+    <Card id="channel-diagnostics" className="forgebadger-animate-in gap-0 py-0 shadow-none">
+      <header className="flex min-h-13 items-center gap-3 px-4 py-3 sm:px-5">
+        <Activity className="size-4 text-muted-foreground" />
+        <h2 className="flex-1 text-sm font-medium">{copy.diagnosticsTitle(channelName)}</h2>
+        {failedCount > 0 && <Badge variant="secondary" className="bg-destructive/10 text-destructive">{failedCount}</Badge>}
+        <Button type="button" variant="ghost" size="sm" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
+          {expanded ? copy.diagnosticsCollapse : copy.diagnosticsExpand}
+          <ChevronDown className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
+        </Button>
+      </header>
       {expanded && (
-        <CardContent className="space-y-2">
-          {isPending && <p role="status">{copy.diagnosticsChecking}</p>}
-          {isError && <p role="alert">{copy.diagnosticsLoadError}</p>}
+        <div className="space-y-2 border-t border-border/70 px-4 py-4 sm:px-5">
+          {isPending && <p role="status" className="text-sm text-muted-foreground">{copy.diagnosticsChecking}</p>}
+          {isError && <p role="alert" className="text-sm text-destructive">{copy.diagnosticsLoadError}</p>}
           {!isPending && !isError && !checks?.length && <p className="text-sm text-muted-foreground">{copy.diagnosticsEmpty}</p>}
           {checks?.map((check) => {
             const status = check.ok ? "ok" : check.status === "untested" ? "untested" : check.status === "pending" ? "pending" : "failed";
             return (
-              <div key={check.key} className="flex items-start gap-2.5 rounded-md border border-border/70 p-3 text-sm">
-                {status === "ok" ? (
-                  <Check className="mt-0.5 size-4 shrink-0 text-emerald-400" />
-                ) : status === "pending" ? (
-                  <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-amber-400" />
-                ) : status === "untested" ? (
-                  <CircleDashed className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                ) : (
-                  <X className="mt-0.5 size-4 shrink-0 text-destructive" />
-                )}
+              <div key={check.key} className="flex items-start gap-2.5 rounded-md bg-muted/20 p-3 text-sm">
+                {status === "ok" ? <Check className="mt-0.5 size-4 shrink-0 text-emerald-400" /> : status === "pending" ? <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-amber-400" /> : status === "untested" ? <CircleDashed className="mt-0.5 size-4 shrink-0 text-muted-foreground" /> : <X className="mt-0.5 size-4 shrink-0 text-destructive" />}
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-2">
                     {check.detail}
                     {status === "untested" && <Badge variant="outline" className="text-muted-foreground">{copy.diagnosticsStatusUntested}</Badge>}
-                    {status === "pending" && <Badge variant="secondary" className="bg-amber-500/15 text-amber-400">{copy.diagnosticsStatusPending}</Badge>}
-                    {status === "failed" && <Badge variant="secondary" className="bg-destructive/15 text-destructive">{copy.diagnosticsStatusFailed}</Badge>}
+                    {status === "pending" && <Badge variant="secondary" className="bg-amber-500/10 text-amber-400">{copy.diagnosticsStatusPending}</Badge>}
+                    {status === "failed" && <Badge variant="secondary" className="bg-destructive/10 text-destructive">{copy.diagnosticsStatusFailed}</Badge>}
                   </p>
-                  {status === "failed" && check.fixHint && (
-                    <p className="mt-1 text-xs text-muted-foreground">{copy.diagnosticsFixHint(check.fixHint)}</p>
-                  )}
+                  {status === "failed" && check.fixHint && <p className="mt-1 text-xs text-muted-foreground">{copy.diagnosticsFixHint(check.fixHint)}</p>}
                 </div>
               </div>
             );
           })}
-        </CardContent>
+        </div>
       )}
     </Card>
   );

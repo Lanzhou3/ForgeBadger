@@ -1,7 +1,8 @@
 "use client";
 
+import { AlertCircle, ArrowRight, CheckCircle2, CircleDashed, PauseCircle } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { ChannelPlatform } from "@/lib/api";
 import type { ChannelOverallState, SetupBlocker } from "./channel-setup";
@@ -14,58 +15,55 @@ interface Props {
   state: ChannelOverallState;
   statusText: string;
   blocker?: SetupBlocker;
-  /** Number of failed diagnostic checks; surfaces a hint line when > 0. */
   failedChecks: number;
 }
 
-const stateBadge: Record<ChannelOverallState, { variant: "secondary" | "outline" | "destructive"; className: string }> = {
-  running: { variant: "secondary", className: "bg-emerald-500/15 text-emerald-400" },
-  pairing: { variant: "secondary", className: "bg-amber-500/15 text-amber-400" },
-  authorization: { variant: "secondary", className: "bg-amber-500/15 text-amber-400" },
-  unknown: { variant: "secondary", className: "bg-amber-500/15 text-amber-400" },
-  stopped: { variant: "destructive", className: "" },
-  not_connected: { variant: "outline", className: "text-muted-foreground" },
+const stateIcon = {
+  running: CheckCircle2,
+  stopped: PauseCircle,
+  unknown: AlertCircle,
+  pairing: CircleDashed,
+  authorization: CircleDashed,
+  not_connected: CircleDashed,
 };
 
-/** Channel platform switch plus the compact overall-status strip. */
 export function ChannelStatusBanner({ channel, busy, onSwitch, state, statusText, blocker, failedChecks }: Props) {
   const copy = useSettingsCopy();
-  const labels: Record<ChannelOverallState, string> = {
-    not_connected: copy.channelStateNotConnected,
-    pairing: copy.channelStatePairing,
-    authorization: copy.channelStateAuthorization,
-    running: copy.channelStateRunning,
-    stopped: copy.channelStateStopped,
-    unknown: copy.channelStateUnknown,
-  };
-  const badge = stateBadge[state];
+  const Icon = stateIcon[state];
   return (
-    <div className="space-y-3">
-      <div role="group" aria-label={copy.channelPlatformLabel} className="flex w-fit rounded-md border border-border/70 p-0.5">
-        {(["feishu", "telegram"] as const).map((value) => (
-          <Button
-            key={value}
-            type="button"
-            size="sm"
-            variant={channel === value ? "default" : "ghost"}
-            aria-pressed={channel === value}
-            disabled={busy}
-            onClick={() => onSwitch(value)}
-          >
-            {value === "feishu" ? copy.channelNameFeishu : copy.channelNameTelegram}
-          </Button>
-        ))}
+    <div className="rounded-lg border bg-card p-3 shadow-none">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div role="group" aria-label={copy.channelPlatformLabel} className="flex w-fit rounded-md bg-muted/60 p-1">
+          {(["feishu", "telegram"] as const).map((value) => (
+            <Button
+              key={value}
+              type="button"
+              size="sm"
+              variant={channel === value ? "secondary" : "ghost"}
+              aria-pressed={channel === value}
+              disabled={busy}
+              className={cn("min-w-24", channel === value && "bg-background shadow-sm")}
+              onClick={() => onSwitch(value)}
+            >
+              {value === "feishu" ? copy.channelNameFeishu : copy.channelNameTelegram}
+            </Button>
+          ))}
+        </div>
+        <div role="status" className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+          <Icon className={cn("size-4 shrink-0", state === "running" ? "text-emerald-400" : state === "stopped" || state === "unknown" ? "text-destructive" : "text-muted-foreground")} />
+          <span className="min-w-0 font-medium">{statusText}</span>
+          {blocker && state !== "running" && (
+            <a className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" href={`#channel-${blocker.step}`}>
+              {blocker.action}<ArrowRight className="size-3" />
+            </a>
+          )}
+        </div>
       </div>
-      <div role="status" className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-md border border-border/70 bg-muted/20 px-3 py-2.5 text-sm">
-        <Badge variant={badge.variant} className={cn(badge.className)}>{labels[state]}</Badge>
-        <span className="min-w-0">{statusText}</span>
-        {blocker && (
-          <a className="underline underline-offset-4" href={`#channel-${blocker.step}`}>{blocker.action}</a>
-        )}
-        {failedChecks > 0 && (
-          <span className="w-full text-xs text-destructive">{copy.diagnosticsFailedNotice(failedChecks)}</span>
-        )}
-      </div>
+      {failedChecks > 0 && (
+        <a href="#channel-diagnostics" className="mt-3 flex items-center gap-2 border-t border-border/70 pt-3 text-xs text-destructive">
+          <AlertCircle className="size-3.5" />{copy.diagnosticsFailedNotice(failedChecks)}
+        </a>
+      )}
     </div>
   );
 }

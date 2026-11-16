@@ -70,15 +70,16 @@ for (const width of [1440, 390]) {
     await expect(toggle).toBeEnabled();
     await toggle.check();
     await expect(panel.getByRole('combobox',{name:'卡片内容'})).toHaveCount(0);
-    await expect(panel.getByText(/通知默认包含/)).toBeVisible();
-    await expect(panel.getByText(/所选私聊或群聊成员均可看到/)).toBeVisible();
+    await expect(panel.getByText(/通知默认包含/)).toHaveCount(0);
     await panel.getByRole('checkbox', { name: '应用操作结果' }).check();
+    await panel.getByText('ForgeBadger Web 地址（可选）',{exact:true}).click();
     await panel.getByLabel('ForgeBadger Web 地址', { exact: true }).fill('https://forge.example.com');
     const send = panel.getByRole('button', { name: '发送测试卡片' });
     await expect(send).toBeDisabled();
     await panel.getByRole('button', { name: '保存通知设置' }).click();
     await expect(panel.getByText('飞书通知已开启，只推送之后产生的通知。')).toBeVisible();
     await send.click();
+    await panel.getByText('最近通知投递',{exact:true}).click();
     await expect(panel.getByText('测试卡片 · 待发送', { exact: true })).toBeVisible();
     expect(await page.locator('main').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
@@ -93,6 +94,7 @@ for (const width of [1440, 390]) {
     await panel.getByRole('button',{name:'保存通知设置'}).click();
     await expect(send).toBeEnabled();
     await panel.screenshot({path:`/tmp/fb-feishu-group-target-${width}.png`});
+    await page.getByText('聊天白名单',{exact:true}).click();
     await expect(page.getByText('尚未设置聊天白名单。',{exact:true})).toBeVisible();
     await page.reload();
     await expect(toggle).toBeChecked();

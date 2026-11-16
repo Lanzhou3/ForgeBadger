@@ -74,7 +74,6 @@ export type ChannelRouteStateKey =
   | 'identity_inactive'
   | 'config_changed'
   | 'channel_disabled'
-  | 'project_missing'
   | 'authority_revoked';
 
 /** Route states that render as destructive badges. */
@@ -82,7 +81,6 @@ export const DESTRUCTIVE_ROUTE_STATES: readonly ChannelRouteStateKey[] = [
   'identity_inactive',
   'config_changed',
   'channel_disabled',
-  'project_missing',
   'authority_revoked',
 ];
 

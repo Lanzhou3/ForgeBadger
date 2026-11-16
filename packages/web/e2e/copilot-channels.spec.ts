@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('owner pairs a private identity, binds scope and reviews uncertain delivery on desktop and mobile',async({page})=>{
+test('owner pairs a private identity, opens a Copilot channel conversation and reviews deliveries',async({page})=>{
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
   await page.addInitScript(()=>{localStorage.setItem('forgebadger.token','e2e-token');localStorage.setItem('forgebadger-language','zh-CN');localStorage.setItem('forgebadger.user',JSON.stringify({id:'owner',email:'owner@test.local',role:'admin',status:'active'}));});
   await page.routeWebSocket('**/ws/events',()=>{});
@@ -22,11 +22,11 @@ test('owner pairs a private identity, binds scope and reviews uncertain delivery
     else if(path.endsWith('/channels/pairings'))data={pairings:paired?[pairing()]:[]};
     else if(path.endsWith('/pairings/pair/confirm')){expect(route.request().postDataJSON()).toEqual({revision:2,externalUserId:'ou_owner',chatId:'oc_owner'});confirmed=true;data={identity};}
     else if(path.endsWith('/channels/identities'))data={identities:confirmed?[identity]:[{...identity,accountRevision:0}]};
-    else if(path.endsWith('/channels/routes')&&method==='POST'){expect(route.request().postDataJSON()).toEqual({identityId:'i',projectId:'p'});bound=true;}
-    else if(path.endsWith('/channels/routes'))data={routes:bound?[{id:'r',identityId:'i',projectId:'p',conversationId:'c',status:revoked?'revoked':'active',authorityValid:!revoked}]:[]};
+    else if(path.endsWith('/channels/routes')&&method==='POST'){expect(route.request().postDataJSON()).toEqual({identityId:'i'});bound=true;}
+    else if(path.endsWith('/channels/routes'))data={routes:bound&&!revoked?[{id:'r',identityId:'i',projectId:null,conversationId:'c',status:'active',authorityValid:true}]:[]};
     else if(path.endsWith('/routes/r/revoke'))revoked=true;
     else if(path.endsWith('/channels/deliveries'))data={deliveries:[{id:'d',accountId:'a',channel:'feishu',inboxId:'m',phase:'terminal',status:'unknown',createdAt:Date.now(),receiptRecorded:false}]};
-    else if(path.endsWith('/project-manager/overview'))data={projects:[{id:'p',name:'验证项目',management:{ownerLabel:'',nextAction:'',freshnessHours:24,revision:1},counts:{done:0,total:0,in_progress:0,blocked:0},evidenceFreshness:{status:'unknown'}}],observedAt:Date.now()};
+    else if(path.endsWith('/project-manager/overview'))data={projects:[],observedAt:Date.now()};
     else if(path.endsWith('/notifications'))data={notifications:[]};
     else if(path.endsWith('/notifications/feishu'))data={config:{enabled:false,targetId:null,identityId:null,types:['attention','failure','completion'],webBaseUrl:'',revision:0},ready:false,blocker:'TARGET_INVALID',targets:[]};
     else if(path.endsWith('/notifications/feishu/deliveries'))data={deliveries:[]};
@@ -34,30 +34,35 @@ test('owner pairs a private identity, binds scope and reviews uncertain delivery
     await route.fulfill({json:{code:0,data,message:''}});
   });
   await page.goto('/copilot/channels');await expect(page.getByRole('heading',{name:'远程渠道',exact:true})).toBeVisible();
-  await page.getByRole('combobox',{name:'项目'}).click();
-  await page.getByRole('option',{name:'验证项目'}).click();
-  await expect(page.getByRole('button',{name:'启用飞书远程操作'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'连接飞书'})).toBeDisabled();
   await expect(page.getByTestId('channel-activation-reason')).toContainText('身份已失效');
-  await expect(page.getByText('ou_owner · 已失效，需重新配对',{exact:true})).toBeVisible();
+  await expect(page.getByText('需重新配对',{exact:true})).toBeVisible();
   await page.getByTestId('channel-activation-reason').scrollIntoViewIfNeeded();
   await page.screenshot({path:'/private/tmp/channel-stale-identity-desktop.png'});
   await page.getByRole('link',{name:'前往身份配对'}).last().click();
   await expect(page).toHaveURL(/#channel-pairing$/);
-  await page.getByRole('button',{name:'生成新的配对码'}).click();await expect(page.getByText('/pair browser-one-time-token')).toBeVisible();
-  claimed=true;await expect(page.getByText('ou_owner',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'生成配对码'}).click();await expect(page.getByText('/pair browser-one-time-token')).toBeVisible();
+  claimed=true;await expect(page.getByText('ou_owner',{exact:true}).first()).toBeVisible();
   await expect(page.getByRole('button',{name:'确认身份'})).toBeDisabled();await page.getByRole('checkbox',{name:'我确认这是自己的飞书私聊'}).check();await page.getByRole('button',{name:'确认身份'}).click();
-  await page.getByRole('combobox',{name:'私聊身份'}).click();
-  await page.getByRole('option',{name:'ou_owner'}).click();
-  await page.getByRole('combobox',{name:'项目'}).click();
-  await page.getByRole('option',{name:'验证项目'}).click();
-  await page.getByRole('button',{name:'启用飞书远程操作'}).click();
-  await expect(page.getByText('独立会话：c')).toBeVisible();await expect(page.getByText('任务结果')).toBeVisible();await expect(page.getByText('结果不确定')).toBeVisible();
-  await expect(page.getByText(/飞书远程操作已授权/)).toBeVisible();
+  await page.getByRole('button',{name:'连接飞书'}).click();
+  await expect(page.getByText('尚未选择项目',{exact:true})).toBeVisible();
+  await expect(page.getByText('项目不存在',{exact:true})).toHaveCount(0);
+  await expect(page.getByRole('link',{name:'打开会话'})).toHaveAttribute('href','/copilot?c=c');
+  await page.getByRole('button',{name:'展开回传记录'}).click();
+  const deliveries=page.locator('#channel-deliveries');
+  await expect(deliveries.getByText('任务结果')).toBeVisible();await expect(deliveries.getByText('结果不确定',{exact:true})).toBeVisible();
+  await expect(page.getByText('飞书已连接 Copilot。',{exact:true})).toBeVisible();
   await page.getByRole('heading',{name:'远程渠道',exact:true}).scrollIntoViewIfNeeded();
   await page.screenshot({path:'/private/tmp/channel-ui-desktop.png',fullPage:true});
-  await page.setViewportSize({width:390,height:844});await expect(page.getByRole('button',{name:'撤销渠道绑定'})).toBeVisible();
+  await page.locator('#channel-authorization').screenshot({path:'/private/tmp/channel-route-desktop.png'});
+  await page.setViewportSize({width:390,height:844});await expect(page.getByRole('button',{name:'撤销绑定'})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.getByRole('heading',{name:'远程渠道',exact:true}).scrollIntoViewIfNeeded();
-  await page.screenshot({path:'/private/tmp/channel-ui-mobile.png',fullPage:true});await page.getByRole('button',{name:'撤销渠道绑定'}).click();
-  await expect(page.getByRole('button',{name:'撤销渠道绑定'})).toBeDisabled();expect(errors).toEqual([]);
+  await page.screenshot({path:'/private/tmp/channel-ui-mobile.png',fullPage:true});
+  await page.locator('#channel-authorization').screenshot({path:'/private/tmp/channel-route-mobile.png'});
+  await page.getByRole('button',{name:'撤销绑定'}).click();
+  await page.getByRole('dialog').getByRole('button',{name:'撤销绑定'}).click();
+  await expect(page.getByRole('button',{name:'连接飞书'})).toBeVisible();
+  await expect(page.getByRole('link',{name:'打开会话'})).toHaveCount(0);
+  expect(errors).toEqual([]);
 });

@@ -56,16 +56,16 @@ export function CopilotChannelsPage() {
     return()=>clearInterval(timer);
   },[timeSensitive]);
   useEffect(()=>{if(token && (token.expiresAt<=now || (data && !data.pairings.some(p=>p.id===token.id && p.status==='pending' && p.accountRevision===accountRevision))))setToken(null);},[data,now,token,accountRevision]);
-  const accountIdentities=data?.identities.filter(i=>i.accountId===accountId)??[];
-  const routes=data?.routes.filter(r=>accountIdentities.some(i=>i.id===r.identityId))??[];
+  const accountIdentities=data?.identities.filter(i=>i.accountId===accountId&&i.status==='active')??[];
+  const routes=data?.routes.filter(r=>r.status==='active'&&accountIdentities.some(i=>i.id===r.identityId))??[];
   const deliveries=data?.deliveries.filter(d=>d.accountId===accountId && d.channel===channel)??[];
-  const identities=data?.identities.filter(i=>i.status==='active' && i.accountId===accountId && i.accountRevision===accountRevision)??[];
+  const identities=accountIdentities.filter(i=>i.accountRevision===accountRevision);
   const identity=identities.find(i=>i.id===identityId)??(identities.length===1?identities[0]:undefined);
   const integrationEnabled=!integrationConfig.isPending&&!integrationConfig.isError&&!!integrationConfig.data?.enabled&&!integrationConfig.data.emergencyDisabled;
   const canPair=!!account?.enabled&&integrationEnabled;
   const blocker=channelSetupBlocker({account,configLoading:integrationConfig.isPending,configError:integrationConfig.isError,
     config:integrationConfig.data,identities,identity,pairing,staleIdentity:accountIdentities.some(i=>i.accountRevision!==accountRevision),
-    existingRoute:routes.find(r=>r.identityId===identity?.id&&r.status==='active')},copy.channelSetup);
+    existingRoute:routes.find(r=>r.identityId===identity?.id)},copy.channelSetup);
   const tokenVisible=!!token && token.expiresAt>now && (data?.pairings.some(p=>p.id===token.id && p.accountId===accountId)??false);
   const queriesError=!!(query.isError||accountQuery.isError);
   function switchChannel(value:ChannelPlatform){setChannel(value);setToken(null);setIdentityId('');setError('');setSuccess('');}
@@ -77,7 +77,6 @@ export function CopilotChannelsPage() {
     if(!account?.enabled)return 'channel_disabled';
     if(integrationConfig.isPending || integrationConfig.isError)return 'pending_review';
     if(!integrationConfig.data?.enabled || integrationConfig.data.emergencyDisabled)return 'channel_disabled';
-    if(!route.projectId)return 'project_missing';
     if(route.authorityValid===false)return 'authority_revoked';
     if(route.authorityValid!==true)return 'pending_review';
     return 'authorized';

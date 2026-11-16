@@ -155,7 +155,7 @@ it('reports every check with an actionable fix hint when nothing is configured',
     assert.match(all.credentials!.fixHint, /Bot Token/);
     assert.match(all.connection!.fixHint, /Bot Token/);
     assert.match(all.identity!.fixHint, /\/pair <配对码>/);
-    assert.match(all.route!.fixHint, /启用远程操作/);
+    assert.match(all.route!.fixHint, /创建远程会话/);
     assert.match(all.model!.fixHint, /Model Center/);
     assert.match(all.delivery!.fixHint, /Bot Token/);
   } finally {
@@ -229,7 +229,7 @@ it('surfaces a stale identity and a fenced route with targeted fix hints', async
     assert.match(all.identity!.fixHint, /\/pair <配对码>/);
     assert.equal(all.route!.ok, false);
     assert.match(all.route!.detail, /重新连接/);
-    assert.match(all.route!.fixHint, /重新绑定渠道授权/);
+    assert.match(all.route!.fixHint, /重新完成身份配对/);
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
@@ -338,4 +338,50 @@ it('surfaces AGENT_NO_MODEL and generic failure categories in channel replies', 
     assert.equal(await failWith('AGENT_PROVIDER_INACTIVE'), '任务失败：AGENT_PROVIDER_INACTIVE，请在 Web Copilot 查看详情。');
     assert.equal(await failWith('socket hang up'), '任务失败：执行错误，请在 Web Copilot 查看详情。');
   } finally { f.db.close(); }
+});
+
+
+it('accepts a projectless channel conversation, replies with project guidance, and still detects a deleted project', async () => {
+  const f = fixture();
+  const account = f.accounts.upsertAccount({ appId: 'diag', appSecret: randomBytes(24).toString('hex'), enabled: true });
+  f.config.upsertConfig({ enabled: true, emergencyDisabled: false });
+  f.accounts.updateAccountHealth(account.id, { state: 'connected', lastConnectedAt: new Date() });
+  seedModel(f);
+  const peer: TrustedChannelPeer = { channel: 'feishu', accountId: account.id, accountRevision: account.configRevision, externalUserId: 'ou-owner', chatId: 'oc-private', chatType: 'p2p' };
+  const issued = f.service.createPairing({ channel: 'feishu', accountId: account.id });
+  const claimed = f.service.claimPairing(issued.token, peer);
+  const identity = f.service.confirmPairing(claimed.id, { revision: claimed.revision, externalUserId: peer.externalUserId, chatId: peer.chatId });
+  const route = f.service.createRoute({ identityId: identity.id });
+  const inbox = new NativeChannelInbox(f.db, f.user.id, f.key);
+  inbox.receive(peer, { eventId: 'projectless-event', messageId: 'projectless-message', text: '请分析当前项目' });
+
+  const adopted = inbox.adoptNext();
+  assert.equal(adopted.status, 'rejected');
+  let sent = '';
+  const worker = new NativeChannelDelivery(f.db, f.user.id, f.key, async input => {
+    input.authorize();
+    sent = input.text;
+    return { status: 'delivered', messageId: 'om-project-required' };
+  });
+  await worker.runOnce(new AbortController().signal);
+  assert.match(sent, /\/project/);
+  assert.match(sent, /尚未选择项目/);
+  assert.equal(inbox.adoptNext().status, 'idle');
+
+  const { server, checks } = await serve(f);
+  try {
+    const all = await checks('/feishu/diagnostics');
+    assert.equal(all.route!.ok, true);
+    assert.doesNotMatch(all.route!.detail, /尚未选择项目|项目已不可用/);
+
+    f.db.pragma('foreign_keys = OFF');
+    f.db.prepare("UPDATE copilot_conversations SET project_id='deleted-project' WHERE id=?").run(route.conversationId);
+    f.db.pragma('foreign_keys = ON');
+    const deleted = await checks('/feishu/diagnostics');
+    assert.equal(deleted.route!.ok, false);
+    assert.match(deleted.route!.detail, /项目已不可用/);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    f.db.close();
+  }
 });

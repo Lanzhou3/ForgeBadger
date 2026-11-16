@@ -34,11 +34,11 @@ async function selectTarget(name:string){
   const option=await screen.findByRole('option',{name});
   fireEvent.pointerDown(option,{button:0});fireEvent.pointerUp(option,{button:0});fireEvent.click(option);
 }
-it('provides result summaries as built-in notification content without a separate choice',async()=>{
+it('keeps built-in notification content without secondary explanatory copy',async()=>{
   await mount();
   expect(screen.queryByRole('combobox',{name:'卡片内容'})).toBeNull();
-  expect(screen.getByText(/通知默认包含/)).toBeTruthy();
-  expect(screen.getByText(/所选私聊或群聊成员均可看到/)).toBeTruthy();
+  expect(screen.queryByText(/通知默认包含/)).toBeNull();
+  expect(screen.getByRole('checkbox',{name:'任务完成'})).toBeTruthy();
   fireEvent.click(screen.getByRole('button',{name:'保存通知设置'}));
   await waitFor(()=>expect(api.saveFeishuNotificationSettings).toHaveBeenCalledWith(expect.objectContaining({enabled:false,revision:0})));
 });

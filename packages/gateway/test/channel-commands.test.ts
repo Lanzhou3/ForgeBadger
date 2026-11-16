@@ -401,3 +401,37 @@ it('native production handler sends command feedback while an existing run remai
     assert.equal(new CopilotRunLedger(f.db,f.user.id).get(runId)?.status,'cancelled');
   }finally{await runtime.stop();f.db.close();}
 });
+
+
+it('switches projects by full name, rejects ambiguous names, and keeps ID selection authoritative', async () => {
+  const f = fixture();
+  try {
+    const projects = new ProjectRepository(f.db, f.user.id);
+    const named = projects.create({ name: 'Forge Badger App', path: '/private/tmp/forge-badger-app', aiTool: 'claude' });
+    const firstDuplicate = projects.create({ name: '重复项目', path: '/private/tmp/duplicate-project-a', aiTool: 'claude' });
+    projects.create({ name: '重复项目', path: '/private/tmp/duplicate-project-b', aiTool: 'claude' });
+    new ProjectRepository(f.db, f.other.id).create({ name: '其他用户项目', path: '/private/tmp/other-user-project', aiTool: 'claude' });
+    const log = new CopilotRunLedger(f.db, f.user.id).log;
+
+    f.command(`/project ${named.name}`);
+    let replies = await f.deliver();
+    assert.match(replies[0]!, new RegExp(named.name));
+    assert.equal(log.getConversation(f.route.conversationId)?.project_id, named.id);
+
+    f.command('/project 重复项目');
+    replies = await f.deliver();
+    assert.match(replies[0]!, /重名|多个项目/);
+    assert.match(replies[0]!, /ID/);
+    assert.equal(log.getConversation(f.route.conversationId)?.project_id, named.id);
+
+    f.command('/project 其他用户项目');
+    replies = await f.deliver();
+    assert.match(replies[0]!, /项目不存在或不可用/);
+    assert.equal(log.getConversation(f.route.conversationId)?.project_id, named.id);
+
+    f.command(`/project ${firstDuplicate.id}`);
+    replies = await f.deliver();
+    assert.match(replies[0]!, /重复项目/);
+    assert.equal(log.getConversation(f.route.conversationId)?.project_id, firstDuplicate.id);
+  } finally { f.db.close(); }
+});

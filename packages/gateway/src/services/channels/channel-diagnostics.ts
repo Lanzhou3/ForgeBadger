@@ -70,13 +70,13 @@ export function runChannelDiagnostics(db: Database, userId: string, masterKey: s
   if (!account) {
     checks.push({ key: 'connection', ok: false, detail: `尚未配置${label}渠道账号。`, fixHint: credentialHints[channel] });
     checks.push({ key: 'identity', ok: false, detail: '尚无已确认身份。', fixHint: pairingHint(label) });
-    checks.push({ key: 'route', ok: false, detail: '尚无渠道授权路由。', fixHint: routeHint('missing') });
+    checks.push({ key: 'route', ok: false, detail: '尚无远程会话。', fixHint: routeHint('missing') });
   } else {
     const config = channel === 'telegram' ? new TelegramIntegrationRepository(db,userId).getConfig() : new FeishuIntegrationRepository(db,userId).getConfig();
     const enabled = account.enabled === 1 && config.enabled && !config.emergencyDisabled;
     checks.push(enabled ? connectionCheck(account, label, channel) : {key:'connection',ok:false,detail:'渠道已停用或已紧急停止。',fixHint:'请在远程渠道设置中确认配置并启用渠道。'});
     checks.push(identityCheck(identities, account, label));
-    checks.push(enabled ? routeCheck(db, userId, records, identities, account, label) : {key:'route',ok:false,detail:'渠道已停用，现有绑定不能执行远程操作。',fixHint:'请先启用渠道，再检查身份与项目授权。'});
+    checks.push(enabled ? routeCheck(db, userId, records, identities, account, label) : {key:'route',ok:false,detail:'渠道已停用，现有绑定不能执行远程操作。',fixHint:'请先启用渠道，再检查身份与远程会话。'});
   }
 
   checks.push(modelCheck(db, userId, masterKey));
@@ -125,14 +125,14 @@ function routeCheck(db: Database, userId: string, records: ChannelIdentityReposi
     if (owner.accountId !== account.id || owner.accountRevision !== account.config_revision) { problem = problem ?? 'revision'; continue; }
     if (account.enabled !== 1) { problem = problem ?? 'disabled'; continue; }
     const conversation = conversations.getConversation(route.conversationId);
-    const project = conversation?.project_id ? projects.getById(conversation.project_id) : undefined;
-    if (!project) { problem = problem ?? 'project'; problemRouteId = problemRouteId ?? route.id; continue; }
     if (conversation?.status !== 'active') { problem = problem ?? 'conversation'; problemRouteId = problemRouteId ?? route.id; continue; }
-    return { key: 'route', ok: true, detail: '存在有效的渠道会话映射。', fixHint: '' };
+    const project = conversation.project_id ? projects.getById(conversation.project_id) : undefined;
+    if (conversation.project_id && !project) { problem = problem ?? 'project'; problemRouteId = problemRouteId ?? route.id; continue; }
+    return { key: 'route', ok: true, detail: '渠道会话已连接。', fixHint: '' };
   }
   return {
     key: 'route', ok: false,
-    detail: problem === 'project' ? `会话 ${problemRouteId} 尚未选择项目，或项目已不可用。`
+    detail: problem === 'project' ? `会话 ${problemRouteId} 绑定的项目已不可用。`
       : problem === 'revision' ? '渠道会话与当前配置版本不匹配（需重新连接）。'
       : problem === 'disabled' ? '渠道已停用，会话映射不可用。'
       : problem === 'identity' ? '渠道会话绑定的身份已失效。'
@@ -180,7 +180,7 @@ function deliveryCheck(db: Database, userId: string, accountId: string): Channel
   if (!last) return { key: 'delivery', ok: false, status:'untested', detail: '尚无消息回传记录。', fixHint: '' };
   const detail = `最近回传：${last.status}（${new Date(last.createdAt).toISOString()}）。`;
   if (last.status === 'pending' || last.status === 'sending') return { key:'delivery',ok:false,status:'pending',detail,fixHint:'' };
-  if (last.status === 'cancelled') return { key:'delivery',ok:false,status:'failed',detail,fixHint:'回传已取消，请检查当前身份与项目授权。' };
+  if (last.status === 'cancelled') return { key:'delivery',ok:false,status:'failed',detail,fixHint:'回传已取消，请检查当前身份与远程会话。' };
   if (last.status === 'failed' || last.status === 'unknown') {
     return { key: 'delivery', ok: false, detail, fixHint: '最近一条回复发送失败：请检查渠道连接状态与凭证；若刚重新保存过凭证，请确认已完成重新配对。' };
   }
@@ -192,11 +192,11 @@ function pairingHint(label: string): string {
 }
 
 function routeHint(problem: string): string {
-  if (problem === 'project') return '删除失效路由，选择有效项目后重新绑定。';
-  if (problem === 'conversation') return '路由绑定的会话已失效：请回「远程渠道」第 3 步重新绑定渠道授权。';
-  if (problem === 'revision' || problem === 'identity') return '配置或身份已变化：请先重新完成身份配对，再回「远程渠道」第 3 步重新绑定渠道授权。';
-  if (problem === 'disabled') return '请先在「远程渠道」设置页启用渠道，再重新绑定渠道授权。';
-  return '选择已确认身份与目标项目，点击「启用远程操作」创建渠道授权。';
+  if (problem === 'project') return '请在会话中发送 /project 重新选择可用项目。';
+  if (problem === 'conversation') return '渠道会话已失效：请在「远程渠道」撤销旧绑定后重新连接。';
+  if (problem === 'revision' || problem === 'identity') return '配置或身份已变化：请重新完成身份配对，再创建远程会话。';
+  if (problem === 'disabled') return '请先在「远程渠道」设置页启用渠道，再重新连接。';
+  return '选择已确认身份，点击「连接」创建远程会话。';
 }
 
 function modelHint(problem: string): string {
