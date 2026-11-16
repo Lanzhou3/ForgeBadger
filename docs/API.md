@@ -677,7 +677,8 @@ adapter reports the `terminal` runtime mode; the former Codex
 2026-08-14.
 
 - `GET /api/v1/adapters/updates` checks installed CLI versions against the
-  latest version published by each CLI's official npm package, except a
+  latest version published by each CLI's official npm package, except Kimi
+  Code, which uses its self-updater's official CDN channel, and a
   Homebrew-installed OpenCode CLI, which uses the published version of its
   official Homebrew tap or Homebrew core formula. It returns one
   status per adapter (`missing`, `check_failed`, `up_to_date`, or
@@ -688,6 +689,11 @@ adapter reports the `terminal` runtime mode; the former Codex
   22.19.0. Version checks do not change installed software. Results are cached
   for 60 seconds across users; instance admins may pass `?refresh=true` to
   recheck immediately. Homebrew formula releases may lag npm releases.
+  Kimi reports `latestSource: "official"`, reads the stable CDN manifest
+  (`latest.json`, with the legacy `/latest` text fallback), or the canary
+  feed when selected by `KIMI_CODE_UPDATE_CHANNEL` or the installed canary
+  version. Canary failures never fall back to stable. npm publishing ahead
+  of the official Kimi feed does not create an update offer.
 - `POST /api/v1/adapters/:adapterId/update` requires an active instance admin
   with a Bearer credential; cookie-only requests are rejected. It starts a
   background operation and immediately returns `202` with an `operation` whose
@@ -701,6 +707,10 @@ adapter reports the `terminal` runtime mode; the former Codex
   CLI refreshes its tap before upgrading. A successful result reports whether
   the installed version is still behind its installation channel's available
   version. Existing terminal sessions are not restarted.
+  Codex updates have a 15-minute outer deadline to accommodate the official
+  standalone installer's large downloads and source fallback; npm commands
+  for other CLIs retain their 5-minute deadline and other self-updaters their
+  3-minute deadline.
 - `POST /api/v1/adapters/:adapterId/install` requires the same admin Bearer
   authorization and returns `202` with a running background operation. It
   installs a missing CLI with its fixed official npm command, then checks
@@ -711,14 +721,17 @@ adapter reports the `terminal` runtime mode; the former Codex
   `GET /api/v1/adapters/operations/:operationId` return background operations
   to authenticated users. Operation states are `running`, `succeeded`, or
   `failed`; settled operations include a result or a sanitized error, never raw
-  subprocess output. Different CLIs may run concurrently. Submitting another
+  subprocess output. Known failures include an optional `errorCode`:
+  `timeout`, `network`, `permission`, `install_method`, or `cleanup_uncertain`.
+  Only the last case requires a Gateway restart before retrying.
+  Different CLIs may run concurrently. Submitting another
   operation for a CLI that is already running returns the existing operation,
   while the execution layer retains its host-wide per-CLI lock. Operations are
   held in Gateway memory so browser refreshes can recover them; a Gateway
   restart clears the records and never retries an interrupted command
   automatically. If a timed-out subprocess cannot be confirmed stopped, only
   that CLI remains locked until Gateway restarts. npm uses the Gateway host's
-  npm registry configuration; version checks use `registry.npmjs.org`. The
+  npm registry configuration; npm version checks use `registry.npmjs.org`. The
   OpenCode adapter tracks the `@opencode/cli` package documented under
   OpenCode's `/v2/docs` channel. Grok tracks `@xai-official/grok`.
 
@@ -1618,8 +1631,8 @@ provenance identify a unique repository/path.
 
 GitHub resolves refs using the small SHA representation, requests selected
 subtrees directly, and fetches every package file at the same commit. Complete
-UTF-8 packages are limited to 65 files (including SKILL.md), 128 KiB per file
-and 1 MiB total. Binary files, symlinks, submodules, unsafe paths, duplicate
+CLI UTF-8 packages are limited to 257 files (including SKILL.md), 128 KiB per file
+and 4 MiB total. Binary files, symlinks, submodules, unsafe paths, duplicate
 case-insensitive paths and file/directory collisions reject the package.
 Tree responses are bounded to 4 MiB and 10,000 entries; truncated trees reject
 with an actionable error. All network requests validate public HTTPS endpoints
@@ -1976,32 +1989,12 @@ permission denial, and adapter error events.
 They intentionally do not store terminal scrollback; terminal pane history
 remains in the Session Server.
 
-### Session Snapshots
+### Session Snapshots (retired)
 
-- `GET /api/v1/snapshots`
-- `POST /api/v1/snapshots/:id/restore`
-
-Query parameters:
-
-- `sessionId` filters snapshots to a session.
-- `projectId` filters snapshots to a project.
-
-Snapshots are tenant-scoped structured metadata records for
-Session Server-backed session state: session, project, daemon session name,
-selected model, selected Agent, and
-optional config version. Snapshot metadata is sanitized and must not contain
-terminal scrollback; terminal pane history remains in the selected runtime.
-
-Snapshot restore is explicit and tenant-scoped. When the recorded daemon
-session still exists, ForgeBadger reattaches the database session to that session and
-returns `mode: "attach_runtime"` without rotating the existing session attach
-token. API responses use `runtimeSessionName`; storage uses
-`runtime_session_name`. Old field aliases are not returned. When the Session Server no longer
-has the recorded session, ForgeBadger recreates a new Session Server-backed session
-from the snapshot's project/model/Agent metadata plus any credential and API key
-metadata still available on the original session record. If the original session record is unavailable, restore falls back to the
-snapshot metadata and `host_environment` credentials. Restore returns
-`mode: "recreate_session"` and never writes terminal scrollback to SQLite.
+`/api/v1/snapshots` and the Web `/history` page were removed on 2026-11-15.
+They only recorded a metadata row per session start and offered a restore
+that duplicated `POST /api/v1/sessions/:id/start`. The `session_snapshots`
+table stays declared for migration continuity and is no longer written.
 
 ### Usage Analytics
 
@@ -3133,15 +3126,25 @@ every task is `passes` or `cancelled`. Task DTOs add `workItemId` and
 context lists task `id`, `verifyCommand`, `workItemId`, `boardStatus` and
 `dispatchStatus`.
 
-`goal_dispatch_task {taskId, aiTool, instructions}` (operate risk) hands a
+`goal_dispatch_task {taskId, memberId?, aiTool?, instructions, parallel?}` (operate risk;
+at least one of `memberId` / `aiTool`) hands a
 task to a real CLI session working inside the goal workspace: it reuses the
 task's previous goal session while that session still runs there with the
 same adapter, otherwise it creates a dedicated session (`workingDir` = the
 workspace) and starts it through the shared session runtime (adapter launch
 gating and CLI lifecycle hooks), then submits the instructions through the
-programmatic-terminal-submit path with delivery confirmation. The adapter
-must be listed in `FORGEBADGER_CLI_AUTONOMY_ADAPTERS` (else
-`COPILOT_ADAPTER_AUTONOMY_DENIED`); without the `pm_dispatch` grant it goes
+programmatic-terminal-submit path with delivery confirmation. The target is
+a member of the Copilot team roster (admin card "Team members" in Copilot
+settings, runtime setting `copilot_team`: `{maxParallelWriters, members:
+[{id, name, title, description, adapter, roles, enabled}]}`): the CLI must
+support programmatic submit (`capabilities.programmaticDispatch` on
+`GET /runtime-settings`) and have an enabled member with the `writer` role,
+else `COPILOT_ADAPTER_AUTONOMY_DENIED`. `memberId` selects a member (its
+name, title and description are appended to the instructions); `aiTool`
+picks the first writer member for that CLI. The retired
+`FORGEBADGER_CLI_AUTONOMY_ADAPTERS` variable is ignored. When the CLI turn
+settles, the journal note carries the CLI's own final message (unverified)
+and the changed files of a worktree workspace. Without the `pm_dispatch` grant it goes
 through normal owner approval. On success the session id is stored on the
 task (`dispatchedSessionId`, `dispatchStatus: running`) and journaled. While
 any dispatch is `running` the goal driver does not enqueue continuation runs
@@ -3150,6 +3153,206 @@ any dispatch is `running` the goal driver does not enqueue continuation runs
 journals that the turn ended (not verification) and re-evaluates the goal; a
 session that stops without a report settles as `ended`. Dispatch and a
 finished turn are never completion — the task's verify gate still applies.
+
+Parallel writers: without `parallel` the CLI works in the shared goal tree,
+which has exactly one writer — a dispatch is refused
+(`COPILOT_GOAL_INPUT_INVALID`) while another task of the goal has a running
+dispatch there. `parallel: true` (git-backed goals only, else
+`COPILOT_GOAL_TASK_WORKSPACE_UNAVAILABLE`; the task needs a `verify_command`)
+gives the task its own git worktree `<state>/goal-worktrees/tasks-<goalId>/<taskId>`
+on `forgebadger/goal-task-<taskId>`, forked from the goal branch tip after
+checkpoint-committing pending goal-tree edits (CLI hook files excluded). The
+worktree's existence on disk is the record (no schema); a task that has one
+always dispatches there. Every dispatch of a goal is capped by
+`maxParallelWriters` of the team roster (`COPILOT_GOAL_PARALLEL_LIMIT`). The
+result's `workspace` is `task-worktree` or the goal workspace kind, and the
+settle report lists the task worktree's changed files. In the model-facing
+context a task with a worktree carries `isolatedWorktree: true`.
+`goal_run_checks {taskId}` runs in that worktree (OS isolation, when enabled,
+is scoped to it) and reports `workspace: task-worktree|goal`;
+`goal_file_read {taskId}` reads it.
+`goal_integrate_task {taskId}` (goal runs only, not on the coding sub-run
+surface; no approval and in no grant, since it only moves the Copilot-owned
+goal branch) requires the task worktree, a settled (not `running`) dispatch and
+a recorded verify exit code 0, commits pending edits of both trees, and merges
+the task branch into the goal branch (`--no-ff`) under the repository lock;
+it returns `{integrated, commit, changedFiles, conflicts: []}`. A conflict
+aborts the merge, leaves both trees as they were and fails with
+`COPILOT_GOAL_TASK_CONFLICT` naming the files. `goal_update_task` refuses
+`passes` for a task whose worktree is not integrated
+(`COPILOT_GOAL_TASK_NOT_INTEGRATED`). None of this touches the project branch or
+working tree; the owner's `POST /goals/:id/merge` is unchanged except for the
+gate below.
+
+Task worktree hardening: a task owns a worktree while its directory or its
+`forgebadger/goal-task-<taskId>` branch exists; a deleted directory with a kept
+branch is restored (`worktree prune` + `worktree add` on the existing branch) by
+re-dispatch, `goal_run_checks` / `goal_file_read` with `taskId`, and
+`goal_integrate_task`, and `passes` stays gated on the branch tip being in the
+goal branch. Dispatch clears the task's verify record; `goal_run_checks` in a
+task worktree appends `verified-tree: <tree hash>` to the task evidence and
+`goal_integrate_task` refuses a tree that changed after that run. A parallel
+fork or an integration (both checkpoint-commit the goal tree) is refused while
+a CLI is running in the shared goal tree. Managed CLI hook files a member
+committed are untracked again by a ForgeBadger commit on the task branch and
+never reach the goal branch; a merge left in progress by a crash is aborted
+before the next fork/integrate; a conflicting integration restores HEAD and index
+of both trees. Concurrent git operations on a goal are waited for up to about
+3 s. When the owner accepts (`done`) on the board a task that owns a worktree,
+the worktree is integrated first and the task then passes; if it conflicts or
+cannot be integrated the task is left as is and the reason is journaled.
+`GET /goals/:id/diff` adds `unintegratedTasks: [{taskId, description}]` (always
+present) for non-cancelled tasks whose worktree work is not in the goal branch,
+and `POST /goals/:id/merge` answers 409 `COPILOT_GOAL_STATE` listing them.
+Known limit: a task CLI can still read other branches' committed content
+(`git show`) from its worktree.
+After a successful `POST /goals/:id/merge`, task worktrees whose work is fully in
+the goal branch (no uncommitted edits besides CLI hook files, branch tip
+contained in the goal branch) are removed together with their task branch, and
+a member session still sitting in one is stopped first; the response adds
+`cleanedTaskWorktrees` (count). Anything else stays on disk.
+
+Cross-CLI review: `goal_review_task {taskId, memberId?, focus?}` (goal runs
+only; operate-class, per-call approval or the `pm_dispatch` grant) has a team
+member with the `reviewer` role review one task. The reviewer's CLI must
+support programmatic submit and differ from the CLI of the task's dispatched
+session (`COPILOT_GOAL_REVIEWER_UNAVAILABLE` when none qualifies). The gateway
+snapshots the task's tree (its own worktree, else the shared goal tree diffed
+against the goal base) into a dangling commit built in a throwaway index, so no
+branch, index or working tree moves, and checks it out detached at
+`<state>/goal-worktrees/reviews-<goalId>/<taskId>-r<n>`. The reviewer session
+starts there with the task description, the lead's `focus`, and the diff
+(`FORGEBADGER_REVIEW.diff`); it gets nothing of the writer's conversation. It
+answers by writing `FORGEBADGER_REVIEW.json`
+(`{verdict, summary, findings: [{file, line, severity, message}]}`, severity
+`critical|high|medium|low`), which is parsed leniently, redacted and capped
+(50 findings, 256 KiB). The goal driver waits (`awaiting_review`) until the
+turn-end hook, the session ending or a 30 minute timeout settles the attempt;
+the reviewer session is then stopped and the checkout deleted. A task gets at
+most 2 reported rounds and 4 started attempts (`COPILOT_GOAL_REVIEW_LIMIT`);
+running reviews count against `maxParallelWriters` together with dispatches.
+Refused on copy workspaces, while the task's CLI turn runs, and when there is
+no diff. An attempt whose instructions could not be confirmed as delivered
+stays on the record as `ended`. A file named `FORGEBADGER_REVIEW.json` inside
+the reviewed tree is removed from the checkout before the reviewer starts. A
+cancelled or completed goal stops its running reviews at the next evaluation. `goal_get_review {taskId}` (read) returns every attempt with its
+findings. Review state is a JSON file `reviews-<goalId>/<taskId>.json` in the
+state directory (no schema yet); an unreadable file refuses further reviews.
+A review is evidence only: it never touches a task's status, verify record or
+evidence, never satisfies `verify_command`, and never integrates or merges.
+
+`GET /goals/:id/team` (owner only, 404 otherwise) is the goal page's read of
+team work: `{members: [{id, name, title, adapter, roles}], maxParallelWriters,
+tasks: [{taskId, worker: {adapter, memberId, memberName, sessionId} | null,
+workspace: "own"|"shared", integrated: boolean | null, review: {rounds,
+roundsLeft, attempts: [{attempt, status, reviewer, sessionId, startedAt,
+settledAt, verdict, summary, findings, droppedFindings}]} | null}]}`. `members`
+are the enabled roster entries. `worker.memberId` is matched from the dispatched
+session's name and CLI (the member is not stored with the task yet) and is
+`null` when no member matches. `integrated` is `null` for the shared goal tree
+or when the worktree could not be inspected. It runs git per task worktree, so
+it is separate from `GET /goals/:id`.
+
+### Fleets
+
+A fleet is a standing agent team for one personal git project (one fleet per
+user and project): a flagship (lead) Copilot run on the fleet's own
+conversation, woken by events, plus the `copilot_team` roster members. It
+reuses the goal execution machinery through the scope seam: a lead run carries
+the fleet id in `copilot_runs.goal_id`, so `goal_add_tasks`,
+`goal_dispatch_task`, `goal_run_checks`, `goal_review_task`,
+`goal_integrate_task`, `goal_update_task`, `goal_write_journal` and the
+sandbox tools work on the fleet board. Integration branch
+`forgebadger/fleet-<fleetId>` in `goal-worktrees/<fleetId>/`. All routes live
+under `/api/v1/fleets`, require JWT, and answer 404 for another user's fleet.
+Times are epoch ms.
+
+| Method / path | Body | Result |
+| --- | --- | --- |
+| `GET /fleets` | - | `{fleets: [{id, projectId, projectName, title, status, pausedReason, taskTotal, taskDone, taskHeld, taskRunning, updatedAt}]}` |
+| `POST /fleets` | `{projectId, title?, instructions?, grants?}` | 201 `{fleet}`; creates the lead conversation. 409 `FLEET_EXISTS`, 409 `FLEET_GIT_REQUIRED`, 403 `COPILOT_GOAL_SHARED_PROJECT`, 404 unknown project |
+| `GET /fleets/:id` | - | `{fleet, tasks, journal (latest 30: {id, runId, taskId, note, createdAt}), timers (pending: {id, taskId, dueAt, note}), pendingEvents, leadActive}` |
+| `GET /fleets/:id/team` | - | same shape as `GET /copilot/goals/:id/team`; `worker.memberId` prefers the stored `member_id` |
+| `PATCH /fleets/:id` | `{title?, instructions?, grants?}` | `{fleet}` |
+| `POST /fleets/:id/pause` / `resume` | - | `{fleet}`; resume enqueues `fleet_resumed` |
+| `POST /fleets/:id/tasks` | `{description, details?, verifyCommand?, fileScope?, workItemId?}` | 201 `{task}`; enqueues `task_added` |
+| `POST /fleets/:id/tasks/:taskId/answer` | `{answer}` | `{task}`; clears the hold, appends Q/A to the task note and journal, enqueues `hold_answered`; 409 `FLEET_TASK_NOT_HELD` without an open hold |
+| `POST /fleets/:id/tasks/:taskId/cancel` | - | `{task}`; final, enqueues `task_cancelled`; a running member session is not stopped |
+| `POST /fleets/:id/messages` | `{text}` | `{accepted: true}`; enqueues `owner_message`. A copy of a message that is still pending is not queued again: `{accepted: true, duplicate: true}` |
+| `GET /fleets/:id/diff` | - | `{files, truncated, unintegratedTasks: [{taskId, description}]}` |
+| `POST /fleets/:id/merge` | - | goal merge result plus `cleanedTaskWorktrees`; enqueues `merge_done` |
+
+`fleet` = `{id, projectId, projectName, title, instructions, status
+("active"|"paused"), pausedReason ("owner" | "run_rate_limit" | "no_progress" | null), grants,
+workspace: {kind, branch, baseCommit, targetBranch} | null, createdAt,
+updatedAt}`. A task is the goal task DTO (`goalId` = fleet id; `boardStatus`
+is the linked work item's status, else null) plus `details, memberId,
+fileScope: string[], hold: {question, askedAt} | null, note` (task note
+clipped to 600 chars, or null) and `createdBy` ("owner"|"lead"). Invalid input
+is 400 (`COPILOT_INVALID_INPUT`, or `FLEET_INPUT_INVALID` for a bad file
+scope). The merge holds a per-fleet merge lock from gate to cleanup (no
+flagship run starts meanwhile; pending events are pumped right after; a second
+merge is 409). Gate: 409 `COPILOT_GOAL_STATE` while a lead run is active or any
+CLI session is still alive in the shared integration tree, whatever its
+dispatch record says; in-flight tasks in their own worktrees do not block
+(their work is not in the fleet branch). After the merge integrated task
+worktrees are removed. `DELETE /api/v1/copilot/conversations/:id` on a fleet's
+flagship conversation is 409 `COPILOT_FLEET_CONVERSATION`; a flagship
+conversation that is nevertheless missing or deleted is replaced by a fresh one
+(journaled) before the next lead run.
+
+Inbox (`fleet_events`): every wake-up is a row, deduplicated per fleet by
+`dedupe_key`. Kinds and keys: `task_added` (`task:<taskId>`), `owner_message`
+(`message:<textHash>:<copies already picked up>`), `hold_answered`
+(`answer:<taskId>:<holdAskedAt>`), `task_cancelled` (`cancel:<taskId>`),
+`member_turn_ended` / `member_session_ended` (shared
+`dispatch:<taskId>:<sessionId>:<dispatchedAt>`: one wake-up per dispatched
+turn), `review_settled` (`review:<taskId>:<attempt>`), `timer_due`
+(`timer:<timerId>`), `fleet_resumed` (`resume:<fleet updatedAt at pause>`),
+`merge_done` (`merge:<fleet branch base after merge>`). The worker runs one lead
+run per fleet at a time, claiming up to 20 pending events with the run id in
+the admission transaction; completed → `done`; failed/stopped → back to
+`pending` with one more attempt (retry after 15 s × attempts), `failed` after 3
+with a journal line and a notification; a run stopped by an owner pause does
+not count. A paused fleet accumulates events. More than 30 lead runs within an
+hour (or since the last resume) pause the fleet with `run_rate_limit`; 6
+completed lead runs in a row that changed no task (status, dispatch, verify
+record, hold) and handled no owner event (`task_added`, `owner_message`,
+`hold_answered`, `fleet_resumed`, which reset the count) pause it with
+`no_progress` (counter `fleets.idle_lead_runs`). A run whose fleet was deleted
+mid-way stops (`fleet_missing`). Processed events are pruned after 14 days. A
+5-second pass fires due timers, ends member dispatches whose session died or
+stayed silent for 60 minutes, settles reviews, recovers claims whose run
+vanished or ended unseen, and pumps; the table alone drives recovery after a
+restart.
+
+Lead tools (fleet lead runs only, read risk, no approval; each refuses any
+other run): `fleet_hold_task {taskId, question}` (holds one task, notifies the
+owner; the fleet stays active and a held task cannot be dispatched),
+`fleet_set_timer {minutes 1-1440, note, taskId?}` (one-shot, at most 20
+pending), `fleet_cancel_timer {timerId}`, `fleet_write_note {scope
+fleet|task|member, refId?, body ≤4000}` (replaced whole) and `fleet_read_note
+{scope, refId?}`. The lead context carries only a 160-character note index.
+Lead runs keep source `user` (grants apply) but the `fleet-authority` tool
+layer hides and refuses at execution every `mcp_*` tool and the owner-only
+tools (`takeover_session`, `submit_development_task`,
+`cancel_development_task`, `accept_development_task`).
+
+Differences from goals: no goal status machine (no completed/blocked, no
+stagnation or failure cooldown); the lead dispatches and ends its run instead of
+waiting for members; `goal_ask_user` is hidden (per-task hold instead);
+`goal_add_tasks` creates no project board work items (an optional
+`workItemId` link is kept) and tasks may carry `details` and `fileScope`; a
+held task cannot change status (`FLEET_TASK_HELD`) and `goal_delegate`,
+`goal_dispatch_task`, `goal_integrate_task` and `goal_review_task` refuse held
+and cancelled tasks; a work item is linked to at most one unresolved goal or
+fleet task; `goal_dispatch_task` records the member, refuses a `parallel: true` dispatch whose `fileScope` overlaps a
+running dispatch (`COPILOT_GOAL_SCOPE_OVERLAP`, path-segment prefix; tasks
+without a scope are not checked), and appends the member note (first 1500
+chars) and the file scope to the member's instructions. Notifications are type
+`copilot_fleet`: task held (once per hold cycle), events given up, run-rate or
+no-progress pause, and one digest
+when every non-cancelled task passes.
 
 ### Historical reference: retired Copilot grants
 
@@ -3251,10 +3454,15 @@ their respective boundaries. See [task lifecycle review](COPILOT-AUTONOMY-REVIEW
 CLI Skill rows expose `runtimeTarget: "cli"` and nullable `resourceManifest`.
 A null manifest denotes Markdown-only content, including remote Markdown imports;
 it does not assert that referenced scripts/assets were installed. Local supported
-packages snapshot up to 64 additional UTF-8 text files, 128 KiB per file, 1 MiB
-combined, at most eight nested directory levels. Binary files, resource symlinks,
+packages snapshot up to 256 additional UTF-8 text files, 128 KiB per file, 4 MiB
+combined including root `SKILL.md`, at most eight nested directory levels.
+Local scanning excludes generated caches/dependencies (`__pycache__`, `.pytest_cache`,
+`.mypy_cache`, `.ruff_cache`, `.cache`, `.git`, `node_modules`, `.DS_Store`,
+and `.pyc`/`.pyo` files); source scripts remain included. Binary files, resource symlinks,
 escapes and oversized packages are rejected whole and reported in
-`discovery.rejectedSkills` (`path`, `reason`). Export preserves frontmatter and
+`discovery.rejectedSkills` (`path`, `reason`). `path` identifies the root `SKILL.md`;
+resource encoding, size and count errors identify the offending relative resource
+in `reason`. Export preserves frontmatter and
 literal template syntax, copies supported text resources, rejects path collisions,
 and records `.forgebadger-skill.json` for obsolete-file review. Script execution,
 executable-bit installation and binary asset packaging are outside this text
@@ -3954,3 +4162,185 @@ Direct owner `POST /api/v1/sessions/:id/stop` keeps its ID-only request and
 `externalExecutionStopped: null`; legacy Codex also returns a `warning` displayed
 in the Web console. This receipt never claims detached work or a shared daemon
 has stopped or released a native thread lock.
+
+## Team hub coordination
+
+For teams where every member keeps a personal clone and runs AI CLIs on their
+own machine. The hub instance shares tasks, published submissions and review
+confirmations only; code moves through the team's Git remote and the hub never
+executes anything for these calls. Authority is re-read from team and project
+grants on every request, so revoking a member or disabling an account takes
+effect immediately regardless of token lifetime.
+
+Two prefixes expose the same task operations:
+
+| Prefix | Credential | Extra surface |
+|---|---|---|
+| `/api/v1/hub` | node token `Authorization: Bearer fbnode_…` | none |
+| `/api/v1/hub-console` | browser session / JWT | tokens, settings, confirmations |
+
+A node token is pinned to one project (any other project id answers
+`404 PROJECT_NOT_FOUND`), is rate limited to 240 requests per minute and is
+rejected by every other API. Only its SHA-256 is stored.
+
+### Node tokens (`/api/v1/hub-console/tokens`)
+
+- `POST` `{ projectId, name, expiresInDays? (1–90, default 30) }` →
+  `201 { token, record }`. Requires read access to the project. `token` is
+  shown once.
+- `GET` → `{ tokens }` for the caller only; never includes the token.
+- `DELETE /:tokenId` → `{ revoked }` (idempotent, caller's tokens only).
+
+### Shared task operations (both prefixes)
+
+- `GET /projects/:projectId` → `{ project: { id, name, role, capabilities }, actorId, settings }`.
+  The hub filesystem path is never returned.
+- `GET /projects/:projectId/tasks?assignee=me|all` → `{ tasks }`. Each task
+  carries `revision`, `semanticRevision`, `assigneeId`, `reviewerId` and
+  `latestSubmission` (`current` is false once requirements or assignments
+  changed after it was recorded).
+- `GET /projects/:projectId/tasks/:taskId` → `{ task, submissions, comments }`,
+  each submission with its `confirmations`.
+- `POST …/tasks/:taskId/claim` `{ expectedRevision }` → assigns an unassigned
+  task to the caller and moves it to `in_progress` (`develop` capability).
+- `PATCH …/tasks/:taskId/status` `{ expectedRevision, status: "in_progress" | "blocked" }`
+  — assignee only. Review and completion are not reachable here.
+- `POST …/tasks/:taskId/submissions`
+  `{ expectedRevision, branch, commitSha, prUrl?, checksStatus: "passed" | "failed" | "not_run", checksSummary? }`
+  → `201 { task, submission }`; assignee only; moves the task to
+  `ready_for_review`. `prUrl` must be HTTPS without credentials. Submissions
+  are immutable and bound to the task's semantic revision. A task with
+  submissions cannot be deleted.
+- `POST …/tasks/:taskId/comments` `{ text }` → `201 { comment }`.
+
+Status changes advance the task `revision`; send the revision from the most
+recent response.
+
+### Console-only operations
+
+- `PUT /projects/:projectId/settings`
+  `{ expectedRevision, provider: "github" | "gitee", remoteUrl, defaultBranch, confirmationPolicy? }`
+  → `{ settings }` (`manage` capability; first write uses `expectedRevision: 0`).
+- `POST /projects/:projectId/tasks/:taskId/confirmations`
+  `{ expectedRevision, submissionId, decision: "accepted" | "changes_requested", note }`
+  → `201 { task, confirmation }`. Requires the `review` capability; the
+  submitter can never confirm their own submission; when the task names a
+  reviewer, only that reviewer or a project manager may confirm. Only the
+  latest submission that still matches the task's semantic revision is
+  reviewable. `accepted` completes the task, `changes_requested` returns it
+  to `in_progress`.
+
+Confirmation records are append-only and carry `actorKind`
+(`human` | `copilot` | `system`) and `effect` (`binding` | `advisory`). The
+project `confirmationPolicy` decides which kinds are binding; the only
+supported policy is `human_only`, and HTTP confirmations are always recorded as
+`human`. Non-binding kinds are stored as advisory opinions and never move the
+task — this is the reserved seam for a later Copilot reviewer.
+
+Errors use the project envelope with a stable `message` code, including
+`STALE_TASK_REVISION`, `TASK_ASSIGNED_TO_ANOTHER_MEMBER`,
+`TASK_ASSIGNEE_REQUIRED`, `TASK_ALREADY_FINISHED`, `TASK_REVIEWER_REQUIRED`,
+`SELF_CONFIRMATION_DENIED`, `SUBMISSION_NOT_FOUND`, `SUBMISSION_SUPERSEDED`,
+`SUBMISSION_STALE`, `SUBMISSION_ALREADY_CONFIRMED`,
+`TASK_NOT_AWAITING_REVIEW`, `CONFIRMATION_POLICY_UNSUPPORTED`,
+`STALE_HUB_SETTINGS_REVISION`, `PROJECT_CAPABILITY_DENIED` and `INVALID_INPUT`.
+
+### Insights: modules, conflict radar, pull request and CI status
+
+Console only (`/api/v1/hub-console`, browser session). Insights are derived,
+refreshed-in-place hints for reviewers. They never gate confirmation and are
+not evidence; the Git host's branch protection remains the merge gate.
+
+- `GET /projects/:projectId/insights` (`read`) →
+  `{ modules, taskModules, checks, sync, remote }`
+  - `modules`: `[{ pattern, owners }]` parsed from `CODEOWNERS`
+    (`.github/CODEOWNERS`, `CODEOWNERS`, `docs/CODEOWNERS`) on the fetched
+    default branch; before the first refresh, from the mirror's working tree.
+    Symlinked or oversized files are ignored. Patterns with more than 16
+    wildcards or 32 segments are dropped.
+  - `taskModules`: `{ [taskId]: pattern }`.
+  - `checks`: `[{ submissionId, taskId, kind, status, details, checkedAt }]`
+    for each task's latest submission only. `status` is `ok`, `attention` or
+    `unknown`.
+  - `sync`: `{ mirrorFetchedAt, mirrorError, remotePolledAt, remoteError }`
+    (error values are stable codes).
+  - `remote`: `{ tokenConfigured }`.
+- `PUT /projects/:projectId/tasks/:taskId/module` `{ pattern | null }`
+  (`manage`) → `{ taskModules }`. The pattern must be a current CODEOWNERS
+  pattern (`MODULE_PATTERN_UNKNOWN` otherwise).
+- `POST /projects/:projectId/mirror/refresh` `{}` (`review` or `manage`) →
+  the insights shape. Fetches the hub project's clone from its `origin`
+  (which must equal the configured remote, else `MIRROR_REMOTE_MISMATCH`)
+  using the host's Git credentials, then recomputes for in-flight submissions:
+  - `base_conflict` `{ baseBranch, files, truncated }` — merge conflicts with
+    the default branch.
+  - `peer_conflict` `{ peers: [{ submissionId, taskId, files }] }` — conflicts
+    with other tasks' in-flight submissions.
+  - `scope` `{ pattern, outside, total }` — changed files outside the task's
+    module (only when the task has one).
+  A commit the mirror does not have yields `unknown` with
+  `{ reason: "COMMIT_NOT_FETCHED" }`. Refreshes for one project share a run,
+  repeat calls within 30 seconds return the current view, analysis stops at a
+  time budget (`ANALYSIS_BUDGET_EXCEEDED`), and the route is limited to 6
+  calls per minute per user. Requires the repository settings
+  (`HUB_REPOSITORY_NOT_CONFIGURED`).
+- `PUT /projects/:projectId/remote-credential` `{ token }` (`manage`) →
+  `{ tokenConfigured: true }`; `DELETE` → `{ tokenConfigured: false }`. The
+  optional Git host API token is write-only, AES-256-GCM encrypted and used
+  only to read pull request and CI status. It must be sent over HTTPS or
+  direct loopback (`SECURE_CREDENTIAL_TRANSPORT_REQUIRED`). Changing the
+  project's provider or remote URL discards it.
+- `POST /projects/:projectId/remote/refresh` `{}` (`review` or `manage`) →
+  `{ checks }` for kinds:
+  - `pull_request` `{ number, url, state, draft, headSha, matchesSubmission }`
+    — found through the submission's PR URL or its branch; `attention` when
+    closed unmerged or when the PR head is not the submitted commit;
+    `unknown` `{ reason: "NOT_FOUND" }` when there is none.
+  - `ci` `{ state, total, failed }` — `ok` only when the host affirmatively
+    reports success.
+  Only `github.com` and `gitee.com` repositories are supported
+  (`REMOTE_REPOSITORY_UNSUPPORTED`). Works without a token for public
+  repositories. Repeat calls within 60 seconds of a successful poll return the
+  stored rows. Host failures surface as `REMOTE_AUTH_REJECTED`,
+  `REMOTE_RATE_LIMITED`, `REMOTE_REPOSITORY_NOT_FOUND`, `REMOTE_UNREACHABLE`
+  or `REMOTE_RESPONSE_INVALID`. Gitee commit-status support is best effort:
+  any outcome that is not an explicit success is reported as `none`.
+
+### Node side (`/api/v1/hub-links`, browser session)
+
+Served by a member's own instance. It links one of the member's local projects
+(their clone) to a hub project and relays explicit task actions; it never
+writes to the working tree or runs project code.
+
+All routes require the instance admin (`403 HUB_LINK_ADMIN_REQUIRED`
+otherwise): linking makes the instance call an operator-chosen private
+address. On a member's own machine the member is that admin. Replies from the
+hub are schema-validated and unknown fields dropped before they are cached.
+
+- `GET /` → `{ links }`. The stored node token is never returned.
+- `POST /` `{ hubUrl, token, localProjectId }` → `201 { link }`. `hubUrl` is an
+  origin; it must be HTTPS unless the host is loopback (an SSH port-forward to
+  the hub). Private addresses are allowed for this endpoint only; cloud
+  metadata hosts stay blocked. The hub project is discovered from the token
+  via `GET /api/v1/hub/self` (`{ userId, projectId, tokenName, expiresAt }`).
+  The token is stored AES-256-GCM encrypted. One link per local project.
+- `DELETE /:linkId` → `{ removed }`.
+- `POST /:linkId/sync` → `{ link, settings, tasks }`; refreshes the cached
+  task list. A failure records its code in `link.lastError` and keeps the
+  previous cache.
+- `GET /:linkId/tasks` → `{ tasks }` from the cache. Each task adds `mine`,
+  `localWorkItemId` and `suggestedBranch` (`fb/<short id>-<slug>`).
+- `GET /:linkId/git` → `{ git: { branch, commit, dirty, pushed } }` read from
+  the local clone with repository hooks disabled.
+- `POST /:linkId/tasks/:taskId/claim`, `PATCH …/status` `{ status }` → relay
+  to the hub with the freshly synced revision.
+- `POST /:linkId/tasks/:taskId/submit` `{ prUrl?, checksStatus, checksSummary? }`
+  → `{ task }`. Branch and commit always come from the clone. Refused with
+  `LOCAL_HEAD_DETACHED`, `LOCAL_CHANGES_UNCOMMITTED`, `LOCAL_BRANCH_NOT_PUSHED`
+  or `SUBMIT_FROM_DEFAULT_BRANCH`.
+- `POST /:linkId/tasks/:taskId/local-task` → `201 { workItemId, suggestedBranch }`;
+  creates (once) a private local work item mirroring the hub task.
+
+Hub rule violations pass through with their hub code. Connectivity errors are
+`HUB_UNREACHABLE`, `HUB_TOKEN_REJECTED`, `HUB_RESPONSE_INVALID`,
+`HUB_URL_INVALID`, `HUB_URL_HTTPS_REQUIRED` and `HUB_URL_REJECTED`.

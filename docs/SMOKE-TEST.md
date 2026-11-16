@@ -146,12 +146,9 @@ Expected response:
 Then confirm the Notifications page and session Activity panel show a
 permission prompt event.
 
-## 8. Usage And History
+## 8. Usage
 
 - Open Usage and confirm session/model/project aggregates render.
-- Open History and confirm session snapshots can be filtered.
-- Start or reconnect a session and confirm the snapshot list changes after
-  Gateway records session state.
 
 ## 9. Native Copilot
 

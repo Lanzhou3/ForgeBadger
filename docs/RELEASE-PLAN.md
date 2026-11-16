@@ -539,7 +539,7 @@ A release candidate is acceptable only when:
   This does not claim stable release acceptance.
 - Manual smoke in `docs/SMOKE-TEST.md` passes for auth, projects, config sync,
   sessions, terminal attach, notifications, Templates, Skills, plugins,
-  usage, and snapshots.
+  and usage.
 - Windows native/WSL evidence is recorded from a physical Windows host before
   removing the current platform caveat.
 - Existing projects can still render config previews and apply config sync with

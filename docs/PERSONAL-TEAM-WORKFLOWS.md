@@ -183,9 +183,10 @@ Keep the SSH connection open; reconnect it before reconnecting the browser.
 
 Team invite links generated from this address work after the member starts the tunnel.
 Keep token-bearing invitations private. Normal tokens travel inside SSH even though
-the browser talks HTTP to its own loopback. This release does not claim arbitrary HTTPS
-reverse-proxy Origin support, enterprise SSO, host-account sandboxing or a multi-host
-terminal cluster. A two-device SSH/host-key onboarding exercise remains an operator
+the browser talks HTTP to its own loopback. The only supported reverse-proxy shape is the
+same-origin HTTPS proxy described under "LAN access through a same-origin HTTPS proxy";
+this release does not claim cross-origin proxy support, enterprise SSO, host-account
+sandboxing or a multi-host terminal cluster. A two-device SSH/host-key onboarding exercise remains an operator
 acceptance check; loopback browser tests cannot prove a real remote network path.
 
 ## Historical backup compatibility
@@ -267,3 +268,119 @@ new matching artifact to attach a new reference. Referenced artifacts are retain
 foreign-key restriction; deleting the owning work item removes its reference rows.
 Association never accepts the artifact, completes the task, writes source files or merges
 code. Copilot's existing explicit approval and sandbox boundaries remain in force.
+
+## LAN access through a same-origin HTTPS proxy
+
+To let teammates open the hub from the LAN without SSH tunnels, keep Gateway
+and Web on loopback and put one TLS-terminating reverse proxy on the same host
+in front of both. The browser then talks to a single HTTPS origin, so no
+cross-origin allowance is needed and tokens never cross the network in clear
+text. Do not bind the Gateway itself to a LAN interface.
+
+Example Caddy configuration with its built-in private CA:
+
+```caddyfile
+forge.lan {
+	tls internal
+	@gateway path /api/* /ws/* /mcp /mcp/*
+	reverse_proxy @gateway 127.0.0.1:18332
+	reverse_proxy 127.0.0.1:18333
+}
+```
+
+Start ForgeBadger with the proxy origin:
+
+```sh
+FORGEBADGER_PUBLIC_URL=https://forge.lan FORGEBADGER_REGISTRATION=invite forgebadger start
+```
+
+`FORGEBADGER_PUBLIC_URL` must be a bare HTTPS origin. It makes the Web console
+call the proxy instead of the loopback Gateway and turns on
+`FORGEBADGER_TRUST_PROXY` for the Gateway unless you set that variable
+yourself. With proxy trust enabled the Gateway accepts forwarding headers from
+loopback peers only, marks session cookies `Secure` for requests the proxy
+received over HTTPS, and records the real client address. A proxied request is
+never treated as a local-operator request, so first-account bootstrap and
+account recovery still require direct access on the host. When running from
+source instead of the published CLI, set `FORGEBADGER_TRUST_PROXY=true` and
+build Web with `NEXT_PUBLIC_GATEWAY_URL` set to the proxy origin.
+
+Each teammate's computer must trust the proxy's root certificate once (for
+Caddy: the `root.crt` under its data directory) and resolve the hub name, for
+example through the router's DNS or a hosts entry. Nodes that link to this hub
+need the same certificate through `NODE_EXTRA_CA_CERTS`. Opening the hub by IP
+address works only if the certificate covers that address. A two-device check
+on the real network remains an operator acceptance step.
+
+## Team hub with per-member clones
+
+Use this topology when every member keeps a personal clone and runs AI CLIs on
+their own computer. One always-on instance is the **hub**; each member's own
+instance is a **node**. The hub shares tasks, submissions and confirmations.
+Code travels only through the team's Git remote (GitHub or Gitee), and nothing
+is executed on the hub. Member isolation is physical: terminals, CLI
+credentials and uncommitted work never leave the member's machine.
+
+Hub setup: create the team and invite members, register a mirror clone as a
+project, enroll it, grant `developer`/`reviewer` roles, and record the shared
+remote under **Member management → Project access → Repository**. Set
+`FORGEBADGER_REGISTRATION=invite` before exposing the hub to the LAN.
+
+Member setup: on the hub, create a **node token** under **Member management →
+Project access**. On your own instance, open the project for your clone,
+choose **Connect to a team hub** in Development tasks, and paste the hub
+address and token. The hub address must be HTTPS; plain HTTP is accepted only
+for `127.0.0.1` (an SSH port-forward). When the hub uses a private CA, start
+the node with `NODE_EXTRA_CA_CERTS` pointing at that CA certificate. If your
+node already uses port 18332, forward the hub to a different local port.
+
+Daily flow:
+
+1. Claim a task in **Team tasks** (or have a manager assign it).
+2. Optionally create the matching local task, work on the suggested
+   `fb/<id>-<slug>` branch in your own CLI session, commit and push.
+3. **Submit current branch**: the node reads the branch and commit from your
+   clone and refuses uncommitted, unpushed or default-branch states.
+4. A reviewer confirms or requests changes on the hub, in the task's
+   **Delivery and confirmation** panel. Nobody can confirm their own
+   submission, and a named reviewer (or a manager) is required when set.
+5. Merge through the Git remote's pull request and branch protection. The hub
+   confirmation completes the task; it does not merge code.
+
+Changing a task's requirements or assignments after a submission makes that
+submission stale; it must be submitted again before it can be confirmed.
+Confirmations are human-only today. The record format already distinguishes
+reviewer kinds, and non-human opinions are stored as advisory without changing
+task state.
+
+### Modules and the team radar
+
+Module ownership comes from the repository's own `CODEOWNERS` file, so the
+same file drives required reviews on the Git host. A manager assigns each task
+to one of its patterns in the task's **Delivery and confirmation** panel.
+
+Under **Member management → Project access → Team radar**, reviewers and
+managers can run two refreshes:
+
+- **Refresh conflict radar** fetches the hub's mirror clone and flags, for
+  each in-flight submission, conflicts with the default branch, conflicts
+  with other members' in-flight submissions, and files changed outside the
+  task's module. The mirror must be a clone of the configured remote, and the
+  hub's operating-system account needs read access to it (SSH key or
+  credential helper).
+- **Refresh PR and CI status** reads the pull request and CI state from
+  GitHub or Gitee. Public repositories need no token; for private ones a
+  manager stores a read-only API token, which is encrypted, never shown again
+  and discarded when the provider or repository setting changes.
+
+These are reviewer aids, not gates. A flag does not block confirmation and an
+absent flag does not prove the code merges or passes; the pull request and
+branch protection on the Git host decide that. Gitee CI status is best effort
+and reports "none" whenever the host does not state an explicit success.
+
+On a hub, only the instance admin sees **Connect to a team hub**; ordinary
+members link from their own instance, where they are the admin.
+
+A node token cannot confirm work, reaches only its one project, and stops
+working as soon as the member's grant is revoked or the account is disabled.
+Removing a link on the node does not revoke the token; revoke it on the hub.
