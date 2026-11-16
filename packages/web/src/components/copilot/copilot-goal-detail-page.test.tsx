@@ -10,6 +10,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/copilot/goals/g1", useR
 vi.mock("@/lib/copilot-api", async (original) => ({
   ...await original<typeof import("@/lib/copilot-api")>(),
   getGoal: vi.fn(),
+  getGoalTeam: vi.fn(),
   answerGoal: vi.fn(),
   getGoalDiff: vi.fn(),
   mergeGoal: vi.fn(),
@@ -87,6 +88,7 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   vi.mocked(api.getGoal).mockResolvedValue(goalPayload());
+  vi.mocked(api.getGoalTeam).mockResolvedValue({ members: [], maxParallelWriters: 3, tasks: [] });
   vi.mocked(api.answerGoal).mockResolvedValue({ goal });
   vi.mocked(api.getGoalDiff).mockResolvedValue({ files: [], truncated: false });
   vi.mocked(api.mergeGoal).mockResolvedValue({ merged: ["src/a.ts"], deleted: [], kept: [] });
@@ -356,4 +358,25 @@ it("links board-backed tasks to the project board and shows board cancellation",
   expect(badge.getAttribute("href")).toBe("/projects/p1");
   expect(screen.getByText("已取消（看板）")).toBeTruthy();
   expect(screen.getByRole("link", { name: /看板：已取消/ })).toBeTruthy();
+});
+
+it("warns about tasks that are not in the goal branch and holds the merge button", async () => {
+  vi.mocked(api.getGoal).mockResolvedValue(goalPayload({
+    goal: { status: "blocked", blockedReason: "no_task_progress" },
+    tasks: [{ ...baseTask, id: "t1", status: "in_progress", verifyCommand: "pnpm test" }],
+  }));
+  vi.mocked(api.getGoalTeam).mockResolvedValue({
+    members: [], maxParallelWriters: 3,
+    tasks: [{ taskId: "t1", worker: null, workspace: "own", integrated: false, review: null }],
+  });
+  mount();
+  expect(await screen.findByText("1 个任务的改动还没并入 Goal 分支，现在合并会被拒绝。")).toBeTruthy();
+  expect((screen.getByRole("button", { name: /合并到项目/ }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it("still renders the tasks when the team view fails to load", async () => {
+  vi.mocked(api.getGoalTeam).mockRejectedValue(new Error("boom"));
+  mount();
+  expect(await screen.findByText("团队状态加载失败，下面只显示基本进度。")).toBeTruthy();
+  expect(screen.getByText("Build UI")).toBeTruthy();
 });

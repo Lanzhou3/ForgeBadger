@@ -516,6 +516,8 @@ export interface CopilotGoalTask {
   /** CLI session this task was dispatched to, if any. */
   dispatchedSessionId?: string | null;
   dispatchStatus?: CopilotGoalDispatchStatus | null;
+  /** Epoch ms of the last dispatch state change. */
+  dispatchUpdatedAt?: number | null;
   /** Linked project board work item (personal projects) and its board status. */
   workItemId?: string | null;
   boardStatus?: string | null;
@@ -577,6 +579,58 @@ export function getGoal(id: string) {
     /** Agent question awaiting a user answer; non-null only while blockedReason === "awaiting_user". */
     pendingQuestion: string | null;
   }>(`/api/v1/copilot/goals/${encodeURIComponent(id)}`);
+}
+
+export type CopilotGoalReviewSeverity = "critical" | "high" | "medium" | "low";
+
+export interface CopilotGoalReviewFinding {
+  file: string;
+  line: number | null;
+  severity: CopilotGoalReviewSeverity;
+  message: string;
+}
+
+export interface CopilotGoalReviewAttempt {
+  attempt: number;
+  /** `reported` = findings collected; `no_report`/`ended` = the reviewer left nothing usable. */
+  status: "running" | "reported" | "no_report" | "ended";
+  reviewer: { id: string; name: string; adapter: string };
+  sessionId: string;
+  startedAt: number;
+  settledAt: number | null;
+  verdict: "approve" | "request_changes" | "comment" | null;
+  summary: string | null;
+  findings: CopilotGoalReviewFinding[];
+  droppedFindings: number;
+}
+
+export interface CopilotGoalTeamMember {
+  id: string;
+  name: string;
+  title: string;
+  adapter: string;
+  roles: string[];
+}
+
+/** Team work on one task: who wrote it, where its changes live, what reviewers said. */
+export interface CopilotGoalTaskTeam {
+  taskId: string;
+  worker: { adapter: string; memberId: string | null; memberName: string | null; sessionId: string } | null;
+  /** `own` = a dedicated worktree of this task; `shared` = the goal tree. */
+  workspace: "own" | "shared";
+  /** Own worktree only: its work reached the goal branch. null = shared tree or unknown. */
+  integrated: boolean | null;
+  review: { rounds: number; roundsLeft: number; attempts: CopilotGoalReviewAttempt[] } | null;
+}
+
+export interface CopilotGoalTeam {
+  members: CopilotGoalTeamMember[];
+  maxParallelWriters: number;
+  tasks: CopilotGoalTaskTeam[];
+}
+
+export function getGoalTeam(id: string) {
+  return fetchJson<CopilotGoalTeam>(`/api/v1/copilot/goals/${encodeURIComponent(id)}/team`);
 }
 
 /** Answer a pending agent question; the server rejects (409) unless the goal awaits the user. */

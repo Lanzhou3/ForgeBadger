@@ -1,0 +1,84 @@
+/* Goal task track: the one place this page moves on its own. A finished link
+   is still; the link feeding the active stage carries a travelling spark, and
+   the active node breathes. Everything stops under reduced motion and when the
+   goal is not running. */
+
+@keyframes forgebadger-flow-travel {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+
+@keyframes forgebadger-flow-breathe {
+  0% { box-shadow: 0 0 0 0 hsl(var(--brand) / 0.5); }
+  70%, 100% { box-shadow: 0 0 0 7px hsl(var(--brand) / 0); }
+}
+
+@keyframes forgebadger-flow-draw {
+  from { opacity: 0; transform: translateX(-6px) scale(0.92); }
+  to { opacity: 1; transform: none; }
+}
+
+.fb-flow-link {
+  height: 2px;
+  border-radius: 1px;
+  background: hsl(var(--border));
+}
+
+.fb-flow-link[data-state="done"] {
+  background: hsl(var(--brand) / 0.7);
+}
+
+.fb-flow-link[data-state="todo"] {
+  background: repeating-linear-gradient(90deg, hsl(var(--border)) 0 4px, transparent 4px 8px);
+}
+
+.fb-flow-link[data-state="active"] {
+  background-color: hsl(var(--brand) / 0.28);
+  background-image: linear-gradient(90deg, transparent 0%, hsl(var(--brand)) 35%, hsl(var(--brand-accent)) 50%, hsl(var(--brand)) 65%, transparent 100%);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  background-position: 150% 0;
+}
+
+.fb-flow-live .fb-flow-link[data-state="active"] {
+  animation: forgebadger-flow-travel 1.5s linear infinite;
+}
+
+.fb-flow-live .fb-flow-node[data-state="active"] {
+  animation: forgebadger-flow-breathe 1.8s ease-out infinite;
+}
+
+.fb-flow-enter {
+  animation: forgebadger-flow-draw 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--fb-flow-i, 0) * 55ms);
+}
+
+.fb-flow-details {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms ease;
+}
+
+.fb-flow-details[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+
+.fb-flow-details > div {
+  overflow: hidden;
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fb-flow-live .fb-flow-link[data-state="active"],
+  .fb-flow-live .fb-flow-node[data-state="active"],
+  .fb-flow-enter {
+    animation: none;
+  }
+  .fb-flow-link[data-state="active"] {
+    background-image: none;
+    background-color: hsl(var(--brand) / 0.7);
+  }
+  .fb-flow-details {
+    transition: none;
+  }
+}

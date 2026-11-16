@@ -140,6 +140,17 @@ export function createCopilotGoalRoutes(deps: AgentStackDeps): Router {
     }));
   });
 
+  // Team work per task (worker, worktree, integration, reviews). Separate from
+  // the detail read because worktree inspection runs git.
+  router.get("/goals/:id/team", async (req, res) => {
+    const id = parseId(req.params.id, res); if (!id) return;
+    try {
+      const goal = new CopilotGoalStore(deps.db, userId(req)).getGoal(id);
+      if (!goal) return notFound(res);
+      res.json(ok(await goalTeamView(deps.db, userId(req), goal)));
+    } catch (error) { domainError(res, error); }
+  });
+
   router.post("/goals/:id/answer", (req, res) => {
     const id = parseId(req.params.id, res); if (!id) return;
     withBody(req.body, answerSchema, res, (value) => {

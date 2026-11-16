@@ -190,6 +190,14 @@ describe("copilot goals routes", () => {
     assert.equal((await listGoals(stranger)).length, 0);
     const strangerDetail = await fetch(`${baseUrl}/api/v1/copilot/goals/${first.goalId}`, { headers: authenticated(stranger) });
     assert.equal(strangerDetail.status, 404);
+    // Team view: owner gets one entry per task, a stranger gets nothing.
+    const team = await fetch(`${baseUrl}/api/v1/copilot/goals/${first.goalId}/team`, { headers: authenticated(owner) });
+    const teamBody = (await team.json()) as Envelope<{ members: unknown[]; maxParallelWriters: number; tasks: Array<Record<string, unknown>> }>;
+    assert.equal(team.status, 200, JSON.stringify(teamBody));
+    assert.equal(teamBody.data!.tasks.length, 1);
+    assert.deepEqual({ worker: teamBody.data!.tasks[0]!.worker, workspace: teamBody.data!.tasks[0]!.workspace, integrated: teamBody.data!.tasks[0]!.integrated, review: teamBody.data!.tasks[0]!.review },
+      { worker: null, workspace: "shared", integrated: null, review: null });
+    assert.equal((await fetch(`${baseUrl}/api/v1/copilot/goals/${first.goalId}/team`, { headers: authenticated(stranger) })).status, 404);
     await cancelGoal(owner, first.goalId);
     await cancelGoal(owner, second.goalId);
   });

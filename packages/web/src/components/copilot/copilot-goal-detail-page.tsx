@@ -4,27 +4,20 @@ import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   ArrowLeft,
   Ban,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Circle,
   CircleDashed,
   CircleHelp,
   FileDiff,
   GitBranch,
   GitMerge,
   KeyRound,
-  Loader2,
   Pause,
   Play,
-  KanbanSquare,
-  Send,
-  ShieldCheck,
   Target,
-  XCircle,
-  type LucideIcon,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -33,6 +26,9 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { GoalStatusBadge } from "./goal-status-badge";
+import { GoalTaskFlow } from "./goal-task-flow";
+import { unintegratedTasks } from "./goal-task-flow-model";
+import { GoalTeamStrip } from "./goal-team-strip";
 import { useGoalsCopy } from "./goals-copy";
 import { useUiLocale } from "@/hooks/use-language";
 import {
@@ -40,22 +36,14 @@ import {
   cancelGoal,
   getGoal,
   getGoalDiff,
+  getGoalTeam,
   mergeGoal,
   pauseGoal,
   resumeGoal,
   type CopilotGoalDiffFile,
-  type CopilotGoalTaskStatus,
 } from "@/lib/copilot-api";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-
-const TASK_META: Record<CopilotGoalTaskStatus, { icon: LucideIcon; className: string; key: "taskPending" | "taskInProgress" | "taskPasses" | "taskFailed" | "taskCancelled" }> = {
-  pending: { icon: Circle, className: "text-muted-foreground", key: "taskPending" },
-  in_progress: { icon: Loader2, className: "animate-spin text-brand", key: "taskInProgress" },
-  passes: { icon: CheckCircle2, className: "text-emerald-500", key: "taskPasses" },
-  failed: { icon: XCircle, className: "text-destructive", key: "taskFailed" },
-  cancelled: { icon: Ban, className: "text-muted-foreground", key: "taskCancelled" },
-};
 
 export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
   const copy = useGoalsCopy();
@@ -68,6 +56,15 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
     queryKey,
     queryFn: () => getGoal(goalId),
     refetchInterval: (query) => query.state.data?.goal.status === "active" ? 8000 : false,
+  });
+
+  // Worker, worktree and review state per task. It runs git on the server, so
+  // it is its own read and the page still renders when it fails.
+  const teamQuery = useQuery({
+    queryKey: ["copilot", "goals", "team", goalId] as const,
+    queryFn: () => getGoalTeam(goalId),
+    refetchInterval: () => goalQuery.data?.goal.status === "active" ? 8000 : false,
+    retry: false,
   });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["copilot", "goals"] });
@@ -121,14 +118,14 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
 
   if (goalQuery.isPending) {
     return (
-      <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-4 overflow-y-auto p-4 pt-16 md:p-6">
+      <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 pt-16 md:p-6">
         <p role="status" className="text-xs text-muted-foreground">{copy.loading}</p>
       </div>
     );
   }
   if (goalQuery.isError) {
     return (
-      <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-4 overflow-y-auto p-4 pt-16 md:p-6">
+      <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 pt-16 md:p-6">
         <BackLink />
         <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           <p>{copy.loadFailed}</p>
@@ -148,9 +145,12 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
   const actionError = pauseMutation.error ?? resumeMutation.error ?? cancelMutation.error;
   const awaitingUser = Boolean(pendingQuestion);
   const mergeable = goal.status === "completed" || goal.status === "blocked";
+  const team = teamQuery.data;
+  // Unintegrated work is normal while the goal runs; it only matters once the owner could merge.
+  const pendingIntegration = mergeable ? unintegratedTasks(sortedTasks, team?.tasks) : [];
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-4 overflow-y-auto p-4 pt-16 md:p-6">
+    <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 pt-16 md:p-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <BackLink />
@@ -200,7 +200,8 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
           {mergeable ? (
             <Button
               size="sm"
-              disabled={mergeMutation.isPending}
+              disabled={mergeMutation.isPending || pendingIntegration.length > 0}
+              title={pendingIntegration.length > 0 ? copy.unintegratedBanner(pendingIntegration.length) : undefined}
               onClick={() => {
                 void ensureDiff().then(() => setMergeOpen(true));
               }}
@@ -284,79 +285,24 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
         </CardContent>
       </Card>
 
-      <Card className="forgebadger-animate-in">
-        <CardContent className="space-y-2">
-          <h2 className="text-sm font-semibold">{copy.tasks}</h2>
-          {sortedTasks.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{copy.noTasks}</p>
-          ) : (
-            sortedTasks.map((task) => {
-              const meta = TASK_META[task.status];
-              const Icon = meta.icon;
-              return (
-                <div key={task.id} className="rounded-md border border-border/70 bg-card px-3 py-2">
-                  <div className="flex items-start gap-2">
-                    <Icon className={cn("mt-0.5 size-4 shrink-0", meta.className)} aria-hidden />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm">
-                        <span className="mr-1.5 font-mono text-xs text-muted-foreground">#{task.seq}</span>
-                        {task.description}
-                      </p>
-                      {task.verifyCommand ? (
-                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                          <code className="rounded bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground" title={task.verifyCommand}>
-                            {copy.verifyCommand}: {task.verifyCommand}
-                          </code>
-                          {task.verifiedAt != null && task.verifyExitCode === 0 ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-                              <ShieldCheck className="size-3" />
-                              {copy.verified}
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                              <ShieldCheck className="size-3" />
-                              {copy.unverified}
-                            </span>
-                          )}
-                        </div>
-                      ) : null}
-                      {task.workItemId && goal.projectId ? (
-                        <Link
-                          href={`/projects/${encodeURIComponent(goal.projectId)}`}
-                          className="mt-1 mr-1 inline-flex w-fit items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-brand/10 hover:text-foreground"
-                          title={task.workItemId}
-                        >
-                          <KanbanSquare className="size-3" aria-hidden />
-                          {copy.boardLinked(task.boardStatus ? (copy.boardStatus[task.boardStatus] ?? task.boardStatus) : copy.boardMissing)}
-                        </Link>
-                      ) : null}
-                      {task.dispatchedSessionId ? (
-                        <Link
-                          href={`/sessions/${encodeURIComponent(task.dispatchedSessionId)}`}
-                          className="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-brand/10 hover:text-foreground"
-                          title={task.dispatchedSessionId}
-                        >
-                          <Send className="size-3" aria-hidden />
-                          {task.dispatchStatus ? (copy.dispatchStatus[task.dispatchStatus] ?? copy.dispatched) : copy.dispatched}
-                        </Link>
-                      ) : null}
-                      {task.status === "passes" && task.evidence ? (
-                        <div className="mt-1.5 rounded bg-muted/40 p-2">
-                          <p className="mb-0.5 text-[11px] font-medium text-muted-foreground">{copy.evidence}</p>
-                          <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-muted-foreground">
-                            {task.evidence}
-                          </pre>
-                        </div>
-                      ) : null}
-                    </div>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">{copy[meta.key]}</span>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </CardContent>
-      </Card>
+      {pendingIntegration.length > 0 ? (
+        <div role="status" className="flex items-start gap-2 rounded-lg border border-hue-gold/40 bg-hue-gold/10 px-3 py-2 text-sm">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-hue-gold" aria-hidden />
+          <div className="min-w-0">
+            <p>{copy.unintegratedBanner(pendingIntegration.length)}</p>
+            <p className="text-xs text-muted-foreground">
+              {pendingIntegration.map((task) => `#${task.seq}`).join("  ")} {copy.unintegratedHint}
+            </p>
+          </div>
+        </div>
+      ) : null}
+      {teamQuery.isError ? (
+        <p role="status" className="text-xs text-muted-foreground">{copy.teamLoadFailed}</p>
+      ) : null}
+
+      {team ? <GoalTeamStrip team={team} tasks={sortedTasks} /> : null}
+
+      <GoalTaskFlow goal={goal} tasks={sortedTasks} team={team} />
 
       <DiffReviewCard
         open={diffOpen}
@@ -436,14 +382,14 @@ const DIFF_STATUS_META: Record<CopilotGoalDiffFile["status"], { key: "diffFileAd
   deleted: { key: "diffFileDeleted", className: "bg-red-500/15 text-red-600 dark:text-red-400" },
 };
 
-interface DiffQueryState {
+export interface DiffQueryState {
   data?: { files: CopilotGoalDiffFile[]; truncated?: boolean };
   isPending: boolean;
   isError: boolean;
   refetch: () => void;
 }
 
-function DiffReviewCard({ open, onToggle, query }: { open: boolean; onToggle: () => void; query: DiffQueryState }) {
+export function DiffReviewCard({ open, onToggle, query }: { open: boolean; onToggle: () => void; query: DiffQueryState }) {
   const copy = useGoalsCopy();
   const files = query.data?.files;
   return (
