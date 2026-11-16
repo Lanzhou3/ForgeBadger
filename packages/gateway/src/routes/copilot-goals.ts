@@ -17,6 +17,8 @@ import { buildAgentStack, type AgentStackDeps } from "../services/agent/agent-st
 import { clearGoalFailureCooldown, evaluateGoalContinuation } from "../services/agent/goal-driver.js";
 import { applyGoalTransition } from "../services/agent/goal-lifecycle.js";
 import { diffGoalWorkspace, existingGoalWorkspace, mergeGoalWorkspace } from "../services/agent/goal-workspace.js";
+import { cleanupIntegratedTaskWorkspaces, listUnintegratedTasks } from "../services/agent/goal-task-workspace.js";
+import { goalTeamView } from "../services/agent/goal-team-view.js";
 import { CopilotGoalStore, type GoalJournalRow, type GoalListRow, type GoalRow, type GoalTaskRow } from "../services/agent/goal-store.js";
 import { GOAL_GRANTS, parseGoalGrants } from "../services/agent/goal-grants.js";
 import { boardStatusOf, syncGoalFromBoard } from "../services/agent/goal-board.js";
@@ -180,13 +182,13 @@ export function createCopilotGoalRoutes(deps: AgentStackDeps): Router {
       const store = new CopilotGoalStore(deps.db, userId(req));
       const goal = store.getGoal(id);
       if (!goal) return notFound(res);
-      if (!goal.project_id) return res.json(ok({ files: [], truncated: false }));
+      if (!goal.project_id) return res.json(ok({ files: [], truncated: false, unintegratedTasks: [] }));
       const project = new ProjectRepository(deps.db, userId(req)).getById(goal.project_id);
       if (!project) return notFound(res);
       const workspace = existingGoalWorkspace(deps.db, goal);
-      if (!workspace) return res.json(ok({ files: [], truncated: false }));
+      if (!workspace) return res.json(ok({ files: [], truncated: false, unintegratedTasks: [] }));
       const { files, truncated } = await diffGoalWorkspace(workspace, project.path);
-      res.json(ok({ files, truncated }));
+      res.json(ok({ files, truncated, unintegratedTasks: await listUnintegratedTasks(deps.db, goal) }));
     } catch (error) { domainError(res, error); }
   });
 
@@ -209,13 +211,21 @@ export function createCopilotGoalRoutes(deps: AgentStackDeps): Router {
       if (active) throw new AgentError('COPILOT_GOAL_STATE', 'Goal has an active run; stop or wait for it before merging');
       if (goal.status !== 'completed' && goal.status !== 'blocked')
         throw new AgentError('COPILOT_GOAL_STATE', `Goal is '${goal.status}'; only completed or blocked goals can be merged`);
+      // Work that lives only in a member's task worktree would silently be left out of the merge.
+      const unintegrated = await listUnintegratedTasks(deps.db, goal);
+      if (unintegrated.length)
+        throw new AgentError('COPILOT_GOAL_STATE', `Tasks with work not yet integrated into the goal branch: ${unintegrated.map(task => `${task.taskId} (${task.description.slice(0, 80)})`).join(', ')}; integrate them (goal_integrate_task) or cancel them first`);
       // Dry-run conflicts (copy) or a refused git integration (worktree)
       // abort the whole merge before the project changes.
       const result = await mergeGoalWorkspace(deps.db, actingUser, goal, workspace, project);
       const listing = [...result.merged, ...result.deleted.map(path => `${path} (deleted)`), ...result.kept.map(path => `${path} (kept)`)]
         .slice(0, 50).join(', ');
       store.appendJournal(id, null, `Merged ${workspace.kind === 'worktree' ? `goal branch ${workspace.branch}` : 'sandbox'} into project${result.commit ? ` at ${result.commit.slice(0, 12)}` : ''}: ${listing || '(no changes)'}.`);
-      res.json(ok(result));
+      // Everything that was merged is in the project now: task worktrees whose work is in the goal branch are done.
+      const cleaned = await cleanupIntegratedTaskWorkspaces(deps.db, deps, actingUser, store.getGoal(id)!);
+      if (cleaned.removed.length)
+        store.appendJournal(id, null, `Removed ${cleaned.removed.length} integrated task worktree(s) after the merge${cleaned.kept.length ? `; kept ${cleaned.kept.length} with work that is not in the goal branch` : ''}.`);
+      res.json(ok({ ...result, cleanedTaskWorktrees: cleaned.removed.length }));
     } catch (error) { domainError(res, error); }
   });
 
