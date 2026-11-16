@@ -413,6 +413,42 @@ describe("SettingsPage terminal runtime", () => {
     expect(screen.queryByRole("button", { name: "settings.adapterUpdateNow" })).toBeNull();
   });
 
+  it("shows Kimi's official stable channel without offering an npm-only update", async () => {
+    setSection("adapters");
+    getDependenciesMock.mockResolvedValue({ dependencies: [] });
+    discoverAdaptersMock.mockResolvedValue({ adapters: [{
+      id: "kimi", label: "Kimi Code", command: "kimi", supportLevel: "supported",
+      launchEnabled: true, configDir: ".kimi-code", runtimeModes: ["terminal"],
+      available: true, status: "available", version: "2.5.3"
+    }] });
+    checkAdapterUpdatesMock.mockResolvedValue({
+      canUpdate: true,
+      updates: [{ id: "kimi", state: "up_to_date", installedVersion: "2.5.3",
+        latestVersion: "2.5.3", latestSource: "official", command: "kimi upgrade --yes" }]
+    });
+    renderSettingsPage();
+    await screen.findByText("settings.adapterUpToDateOfficial: 2.5.3");
+    expect(screen.queryByRole("button", { name: "settings.adapterUpdateNow" })).toBeNull();
+  });
+
+  it("shows a Codex download timeout without misreporting a permission failure", async () => {
+    setSection("adapters");
+    getDependenciesMock.mockResolvedValue({ dependencies: [] });
+    discoverAdaptersMock.mockResolvedValue({ adapters: [{
+      id: "codex", label: "Codex", command: "codex", supportLevel: "supported",
+      launchEnabled: true, configDir: ".codex", runtimeModes: ["terminal"],
+      available: true, status: "available", version: "0.167.0"
+    }] });
+    checkAdapterUpdatesMock.mockResolvedValue({ canUpdate: true, updates: [] });
+    listAdapterOperationsMock.mockResolvedValue({ operations: [{
+      id: "codex-timeout", adapterId: "codex", kind: "update", state: "failed",
+      startedAt: "2026-11-14T00:00:00Z", errorCode: "timeout", error: "CLI update timed out"
+    }] });
+    renderSettingsPage();
+    await screen.findByText("settings.adapterOperationTimeout");
+    expect(screen.queryByText("settings.adapterUpdateFailed")).toBeNull();
+  });
+
   it("shows the Homebrew channel version without offering an npm-only update", async () => {
     setSection("adapters");
     getDependenciesMock.mockResolvedValue({ dependencies: [] });
