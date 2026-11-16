@@ -1,13 +1,14 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, Suspense, useEffect, useState } from "react";
 import { LanguageProvider } from "@/hooks/use-language";
 import { NotificationProvider } from "@/hooks/use-notifications";
 import { initColorMode } from "@/lib/color-mode";
 import { initColorThemes } from "@/lib/color-theme";
 import { initTerminalFont } from "@/lib/terminal-font";
 import { Toaster } from "@/components/ui/sonner";
+import { PageTitle } from "@/components/layout/page-title";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -22,6 +23,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <LanguageProvider>
+        <Suspense fallback={null}><PageTitle /></Suspense>
         <NotificationProvider>{children}</NotificationProvider>
         <Toaster position="top-right" />
       </LanguageProvider>
