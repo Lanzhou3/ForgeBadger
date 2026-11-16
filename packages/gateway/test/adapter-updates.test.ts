@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { checkAdapterUpdate, checkAdapterUpdates, installAdapter, updateAdapter } from "../src/services/adapter-updates.js";
 import type { AdapterId } from "../src/services/adapter-discovery.js";
 import type { CommandRunner } from "../src/lib/dependency-check.js";
+import { AdapterOperationManager } from "../src/services/adapter-operations.js";
 
 const publicResolver = async () => [{ address: "8.8.8.8", family: 4 }];
 const versionFetcher: typeof fetch = async () => new Response(JSON.stringify({ version: "2.0.0" }));
@@ -16,6 +17,123 @@ function deferred() {
 }
 
 describe("adapter updates", () => {
+  it("checks Kimi against its updater CDN instead of a newer npm publication", async () => {
+    const urls: string[] = [];
+    const status = await checkAdapterUpdate("kimi", {
+      runner: async () => ({ exitCode: 0, stdout: "2.5.3", stderr: "" }),
+      resolveHost: publicResolver,
+      fetcher: async (url) => {
+        urls.push(String(url));
+        return new Response(JSON.stringify({ version: String(url).includes("registry.npmjs.org") ? "2.6.2" : "2.5.3" }));
+      }
+    });
+    assert.equal(status.state, "up_to_date");
+    assert.equal(status.latestSource, "official");
+    assert.equal(status.latestVersion, "2.5.3");
+    assert.equal(urls.length, 1);
+    assert.match(urls[0]!, /^https:\/\/cdn\.kimi\.(com|ai)\/kimi-code\/latest\.json$/);
+  });
+
+  it("allows the standalone Codex updater enough time to download its large package", async () => {
+    let installed = "0.167.0";
+    const runner: CommandRunner = async (_command, args, options) => {
+      if (args[0] === "update") {
+        assert.equal(options?.timeoutMs, 900_000);
+        assert.equal(options?.killProcessTree, true);
+        installed = "0.169.0";
+      }
+      return { exitCode: 0, stdout: installed, stderr: "" };
+    };
+    const result = await updateAdapter("codex", {
+      runner, resolveHost: publicResolver,
+      fetcher: async () => new Response(JSON.stringify({ version: "0.169.0" }))
+    });
+    assert.equal(result.versionStillBehind, false);
+  });
+
+  it("uses Kimi's legacy stable feed if the manifest is unavailable", async () => {
+    const urls: string[] = [];
+    const result = await checkAdapterUpdate("kimi", {
+      runner: async () => ({ exitCode: 0, stdout: "2.5.3", stderr: "" }),
+      resolveHost: publicResolver,
+      fetcher: async (url) => {
+        urls.push(String(url));
+        return String(url).endsWith("/latest.json") ? new Response("unavailable", { status: 503 }) : new Response("2.5.4\n");
+      }
+    });
+    assert.equal(result.state, "update_available");
+    assert.equal(result.latestVersion, "2.5.4");
+    assert.ok(urls[1]?.endsWith("/latest"));
+  });
+
+  it("does not fall back to npm when both official Kimi feeds fail", async () => {
+    const result = await checkAdapterUpdate("kimi", {
+      runner: async () => ({ exitCode: 0, stdout: "2.5.3", stderr: "" }),
+      resolveHost: publicResolver,
+      fetcher: async (url) => {
+        assert.ok(!String(url).includes("registry.npmjs.org"));
+        return new Response("unavailable", { status: 503 });
+      }
+    });
+    assert.equal(result.state, "check_failed");
+  });
+
+  it("keeps Kimi's canary check and updater on the same channel", async () => {
+    const previous = process.env.KIMI_CODE_UPDATE_CHANNEL;
+    process.env.KIMI_CODE_UPDATE_CHANNEL = "canary";
+    try {
+      let installed = "2.5.3";
+      const runner: CommandRunner = async (_command, args, options) => {
+        assert.equal(options?.env?.KIMI_CODE_UPDATE_CHANNEL, "canary");
+        if (args[0] === "upgrade") installed = "2.6.2-canary.1";
+        return { exitCode: 0, stdout: installed, stderr: "" };
+      };
+      const fetcher: typeof fetch = async (url) => {
+        assert.ok(String(url).endsWith("/channels/canary.json"));
+        return new Response(JSON.stringify({ version: "2.6.2-canary.1" }));
+      };
+      assert.equal((await updateAdapter("kimi", { runner, fetcher, resolveHost: publicResolver })).versionStillBehind, false);
+      let requests = 0;
+      const failed = await checkAdapterUpdate("kimi", { runner, resolveHost: publicResolver,
+        fetcher: async () => { requests += 1; return new Response("error", { status: 503 }); } });
+      assert.equal(failed.state, "check_failed");
+      assert.equal(requests, 1);
+    } finally {
+      if (previous === undefined) delete process.env.KIMI_CODE_UPDATE_CHANNEL;
+      else process.env.KIMI_CODE_UPDATE_CHANNEL = previous;
+    }
+  });
+
+  for (const [stderr, reason] of [
+    ["curl: (28) failed to download private-token", "network"],
+    ["EACCES private-path private-token", "permission"],
+    ["Could not detect the Codex installation method. private-token", "install_method"]
+  ] as const) {
+    it(`preserves only the safe ${reason} classification in a background operation`, async () => {
+      const runner: CommandRunner = async (_command, args) => args[0] === "--version"
+        ? { exitCode: 0, stdout: "1.0.0", stderr: "" }
+        : { exitCode: 1, stdout: "private-token", stderr };
+      let settled!: () => void;
+      const done = new Promise<void>((resolve) => { settled = resolve; });
+      const manager = new AdapterOperationManager({ runner, fetcher: versionFetcher, resolveHost: publicResolver }, settled);
+      const operation = manager.start("codex", "update");
+      await done;
+      const result = manager.get(operation.id);
+      assert.equal(result?.state, "failed");
+      assert.equal(result?.errorCode, reason);
+      assert.ok(!JSON.stringify(result).includes("private-token"));
+    });
+  }
+
+  it("reports timeout separately from permissions without exposing subprocess output", async () => {
+    const runner: CommandRunner = async (_command, args) => args[0] === "--version"
+      ? { exitCode: 0, stdout: "1.0.0", stderr: "" }
+      : { exitCode: 124, stdout: "private output", stderr: "private token" };
+    await assert.rejects(updateAdapter("codex", { runner, fetcher: versionFetcher, resolveHost: publicResolver }), {
+      statusCode: 502, reason: "timeout", message: "CLI update timed out"
+    });
+  });
+
   it("checks every local version against the official npm packages", async () => {
     const urls: string[] = [];
     const fetcher: typeof fetch = async (url) => {

@@ -1,5 +1,5 @@
 import { lookup } from "node:dns/promises";
-import { accessSync, constants, realpathSync } from "node:fs";
+import { accessSync, constants, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -15,7 +15,7 @@ export interface AdapterUpdateStatus {
   state: AdapterUpdateState;
   installedVersion?: string;
   latestVersion?: string;
-  latestSource?: "npm" | "homebrew";
+  latestSource?: "npm" | "homebrew" | "official";
   command: string;
   installCommand: string;
   installRequiresNode?: string;
@@ -46,8 +46,10 @@ export interface AdapterUpdateDependencies {
   nodeVersion?: string;
 }
 
+export type AdapterUpdateFailureReason = "timeout" | "network" | "permission" | "install_method" | "cleanup_uncertain";
+
 export class AdapterUpdateError extends Error {
-  constructor(message: string, readonly statusCode: number) {
+  constructor(message: string, readonly statusCode: number, readonly reason?: AdapterUpdateFailureReason) {
     super(message);
   }
 }
@@ -171,9 +173,10 @@ export async function checkAdapterUpdate(
   }
 
   try {
-    const latestSource = isHomebrewOpenCode(id, dependencies) ? "homebrew" : "npm";
+    const latestSource = id === "kimi" ? "official" : isHomebrewOpenCode(id, dependencies) ? "homebrew" : "npm";
     const latestVersion = latestSource === "homebrew"
       ? await fetchHomebrewOpenCodeVersion(dependencies)
+      : id === "kimi" ? await fetchKimiVersion(installedVersion, dependencies)
       : await fetchLatestVersion(id, dependencies);
     return {
       id,
@@ -208,7 +211,9 @@ export async function updateAdapter(
     const command = updateCommand(id, before.latestSource);
     if (command === "npm") await assertNpmInstallationAvailable(id, dependencies);
     const result = await (dependencies.runner ?? runCommand)(command, updateArgs(id, before.latestSource, before.latestVersion), {
-      timeoutMs: command === "npm" ? 300_000 : 180_000,
+      // The standalone Codex installer allows 300s per download and may retry
+      // via GitHub. A 180s outer deadline killed healthy large downloads.
+      timeoutMs: id === "codex" ? 900_000 : command === "npm" ? 300_000 : 180_000,
       maxOutputBytes: 16 * 1024,
       killGraceMs: 5000,
       killProcessTree: true,
@@ -216,10 +221,10 @@ export async function updateAdapter(
     });
     if (result.processTreeCleanupUncertain) {
       cleanupUncertain = true;
-      throw new AdapterUpdateError("CLI update timed out and cleanup could not be verified; restart Gateway before retrying", 503);
+      throw new AdapterUpdateError("CLI update timed out and cleanup could not be verified; restart Gateway before retrying", 503, "cleanup_uncertain");
     }
     if (result.exitCode !== 0) {
-      throw new AdapterUpdateError("Official CLI update command failed", 502);
+      throw commandFailure("update", result);
     }
     const after = await checkAdapterCommand(definition.command, definition.versionArgs, dependencies.runner, safeCommandOptions());
     const installedVersion = parseVersion(after.version);
@@ -264,9 +269,9 @@ export async function installAdapter(
     });
     if (result.processTreeCleanupUncertain) {
       cleanupUncertain = true;
-      throw new AdapterUpdateError("CLI install timed out and cleanup could not be verified; restart Gateway before retrying", 503);
+      throw new AdapterUpdateError("CLI install timed out and cleanup could not be verified; restart Gateway before retrying", 503, "cleanup_uncertain");
     }
-    if (result.exitCode !== 0) throw new AdapterUpdateError("Official CLI install command failed", 502);
+    if (result.exitCode !== 0) throw commandFailure("install", result);
     const after = await checkAdapterCommand(definition.command, definition.versionArgs, dependencies.runner, safeCommandOptions());
     const installedVersion = parseVersion(after.version);
     return {
@@ -278,6 +283,23 @@ export async function installAdapter(
   } finally {
     if (!cleanupUncertain) cliOperationsInProgress.delete(id);
   }
+}
+
+function commandFailure(action: "install" | "update", result: { exitCode: number; stdout: string; stderr: string }): AdapterUpdateError {
+  if (result.exitCode === 124) return new AdapterUpdateError(`CLI ${action} timed out`, 502, "timeout");
+  // Only return fixed classifications. Subprocess output can contain secrets,
+  // proxy credentials or local paths and must never enter operation records.
+  const output = `${result.stderr}\n${result.stdout}`;
+  if (/EACCES|EPERM|permission denied|access is denied/i.test(output)) {
+    return new AdapterUpdateError(`CLI ${action} permission denied`, 502, "permission");
+  }
+  if (/could not detect.*installation method|update.*not available.*debug builds/i.test(output)) {
+    return new AdapterUpdateError("CLI installation method does not support self-update", 502, "install_method");
+  }
+  if (/curl: \(\d+\)|ENOTFOUND|ECONNRESET|ETIMEDOUT|fetch failed|failed to (fetch|download)|could not resolve host/i.test(output)) {
+    return new AdapterUpdateError(`CLI ${action} download failed`, 502, "network");
+  }
+  return new AdapterUpdateError(`Official CLI ${action} command failed`, 502);
 }
 
 function formatCommand(id: AdapterId): string {
@@ -338,7 +360,7 @@ const UPDATE_ENV_KEYS = new Set([
   "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "PNPM_HOME",
   "NPM_CONFIG_PREFIX", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
   "CODEX_HOME", "KIMI_CODE_HOME", "PI_CODING_AGENT_DIR", "DISABLE_UPDATES",
-  "KIMI_CODE_NO_AUTO_UPDATE"
+  "KIMI_CODE_NO_AUTO_UPDATE", "KIMI_CODE_UPDATE_CHANNEL", "KIMI_CODE_OAUTH_HOST", "KIMI_OAUTH_HOST"
 ]);
 
 function updateEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -408,6 +430,36 @@ async function fetchLatestVersion(id: AdapterId, dependencies: AdapterUpdateDepe
   const parsed = parseVersion(version);
   if (!parsed || parsed !== version) throw new Error("Registry returned an invalid version");
   return parsed;
+}
+
+async function fetchKimiVersion(installedVersion: string, dependencies: AdapterUpdateDependencies): Promise<string> {
+  // Kimi's self-updater uses this CDN for native AND package-manager installs.
+  // npm can publish ahead of the stable feed, so it is not an update target.
+  const home = process.env.KIMI_CODE_HOME || join(homedir(), ".kimi-code");
+  let region = "mainland-cn";
+  try { region = readFileSync(join(home, "region"), "utf8").trim(); } catch { /* Default matches Kimi. */ }
+  const oauthHost = process.env.KIMI_CODE_OAUTH_HOST || process.env.KIMI_OAUTH_HOST;
+  if (oauthHost) region = /^https:\/\/auth\.kimi\.ai\/?$/i.test(oauthHost) ? "global" : "mainland-cn";
+  // code.kimi.* redirects to these canonical CDN hosts. Pin them directly so
+  // version requests keep the shared redirect:error and public-host guards.
+  const base = region === "global" ? "https://cdn.kimi.ai/kimi-code" : "https://cdn.kimi.com/kimi-code";
+  const requested = process.env.KIMI_CODE_UPDATE_CHANNEL?.trim().toLowerCase();
+  const channel = requested === "stable" || requested === "canary" ? requested
+    : installedVersion.includes("-canary") ? "canary" : "stable";
+  const parse = (value: unknown): string => {
+    const version = parseVersion(value);
+    if (!version || version !== value) throw new Error("Kimi CDN returned an invalid version");
+    return version;
+  };
+  try {
+    const path = channel === "canary" ? "/channels/canary.json" : "/latest.json";
+    const body = await fetchPublicText(`${base}${path}`, dependencies);
+    return parse((JSON.parse(body) as { version?: unknown }).version);
+  } catch (error) {
+    if (channel === "canary") throw error;
+    // Match the stable updater's legacy plain-text fallback.
+    return parse((await fetchPublicText(`${base}/latest`, dependencies)).trim());
+  }
 }
 
 async function fetchPublicText(url: string, dependencies: AdapterUpdateDependencies, maxBytes = 128 * 1024): Promise<string> {

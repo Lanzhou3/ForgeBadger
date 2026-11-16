@@ -44,6 +44,21 @@ import {
 import { ADAPTER_ORDER_QUERY_KEY, useOrderedAdapters } from "@/lib/adapter-order";
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
+import type { TranslationKey } from "@/lib/i18n";
+
+const operationFailureKeys: Record<NonNullable<AdapterOperation["errorCode"]>, TranslationKey> = {
+  timeout: "settings.adapterOperationTimeout",
+  network: "settings.adapterOperationNetwork",
+  permission: "settings.adapterOperationPermission",
+  install_method: "settings.adapterOperationInstallMethod",
+  cleanup_uncertain: "settings.adapterOperationCleanupUncertain",
+};
+
+function updateChannelKey(source: AdapterUpdateStatus["latestSource"], available: boolean): TranslationKey {
+  if (source === "official") return available ? "settings.adapterUpdateAvailableOfficial" : "settings.adapterUpToDateOfficial";
+  if (source === "homebrew") return available ? "settings.adapterUpdateAvailableHomebrew" : "settings.adapterUpToDateHomebrew";
+  return available ? "settings.adapterUpdateAvailable" : "settings.adapterUpToDate";
+}
 
 /** AI CLI adapter discovery card: terminal runtime readiness plus per-CLI
  * detect / install / update actions. Admin-gated operations come from the
@@ -334,6 +349,8 @@ export function AdapterSettings() {
                         operationBlocked={!!activeOperation}
                         feedback={getUpdateFeedback(updateOperation, operationSubmissionFailed[adapter.id] === true)}
                         installFeedback={getInstallFeedback(installOperation, operationSubmissionFailed[adapter.id] === true)}
+                        updateErrorCode={operationSubmissionFailed[adapter.id] ? undefined : updateOperation?.errorCode}
+                        installErrorCode={operationSubmissionFailed[adapter.id] ? undefined : installOperation?.errorCode}
                         onUpdate={() => void handleAdapterUpdate(adapter.id)}
                         onInstall={() => void handleAdapterInstall(adapter.id)}
                       />
@@ -394,6 +411,8 @@ interface AdapterItemProps {
   operationBlocked: boolean;
   feedback?: "done" | "behind" | "failed";
   installFeedback?: "done" | "not_detected" | "failed";
+  updateErrorCode?: AdapterOperation["errorCode"];
+  installErrorCode?: AdapterOperation["errorCode"];
   onUpdate: () => void;
   onInstall: () => void;
 }
@@ -431,7 +450,7 @@ function SortableAdapterItem(props: AdapterItemProps) {
 
 function AdapterItem({
   adapter, update, canUpdate, canInstall, checkingUpdate, updateCheckFailed,
-  updating, installing, operationBlocked, feedback, installFeedback, onUpdate, onInstall,
+  updating, installing, operationBlocked, feedback, installFeedback, updateErrorCode, installErrorCode, onUpdate, onInstall,
 }: AdapterItemProps) {
   const { t } = useLanguage();
 
@@ -471,7 +490,7 @@ function AdapterItem({
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
           {update?.state === "update_available" ? (
             <>
-              <span className="text-amber-500">{t(update.latestSource === "homebrew" ? "settings.adapterUpdateAvailableHomebrew" : "settings.adapterUpdateAvailable")}: {update.latestVersion}</span>
+              <span className="text-amber-500">{t(updateChannelKey(update.latestSource, true))}: {update.latestVersion}</span>
               {canUpdate ? (
                 <Button type="button" size="sm" variant="outline" disabled={operationBlocked || checkingUpdate} onClick={onUpdate}>
                   {updating ? <RefreshCw className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
@@ -481,7 +500,7 @@ function AdapterItem({
               <span className="font-mono text-muted-foreground">{update.command}</span>
             </>
           ) : update?.state === "up_to_date" ? (
-            <span className="text-muted-foreground">{t(update.latestSource === "homebrew" ? "settings.adapterUpToDateHomebrew" : "settings.adapterUpToDate")}: {update.installedVersion}</span>
+            <span className="text-muted-foreground">{t(updateChannelKey(update.latestSource, false))}: {update.installedVersion}</span>
           ) : update?.state === "check_failed" || updateCheckFailed ? (
             <span className="text-muted-foreground">{t("settings.adapterUpdateCheckFailed")}</span>
           ) : checkingUpdate ? (
@@ -489,7 +508,7 @@ function AdapterItem({
           ) : null}
           {feedback && (
             <span role="status" className={feedback === "failed" ? "text-destructive" : "text-muted-foreground"}>
-              {t(feedback === "done" ? "settings.adapterUpdateDone" : feedback === "behind" ? "settings.adapterUpdateBehind" : "settings.adapterUpdateFailed")}
+              {t(feedback === "done" ? "settings.adapterUpdateDone" : feedback === "behind" ? "settings.adapterUpdateBehind" : updateErrorCode ? operationFailureKeys[updateErrorCode] : "settings.adapterUpdateFailed")}
             </span>
           )}
         </div>
@@ -516,7 +535,7 @@ function AdapterItem({
       )}
       {installFeedback && (
         <p role="status" className={cn("mt-2 text-xs", installFeedback === "failed" ? "text-destructive" : "text-muted-foreground")}>
-          {t(installFeedback === "done" ? "settings.adapterInstallDone" : installFeedback === "not_detected" ? "settings.adapterInstallNotDetected" : "settings.adapterInstallFailed")}
+          {t(installFeedback === "done" ? "settings.adapterInstallDone" : installFeedback === "not_detected" ? "settings.adapterInstallNotDetected" : installErrorCode ? operationFailureKeys[installErrorCode] : "settings.adapterInstallFailed")}
         </p>
       )}
       {adapter.runtimeModes.length > 0 && (

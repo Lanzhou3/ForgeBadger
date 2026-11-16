@@ -7,7 +7,8 @@ import {
   updateAdapter,
   type AdapterInstallResult,
   type AdapterUpdateDependencies,
-  type AdapterUpdateResult
+  type AdapterUpdateResult,
+  type AdapterUpdateFailureReason
 } from "./adapter-updates.js";
 
 export type AdapterOperationKind = "install" | "update";
@@ -23,6 +24,7 @@ export interface AdapterOperation {
   finishedAt?: string;
   result?: AdapterOperationResult;
   error?: string;
+  errorCode?: AdapterUpdateFailureReason;
 }
 
 export class AdapterOperationManager {
@@ -58,7 +60,8 @@ export class AdapterOperationManager {
         state: "failed",
         error: error instanceof AdapterUpdateError
           ? error.message
-          : kind === "update" ? "CLI update failed" : "CLI install failed"
+          : kind === "update" ? "CLI update failed" : "CLI install failed",
+        ...(error instanceof AdapterUpdateError && error.reason ? { errorCode: error.reason } : {})
       })
     );
     return snapshot(operation);
@@ -77,14 +80,17 @@ export class AdapterOperationManager {
 
   private settle(
     id: string,
-    outcome: { state: "succeeded"; result: AdapterOperationResult } | { state: "failed"; error: string }
+    outcome: { state: "succeeded"; result: AdapterOperationResult } | { state: "failed"; error: string; errorCode?: AdapterUpdateFailureReason }
   ): void {
     const operation = this.operations.get(id);
     if (!operation || operation.state !== "running") return;
     operation.state = outcome.state;
     operation.finishedAt = new Date().toISOString();
     if (outcome.state === "succeeded") operation.result = outcome.result;
-    else operation.error = outcome.error;
+    else {
+      operation.error = outcome.error;
+      if (outcome.errorCode) operation.errorCode = outcome.errorCode;
+    }
     this.onSettled(snapshot(operation));
   }
 

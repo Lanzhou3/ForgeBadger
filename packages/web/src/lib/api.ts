@@ -987,7 +987,7 @@ export interface AdapterUpdateStatus {
   state: "missing" | "check_failed" | "up_to_date" | "update_available";
   installedVersion?: string;
   latestVersion?: string;
-  latestSource?: "npm" | "homebrew";
+  latestSource?: "npm" | "homebrew" | "official";
   command: string;
   installCommand: string;
   installRequiresNode?: string;
@@ -1019,6 +1019,7 @@ export interface AdapterOperation {
   finishedAt?: string;
   result?: AdapterInstallResult | AdapterUpdateResult;
   error?: string;
+  errorCode?: "timeout" | "network" | "permission" | "install_method" | "cleanup_uncertain";
 }
 
 export type CredentialMode = "host_environment" | "stored_encrypted_key";
