@@ -96,6 +96,7 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
 
   const gatewayUrl = buildBrowserUrl(config.gateway.host, config.gateway.port);
   const webUrl = buildBrowserUrl(config.web.host, config.web.port);
+  const publicUrl = resolvePublicUrl(env.FORGEBADGER_PUBLIC_URL);
 
   await checkPort(config.gateway.host, config.gateway.port);
   await checkPort(config.web.host, config.web.port);
@@ -106,14 +107,16 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
   });
 
   try {
-    await writeRuntimeConfig({ webPublicDir: webRuntime.webPublicDir, gatewayBaseUrl: gatewayUrl });
+    // Behind a same-origin reverse proxy the browser must call the proxy, not
+    // the loopback listener; the child processes keep using the loopback URL.
+    await writeRuntimeConfig({ webPublicDir: webRuntime.webPublicDir, gatewayBaseUrl: publicUrl ?? gatewayUrl });
   } catch (error) {
     throw new Error(`Unable to write Web runtime config to ${webRuntime.webPublicDir}: ${formatError(error)}`, {
       cause: error
     });
   }
 
-  const gateway = spawnProcess(paths.gatewayEntry, buildGatewayEnv(config, gatewayUrl));
+  const gateway = spawnProcess(paths.gatewayEntry, buildGatewayEnv(config, gatewayUrl, publicUrl !== undefined));
   const web = spawnProcess(webRuntime.webServerEntry, buildWebEnv(config, gatewayUrl));
   const children = [gateway, web];
   const childResult = waitForFirstChildResult(children);
@@ -122,6 +125,9 @@ export async function runStart(options: RunStartOptions = {}): Promise<number> {
   try {
     stdout.write(`ForgeBadger Web Console: ${webUrl}\n`);
     stdout.write(`ForgeBadger Gateway: ${gatewayUrl}\n`);
+    if (publicUrl) {
+      stdout.write(`ForgeBadger Public URL: ${publicUrl} (served by your reverse proxy)\n`);
+    }
     if (options.openBrowser) {
       stdout.write("--open is not supported yet; open the URL manually.\n");
     }
@@ -209,9 +215,35 @@ function toRuntimeConfigOptions(options: RunStartOptions): LoadRuntimeConfigOpti
   return runtimeOptions;
 }
 
-function buildGatewayEnv(config: RuntimeConfig, gatewayUrl: string): NodeJS.ProcessEnv {
+/**
+ * FORGEBADGER_PUBLIC_URL is the HTTPS origin of a reverse proxy that serves
+ * both the Web console and the Gateway (the LAN team-hub topology). Anything
+ * other than a bare HTTPS origin is refused so a typo cannot silently point
+ * browsers at the wrong place or downgrade them to plain HTTP.
+ */
+export function resolvePublicUrl(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value) {
+    return undefined;
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("FORGEBADGER_PUBLIC_URL must be an HTTPS origin such as https://forge.lan");
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || (url.pathname !== "/" && url.pathname !== "")) {
+    throw new Error("FORGEBADGER_PUBLIC_URL must be an HTTPS origin such as https://forge.lan");
+  }
+  return url.origin;
+}
+
+function buildGatewayEnv(config: RuntimeConfig, gatewayUrl: string, behindProxy = false): NodeJS.ProcessEnv {
   return {
     ...process.env,
+    // A public URL means a local reverse proxy fronts the Gateway; let it
+    // trust that proxy's forwarding headers unless the operator decided.
+    ...(behindProxy && process.env.FORGEBADGER_TRUST_PROXY === undefined ? { FORGEBADGER_TRUST_PROXY: "true" } : {}),
     FORGEBADGER_HOST: config.gateway.host,
     FORGEBADGER_PORT: String(config.gateway.port),
     FORGEBADGER_STATE_DIR: config.stateDir,

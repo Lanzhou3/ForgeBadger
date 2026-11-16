@@ -284,6 +284,71 @@ describe("runStart", () => {
     assert.match(stdout.text, /ForgeBadger Gateway: http:\/\/127\.0\.0\.1:18332\n/);
   });
 
+  it("points browsers at FORGEBADGER_PUBLIC_URL while child processes keep the loopback Gateway URL", async () => {
+    // Arrange
+    const stdout = createMemoryWriter();
+    const spawns: Array<{ entry: string; env: NodeJS.ProcessEnv }> = [];
+    const runtimeWrites: string[] = [];
+
+    // Act
+    await runStart({
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
+      resolvePaths: () => createInstalledPaths(),
+      checkPort: async () => undefined,
+      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
+      writeRuntimeConfig: async (options) => {
+        runtimeWrites.push(options.gatewayBaseUrl);
+        return path.join(options.webPublicDir, "forgebadger-runtime.js");
+      },
+      spawn: (entry, env) => {
+        const child = new FakeChild();
+        spawns.push({ entry, env });
+        return child;
+      },
+      installShutdown: (children) => {
+        setImmediate(() => children[1]?.emit("exit", 0, null));
+      },
+      env: { FORGEBADGER_PUBLIC_URL: " https://forge.lan/ " },
+      stdout
+    });
+
+    // Assert
+    assert.deepEqual(runtimeWrites, ["https://forge.lan"]);
+    assert.equal(spawns[0]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:18332");
+    assert.equal(spawns[0]?.env.FORGEBADGER_TRUST_PROXY, "true");
+    assert.equal(spawns[1]?.env.FORGEBADGER_GATEWAY_URL, "http://127.0.0.1:18332");
+    assert.match(stdout.text, /ForgeBadger Public URL: https:\/\/forge\.lan /);
+  });
+
+  it("refuses a public URL that is not a bare HTTPS origin and leaves proxy trust off by default", async () => {
+    const { resolvePublicUrl } = await import("../src/commands/start.js");
+    assert.equal(resolvePublicUrl(undefined), undefined);
+    assert.equal(resolvePublicUrl("  "), undefined);
+    assert.equal(resolvePublicUrl("https://192.168.1.20:8443"), "https://192.168.1.20:8443");
+    for (const bad of ["http://forge.lan", "forge.lan", "https://user:pw@forge.lan", "https://forge.lan/app", "https://forge.lan/?x=1"]) {
+      assert.throws(() => resolvePublicUrl(bad), /FORGEBADGER_PUBLIC_URL/, bad);
+    }
+
+    const spawns: Array<{ env: NodeJS.ProcessEnv }> = [];
+    await runStart({
+      loadConfig: async () => createRuntimeConfig("/tmp/forgebadger-state"),
+      resolvePaths: () => createInstalledPaths(),
+      checkPort: async () => undefined,
+      prepareWebRuntime: async (options) => createPreparedWebPaths(options.runtimeWebDir),
+      writeRuntimeConfig: async (options) => path.join(options.webPublicDir, "forgebadger-runtime.js"),
+      spawn: (_entry, env) => {
+        spawns.push({ env });
+        return new FakeChild();
+      },
+      installShutdown: (children) => {
+        setImmediate(() => children[1]?.emit("exit", 0, null));
+      },
+      env: {},
+      stdout: createMemoryWriter()
+    });
+    assert.equal(spawns[0]?.env.FORGEBADGER_TRUST_PROXY, process.env.FORGEBADGER_TRUST_PROXY);
+  });
+
   it("formats IPv6 browser URLs with brackets", async () => {
     // Arrange
     const stdout = createMemoryWriter();
