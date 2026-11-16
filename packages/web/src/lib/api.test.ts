@@ -54,7 +54,6 @@ import {
   listCatalogSources,
   listNotifications,
   listSessions,
-  listSnapshots,
   listUsageRates,
   listSkillTemplates,
   listSkillSources,
@@ -66,7 +65,6 @@ import {
   updateProviderModel,
   refreshCatalog,
   restoreTemplateVersion,
-  restoreSnapshot,
   setUsageRate,
   listTemplateVersions,
   listApiKeys,
@@ -631,22 +629,6 @@ describe("api client", () => {
     expect(fetch).toHaveBeenCalledWith(
       "http://127.0.0.1:18332/api/v1/activities?sessionId=session-1&type=session_started%2Csession_ended&limit=20",
       expect.objectContaining({ headers: expect.any(Object) })
-    );
-  });
-
-  it("lists session snapshots with filters", async () => {
-    await listSnapshots({ projectId: "project-1" });
-    await restoreSnapshot("snapshot-1");
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
-      "http://127.0.0.1:18332/api/v1/snapshots?projectId=project-1",
-      expect.objectContaining({ headers: expect.any(Object) })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      "http://127.0.0.1:18332/api/v1/snapshots/snapshot-1/restore",
-      expect.objectContaining({ method: "POST" })
     );
   });
 

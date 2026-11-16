@@ -8,7 +8,6 @@ import type { Database } from "../../db/types.js";
 import { SessionConflictError } from "../session-manager.js";
 import type { ForgeBadgerEventBus } from "../event-bus.js";
 import { recordActivity } from "../activity-events.js";
-import { recordSessionSnapshot } from "../session-snapshots.js";
 import { getAdapterLaunchStatus } from "../adapter-discovery.js";
 import { createLaunchPlan, createTerminalLaunchPlan, checkTerminalShell, resolveAvailableTerminalShell, normalizeSessionKind, prepareAdapterLaunchExtras, TERMINAL_SHELLS } from "../session-launch-plan.js";
 import { isNativeSessionResolvable, probeLatestNativeSessionId } from "../session-native-id.js";
@@ -184,7 +183,6 @@ async function create(ctx: CommandContext, input: SessionCreateInput) {
             lastActive: new Date()
         });
         recordSessionActivity(db, eventBus, userId, updated ?? dbSession, "session_started", "success", `Session ${dbSession.name} started`);
-        recordSessionSnapshot({ db, userId, session: updated ?? dbSession, metadata: { reason: "session_started" } });
         eventBus?.emitEvent({ type: "session_created", userId, sessionId: dbSession.id, projectId: project.id, name: dbSession.name });
         eventBus?.emitEvent({ type: "session_status_changed", userId, sessionId: dbSession.id, oldStatus: dbSession.status, newStatus: "running" });
         return safeSession(updated ?? dbSession);
@@ -369,12 +367,6 @@ async function start(ctx: CommandContext, input: { sessionId: string; resume?: b
             if (kind !== "terminal" && handleWrite !== undefined)
                 sessionRepo.update(dbSession.id, { nativeSessionId: handleWrite });
             recordSessionActivity(db, eventBus, userId, updatedSession ?? dbSession, resumeId ? "session_resumed" : "session_started", "success", resumeId ? `Session ${dbSession.name} resumed` : `Session ${dbSession.name} started`);
-            recordSessionSnapshot({
-                db,
-                userId,
-                session: updatedSession ?? dbSession,
-                metadata: { reason: "session_started" }
-            });
             return safeSession(updatedSession ?? dbSession);
         });
     }

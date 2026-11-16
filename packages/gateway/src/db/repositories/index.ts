@@ -13,7 +13,6 @@ export { ProjectManagerExecutionRepository } from "./project-manager-execution-r
 export { ProjectRepository } from "./project-repository.js";
 export { ProjectSkillRepository } from "./project-skill-repository.js";
 export { SessionRepository } from "./session-repository.js";
-export { SessionSnapshotRepository } from "./session-snapshot-repository.js";
 export { SkillRepository } from "./skill-repository.js";
 export { TemplateRepository } from "./template-repository.js";
 export { TokenUsageRepository } from "./token-usage-repository.js";

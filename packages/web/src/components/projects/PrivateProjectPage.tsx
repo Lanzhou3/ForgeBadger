@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, Eye, FileCode2, FileText, Globe2, History, Link2, MoreHorizontal, Package, Pencil, Plus, Save, TerminalSquare, Trash2, Wrench } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, Eye, FileCode2, FileText, Globe2, Link2, MoreHorizontal, Package, Pencil, Plus, Save, TerminalSquare, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -381,12 +381,6 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem asChild>
-                    <Link href={`/history?projectId=${project.id}`}>
-                      <History className="size-4" />
-                      {t("nav.history")}
-                    </Link>
-                  </DropdownMenuItem>
                   <DropdownMenuItem
                     variant="destructive"
                     disabled={deleteMutation.isPending}

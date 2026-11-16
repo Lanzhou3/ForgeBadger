@@ -841,18 +841,6 @@ export interface SessionActivity {
   createdAt: string;
 }
 
-export interface SessionSnapshot {
-  id: string;
-  sessionId?: string | null;
-  projectId?: string | null;
-  /** Historical API field name retained for persisted records. */
-  runtimeSessionName?: string | null;
-  modelId?: string | null;
-  configVersion?: string | null;
-  metadata?: unknown;
-  createdAt: string;
-}
-
 export interface AiConfigFile {
   relativePath: string;
   scope: "project" | "global";
@@ -898,11 +886,6 @@ export interface WorkspaceFileSnapshot {
   content: string;
   truncated: boolean;
   binary: boolean;
-}
-
-export interface SnapshotRestoreResult {
-  session: Session;
-  mode: "attach_runtime" | "recreate_session";
 }
 
 export interface AuditLog {
@@ -1748,23 +1731,6 @@ export async function listActivities(params: {
   if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
   const query = searchParams.toString();
   return fetchJson(`/api/v1/activities${query ? `?${query}` : ""}`) as Promise<{ activities: SessionActivity[] }>;
-}
-
-export async function listSnapshots(params: {
-  sessionId?: string;
-  projectId?: string;
-} = {}): Promise<{ snapshots: SessionSnapshot[] }> {
-  const searchParams = new URLSearchParams();
-  if (params.sessionId) searchParams.set("sessionId", params.sessionId);
-  if (params.projectId) searchParams.set("projectId", params.projectId);
-  const query = searchParams.toString();
-  return fetchJson(`/api/v1/snapshots${query ? `?${query}` : ""}`) as Promise<{ snapshots: SessionSnapshot[] }>;
-}
-
-export async function restoreSnapshot(id: string): Promise<SnapshotRestoreResult> {
-  return fetchJson(`/api/v1/snapshots/${id}/restore`, {
-    method: "POST",
-  }) as Promise<SnapshotRestoreResult>;
 }
 
 export async function getUsageSummary(): Promise<{ summary: UsageSummary }> {

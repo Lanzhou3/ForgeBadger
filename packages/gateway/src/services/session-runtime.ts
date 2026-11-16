@@ -1,7 +1,7 @@
 /**
  * Session runtime lifecycle — shared by the HTTP start route and Project Manager
  * tools so there is exactly one launch path (mutex, adapter validation,
- * launch-plan construction, recovery bookkeeping, activity/snapshot records).
+ * launch-plan construction, recovery bookkeeping, activity records).
  *
  * Errors surface typed for HTTP mapping:
  *   - SessionNotFoundError            → 404
@@ -11,7 +11,6 @@
 import { randomUUID } from "node:crypto";
 
 import { recordActivity } from "./activity-events.js";
-import { recordSessionSnapshot } from "./session-snapshots.js";
 import { SessionConflictError, type InMemorySessionManager } from "./session-manager.js";
 import type { ForgeBadgerEventBus } from "./event-bus.js";
 import {
@@ -103,12 +102,6 @@ export async function startSessionRuntime(deps: SessionRuntimeDeps, sessionId: s
       lastActive: new Date()
     });
     recordSessionActivity(deps, updatedSession ?? dbSession, "session_started", "success", `Session ${dbSession.name} started`);
-    recordSessionSnapshot({
-      db: deps.db,
-      userId: deps.userId,
-      session: updatedSession ?? dbSession,
-      metadata: { reason: "session_started" }
-    });
     return updatedSession ?? dbSession;
   });
 

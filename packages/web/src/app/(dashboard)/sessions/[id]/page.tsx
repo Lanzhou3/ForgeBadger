@@ -17,12 +17,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { notifySessionTabsChanged, SessionTabs } from "@/components/session-tabs";
 import { TerminalView } from "@/components/terminal-view";
 import {
@@ -337,27 +331,16 @@ export default function TerminalPage() {
             <SessionNotificationBell />
             {view === "terminal" && (
               <>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 text-muted-foreground hover:text-foreground"
-                      title={t("nav.history")}
-                      aria-label={t("nav.history")}
-                    >
-                      <History className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onSelect={() => setOutputHistoryOpen(true)}>
-                      {t("terminal.historyOutput")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <Link href={`/history?sessionId=${id}`}>{t("sessions.snapshotHistory")}</Link>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 text-muted-foreground hover:text-foreground"
+                  title={t("terminal.historyOutput")}
+                  aria-label={t("terminal.historyOutput")}
+                  onClick={() => setOutputHistoryOpen(true)}
+                >
+                  <History className="size-4" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"

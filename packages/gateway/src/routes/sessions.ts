@@ -23,7 +23,6 @@ import {
 import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import type { RuntimeAuthorizationInvalidator } from "../services/runtime-authorization-invalidation.js";
 import { recordActivity } from "../services/activity-events.js";
-import { recordSessionSnapshot } from "../services/session-snapshots.js";
 import { buildSessionBoard } from "../services/session-board.js";
 import {
   createLaunchPlan,
@@ -239,12 +238,6 @@ export function createSessionRoutes(
         lastActive: new Date()
       });
       recordSessionActivity(db, eventBus, userId, updated ?? dbSession, "session_started", "success", `Session ${dbSession.name} started`);
-      recordSessionSnapshot({
-        db,
-        userId,
-        session: updated ?? dbSession,
-        metadata: { reason: "session_started" }
-      });
 
       eventBus?.emitEvent({
         type: "session_status_changed",

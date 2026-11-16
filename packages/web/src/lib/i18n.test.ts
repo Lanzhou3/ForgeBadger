@@ -62,9 +62,6 @@ describe("i18n", () => {
     expect(getTranslation("en", "templates.seedTitle")).toBe("Seed-only templates");
     expect(getTranslation("zh-CN", "templates.catalogInstall")).toBe("从目录安装");
     expect(getTranslation("en", "templates.catalogEmpty")).toContain("catalog");
-    expect(getTranslation("zh-CN", "nav.history")).toBe("历史");
-    expect(getTranslation("zh-TW", "snapshots.title")).toBe("歷史快照");
-    expect(getTranslation("en", "snapshots.noTerminalHistory")).toContain("terminal scrollback");
     expect(getTranslation("zh-CN", "nav.usage")).toBe("使用统计");
     expect(getTranslation("en", "usage.subtitle")).toContain("token");
     expect(getTranslation("en", "usage.totalTokens")).toContain("tokens");

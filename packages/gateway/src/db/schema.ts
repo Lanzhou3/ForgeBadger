@@ -941,6 +941,8 @@ export const sessionActivities = sqliteTable(
 // Migration 0061 enforces tenant ownership for nullable session/project
 // references with triggers so parent deletion can retain historical rows.
 
+// Retired: the session snapshot History module was removed (2026-11-15). The
+// table stays declared only for migration continuity; nothing reads or writes it.
 export const sessionSnapshots = sqliteTable(
   "session_snapshots",
   {

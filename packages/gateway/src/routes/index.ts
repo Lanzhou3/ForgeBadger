@@ -44,7 +44,6 @@ import { createClaudeRouteRoutes } from "./claude-route.js";
 import { createDashboardRoutes } from "./dashboard.js";
 import { createNotificationRoutes } from "./notifications.js";
 import { createSessionHookRoutes } from "./session-hooks.js";
-import { createSnapshotRoutes } from "./snapshots.js";
 import { createDiagnosticsRoutes } from "./diagnostics.js";
 import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
 import { createTelegramIntegrationRoutes } from "./integrations-telegram.js";
@@ -102,13 +101,6 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.use("/api/v1/activities", createActivityRoutes(deps.db));
   app.use("/api/v1/audit-logs", createAuditLogRoutes(deps.db));
   app.use("/api/v1/catalog", createCatalogRoutes(deps.db));
-  app.use("/api/v1/snapshots", createSnapshotRoutes(
-    deps.db,
-    deps.masterKey,
-    deps.sessionManager,
-    deps.eventBus,
-    deps.adapterCommandRunner
-  ));
   app.use("/api/v1/projects", createProjectManagerRoutes(deps.db, {
     masterKey: deps.masterKey,
     sessionManager: deps.sessionManager,
