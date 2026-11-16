@@ -46,6 +46,7 @@ import { createFeishuIntegrationRoutes } from "./integrations-feishu.js";
 import { createTelegramIntegrationRoutes } from "./integrations-telegram.js";
 import { createCopilotRoutes } from "./copilot.js";
 import { createCopilotGoalRoutes } from "./copilot-goals.js";
+import { createFleetRoutes } from "./fleets.js";
 import { createAutomationRoutes } from "./automations.js";
 import { createMcpRoutes } from "./mcp.js";
 import { createMcpStatusRoutes } from "./mcp-status.js";
@@ -151,6 +152,7 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   if (deps.copilotAgent) {
     app.use("/api/v1/copilot", createCopilotRoutes(deps.copilotAgent));
     app.use("/api/v1/copilot", createCopilotGoalRoutes(deps.copilotAgent));
+    app.use("/api/v1/fleets", createFleetRoutes(deps.copilotAgent));
     app.use("/api/v1/copilot", createAutomationRoutes(deps.copilotAgent));
   }
   app.use("/api/v1/diagnostics", createDiagnosticsRoutes({
