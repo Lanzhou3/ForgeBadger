@@ -6,7 +6,12 @@ import { buildAgentStack, type AgentStackDeps } from './agent-stack.js';
 import { notifyGoalStatus } from './goal-notify.js';
 import { CopilotGoalStore, RESOLVED_TASK_STATUSES, type GoalRow } from './goal-store.js';
 import { syncGoalFromBoard } from './goal-board.js';
+import { boardIntegrationInFlight } from './goal-task-workspace.js';
+import { buildEndedReportSuffix, buildHookReportSuffix } from './goal-dispatch-report.js';
+import { awaitingReviews, settleGoalReviewFromHook } from './goal-review.js';
 import type { TurnInput } from './run-ledger.js';
+import { scopeKind } from './work-store.js';
+import { enqueueSettledFleetReviews } from '../fleet/fleet-inbox.js';
 
 /**
  * GoalDriver: after a goal-owned run reaches a terminal state, decide the
@@ -52,9 +57,18 @@ export function evaluateGoalContinuation(
   const now = options?.now ?? Date.now();
   const store = new CopilotGoalStore(deps.db, userId);
   const goal = store.getGoal(goalId);
-  if (!goal || goal.status !== 'active') return { action: 'inactive' };
+  if (!goal) return { action: 'inactive' };
+  if (goal.status !== 'active') {
+    // A paused or blocked goal lets its reviewer finish (and time out); a finished one stops paying for it.
+    try { awaitingReviews(deps.db, deps, userId, goalId, now, { abandon: goal.status === 'cancelled' || goal.status === 'completed' }); }
+    catch (error) { logGoalDriverError('review-sweep', userId, error); }
+    return { action: 'inactive' };
+  }
   // The owner's board decisions (accept / cancel) settle linked tasks first.
-  syncGoalFromBoard(deps.db, userId, goal);
+  syncGoalFromBoard(deps.db, userId, goal, () => {
+    try { evaluateGoalContinuation(deps, userId, goalId, enqueue); }
+    catch (error) { logGoalDriverError('board-integration', userId, error); }
+  });
   const tasks = store.listTasks(goalId);
   if (tasks.length > 0 && tasks.every(task => RESOLVED_TASK_STATUSES.includes(task.status))) {
     failureCooldowns.delete(goalId);
@@ -63,6 +77,8 @@ export function evaluateGoalContinuation(
     notifyGoalStatus(deps.db, userId, store.getGoal(goalId)!);
     return { action: 'completed' };
   }
+  // The owner accepted a task on the board and its worktree is being integrated: settle first, then continue.
+  if (boardIntegrationInFlight(goalId)) return { action: 'busy', reason: 'integrating_task' };
   // An active parent, delegate-child, or same-conversation run owns the
   // goal: never enqueue a competing run, regardless of stagnation or
   // failure counters.
@@ -70,6 +86,8 @@ export function evaluateGoalContinuation(
   // A dispatched CLI still working on its turn owns the next step: waiting
   // for it is not stagnation, and a continuation run would only re-poll it.
   if (awaitingDispatchedCli(deps.db, store, userId, goalId, now)) return { action: 'busy', reason: 'awaiting_cli' };
+  // Same for a reviewer CLI: its findings are what the next run acts on.
+  if (awaitingReviews(deps.db, deps, userId, goalId, now)) return { action: 'busy', reason: 'awaiting_review' };
   // Failure classification of the most recent settled run: unrecoverable
   // codes block immediately; repeated failures cool down exponentially
   // instead of spinning a retry loop.
@@ -131,8 +149,8 @@ function awaitingDispatchedCli(db: Database, store: CopilotGoalStore, userId: st
     if (running && !stale) { waiting = true; continue; }
     if (store.settleDispatch(task.id, 'ended'))
       store.appendJournal(goalId, null, running
-        ? `CLI session ${task.dispatched_session_id} for task '${task.id}' sent no turn-end report within ${DISPATCH_REPORT_TIMEOUT_MS / 60_000} minutes; no longer waiting on it.`
-        : `CLI session ${task.dispatched_session_id} for task '${task.id}' ended without reporting a finished turn.`);
+        ? `CLI session ${task.dispatched_session_id} for task '${task.id}' sent no turn-end report within ${DISPATCH_REPORT_TIMEOUT_MS / 60_000} minutes; no longer waiting on it.${buildEndedReportSuffix(store.getGoal(goalId), task.id)}`
+        : `CLI session ${task.dispatched_session_id} for task '${task.id}' ended without reporting a finished turn.${buildEndedReportSuffix(store.getGoal(goalId), task.id)}`);
   }
   return waiting;
 }
@@ -151,7 +169,8 @@ export function settleGoalDispatchFromHook(db: Database, event: ForgeBadgerEvent
     const status = event.notificationType === 'task_completed' ? 'completed' : 'failed';
     if (!store.settleDispatch(task.id, status)) continue;
     store.appendJournal(task.goal_id, null, `CLI session ${event.sessionId} reported ${event.notificationType} for task '${task.id}' `
-      + '(the CLI turn ended; this is not verification — run the task verify_command before marking it passes).');
+      + '(the CLI turn ended; this is not verification — run the task verify_command before marking it passes).'
+      + buildHookReportSuffix(store.getGoal(task.goal_id), event, task.id));
     settled.push({ userId: event.userId, goalId: task.goal_id });
   }
   return settled;
@@ -222,14 +241,21 @@ export function attachGoalDriver(deps: AgentStackDeps, options?: GoalDriverOptio
     const onEvent = (event: ForgeBadgerEvent): void => {
       if (!deps.db.open) return;
       if (event.type === 'session_notification') {
-        try { for (const target of settleGoalDispatchFromHook(deps.db, event)) evaluate(target.userId, target.goalId); }
+        try {
+          for (const target of [...settleGoalDispatchFromHook(deps.db, event), ...settleGoalReviewFromHook(deps.db, event, deps)]) {
+            // A fleet scope is driven by its inbox, never by goal continuation.
+            if (scopeKind(deps.db, target.userId, target.goalId) === 'fleet') enqueueSettledFleetReviews(deps.db, target.userId, target.goalId);
+            else evaluate(target.userId, target.goalId);
+          }
+        }
         catch (error) { logGoalDriverError('dispatch-hook', event.userId, error); }
         return;
       }
       if (event.type !== 'copilot_run_updated' || !TERMINAL_RUN_STATES.includes(event.status)) return;
       const run = deps.db.prepare('SELECT goal_id FROM copilot_runs WHERE user_id=? AND id=?')
         .get(event.userId, event.runId) as { goal_id: string | null } | undefined;
-      if (run?.goal_id) evaluate(event.userId, run.goal_id);
+      // Fleet lead runs are settled by the fleet worker.
+      if (run?.goal_id && scopeKind(deps.db, event.userId, run.goal_id) !== 'fleet') evaluate(event.userId, run.goal_id);
     };
     deps.eventBus.on('event', onEvent);
     active = {

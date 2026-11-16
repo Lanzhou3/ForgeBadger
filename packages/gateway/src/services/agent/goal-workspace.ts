@@ -12,12 +12,14 @@ import {
   diffGoalSandbox, ensureGoalSandbox, goalSandboxBase, goalSandboxDir, isBinary, mergeGoalSandbox, unifiedDiff,
   type GoalFileChange, type GoalMergeResult
 } from './goal-sandbox.js';
-import { CopilotGoalStore, type GoalRow, type GoalWorkspaceRecord } from './goal-store.js';
+import type { GoalRow, GoalWorkspaceRecord } from './goal-store.js';
+import { scopeKind, workStore } from './work-store.js';
 import { AgentError } from './types.js';
 
 /**
  * Goal workspace: where every goal edit lands before the owner merges it.
  * Git-backed projects get a managed worktree on `forgebadger/goal-<goalId>`
+ * (`forgebadger/fleet-<fleetId>` for a fleet scope)
  * so sandbox file tools, verify commands and dispatched CLI sessions all work
  * on one tree; non-git projects keep the copy sandbox. Legacy goals that
  * already own a copy sandbox stay on it. Shared/team projects are refused:
@@ -30,7 +32,10 @@ export type GoalWorkspace = GoalWorkspaceRecord;
 export const GOAL_MANAGED_PATHS: readonly string[] = [
   '.claude/settings.local.json', '.codex/hooks.json', '.codex/hooks/forgebadger-notify.mjs', FORGEBADGER_OPENCODE_PLUGIN_RELATIVE
 ];
-const GOAL_BRANCH_PREFIX = 'forgebadger/goal-';
+/** Integration branch namespace of a scope: goals and fleets share the worktree base but not the branch name. */
+function scopeBranchPrefix(db: Database, userId: string, scopeId: string): 'forgebadger/goal-' | 'forgebadger/fleet-' {
+  return scopeKind(db, userId, scopeId) === 'fleet' ? 'forgebadger/fleet-' : 'forgebadger/goal-';
+}
 const MAX_DIFF_RESPONSE_BYTES = 512 * 1024;
 const MAX_UNTRACKED_DIFF_BYTES = 512 * 1024;
 
@@ -80,7 +85,7 @@ function isGitRoot(projectRoot: string): boolean {
 }
 
 async function provisionGoalWorkspace(db: Database, userId: string, goal: GoalRow, projectRoot: string): Promise<GoalWorkspace> {
-  const store = new CopilotGoalStore(db, userId);
+  const store = workStore(db, userId, goal.id);
   const source = fs.realpathSync(projectRoot);
   if (!isGitRoot(source)) {
     const directory = ensureGoalSandbox(source, goalSandboxDir(db, goal.id));
@@ -88,14 +93,15 @@ async function provisionGoalWorkspace(db: Database, userId: string, goal: GoalRo
   }
   const workspacesRoot = goalWorktreeBase(db);
   const target = path.join(workspacesRoot, goal.id);
-  const branch = `${GOAL_BRANCH_PREFIX}${goal.id}`;
+  const branchPrefix = scopeBranchPrefix(db, userId, goal.id);
+  const branch = `${branchPrefix}${goal.id}`;
   try {
     let record: GoalWorkspaceRecord;
     if (fs.existsSync(target)) {
       const adopted = await adoptGoalWorktree({ sourcePath: source, path: target, branch });
       record = { kind: 'worktree', path: target, branch, ...adopted };
     } else {
-      const created = await provisionWorktree({ sourcePath: source, workspacesRoot, runId: goal.id, branchPrefix: 'forgebadger/goal-' });
+      const created = await provisionWorktree({ sourcePath: source, workspacesRoot, runId: goal.id, branchPrefix });
       record = { kind: 'worktree', path: created.path, branch: created.branch, baseCommit: created.baseCommit, targetBranch: created.targetBranch };
     }
     return existingGoalWorkspace(db, store.setWorkspace(goal.id, record))!;
@@ -113,7 +119,7 @@ async function provisionGoalWorkspace(db: Database, userId: string, goal: GoalRo
 export async function ensureGoalWorkspace(db: Database, userId: string, goal: GoalRow, project: { id: string; path: string }): Promise<GoalWorkspace> {
   const existing = existingGoalWorkspace(db, goal);
   if (existing) {
-    if (!goal.workspace_kind) new CopilotGoalStore(db, userId).setWorkspace(goal.id, existing);
+    if (!goal.workspace_kind) workStore(db, userId, goal.id).setWorkspace(goal.id, existing);
     return assertPresent(existing);
   }
   assertGoalProjectWritable(db, userId, project.id, project.path);
@@ -125,7 +131,7 @@ export async function ensureGoalWorkspace(db: Database, userId: string, goal: Go
   return pending;
 }
 
-function goalGitError(error: unknown, code: string, fallback: string): AgentError {
+export function goalGitError(error: unknown, code: string, fallback: string): AgentError {
   if (error instanceof AgentError) return error;
   if (error instanceof CollaborationError) {
     const message = error.code === 'COLLABORATION_GIT_FAILED' ? fallback : error.message;

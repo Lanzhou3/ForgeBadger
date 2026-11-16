@@ -6,6 +6,8 @@ import {
 import { governedProject } from '../project-manager/access.js';
 import { readTaskDispatchAttempt } from '../project-manager/task-execution.js';
 import { CopilotGoalStore, type GoalRow, type GoalTaskInput, type GoalTaskRow, type GoalTaskStatus } from './goal-store.js';
+import { startBoardAcceptance, taskWorkspaceMayExist } from './goal-task-workspace.js';
+import { scopeKind, workStore } from './work-store.js';
 import { AgentError } from './types.js';
 
 /**
@@ -48,7 +50,12 @@ function newWorkItemFor(goal: GoalRow, task: GoalTaskInput) {
  */
 export type GoalTaskDraft = Omit<GoalTaskInput, 'description'> & { description?: string | undefined };
 
+/**
+ * A fleet scope never creates work items (its own board is the plan); it may
+ * still adopt an existing open item by id.
+ */
 export function linkGoalTasksToBoard(db: Database, userId: string, goal: GoalRow, drafts: GoalTaskDraft[]): GoalTaskInput[] {
+  const createItems = scopeKind(db, userId, goal.id) !== 'fleet';
   const projectId = goalBoardProject(db, userId, goal);
   if (!projectId) {
     if (drafts.some(draft => draft.workItemId))
@@ -59,15 +66,16 @@ export function linkGoalTasksToBoard(db: Database, userId: string, goal: GoalRow
     });
   }
   const repo = new ProjectManagerRepository(db, userId);
-  // One live goal per work item: two goals mirroring the same item would fight.
+  // One live goal or fleet per work item: two scopes mirroring the same item would fight.
   const linked = new Set((db.prepare(`SELECT t.work_item_id FROM copilot_goal_tasks t JOIN copilot_goals g ON g.id=t.goal_id AND g.user_id=t.user_id
-      WHERE t.user_id=? AND t.work_item_id IS NOT NULL AND (g.id=? OR g.status NOT IN ('completed','cancelled'))`)
-    .all(userId, goal.id) as { work_item_id: string }[]).map(row => row.work_item_id));
+      WHERE t.user_id=? AND t.work_item_id IS NOT NULL AND (g.id=? OR g.status NOT IN ('completed','cancelled'))
+    UNION SELECT f.work_item_id FROM fleet_tasks f WHERE f.user_id=? AND f.work_item_id IS NOT NULL AND (f.fleet_id=? OR f.status NOT IN ('passes','cancelled'))`)
+    .all(userId, goal.id, userId, goal.id) as { work_item_id: string }[]).map(row => row.work_item_id));
   return drafts.map(draft => {
     if (!draft.workItemId) {
       if (!draft.description) throw new AgentError('COPILOT_GOAL_INPUT_INVALID', 'A new task needs a description');
       const input = { ...draft, description: draft.description };
-      return { ...input, workItemId: repo.createWorkItem(projectId, newWorkItemFor(goal, input)).id };
+      return createItems ? { ...input, workItemId: repo.createWorkItem(projectId, newWorkItemFor(goal, input)).id } : input;
     }
     const item = repo.getWorkItem(projectId, draft.workItemId);
     if (!item) throw new AgentError('COPILOT_NOT_FOUND', `Work item ${draft.workItemId} is not on this goal's project board`);
@@ -120,7 +128,7 @@ export function mirrorGoalTaskToBoard(db: Database, userId: string, goal: GoalRo
   if (!task.work_item_id || task.status === 'cancelled') return;
   const projectId = goalBoardProject(db, userId, goal);
   if (!projectId) return;
-  const store = new CopilotGoalStore(db, userId);
+  const store = workStore(db, userId, goal.id);
   try {
     const repo = new ProjectManagerRepository(db, userId);
     const item = repo.getWorkItem(projectId, task.work_item_id);
@@ -152,9 +160,11 @@ const REOPENED_BOARD_STATUSES: readonly ProjectManagerWorkItemStatus[] = ['todo'
  * task (owner acceptance), `cancelled` cancels it, and a passes task whose
  * item the board moved back after it passed (changes requested) reopens as
  * in_progress — a completed goal is paused so the owner decides on resuming.
- * Idempotent; returns how many tasks changed.
+ * Tasks that own a worktree are integrated asynchronously first (see
+ * startBoardAcceptance); `onAsyncSettled` fires when one passes. Idempotent;
+ * returns how many tasks changed synchronously.
  */
-export function syncGoalFromBoard(db: Database, userId: string, goal: GoalRow): number {
+export function syncGoalFromBoard(db: Database, userId: string, goal: GoalRow, onAsyncSettled?: () => void): number {
   const projectId = goalBoardProject(db, userId, goal);
   if (!projectId) return 0;
   const store = new CopilotGoalStore(db, userId);
@@ -165,6 +175,8 @@ export function syncGoalFromBoard(db: Database, userId: string, goal: GoalRow): 
     if (!task.work_item_id || task.status === 'cancelled') continue;
     const item = repo.getWorkItem(projectId, task.work_item_id);
     if (item?.status === 'done' && task.status !== 'passes') {
+      // A task with its own worktree passes only once that work is in the goal branch.
+      if (taskWorkspaceMayExist(goal, task.id)) { startBoardAcceptance(db, userId, goal, task, item, onAsyncSettled); continue; }
       if (store.settleFromBoard(goal.id, task.id, 'passes', `Accepted on the project board (work item ${item.id}).`)) {
         store.appendJournal(goal.id, null, `Owner accepted work item "${item.title}" on the board; task '${task.id}' passes.`);
         changed += 1;

@@ -28,6 +28,9 @@ import { createGraphTools } from "./graph.js";
 import { createGoalTools } from "./goals.js";
 import { createGoalSandboxTools } from "./goal-sandbox.js";
 import { createGoalDelegateTools } from "./goal-delegate.js";
+import { createGoalIntegrateTools } from "./goal-integrate.js";
+import { createGoalReviewTools } from "./goal-review.js";
+import { createFleetTools } from "./fleet.js";
 
 export function createPlatformTools(): AgentTool[] {
   return [
@@ -53,6 +56,9 @@ export function createPlatformTools(): AgentTool[] {
     ...createGraphTools(),
     ...createGoalTools(),
     ...createGoalSandboxTools(),
-    ...createGoalDelegateTools()
+    ...createGoalDelegateTools(),
+    ...createGoalIntegrateTools(),
+    ...createGoalReviewTools(),
+    ...createFleetTools()
   ];
 }

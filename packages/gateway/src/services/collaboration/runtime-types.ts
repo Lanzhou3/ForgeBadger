@@ -8,7 +8,7 @@ export interface ProvisionWorktreeInput {
   branchPrefix?: WorktreeBranchPrefix;
   authorize?: () => void;
 }
-export type WorktreeBranchPrefix = 'codex/task-' | 'forgebadger/goal-';
+export type WorktreeBranchPrefix = 'codex/task-' | 'forgebadger/goal-' | 'forgebadger/fleet-' | 'forgebadger/goal-task-';
 export interface ProvisionedWorktree {
   path: string;
   branch: string;

@@ -1,5 +1,7 @@
 import type { Database } from '../../db/types.js';
 import { AgentError } from './types.js';
+import { PROGRAMMATIC_SUBMIT_ADAPTERS } from '../programmatic-terminal-submit.js';
+import { writerMemberFor } from './team-roster.js';
 
 /**
  * Goal authorization grants (M3). A grant is created once with the goal and
@@ -32,20 +34,26 @@ export function parseGoalGrants(value: string | null | undefined): GoalGrant[] {
   }
 }
 
-/** First grant of the goal that covers the tool, or null (approval required). Active goals only. */
+/** First grant of the scope (goal or fleet) that covers the tool, or null (approval required). Active scopes only. */
 export function goalGrantForTool(db: Database, userId: string, goalId: string, toolName: string): GoalGrant | null {
-  const row = db.prepare("SELECT grants_json FROM copilot_goals WHERE user_id=? AND id=? AND status='active'").get(userId, goalId) as { grants_json: string } | undefined;
+  const row = (db.prepare("SELECT grants_json FROM copilot_goals WHERE user_id=? AND id=? AND status='active'").get(userId, goalId)
+    ?? db.prepare("SELECT grants_json FROM fleets WHERE user_id=? AND id=? AND status='active'").get(userId, goalId)) as { grants_json: string } | undefined;
   if (!row) return null;
   for (const grant of parseGoalGrants(row.grants_json))
     if ((GOAL_GRANT_TOOLS[grant] as readonly string[]).includes(toolName)) return grant;
   return null;
 }
 
-/** FORGEBADGER_CLI_AUTONOMY_ADAPTERS gate for programmatic CLI dispatch. */
+/**
+ * Gate for programmatic CLI dispatch: the CLI must support programmatic
+ * submit, and the owner must have an enabled writer team member for it
+ * (Copilot settings → Team members).
+ */
 export function assertAdapterAutonomy(aiTool: string): void {
-  const allowed = (process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS ?? '')
-    .split(',').map(entry => entry.trim()).filter(Boolean);
-  if (!allowed.includes(aiTool))
+  if (!(PROGRAMMATIC_SUBMIT_ADAPTERS as readonly string[]).includes(aiTool))
     throw new AgentError('COPILOT_ADAPTER_AUTONOMY_DENIED',
-      `Adapter '${aiTool}' is not listed in FORGEBADGER_CLI_AUTONOMY_ADAPTERS; add it there (and restart the gateway) to enable programmatic CLI dispatch.`);
+      `Adapter '${aiTool}' cannot be driven programmatically yet (manual only).`);
+  if (!writerMemberFor(aiTool))
+    throw new AgentError('COPILOT_ADAPTER_AUTONOMY_DENIED',
+      `No enabled team member with the writer role uses '${aiTool}'; ask the owner to add or enable a team member for that CLI in Copilot settings → Team members.`);
 }
