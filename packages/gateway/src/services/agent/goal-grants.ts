@@ -16,7 +16,7 @@ export type GoalGrant = (typeof GOAL_GRANTS)[number];
 export const GOAL_GRANT_TOOLS: Record<GoalGrant, readonly string[]> = {
   operate_sessions: ['start_session', 'stop_session', 'takeover_session'],
   terminal_run: ['terminal_run', 'terminal_open', 'terminal_close'],
-  pm_dispatch: ['dispatch_task_to_session', 'pm_execute_task_packet', 'pm_prepare_task_packet', 'goal_dispatch_task'],
+  pm_dispatch: ['dispatch_task_to_session', 'pm_execute_task_packet', 'pm_prepare_task_packet', 'goal_dispatch_task', 'goal_review_task'],
   // Host shell inside the goal sandbox copy (no OS-level isolation).
   sandbox_checks: ['goal_run_checks']
 };
