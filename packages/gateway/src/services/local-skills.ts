@@ -1,4 +1,4 @@
-import { readSkillResourceManifest } from "./skill-resources.js";
+import { isIgnoredSkillResource, readSkillResourceManifest } from "./skill-resources.js";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -196,6 +196,7 @@ function walk(current: string, depth: number, files: string[], limit: number, vi
 
   for (const entry of safeReadDir(current)) {
     if (files.length >= limit) break;
+    if (isIgnoredSkillResource(entry.name)) continue;
     const fullPath = path.join(current, entry.name);
     const realPath = safeRealpath(fullPath);
     if (!realPath || !insideRoot(realPath, approvedRoot)) continue;

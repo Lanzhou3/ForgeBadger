@@ -14,6 +14,27 @@ const locator = {
   path: "skills/review",
 };
 
+test("large CLI packages retain every resource through remote install and rollback", async (t) => {
+  const f = skillFixture();
+  t.after(() => f.db.close());
+  for (let index = 0; index < 209; index++) {
+    f.files[`skills/review/guides/${index}.md`] = `# Guide ${index}\n${"x".repeat(10000)}`;
+  }
+  const service = new SkillInstallService(f.db, f.options);
+  const preview = await service.preview(f.owner.id, { locator });
+  assert.equal(preview.package.files.length, 212);
+  const { skill } = service.consume(f.owner.id, preview.token);
+  assert.equal(storedSkillFiles(skill).length, 212);
+  const revision = service.history(f.owner.id, skill.id)[0]!;
+  f.files["skills/review/guides/0.md"] = "updated guide";
+  f.bump();
+  const update = await service.preview(f.owner.id, { skillId: skill.id });
+  service.consume(f.owner.id, update.token, { skillId: skill.id, operation: "update" });
+  const restore = await service.preview(f.owner.id, { skillId: skill.id, revisionId: revision.id });
+  const restored = service.consume(f.owner.id, restore.token, { skillId: skill.id, operation: "rollback" });
+  assert.deepEqual(storedSkillFiles(restored.skill), storedSkillFiles(skill));
+});
+
 test("preview binds the full immutable package, tenant, operation and single-use token", async (t) => {
   const f = skillFixture();
   t.after(() => f.db.close());

@@ -5,6 +5,9 @@ import {
   parseSkillResourceManifest,
   resourcePath,
   SKILL_MANIFEST_FILE,
+  MAX_RESOURCE_FILES,
+  MAX_RESOURCE_BYTES,
+  MAX_RESOURCE_FILE_BYTES,
 } from "./skill-resources.js";
 
 export interface SkillPackageFile {
@@ -22,9 +25,9 @@ export interface SkillPackage {
   packageHash: string;
   sizeBytes: number;
 }
-export const MAX_SKILL_FILES = 65;
-export const MAX_SKILL_FILE_BYTES = 128 * 1024;
-export const MAX_SKILL_PACKAGE_BYTES = 1024 * 1024;
+export const MAX_SKILL_FILES = MAX_RESOURCE_FILES + 1;
+export const MAX_SKILL_FILE_BYTES = MAX_RESOURCE_FILE_BYTES;
+export const MAX_SKILL_PACKAGE_BYTES = MAX_RESOURCE_BYTES;
 
 export function readSkillMetadata(content: string): Record<string, unknown> {
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(content);
@@ -74,7 +77,7 @@ export function validateSkillFiles(input: unknown): SkillPackageFile[] {
     total += size;
     if (size > MAX_SKILL_FILE_BYTES || total > MAX_SKILL_PACKAGE_BYTES)
       throw new Error(
-        "Skill package exceeds 128 KiB/file or 1 MiB total limit",
+        `Skill package exceeds 128 KiB/file or 4 MiB total limit: ${file.path}`,
       );
     if (
       file.content.includes("\0") ||

@@ -12,6 +12,7 @@ import {
 import {
   MAX_SKILL_FILES,
   MAX_SKILL_FILE_BYTES,
+  MAX_SKILL_PACKAGE_BYTES,
   parseSkillPackage,
   type SkillPackage,
 } from "./skill-package.js";
@@ -233,7 +234,7 @@ async function resolveClawHubPackage(
   for (const file of response.version.files) {
     resourcePath(file.path);
     bytes += file.size;
-    if (file.size > MAX_SKILL_FILE_BYTES || bytes > 1024 * 1024)
+    if (file.size > MAX_SKILL_FILE_BYTES || bytes > MAX_SKILL_PACKAGE_BYTES)
       throw new Error("Skill package exceeds file or total size limit");
   }
   for (let i = 0; i < response.version.files.length; i += 4) {

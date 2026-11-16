@@ -6,6 +6,7 @@ import {
   readSkillMetadata,
   parseSkillPackage,
   MAX_SKILL_FILES,
+  MAX_SKILL_PACKAGE_BYTES,
   type SkillPackage,
 } from "./skill-package.js";
 
@@ -715,7 +716,7 @@ export async function fetchGitHubSkillPackage(
         (total, file) => total + Buffer.byteLength(file.content),
         0,
       ) >
-      1024 * 1024
+      MAX_SKILL_PACKAGE_BYTES
     )
       throw new Error("Skill package exceeds total size limit");
   }

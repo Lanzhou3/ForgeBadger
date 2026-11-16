@@ -6,16 +6,27 @@ import { safeResolve, validateProjectRoot } from '../lib/safe-resolve.js';
 import type { TemplateFileInput } from '../config-generation/types.js';
 
 export const SKILL_MANIFEST_FILE = '.forgebadger-skill.json';
-export const MAX_RESOURCE_FILES = 64;
-export const MAX_RESOURCE_BYTES = 1024 * 1024;
-const MAX_FILE_BYTES = 128 * 1024;
+export const MAX_RESOURCE_FILES = 256;
+export const MAX_RESOURCE_BYTES = 4 * 1024 * 1024;
+export const MAX_RESOURCE_FILE_BYTES = 128 * 1024;
+const MAX_FILE_BYTES = MAX_RESOURCE_FILE_BYTES;
+const MAX_EXPORT_MANIFEST_BYTES = 1024 * 1024;
+const ignoredResourceNames = new Set([
+  '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.cache',
+  '.git', 'node_modules', '.DS_Store'
+]);
+
+/** Generated caches and dependencies are not part of the portable Skill package. */
+export function isIgnoredSkillResource(name: string): boolean {
+  return ignoredResourceNames.has(name) || /\.(pyc|pyo)$/iu.test(name);
+}
 const fileSchema = z.object({relativePath:z.string().min(1).max(512),content:z.string().max(MAX_FILE_BYTES)}).strict();
 const exportManifestSchema = z.object({version:z.literal(1),files:z.array(z.object({relativePath:z.string(),sha256:z.string().regex(/^[a-f0-9]{64}$/u)}).strict()).max(MAX_RESOURCE_FILES+1)}).strict();
 const manifestSchema = z.object({version:z.literal(1),kind:z.literal('utf8-package'),sourcePath:z.string().max(4096),files:z.array(fileSchema).max(MAX_RESOURCE_FILES)}).strict();
 
 export function resourcePath(value: string): string {
   const parts = value.split('/');
-  if (value.includes('\\') || /[\x00-\x1f:%]/u.test(value) || path.posix.isAbsolute(value)
+  if (value.length > 512 || value.includes('\\') || /[\x00-\x1f:%]/u.test(value) || path.posix.isAbsolute(value)
     || parts.some(part=>!part || part==='.' || part==='..' || /[. ]$/u.test(part)
       || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(part))) {
     throw new Error('Unsafe Skill resource path');
@@ -27,34 +38,48 @@ export function resourcePath(value: string): string {
 export function readSkillResourceManifest(skillPath: string): string {
   const root = validateProjectRoot(path.dirname(skillPath));
   const files: Array<{relativePath:string;content:string}> = [];
-  let totalBytes = 0;
+  // The package limit includes the root document, just like remote package validation.
+  let totalBytes = statSync(skillPath).size;
   function walk(directory: string, depth: number): void {
-    if (depth>8) throw new Error('Skill package exceeds directory depth limit');
+    if (depth>8) throw new Error(`${path.relative(root,directory)}: Skill package exceeds directory depth limit`);
     for (const entry of readdirSync(directory,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))) {
+      if (isIgnoredSkillResource(entry.name)) continue;
       const relativePath = resourcePath(path.relative(root,path.join(directory,entry.name)).split(path.sep).join('/'));
       const resolved = safeResolve(root,relativePath);
-      if (lstatSync(resolved).isSymbolicLink()) throw new Error('Skill package symlinks are not supported');
+      if (lstatSync(resolved).isSymbolicLink()) throw new Error(`${relativePath}: Skill package symlinks are not supported`);
       const stats = statSync(resolved);
       if (stats.isDirectory()) { walk(resolved,depth+1); continue; }
-      if (!stats.isFile()) throw new Error('Skill package contains unsupported file type');
+      if (!stats.isFile()) throw new Error(`${relativePath}: Skill package contains unsupported file type`);
       if (relativePath===SKILL_MANIFEST_FILE) {
-        if(stats.size>64*1024) throw new Error('Skill export manifest exceeds review limit');
+        if(stats.size>MAX_EXPORT_MANIFEST_BYTES) throw new Error(`${relativePath}: Skill export manifest exceeds review limit`);
         const metadata=exportManifestSchema.parse(JSON.parse(readFileSync(resolved,'utf8')));
         for(const file of metadata.files) resourcePath(file.relativePath);
         continue;
       }
       if (relativePath==='SKILL.md') continue;
-      if (files.length>=MAX_RESOURCE_FILES || stats.size>MAX_FILE_BYTES) throw new Error('Skill package exceeds file count or size limit');
+      if (files.length>=MAX_RESOURCE_FILES) throw new Error(`${relativePath}: Skill package exceeds ${MAX_RESOURCE_FILES} resource file count limit`);
+      if (stats.size>MAX_FILE_BYTES) throw new Error(`${relativePath}: Skill resource exceeds 128 KiB file size limit`);
       const bytes = readFileSync(resolved);
       totalBytes += bytes.length;
-      if (bytes.length>MAX_FILE_BYTES || totalBytes>MAX_RESOURCE_BYTES) throw new Error('Skill package exceeds resource size limit');
-      const content = new TextDecoder('utf-8',{fatal:true}).decode(bytes);
-      if (content.includes('\0')) throw new Error('Skill package contains binary resources; UTF-8 text only');
+      if (bytes.length>MAX_FILE_BYTES) throw new Error(`${relativePath}: Skill resource exceeds 128 KiB file size limit`);
+      if (totalBytes>MAX_RESOURCE_BYTES) throw new Error(`${relativePath}: Skill package exceeds 4 MiB total size limit`);
+      const content = decodeResource(bytes,relativePath);
       files.push({relativePath,content});
     }
   }
   walk(root,0);
   return JSON.stringify({version:1,kind:'utf8-package',sourcePath:realpathSync(skillPath),files});
+}
+
+function decodeResource(bytes: Buffer, relativePath: string): string {
+  let content: string;
+  try {
+    content = new TextDecoder('utf-8',{fatal:true}).decode(bytes);
+  } catch {
+    throw new Error(`${relativePath}: Skill resource is not valid UTF-8 text; binary assets are unsupported`);
+  }
+  if (content.includes('\0')) throw new Error(`${relativePath}: Skill package contains binary resources; UTF-8 text only`);
+  return content;
 }
 
 export function parseSkillResourceManifest(value: string | null | undefined) {
@@ -109,7 +134,7 @@ export function assertNoObsoleteSkillResources(root: string, skillsDirectory: st
     const manifestRelative = `${skillsDirectory}/${entry.name}/${SKILL_MANIFEST_FILE}`;
     const manifestPath = safeResolve(root,manifestRelative);
     if (!existsSync(manifestPath)) continue;
-    if(statSync(manifestPath).size>64*1024) throw new Error('Skill export manifest exceeds review limit');
+    if(statSync(manifestPath).size>MAX_EXPORT_MANIFEST_BYTES) throw new Error('Skill export manifest exceeds review limit');
     const manifest = exportManifestSchema.parse(JSON.parse(readFileSync(manifestPath,'utf8')));
     for(const file of manifest.files) {
       const relative = `${skillsDirectory}/${entry.name}/${resourcePath(file.relativePath)}`;

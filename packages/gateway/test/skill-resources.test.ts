@@ -24,7 +24,8 @@ it('does not follow discovery symlinks outside approved roots',()=>{
  finally {rmSync(root,{recursive:true,force:true});rmSync(other,{recursive:true,force:true});}
 });
 
-import {parseSkillResourceManifest,assertNoObsoleteSkillResources} from '../src/services/skill-resources.js';
+import {parseSkillResourceManifest,assertNoObsoleteSkillResources,readSkillResourceManifest,MAX_RESOURCE_FILES,MAX_RESOURCE_BYTES,MAX_RESOURCE_FILE_BYTES} from '../src/services/skill-resources.js';
+import {validateSkillFiles,storedSkillFiles} from '../src/services/skill-package.js';
 import {createRenderPlan} from '../src/config-generation/render.js';
 
 it('preserves template-like syntax inside CLI resources through final render',()=>{
@@ -73,6 +74,148 @@ it('detects obsolete tracked resources and leaves modified files untouched',()=>
 });
 import {readFileSync as requireReadFile} from 'node:fs';
 function requireRead(file:string){return requireReadFile(file,'utf8');}
+
+it('ignores generated caches while preserving Skill source resources', () => {
+ const root = mkdtempSync(path.join(tmpdir(), 'fb-skill-caches-'));
+ try {
+  mkdirSync(path.join(root, 'scripts/__pycache__'), {recursive:true});
+  mkdirSync(path.join(root, '.pytest_cache'), {recursive:true});
+  writeFileSync(path.join(root, 'SKILL.md'), '# Video');
+  writeFileSync(path.join(root, 'scripts/synth.py'), 'print("audio")');
+  writeFileSync(path.join(root, 'scripts/__pycache__/synth.cpython-312.pyc'), Buffer.from([0xff, 0]));
+  writeFileSync(path.join(root, 'scripts/old.pyo'), Buffer.from([0xff, 0]));
+  writeFileSync(path.join(root, '.pytest_cache/SKILL.md'), '# Cached fake Skill');
+  writeFileSync(path.join(root, '.DS_Store'), Buffer.from([0xff, 0]));
+  const rejected:string[] = [];
+  const skills = discoverLocalSkills({roots:[root], onRejected:(_path, reason) => rejected.push(reason)});
+  assert.deepEqual(rejected, []);
+  assert.equal(skills.length, 1);
+  assert.deepEqual(parseSkillResourceManifest(skills[0]!.resourceManifest), [
+   {relativePath:'scripts/synth.py', content:'print("audio")'}
+  ]);
+ } finally {rmSync(root, {recursive:true, force:true});}
+});
+
+it('imports and exports a large documentation Skill without truncating its resources', () => {
+ const root = mkdtempSync(path.join(tmpdir(), 'fb-large-skill-'));
+ try {
+  const dir = path.join(root, 'guidance');
+  mkdirSync(path.join(dir, 'guides'), {recursive:true});
+  writeFileSync(path.join(dir, 'SKILL.md'), '---\nname: guidance\ndescription: Web guidance\n---\n# Guidance');
+  for (let index = 0; index < 209; index++) {
+   writeFileSync(path.join(dir, `guides/guide-${index}.md`), `# Guide ${index}\n${'x'.repeat(10000)}`);
+  }
+  const rejected:string[] = [];
+  const [skill] = discoverLocalSkills({roots:[dir], onRejected:(_path, reason) => rejected.push(reason)});
+  assert.deepEqual(rejected, []);
+  assert.ok(skill);
+  assert.equal(parseSkillResourceManifest(skill.resourceManifest).length, 209);
+  assert.equal(validateSkillFiles(storedSkillFiles(skill)).length, 210);
+  const files = buildProjectConfigFiles({adapter:'codex', templateFiles:[], skills:[{
+   ...skill, skillId:'large', description:skill.description??null, isEnabled:true, selectionState:'inherited_enabled'
+  }]});
+  for (const file of files) {
+   const dest = path.join(root, 'export', file.relativePath);
+   mkdirSync(path.dirname(dest), {recursive:true});
+   writeFileSync(dest, file.content);
+  }
+  const exportedRoot = path.join(root, 'export/.agents/skills');
+  assert.doesNotThrow(() => assertNoObsoleteSkillResources(path.join(root, 'export'), '.agents/skills', files));
+  const [roundtrip] = discoverLocalSkills({roots:[exportedRoot]});
+  assert.ok(roundtrip);
+  assert.deepEqual(storedSkillFiles(roundtrip), storedSkillFiles(skill));
+ } finally {rmSync(root, {recursive:true, force:true});}
+});
+
+it('identifies the offending resource and rejects the complete package', () => {
+ const root = mkdtempSync(path.join(tmpdir(), 'fb-skill-diagnostics-'));
+ try {
+  mkdirSync(path.join(root, 'assets'));
+  writeFileSync(path.join(root, 'SKILL.md'), '# Skill');
+  const file = path.join(root, 'assets/broken.dat');
+  for (const [content, reason] of [
+   [Buffer.from([0xff]), /assets\/broken\.dat.*UTF-8/],
+   [Buffer.from([0]), /assets\/broken\.dat.*binary/],
+   [Buffer.alloc(128 * 1024 + 1, 120), /assets\/broken\.dat.*128 KiB/]
+  ] as const) {
+   writeFileSync(file, content);
+   assert.throws(() => readSkillResourceManifest(path.join(root, 'SKILL.md')), reason);
+   const rejected:string[] = [];
+   assert.deepEqual(discoverLocalSkills({roots:[root], onRejected:(_path, message) => rejected.push(message)}), []);
+   assert.match(rejected[0]!, reason);
+  }
+ } finally {rmSync(root, {recursive:true, force:true});}
+});
+
+it('roundtrips the file-count boundary and long export metadata, then rejects one extra resource', () => {
+ const root = mkdtempSync(path.join(tmpdir(), 'fb-skill-file-limit-'));
+ const exported = mkdtempSync(path.join(tmpdir(), 'fb-skill-export-limit-'));
+ try {
+  const prefix = `guides/${'a'.repeat(160)}/${'b'.repeat(160)}`;
+  mkdirSync(path.join(root, prefix), {recursive:true});
+  writeFileSync(path.join(root, 'SKILL.md'), '# Skill');
+  for (let index = 0; index < MAX_RESOURCE_FILES; index++) {
+   writeFileSync(path.join(root, prefix, `${index}.md`), 'guide');
+  }
+  const [skill] = discoverLocalSkills({roots:[root]});
+  assert.ok(skill);
+  assert.equal(validateSkillFiles(storedSkillFiles(skill)).length, MAX_RESOURCE_FILES + 1);
+  const files = buildProjectConfigFiles({templateFiles:[], skills:[{
+   ...skill, skillId:'max', description:null, isEnabled:true, selectionState:'inherited_enabled'
+  }]});
+  const manifest = files.find(file => file.relativePath.endsWith('.forgebadger-skill.json'))!;
+  assert.ok(Buffer.byteLength(manifest.content) > 64 * 1024);
+  writeFileSync(path.join(root, '.forgebadger-skill.json'), manifest.content);
+  assert.equal(parseSkillResourceManifest(readSkillResourceManifest(path.join(root, 'SKILL.md'))).length, MAX_RESOURCE_FILES);
+  for (const file of files) {
+   const dest = path.join(exported, file.relativePath);
+   mkdirSync(path.dirname(dest), {recursive:true});
+   writeFileSync(dest, file.content);
+  }
+  assert.doesNotThrow(() => assertNoObsoleteSkillResources(exported, '.claude/skills', files));
+  const [roundtrip] = discoverLocalSkills({roots:[path.join(exported, '.claude/skills')]});
+  assert.ok(roundtrip);
+  assert.equal(parseSkillResourceManifest(roundtrip.resourceManifest).length, MAX_RESOURCE_FILES);
+  writeFileSync(path.join(root, 'extra.md'), 'extra');
+  assert.throws(() => readSkillResourceManifest(path.join(root, 'SKILL.md')), /\.md:.*256.*file count limit/);
+  assert.throws(() => validateSkillFiles([...storedSkillFiles(skill), {path:'extra.md', content:'extra'}]));
+ } finally {
+  rmSync(root, {recursive:true, force:true});
+  rmSync(exported, {recursive:true, force:true});
+ }
+});
+
+it('enforces the total package byte boundary including SKILL.md during discovery and validation', () => {
+ const root = mkdtempSync(path.join(tmpdir(), 'fb-skill-byte-limit-'));
+ try {
+  const main = '# Skill';
+  writeFileSync(path.join(root, 'SKILL.md'), main);
+  let remaining = MAX_RESOURCE_BYTES - Buffer.byteLength(main);
+  for (let index = 0; remaining > 0; index++) {
+   const size = Math.min(remaining, MAX_RESOURCE_FILE_BYTES);
+   writeFileSync(path.join(root, `${String(index).padStart(3, '0')}.md`), 'x'.repeat(size));
+   remaining -= size;
+  }
+  const [skill] = discoverLocalSkills({roots:[root]});
+  assert.ok(skill);
+  const files = storedSkillFiles(skill);
+  assert.doesNotThrow(() => validateSkillFiles(files));
+  writeFileSync(path.join(root, 'extra.md'), 'x');
+  assert.throws(() => readSkillResourceManifest(path.join(root, 'SKILL.md')), /extra\.md:.*4 MiB total size limit/);
+  assert.throws(() => validateSkillFiles([...files, {path:'extra.md', content:'x'}]), /4 MiB/);
+ } finally {rmSync(root, {recursive:true, force:true});}
+});
+
+it('still rejects resource symlinks and preserves the source files', () => {
+ const root = mkdtempSync(path.join(tmpdir(), 'fb-skill-link-resource-'));
+ try {
+  writeFileSync(path.join(root, 'SKILL.md'), '# Skill');
+  writeFileSync(path.join(root, 'real.txt'), 'keep');
+  symlinkSync(path.join(root, 'real.txt'), path.join(root, 'linked.txt'));
+  assert.throws(() => readSkillResourceManifest(path.join(root, 'SKILL.md')), /linked\.txt:.*symlinks/);
+  assert.equal(requireRead(path.join(root, 'real.txt')), 'keep');
+ } finally {rmSync(root, {recursive:true, force:true});}
+});
 
 it('roundtrips exported packages and validates export metadata',()=>{
  const root=mkdtempSync(path.join(tmpdir(),'fb-roundtrip-package-'));
