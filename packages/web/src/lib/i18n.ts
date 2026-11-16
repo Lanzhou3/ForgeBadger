@@ -1,6 +1,7 @@
 import { projectTaskTranslations } from "./project-task-i18n";
 import { teamTranslations } from "./teams-i18n";
 import { collaborationTranslations } from "./collaboration-i18n";
+import { hubTranslations } from "./hub-i18n";
 export const supportedLanguages = ["zh-CN", "zh-TW", "en"] as const;
 
 export type Language = (typeof supportedLanguages)[number];
@@ -52,6 +53,7 @@ export const translations = {
   "zh-CN": {
     ...collaborationTranslations["zh-CN"],
     ...teamTranslations["zh-CN"],
+    ...hubTranslations["zh-CN"],
     ...projectTaskTranslations["zh-CN"],
     "dashboard.activationDelivery": "验证并交付首个改动",
     "dashboard.activationDeliveryReady": "你已完成一次经过验证、审核并安全整合的实际交付。",
@@ -1873,6 +1875,7 @@ export const translations = {
   "zh-TW": {
     ...collaborationTranslations["zh-TW"],
     ...teamTranslations["zh-TW"],
+    ...hubTranslations["zh-TW"],
     ...projectTaskTranslations["zh-TW"],
     "dashboard.activationDelivery": "驗證並交付首個改動",
     "dashboard.activationDeliveryReady": "你已完成一次經過驗證、審核並安全整合的實際交付。",
@@ -3694,6 +3697,7 @@ export const translations = {
   en: {
     ...collaborationTranslations["en"],
     ...teamTranslations.en,
+    ...hubTranslations.en,
     ...projectTaskTranslations.en,
     "dashboard.activationDelivery": "Verify and deliver your first change",
     "dashboard.activationDeliveryReady": "You have completed a verified, reviewed and safely integrated delivery.",

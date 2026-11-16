@@ -63,6 +63,7 @@ import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/projects/markdown-renderer";
 import { toast } from "@/lib/toast";
+import { TeamHubLink } from "@/components/hub/TeamHubLink";
 
 // Heavy tab panels are code-split so their dependencies (@xyflow/react for the
 // graph, @dnd-kit for the project manager) load on first use of their tab,
@@ -574,7 +575,8 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
               <ProjectGraphPanel projectId={id} enabled={activeTab === "graph"} />
             </TabsContent>
 
-            <TabsContent value="project-manager" className="mt-4">
+            <TabsContent value="project-manager" className="mt-4 space-y-4">
+              <TeamHubLink projectId={id} enabled={activeTab === "project-manager"} />
               <ProjectManagerPanel
                 projectId={id}
                 authority={taskAuthority}

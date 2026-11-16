@@ -20,6 +20,7 @@ import {
   WorkspaceStatus,
 } from "./WorkspaceShared";
 import { RunPanel } from "./RunPanel";
+import { TaskHubDelivery } from "@/components/hub/TaskHubDelivery";
 interface Props {
   detail: WorkspaceDetail;
   taskId: string;
@@ -144,6 +145,7 @@ export function TaskExecutionPanel({ detail, taskId, actorId }: Props) {
           />
         )}
       </Panel>}
+      <TaskHubDelivery detail={detail} taskId={task.id} {...(actorId ? { actorId } : {})} />
       <Panel title={t("workspace.comments")}>
         {comments.length ? (
           <ul className="space-y-3">
