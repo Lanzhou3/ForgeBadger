@@ -18,6 +18,8 @@ import {
   RuntimeSettingsError,
   type RuntimeSettingsEffective
 } from "../src/services/runtime-settings.js";
+import { adapterIds } from "../src/lib/adapter-ids.js";
+import { PROGRAMMATIC_SUBMIT_ADAPTERS } from "../src/services/programmatic-terminal-submit.js";
 import { goalCheckSandboxCapability } from "../src/services/agent/command-sandbox.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
@@ -115,6 +117,70 @@ describe("runtime settings store", () => {
     assert.throws(() => store.update("tester", { goal_check_sandbox: "on" }), RuntimeSettingsError);
   });
 
+  describe("copilot_team", () => {
+    const member = (over: Record<string, unknown> = {}) => ({
+      id: "claude-dev", name: "Ada", title: "Implementer", description: "Writes code", adapter: "claude",
+      roles: ["writer"], enabled: true, ...over
+    });
+    const team = (members: unknown[] = [member()], maxParallelWriters = 3) => ({ maxParallelWriters, members });
+
+    it("defaults to an empty roster sourced from env", () => {
+      const store = createRuntimeSettingsStore(db, { env });
+      assert.deepEqual(store.effective().copilotTeam, { maxParallelWriters: 3, members: [] });
+      const view = store.views().find((entry) => entry.key === "copilot_team");
+      assert.deepEqual({ value: view?.value, source: view?.source, hot: view?.hot },
+        { value: { maxParallelWriters: 3, members: [] }, source: "env", hot: true });
+    });
+
+    it("persists a full replacement and reports settings provenance", () => {
+      const applied: RuntimeSettingsEffective[] = [];
+      const store = createRuntimeSettingsStore(db, { env, apply: (effective) => { applied.push(effective); } });
+      const views = store.update("tester", { copilot_team: team([member(), member({ id: "rev", roles: ["reviewer", "writer"], adapter: "codex", name: "  Rex  " })], 2) });
+      const view = views.find((entry) => entry.key === "copilot_team");
+      assert.equal(view?.source, "settings");
+      assert.equal(applied.at(-1)?.copilotTeam.maxParallelWriters, 2);
+      assert.equal(applied.at(-1)?.copilotTeam.members[1]?.name, "Rex");
+      assert.equal(createRuntimeSettingsStore(db, { env }).effective().copilotTeam.members.length, 2);
+      store.update("tester", { copilot_team: team([]) });
+      assert.deepEqual(store.effective().copilotTeam.members, []);
+    });
+
+    it("rejects invalid rosters", () => {
+      const store = createRuntimeSettingsStore(db, { env });
+      const bad: unknown[] = [
+        team([member({ id: "Bad_Id" })]),
+        team([member({ id: "-x" })]),
+        team([member(), member()]),
+        team([member({ roles: [] })]),
+        team([member({ roles: ["writer", "writer"] })]),
+        team([member({ roles: ["boss"] })]),
+        team([member({ adapter: "emacs" })]),
+        team([member({ name: "  " })]),
+        team([member({ description: "x".repeat(501) })]),
+        team(Array.from({ length: 13 }, (_, i) => member({ id: `m${i}` }))),
+        team([member()], 0),
+        team([member()], 7),
+        team([member()], 1.5),
+        { ...team(), extra: 1 },
+        team([{ ...member(), extra: 1 }]),
+        JSON.stringify(team())
+      ];
+      for (const value of bad) assert.throws(() => store.update("tester", { copilot_team: value }), RuntimeSettingsError);
+      assert.deepEqual(store.effective().copilotTeam, { maxParallelWriters: 3, members: [] });
+    });
+
+    it("falls back to the default when the stored override is corrupt", () => {
+      db.prepare("INSERT INTO runtime_settings(key,value,updated_at,updated_by) VALUES('copilot_team',?,?,?)")
+        .run(JSON.stringify({ maxParallelWriters: 99, members: [] }), Date.now(), "tester");
+      assert.deepEqual(createRuntimeSettingsStore(db, { env }).effective().copilotTeam, { maxParallelWriters: 3, members: [] });
+    });
+
+    it("is blocked in readonly mode", () => {
+      const store = createRuntimeSettingsStore(db, { env: baseEnv({ FORGEBADGER_RUNTIME_SETTINGS_READONLY: "true" }) });
+      assert.throws(() => store.update("tester", { copilot_team: team() }), /read-only/);
+    });
+  });
+
   it("honours FORGEBADGER_RUNTIME_SETTINGS_READONLY", () => {
     const readonlyEnv = baseEnv({ FORGEBADGER_RUNTIME_SETTINGS_READONLY: "true" });
     const store = createRuntimeSettingsStore(db, { env: readonlyEnv });
@@ -184,6 +250,9 @@ describe("runtime settings routes", () => {
       Authorization: `Bearer ${token}`
     });
     assert.deepEqual(read.body.data.capabilities.goalCheckSandbox, capability);
+    const dispatch = read.body.data.capabilities.programmaticDispatch as Record<string, boolean>;
+    assert.deepEqual(Object.keys(dispatch).sort(), [...adapterIds].sort());
+    for (const id of adapterIds) assert.equal(dispatch[id], (PROGRAMMATIC_SUBMIT_ADAPTERS as readonly string[]).includes(id));
 
     const put = await makeRequest(app, "PUT", "/api/v1/runtime-settings", { goal_check_sandbox: true }, {
       Authorization: `Bearer ${token}`

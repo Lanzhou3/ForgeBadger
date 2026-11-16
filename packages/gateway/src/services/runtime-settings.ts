@@ -10,20 +10,23 @@ import { runtimeSettings } from "../db/schema.js";
 import type { Database } from "../db/types.js";
 import { AuditLogRepository } from "../db/repositories/audit-log-repository.js";
 import { z } from "zod";
+import { copilotTeamSchema, defaultCopilotTeam, type CopilotTeamRoster } from "./agent/team-roster.js";
 
 export type RuntimeSettingKey =
   | "registration"
   | "mcp_enabled"
   | "session_prefix"
   | "pm_auto_dispatch"
-  | "goal_check_sandbox";
+  | "goal_check_sandbox"
+  | "copilot_team";
 
 export const RUNTIME_SETTING_KEYS: readonly RuntimeSettingKey[] = [
   "registration",
   "mcp_enabled",
   "session_prefix",
   "pm_auto_dispatch",
-  "goal_check_sandbox"
+  "goal_check_sandbox",
+  "copilot_team"
 ];
 
 /** Per-key metadata surfaced to the settings page. */
@@ -34,7 +37,8 @@ export const RUNTIME_SETTING_META: Readonly<Record<RuntimeSettingKey, { hot: boo
   mcp_enabled: { hot: false },
   session_prefix: { hot: true },
   pm_auto_dispatch: { hot: true },
-  goal_check_sandbox: { hot: true }
+  goal_check_sandbox: { hot: true },
+  copilot_team: { hot: true }
 };
 
 export interface RuntimeSettingsEffective {
@@ -47,6 +51,8 @@ export interface RuntimeSettingsEffective {
    * there is no environment variable, the default is off.
    */
   goalCheckSandbox: boolean;
+  /** Copilot team roster (CLI members the Copilot may dispatch to). Settings-page only. */
+  copilotTeam: CopilotTeamRoster;
   /** true when FORGEBADGER_RUNTIME_SETTINGS_READONLY forbids API writes. */
   readonly: boolean;
 }
@@ -94,7 +100,8 @@ const patchSchema = z
     mcp_enabled: booleanInput.optional(),
     session_prefix: sessionPrefixSchema.optional(),
     pm_auto_dispatch: booleanInput.optional(),
-    goal_check_sandbox: booleanInput.optional()
+    goal_check_sandbox: booleanInput.optional(),
+    copilot_team: copilotTeamSchema.optional()
   })
   .strict();
 
@@ -105,6 +112,7 @@ export function envToEffective(env: GatewayEnv): RuntimeSettingsEffective {
     sessionPrefix: env.FORGEBADGER_SESSION_PREFIX,
     pmAutoDispatch: env.FORGEBADGER_PROJECT_MANAGER_AUTO_DISPATCH_ENABLED,
     goalCheckSandbox: false,
+    copilotTeam: defaultCopilotTeam(),
     readonly: env.FORGEBADGER_RUNTIME_SETTINGS_READONLY
   };
 }
@@ -164,6 +172,10 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
       const value = z.boolean().safeParse(overrides.get("goal_check_sandbox"));
       if (value.success) merged.goalCheckSandbox = value.data;
     }
+    if (overrides.has("copilot_team")) {
+      const value = copilotTeamSchema.safeParse(overrides.get("copilot_team"));
+      if (value.success) merged.copilotTeam = value.data as CopilotTeamRoster;
+    }
     return merged;
   }
 
@@ -179,6 +191,8 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
         return current.pmAutoDispatch;
       case "goal_check_sandbox":
         return current.goalCheckSandbox;
+      case "copilot_team":
+        return current.copilotTeam;
     }
   }
 
@@ -190,7 +204,8 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
       mcp_enabled: current.mcpEnabled,
       session_prefix: current.sessionPrefix,
       pm_auto_dispatch: current.pmAutoDispatch,
-      goal_check_sandbox: current.goalCheckSandbox
+      goal_check_sandbox: current.goalCheckSandbox,
+      copilot_team: current.copilotTeam
     };
     return RUNTIME_SETTING_KEYS.map((key) => ({
       key,
@@ -224,7 +239,8 @@ export function createRuntimeSettingsStore(db: Database, options: RuntimeSetting
       mcp_enabled: data.mcp_enabled === undefined ? undefined : toBoolean(data.mcp_enabled),
       session_prefix: data.session_prefix,
       pm_auto_dispatch: data.pm_auto_dispatch === undefined ? undefined : toBoolean(data.pm_auto_dispatch),
-      goal_check_sandbox: data.goal_check_sandbox === undefined ? undefined : toBoolean(data.goal_check_sandbox)
+      goal_check_sandbox: data.goal_check_sandbox === undefined ? undefined : toBoolean(data.goal_check_sandbox),
+      copilot_team: data.copilot_team
     };
 
     const now = Date.now();

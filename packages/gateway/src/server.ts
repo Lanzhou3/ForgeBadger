@@ -26,6 +26,7 @@ import {
   type RuntimeSettingsEffective,
   type RuntimeSettingsStore
 } from "./services/runtime-settings.js";
+import { setCopilotTeamRoster } from "./services/agent/team-roster.js";
 import { goalCheckSandboxStartupWarning, setGoalCheckSandboxMode } from "./services/agent/command-sandbox.js";
 import type { GatewayEnv } from "./config/env.js";
 
@@ -164,6 +165,7 @@ export function createGatewayApp(options: GatewayAppOptions): GatewayApp {
         apply: (effective: RuntimeSettingsEffective) => {
           options.sessionManager.setSessionPrefix(effective.sessionPrefix);
           setGoalCheckSandboxMode(effective.goalCheckSandbox ? "on" : "off");
+          setCopilotTeamRoster(effective.copilotTeam);
           const sandboxWarning = goalCheckSandboxStartupWarning();
           if (sandboxWarning) console.warn(`[gateway] ${sandboxWarning}`);
           // The supervisor only advances already-dispatched work items from

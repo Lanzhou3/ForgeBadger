@@ -18,6 +18,7 @@ import { SettingsCardHeader } from "@/components/settings/ui";
 import { CopilotMemoryPanel } from "./copilot-memory-panel";
 import { CopilotAutonomyPanel } from "./copilot-autonomy-panel";
 import { CopilotGoalSandboxPanel } from "./copilot-goal-sandbox-panel";
+import { CopilotTeamPanel } from "./copilot-team-panel";
 import { copilotPreferencesQueryKey, modelProvidersQueryKey } from "./copilot-runtime-panel";
 import { getCopilotPreferences } from "@/lib/copilot-api";
 import { CopilotSettingsShell } from "./copilot-settings-shell";
@@ -132,6 +133,7 @@ export function CopilotSettingsPage() {
         </Card>
         <CopilotAutonomyPanel />
         <CopilotGoalSandboxPanel />
+        <CopilotTeamPanel />
         <div className="grid gap-3 sm:grid-cols-2">
           {entries.map((entry) => {
             const Icon = entry.icon;

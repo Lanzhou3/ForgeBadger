@@ -3707,7 +3707,26 @@ export type RuntimeSettingKey =
   | "mcp_enabled"
   | "session_prefix"
   | "pm_auto_dispatch"
-  | "goal_check_sandbox";
+  | "goal_check_sandbox"
+  | "copilot_team";
+
+export type CopilotTeamAdapter = "claude" | "opencode" | "codex" | "kimi" | "pi" | "mcode" | "grok";
+export type CopilotTeamRole = "writer" | "reviewer";
+
+export interface CopilotTeamMember {
+  id: string;
+  name: string;
+  title: string;
+  description: string;
+  adapter: CopilotTeamAdapter;
+  roles: CopilotTeamRole[];
+  enabled: boolean;
+}
+
+export interface CopilotTeamRoster {
+  maxParallelWriters: number;
+  members: CopilotTeamMember[];
+}
 
 export interface RuntimeSettingView {
   key: RuntimeSettingKey;
@@ -3724,6 +3743,8 @@ export interface RuntimeSettingsState {
   /** Host support for switches the Gateway cannot honor everywhere. */
   capabilities?: {
     goalCheckSandbox?: { available: boolean; reason: string | null };
+    /** false → that CLI can only be operated manually, not a dispatch target. */
+    programmaticDispatch?: Partial<Record<CopilotTeamAdapter, boolean>>;
   };
 }
 
@@ -3741,7 +3762,7 @@ export async function getRuntimeSettings(): Promise<RuntimeSettingsState> {
 }
 
 export async function updateRuntimeSettings(
-  patch: Partial<Record<RuntimeSettingKey, unknown>>
+  patch: Partial<Record<RuntimeSettingKey, unknown>> & { copilot_team?: CopilotTeamRoster }
 ): Promise<RuntimeSettingsState> {
   return fetchJson<RuntimeSettingsState>("/api/v1/runtime-settings", {
     method: "PUT",

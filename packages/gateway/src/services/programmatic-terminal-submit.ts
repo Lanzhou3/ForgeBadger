@@ -352,3 +352,9 @@ export async function confirmProgrammaticTaskConsumed(
     await sleep(options.intervalMs);
   }
 }
+
+/**
+ * Adapters whose composer frame is parsed, so a programmatic submit can be
+ * delivered and confirmed. Every other adapter is manual-only.
+ */
+export const PROGRAMMATIC_SUBMIT_ADAPTERS: readonly AdapterId[] = ["claude", "codex", "opencode", "kimi", "pi"];

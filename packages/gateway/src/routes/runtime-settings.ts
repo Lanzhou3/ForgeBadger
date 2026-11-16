@@ -5,11 +5,16 @@ import { UserRepository } from "../db/repositories/user-repository.js";
 import type { Database } from "../db/types.js";
 import type { RuntimeSettingsStore } from "../services/runtime-settings.js";
 import { RuntimeSettingsError } from "../services/runtime-settings.js";
+import { adapterIds } from "../lib/adapter-ids.js";
+import { PROGRAMMATIC_SUBMIT_ADAPTERS } from "../services/programmatic-terminal-submit.js";
 import { goalCheckSandboxCapability } from "../services/agent/command-sandbox.js";
 
 /** Host facts the settings page needs to render switches it cannot honor. */
 function hostCapabilities() {
-  return { goalCheckSandbox: goalCheckSandboxCapability() };
+  const programmaticDispatch = Object.fromEntries(
+    adapterIds.map((id) => [id, (PROGRAMMATIC_SUBMIT_ADAPTERS as readonly string[]).includes(id)])
+  );
+  return { goalCheckSandbox: goalCheckSandboxCapability(), programmaticDispatch };
 }
 
 function enablesGoalCheckSandbox(body: Record<string, unknown>): boolean {
