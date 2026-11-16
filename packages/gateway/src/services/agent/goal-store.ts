@@ -212,10 +212,13 @@ export class CopilotGoalStore {
       .run(baseCommit, Date.now(), this.userId, goalId);
   }
 
-  /** Links a task to the CLI session that received its instructions (goal_dispatch_task); the CLI turn starts `running`. */
+  /**
+   * Links a task to the CLI session that received its instructions (goal_dispatch_task); the CLI turn starts `running`.
+   * The verify record is cleared: new CLI work needs a fresh verification (a task already `passes` keeps its status).
+   */
   setTaskDispatched(goalId: string, taskId: string, sessionId: string): GoalTaskRow {
     const now = Date.now();
-    const changed = this.db.prepare(`UPDATE copilot_goal_tasks SET dispatched_session_id=?, dispatch_status='running', dispatch_updated_at=?, updated_at=?
+    const changed = this.db.prepare(`UPDATE copilot_goal_tasks SET dispatched_session_id=?, dispatch_status='running', dispatch_updated_at=?, updated_at=?, verified_at=NULL, verify_exit_code=NULL
         WHERE user_id=? AND id=? AND goal_id=?`)
       .run(sessionId, now, now, this.userId, taskId, goalId).changes;
     if (!changed) throw new AgentError('COPILOT_NOT_FOUND', 'Task not found');

@@ -230,6 +230,16 @@ function sweepStaleScratch(base: string): void {
   }
 }
 
+/**
+ * <state>/goal-worktrees/<goal>, <state>/goal-worktrees/tasks-<goal>/<task> or
+ * <state>/goal-sandboxes/<goal>: everything else under <state> is Gateway data.
+ */
+export function stateRootOf(workspace: string): string {
+  const container = path.dirname(workspace);
+  const base = path.basename(container).startsWith('tasks-') ? path.dirname(container) : container;
+  return path.dirname(base);
+}
+
 export interface CheckSandboxPlan {
   file: string;
   args: string[];
@@ -259,8 +269,7 @@ export function prepareCheckSandbox(input: CheckSandboxInput): CheckSandboxPlan 
   if (!probe.available) throw new AgentError('COPILOT_GOAL_SANDBOX_UNAVAILABLE', `${probe.reason}. ${UNAVAILABLE_HELP}`);
   const workspace = fs.realpathSync(input.workspace);
   const home = fs.realpathSync(os.homedir());
-  // <state>/goal-worktrees/<goal> or <state>/goal-sandboxes/<goal>: everything else under <state> is Gateway data.
-  const stateRoot = path.dirname(path.dirname(workspace));
+  const stateRoot = stateRootOf(workspace);
   const configuredState = process.env.FORGEBADGER_STATE_DIR ? realpathOrNull(process.env.FORGEBADGER_STATE_DIR) : null;
   const projectRoot = input.projectRoot ? realpathOrNull(input.projectRoot) : null;
   const denyRead = [stateRoot, ...(configuredState ? [configuredState] : []), ...(projectRoot ? [projectRoot] : [])]

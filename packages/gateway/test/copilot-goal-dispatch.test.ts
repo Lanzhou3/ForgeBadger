@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { after, describe, it } from "node:test";
+import { after, beforeEach, describe, it } from "node:test";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -23,6 +23,7 @@ import type { AgentLlmClient, AgentLlmStreamEvent } from "../src/services/agent/
 import { createAgentToolRegistry } from "../src/services/agent/tool-registry.js";
 import { ForgeBadgerEventBus, type ForgeBadgerEvent } from "../src/services/event-bus.js";
 import type { AgentToolContext } from "../src/services/agent/tool-registry.js";
+import { defaultCopilotTeam, setCopilotTeamRoster, type TeamMember } from "../src/services/agent/team-roster.js";
 import { InMemorySessionManager } from "../src/services/session-manager.js";
 import { DISPATCH_REPORT_TIMEOUT_MS, evaluateGoalContinuation, settleGoalDispatchFromHook } from "../src/services/agent/goal-driver.js";
 import { goalSandboxDir } from "../src/services/agent/goal-sandbox.js";
@@ -40,13 +41,15 @@ function git(cwd: string, ...args: string[]): void {
 }
 
 /** Claude-shaped fake terminal: composer ready, staged text echoed, Enter consumes it. */
+const stagedInputs: string[] = [];
+
 function claudeSessionManager(): InMemorySessionManager {
   const ready = "some output\n────────────\n❯ \n────────────\n";
   let pane = ready;
   return new InMemorySessionManager({
     async createSession() {}, async killSession() {}, async listSessions() { return []; }, async hasSession() { return true; },
     async capturePane() { return pane; }, async inspectPane() { return { content: pane, dead: false }; },
-    async stageProgrammaticInput(_name: string, data: string) { pane = `────────────\n❯ ${data}\n────────────\n`; },
+    async stageProgrammaticInput(_name: string, data: string) { stagedInputs.push(data); pane = `────────────\n❯ ${data}\n────────────\n`; },
     async pressEnter() { pane = ready; }
   } as never, undefined, undefined, { sleep: async () => {} });
 }
@@ -104,26 +107,88 @@ function dispatchFixture(options: { git?: boolean } = {}): DispatchFixture {
   };
 }
 
+function writer(adapter: TeamMember["adapter"], over: Partial<TeamMember> = {}): TeamMember {
+  return { id: `${adapter}-dev`, name: `${adapter} dev`, title: "Implementer", description: "Writes code", adapter, roles: ["writer"], enabled: true, ...over };
+}
+function roster(...members: TeamMember[]): void {
+  setCopilotTeamRoster({ maxParallelWriters: 3, members });
+}
+
 describe("goal_dispatch_task", () => {
   const dbs: Database.Database[] = [];
   function tracked(fixture: DispatchFixture) { dbs.push(fixture.db); return fixture; }
 
+  beforeEach(() => { setCopilotTeamRoster(defaultCopilotTeam()); stagedInputs.length = 0; });
+
   after(() => {
-    delete process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS;
+    setCopilotTeamRoster(defaultCopilotTeam());
     for (const db of dbs) if (db.open) db.close();
     fs.rmSync(stateRoot, { recursive: true, force: true });
   });
 
-  it("refuses adapters outside FORGEBADGER_CLI_AUTONOMY_ADAPTERS", async () => {
-    process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS = "kimi";
+  const denied = (error: unknown) => error instanceof AgentError && error.code === "COPILOT_ADAPTER_AUTONOMY_DENIED";
+  const invalid = (error: unknown) => error instanceof AgentError && error.code === "COPILOT_GOAL_INPUT_INVALID";
+
+  it("refuses dispatch with an empty roster and ignores the retired env variable", async () => {
+    process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS = "claude";
+    try {
+      const fixture = tracked(dispatchFixture());
+      await assert.rejects(
+        fixture.tool.execute({ taskId: fixture.taskId, aiTool: "claude", instructions: "do it" }, fixture.context), denied);
+    } finally { delete process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS; }
+  });
+
+  it("refuses disabled, reviewer-only and other-adapter members", async () => {
+    const fixture = tracked(dispatchFixture());
+    const attempt = () => fixture.tool.execute({ taskId: fixture.taskId, aiTool: "claude", instructions: "do it" }, fixture.context);
+    roster(writer("claude", { enabled: false }));
+    await assert.rejects(attempt(), denied);
+    roster(writer("claude", { roles: ["reviewer"] }));
+    await assert.rejects(attempt(), denied);
+    roster(writer("kimi"));
+    await assert.rejects(attempt(), denied);
+  });
+
+  it("refuses adapters that cannot be driven programmatically even with a member", async () => {
+    roster(writer("grok"));
     const fixture = tracked(dispatchFixture());
     await assert.rejects(
-      fixture.tool.execute({ taskId: fixture.taskId, aiTool: "claude", instructions: "do it" }, fixture.context),
-      (error: unknown) => error instanceof AgentError && error.code === "COPILOT_ADAPTER_AUTONOMY_DENIED");
+      fixture.tool.execute({ taskId: fixture.taskId, aiTool: "grok", instructions: "do it" }, fixture.context),
+      (error: unknown) => denied(error) && /programmatically/.test((error as Error).message));
+  });
+
+  it("dispatches as a team member: session name, role preamble, journal and result", async () => {
+    roster(writer("claude", { id: "ada", name: "Ada", title: "Backend lead", description: "Owns the parser." }));
+    const fixture = tracked(dispatchFixture());
+    const result = await fixture.tool.execute(
+      { taskId: fixture.taskId, memberId: "ada", instructions: "implement the parser" }, fixture.context) as
+      { sessionId: string; adapter: string; member?: { id: string; name: string } };
+    assert.deepEqual(result.member, { id: "ada", name: "Ada" });
+    assert.equal(result.adapter, "claude");
+    const row = fixture.db.prepare("SELECT name FROM sessions WHERE id=?").get(result.sessionId) as { name: string };
+    assert.ok(row.name.startsWith("Ada: "));
+    const submitted = stagedInputs.join("");
+    assert.ok(submitted.includes("You are Ada, Backend lead. Owns the parser."), submitted);
+    assert.ok(fixture.store.recentJournal(fixture.goalId).some(entry => entry.note.includes("member Ada [ada]")));
+    // aiTool alone resolves the first writer member for that CLI (the shared tree has one writer: settle the first).
+    fixture.store.settleDispatch(fixture.taskId, "completed");
+    const viaTool = await fixture.tool.execute(
+      { taskId: fixture.verifyTaskId, aiTool: "claude", instructions: "x" }, fixture.context) as { member?: { id: string } };
+    assert.equal(viaTool.member?.id, "ada");
+  });
+
+  it("validates memberId and aiTool consistency", async () => {
+    roster(writer("claude", { id: "ada" }), writer("kimi", { id: "rev", roles: ["reviewer"] }));
+    const fixture = tracked(dispatchFixture());
+    const run = (input: Record<string, unknown>) => fixture.tool.execute({ taskId: fixture.taskId, instructions: "x", ...input }, fixture.context);
+    await assert.rejects(run({ memberId: "nobody" }), invalid);
+    await assert.rejects(run({ memberId: "rev" }), invalid);
+    await assert.rejects(run({ memberId: "ada", aiTool: "kimi" }), invalid);
+    await assert.rejects(run({}));
   });
 
   it("creates a session, dispatches with delivery confirmation and records the task link", async () => {
-    process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS = "claude,kimi";
+    roster(writer("claude"), writer("kimi"));
     const fixture = tracked(dispatchFixture());
     const result = await fixture.tool.execute(
       { taskId: fixture.taskId, aiTool: "claude", instructions: "implement the parser" }, fixture.context) as
@@ -145,7 +210,7 @@ describe("goal_dispatch_task", () => {
   });
 
   it("runs the CLI inside the goal git worktree, with its lifecycle hook installed there", async () => {
-    process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS = "claude";
+    roster(writer("claude"));
     const fixture = tracked(dispatchFixture({ git: true }));
     const result = await fixture.tool.execute(
       { taskId: fixture.taskId, aiTool: "claude", instructions: "implement the parser" }, fixture.context) as { sessionId: string; workspace: string };
@@ -159,7 +224,7 @@ describe("goal_dispatch_task", () => {
   });
 
   it("reuses the task's running goal session and never an owner-interactive one", async () => {
-    process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS = "claude";
+    roster(writer("claude"));
     const fixture = tracked(dispatchFixture());
     // An owner-interactive running session already exists for the project.
     new SessionRepository(fixture.db, fixture.userId).create({
@@ -170,6 +235,8 @@ describe("goal_dispatch_task", () => {
       { taskId: fixture.taskId, aiTool: "claude", instructions: "first" }, fixture.context) as { sessionId: string; sessionCreated: boolean };
     const second = await fixture.tool.execute(
       { taskId: fixture.taskId, aiTool: "claude", instructions: "second" }, fixture.context) as { sessionId: string; sessionCreated: boolean };
+    // A shared tree has one writer: the other task waits until the first turn settles.
+    fixture.store.settleDispatch(fixture.taskId, "completed");
     const other = await fixture.tool.execute(
       { taskId: fixture.verifyTaskId, aiTool: "claude", instructions: "other task" }, fixture.context) as { sessionId: string; sessionCreated: boolean };
     assert.equal(first.sessionCreated, true);
@@ -182,7 +249,7 @@ describe("goal_dispatch_task", () => {
   });
 
   it("settles the dispatch from the CLI turn-end hook and holds the goal while the CLI works", async () => {
-    process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS = "claude";
+    roster(writer("claude"));
     const fixture = tracked(dispatchFixture());
     fixture.db.prepare("UPDATE copilot_runs SET status='completed', completed_at=? WHERE user_id=? AND goal_id=?").run(Date.now(), fixture.userId, fixture.goalId);
     const { sessionId } = await fixture.tool.execute(
@@ -210,7 +277,7 @@ describe("goal_dispatch_task", () => {
   });
 
   it("releases the goal when a submit fails and when a running CLI never reports", async () => {
-    process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS = "claude";
+    roster(writer("claude"));
     const fixture = tracked(dispatchFixture());
     fixture.db.prepare("UPDATE copilot_runs SET status='completed', completed_at=? WHERE user_id=? AND goal_id=?").run(Date.now(), fixture.userId, fixture.goalId);
     const submit = fixture.sessionManager.submitProgrammaticTask.bind(fixture.sessionManager);
@@ -230,7 +297,7 @@ describe("goal_dispatch_task", () => {
   });
 
   it("stops waiting when the dispatched session ends without a report", async () => {
-    process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS = "claude";
+    roster(writer("claude"));
     const fixture = tracked(dispatchFixture());
     fixture.db.prepare("UPDATE copilot_runs SET status='completed', completed_at=? WHERE user_id=? AND goal_id=?").run(Date.now(), fixture.userId, fixture.goalId);
     const { sessionId } = await fixture.tool.execute(
@@ -243,8 +310,108 @@ describe("goal_dispatch_task", () => {
     assert.ok(fixture.store.recentJournal(fixture.goalId).some(entry => entry.note.includes("ended without reporting")));
   });
 
+  describe("parallel task worktrees", () => {
+    const limit = (error: unknown) => error instanceof AgentError && error.code === "COPILOT_GOAL_PARALLEL_LIMIT";
+    const unavailable = (error: unknown) => error instanceof AgentError && error.code === "COPILOT_GOAL_TASK_WORKSPACE_UNAVAILABLE";
+
+    function verifiedTasks(fixture: DispatchFixture, count: number): string[] {
+      return fixture.store.addTasks(fixture.goalId, Array.from({ length: count }, (_, index) => ({ description: `Parallel ${index}`, verifyCommand: `test -f p${index}.txt` })))
+        .map(task => task.id);
+    }
+    const dispatch = (fixture: DispatchFixture, input: Record<string, unknown>) =>
+      fixture.tool.execute({ aiTool: "claude", instructions: "work", ...input }, fixture.context) as Promise<{ sessionId: string; workspace: string; sessionCreated: boolean }>;
+    const workingDir = (fixture: DispatchFixture, sessionId: string) =>
+      (fixture.db.prepare("SELECT working_dir FROM sessions WHERE id=?").get(sessionId) as { working_dir: string }).working_dir;
+    const projectHead = (fixture: DispatchFixture) => execFileSync("git", ["rev-parse", "HEAD"], { cwd: fixture.projectDir, encoding: "utf8" }).trim();
+    const projectStatus = (fixture: DispatchFixture) => execFileSync("git", ["status", "--porcelain=v1"], { cwd: fixture.projectDir, encoding: "utf8" });
+
+    it("runs the CLI in the task worktree with a parallel-aware workspace note", async () => {
+      roster(writer("claude"));
+      const fixture = tracked(dispatchFixture({ git: true }));
+      const headBefore = projectHead(fixture);
+      const result = await dispatch(fixture, { taskId: fixture.verifyTaskId, parallel: true });
+      assert.equal(result.workspace, "task-worktree");
+      const dir = workingDir(fixture, result.sessionId);
+      assert.equal(dir, path.join(stateRoot, "goal-worktrees", `tasks-${fixture.goalId}`, fixture.verifyTaskId));
+      assert.notEqual(dir, fixture.workspaceDir());
+      const submitted = stagedInputs.join("");
+      assert.ok(submitted.includes(`forgebadger/goal-task-${fixture.verifyTaskId}`), submitted);
+      assert.ok(submitted.includes("Other team members work in parallel in their own worktrees"), submitted);
+      assert.ok(fixture.store.recentJournal(fixture.goalId).some(entry => entry.note.includes("task worktree on forgebadger/goal-task-")));
+      assert.equal(projectHead(fixture), headBefore);
+      assert.equal(projectStatus(fixture).includes("README"), false);
+    });
+
+    it("refuses parallel without a verify_command and on copy-sandbox goals", async () => {
+      roster(writer("claude"));
+      const fixture = tracked(dispatchFixture({ git: true }));
+      await assert.rejects(dispatch(fixture, { taskId: fixture.taskId, parallel: true }), (error: unknown) => invalid(error) && /verify_command/.test((error as Error).message));
+      const copy = tracked(dispatchFixture());
+      await assert.rejects(dispatch(copy, { taskId: copy.verifyTaskId, parallel: true }), unavailable);
+    });
+
+    it("enforces maxParallelWriters for all dispatches of a goal", async () => {
+      setCopilotTeamRoster({ maxParallelWriters: 2, members: [writer("claude")] });
+      const fixture = tracked(dispatchFixture({ git: true }));
+      const [a, b, c] = verifiedTasks(fixture, 3) as [string, string, string];
+      await dispatch(fixture, { taskId: a, parallel: true });
+      await dispatch(fixture, { taskId: b, parallel: true });
+      await assert.rejects(dispatch(fixture, { taskId: c, parallel: true }), limit);
+      await assert.rejects(dispatch(fixture, { taskId: fixture.taskId }), limit, "shared dispatches count too");
+      // Re-dispatching a running task does not count against itself.
+      assert.equal((await dispatch(fixture, { taskId: a })).workspace, "task-worktree");
+      fixture.store.settleDispatch(b, "completed");
+      assert.equal((await dispatch(fixture, { taskId: c, parallel: true })).workspace, "task-worktree");
+    });
+
+    it("allows exactly one shared-tree writer, while parallel dispatch stays possible", async () => {
+      setCopilotTeamRoster({ maxParallelWriters: 3, members: [writer("claude")] });
+      const fixture = tracked(dispatchFixture({ git: true }));
+      const [a, b] = verifiedTasks(fixture, 2) as [string, string];
+      const shared = await dispatch(fixture, { taskId: a });
+      assert.equal(shared.workspace, "worktree");
+      assert.equal(workingDir(fixture, shared.sessionId), fixture.workspaceDir());
+      await assert.rejects(dispatch(fixture, { taskId: b }),
+        (error: unknown) => invalid(error) && /parallel: true/.test((error as Error).message) && (error as Error).message.includes(a));
+      // A parallel fork would checkpoint the shared-tree CLI's half-done edits onto the goal branch: refused while it runs.
+      await assert.rejects(dispatch(fixture, { taskId: b, parallel: true }), (error: unknown) => invalid(error) && /half-done/.test((error as Error).message));
+      // Re-dispatching the shared writer itself stays allowed; moving it into a worktree mid-turn does not.
+      assert.equal((await dispatch(fixture, { taskId: a })).sessionCreated, false);
+      await assert.rejects(dispatch(fixture, { taskId: a, parallel: true }), (error: unknown) => invalid(error) && /shared goal tree/.test((error as Error).message));
+      fixture.store.settleDispatch(a, "completed");
+      assert.equal((await dispatch(fixture, { taskId: b, parallel: true })).workspace, "task-worktree");
+    });
+
+    it("always dispatches a task that owns a worktree there, and reuses its session", async () => {
+      roster(writer("claude"));
+      const fixture = tracked(dispatchFixture({ git: true }));
+      const first = await dispatch(fixture, { taskId: fixture.verifyTaskId, parallel: true });
+      fixture.store.settleDispatch(fixture.verifyTaskId, "completed");
+      const second = await dispatch(fixture, { taskId: fixture.verifyTaskId });
+      assert.equal(second.workspace, "task-worktree");
+      assert.equal(second.sessionId, first.sessionId);
+      assert.equal(second.sessionCreated, false);
+    });
+
+    it("settle report lists the task tree's files, not the goal tree's", async () => {
+      roster(writer("claude"));
+      const fixture = tracked(dispatchFixture({ git: true }));
+      const result = await dispatch(fixture, { taskId: fixture.verifyTaskId, parallel: true });
+      const dir = workingDir(fixture, result.sessionId);
+      fs.writeFileSync(path.join(dir, "task-only.ts"), "export {};\n");
+      fs.writeFileSync(path.join(fixture.workspaceDir(), "goal-only.ts"), "export {};\n");
+      settleGoalDispatchFromHook(fixture.db, {
+        type: "session_notification", userId: fixture.userId, sessionId: result.sessionId, hookEventName: "Stop",
+        notificationType: "task_completed", message: "done", adapter: "claude"
+      } as unknown as ForgeBadgerEvent);
+      const note = fixture.store.recentJournal(fixture.goalId).map(entry => entry.note).find(text => text.includes("reported task_completed"))!;
+      assert.ok(note.includes("task worktree changed files (1): task-only.ts"), note);
+      assert.ok(!note.includes("goal-only.ts"), note);
+    });
+  });
+
   it("dispatch does not satisfy the verify gate", async () => {
-    process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS = "claude";
+    roster(writer("claude"));
     const fixture = tracked(dispatchFixture());
     await fixture.tool.execute(
       { taskId: fixture.verifyTaskId, aiTool: "claude", instructions: "run the checks" }, fixture.context);
@@ -253,7 +420,7 @@ describe("goal_dispatch_task", () => {
   });
 
   it("routes through the approval gate: no grant waits, pm_dispatch grant auto-executes", async () => {
-    process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS = "claude";
+    roster(writer("claude"));
     // Without grant: the run parks at awaiting_approval before executing.
     const without = tracked(dispatchFixture());
     without.db.prepare("UPDATE copilot_runs SET status='completed', completed_at=? WHERE user_id=? AND goal_id=?")

@@ -2,10 +2,11 @@ import { z } from 'zod';
 import type { Database } from '../../../db/types.js';
 import { ProjectRepository } from '../../../db/repositories/project-repository.js';
 import { AgentError } from '../types.js';
-import { CopilotGoalStore } from '../goal-store.js';
+import { workStore } from '../work-store.js';
 import { editSandboxFile, readSandboxFile, runSandboxCommand, sandboxCommandEnv, writeSandboxFile } from '../goal-sandbox.js';
 import { SANDBOX_FAILURE_HINT, goalCheckSandboxMode, prepareCheckSandbox, type GoalCheckIsolation } from '../command-sandbox.js';
 import { ensureGoalWorkspace } from '../goal-workspace.js';
+import { ensureTaskWorkspace, existingTaskWorkspace, taskWorkspaceIdentity, taskWorkspaceState } from '../goal-task-workspace.js';
 import { goalIdForRun } from './goals.js';
 import type { AgentTool, AgentToolContext } from '../tool-registry.js';
 
@@ -22,6 +23,8 @@ const MAX_OUTPUT_CHARS = 2000;
 
 const fileReadInput = z.object({
   path: z.string().trim().min(1).max(1024),
+  /** Read from this task's own worktree (parallel dispatch) instead of the goal tree. */
+  taskId: z.string().trim().min(1).max(128).optional(),
   offset: z.number().int().min(0).optional(),
   limit: z.number().int().min(1).max(5000).optional()
 }).strict();
@@ -45,23 +48,42 @@ const runChecksInput = z.object({
   unsandboxed: z.boolean().optional()
 }).strict();
 
-async function goalSandboxFor(context: AgentToolContext): Promise<{ goalId: string; sandboxDir: string; projectRoot: string }> {
+interface GoalSandboxTarget {
+  goalId: string; sandboxDir: string; projectRoot: string;
+  /** Which tree `sandboxDir` is. */
+  tree: 'goal' | 'task-worktree';
+}
+
+/**
+ * The goal workspace, or - with a taskId whose task owns a worktree - that
+ * task's worktree. `requireTask` refuses instead of falling back to the goal tree.
+ */
+async function goalSandboxFor(context: AgentToolContext, taskId?: string, requireTask = false): Promise<GoalSandboxTarget> {
   const db = context.db as Database;
   const goalId = goalIdForRun(context);
-  const goal = new CopilotGoalStore(db, context.userId).getGoal(goalId);
+  const goal = workStore(db, context.userId, goalId).getGoal(goalId);
   if (!goal?.project_id)
     throw new AgentError('COPILOT_GOAL_PROJECT_REQUIRED', 'This goal has no project; sandbox file tools are unavailable');
   const project = new ProjectRepository(db, context.userId).getById(goal.project_id);
   if (!project) throw new AgentError('COPILOT_PROJECT_NOT_FOUND', 'Goal project no longer exists');
   const workspace = await ensureGoalWorkspace(db, context.userId, goal, project);
-  return { goalId, sandboxDir: workspace.path, projectRoot: project.path };
+  if (taskId) {
+    const fresh = workStore(db, context.userId, goalId).getGoal(goalId) ?? goal;
+    // A task whose directory was deleted but whose branch lives on is restored, never silently run against the goal tree.
+    if (await taskWorkspaceState(db, fresh, taskId) === 'lost') await ensureTaskWorkspace(db, context.userId, fresh, taskId);
+    const task = existingTaskWorkspace(db, fresh, taskId);
+    if (task) return { goalId, sandboxDir: task.path, projectRoot: project.path, tree: 'task-worktree' };
+    if (requireTask) throw new AgentError('COPILOT_GOAL_INPUT_INVALID', 'This task has no task worktree; omit taskId to read the goal tree');
+  }
+  return { goalId, sandboxDir: workspace.path, projectRoot: project.path, tree: 'goal' };
 }
 
-function verifySummary(command: string, result: { stdout: string; stderr: string; durationMs: number }, isolation?: GoalCheckIsolation): string {
+function verifySummary(command: string, result: { stdout: string; stderr: string; durationMs: number }, isolation?: GoalCheckIsolation, treeIdentity?: string): string {
   const tail = (result.stdout || result.stderr).trim().slice(-MAX_OUTPUT_CHARS);
   // The isolation marker exists only when isolation is enabled, so records written with it off keep their shape.
   const marker = isolation ? `, ${isolation === 'seatbelt' ? 'sandboxed' : 'unsandboxed'}` : '';
-  return `verify: ${command} (exit 0, ${result.durationMs}ms${marker})\n${tail}`;
+  // The task tree fingerprint at verification time; goal_integrate_task refuses a tree that changed since.
+  return `verify: ${command} (exit 0, ${result.durationMs}ms${marker})\n${tail}${treeIdentity ? `\nverified-tree: ${treeIdentity}` : ''}`;
 }
 
 /**
@@ -90,13 +112,13 @@ export function createGoalSandboxTools(): AgentTool[] {
   return [
     {
       name: 'goal_file_read',
-      description: 'Read a text file inside the goal sandbox by sandbox-relative path. 读取沙箱内文件。',
+      description: 'Read a text file inside the goal sandbox by sandbox-relative path. With taskId, reads from the own worktree of that task (tasks dispatched with parallel: true) so you can inspect the work of a member. 读取沙箱内文件。',
       risk: 'read',
       requiresApproval: false,
       inputSchema: fileReadInput,
       async execute(input, context) {
-        const { sandboxDir } = await goalSandboxFor(context);
-        const { path, offset, limit } = fileReadInput.parse(input);
+        const { path, offset, limit, taskId } = fileReadInput.parse(input);
+        const { sandboxDir } = await goalSandboxFor(context, taskId, true);
         return readSandboxFile(sandboxDir, path, offset ?? 0, limit);
       }
     },
@@ -126,18 +148,18 @@ export function createGoalSandboxTools(): AgentTool[] {
     },
     {
       name: 'goal_run_checks',
-      description: 'Run a shell command with the sandbox as working directory; returns exit code, stdout/stderr and timeout status. With taskId and exit code 0, the task verify record is refreshed so the task can be marked passes. Needs owner approval unless the goal holds the sandbox_checks grant. When the result carries isolation (the host has OS isolation enabled) the command ran without network, with Git metadata read-only and no access outside the workspace; unsandboxed: true runs it on the host instead and always needs owner approval of that call, grant or not. 在沙箱内执行校验命令；需审批或 sandbox_checks 授权；退出码 0 时刷新对应任务的 verify 记录；unsandboxed 需逐次审批。',
+      description: 'Run a shell command with the sandbox as working directory; returns exit code, stdout/stderr, timeout status and which tree it ran in (workspace). With taskId the command runs in the own worktree of that task when it has one (verify where the work is), otherwise in the goal tree; with exit code 0, the task verify record is refreshed so the task can be marked passes. Needs owner approval unless the goal holds the sandbox_checks grant. When the result carries isolation (the host has OS isolation enabled) the command ran without network, with Git metadata read-only and no access outside the workspace; unsandboxed: true runs it on the host instead and always needs owner approval of that call, grant or not. 在沙箱内执行校验命令；需审批或 sandbox_checks 授权；退出码 0 时刷新对应任务的 verify 记录；unsandboxed 需逐次审批。',
       // Arbitrary shell (OS isolation is opt-in and macOS-only): operate-class, never auto-run as a read.
       risk: 'operate',
       requiresApproval: true,
       inputSchema: runChecksInput,
       async execute(input, context) {
-        const { goalId, sandboxDir, projectRoot } = await goalSandboxFor(context);
         const { command, timeoutMs, taskId, unsandboxed } = runChecksInput.parse(input);
+        const { goalId, sandboxDir, projectRoot, tree } = await goalSandboxFor(context, taskId);
         const { result, isolation } = await runCheck(context, { sandboxDir, projectRoot }, { command, timeoutMs, unsandboxed });
         let verified: unknown;
         if (taskId && result.exitCode === 0) {
-          const store = new CopilotGoalStore(context.db as Database, context.userId);
+          const store = workStore(context.db as Database, context.userId, goalId);
           const task = store.listTasks(goalId).find(entry => entry.id === taskId);
           if (!task) throw new AgentError('COPILOT_NOT_FOUND', 'Task not found');
           // The verify gate only accepts the task's declared verify_command:
@@ -147,11 +169,14 @@ export function createGoalSandboxTools(): AgentTool[] {
           if (task.verify_command.trim() !== command.trim())
             throw new AgentError('COPILOT_GOAL_VERIFY_MISMATCH',
               `Command does not match the task verify_command (${task.verify_command}); refusing to record verification`);
-          const refreshed = store.markTaskVerified(goalId, taskId, 0, verifySummary(command, result, isolation));
+          const goal = store.getGoal(goalId);
+          const identity = tree === 'task-worktree' && goal ? await taskWorkspaceIdentity(context.db as Database, goal, taskId).catch(() => undefined) : undefined;
+          const refreshed = store.markTaskVerified(goalId, taskId, 0, verifySummary(command, result, isolation, identity));
           verified = { taskId: refreshed.id, verifiedAt: refreshed.verified_at };
         }
         return {
           ...result,
+          workspace: tree,
           ...(isolation ? { isolation } : {}),
           ...(isolation === 'seatbelt' && result.exitCode !== 0 ? { sandboxHint: SANDBOX_FAILURE_HINT } : {}),
           ...(verified ? { verified } : {})

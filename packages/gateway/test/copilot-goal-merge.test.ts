@@ -14,6 +14,9 @@ import { InMemorySessionManager } from "../src/services/session-manager.js";
 import { InMemoryApiKeyStore } from "../src/secrets/api-key-store.js";
 import { CopilotGoalStore } from "../src/services/agent/goal-store.js";
 import { ensureGoalSandbox, goalSandboxDir } from "../src/services/agent/goal-sandbox.js";
+import { ensureGoalWorkspace } from "../src/services/agent/goal-workspace.js";
+import { ensureTaskWorkspace, integrateTaskWorkspace } from "../src/services/agent/goal-task-workspace.js";
+import { execFileSync } from "node:child_process";
 
 const jwtSecret = "0123456789abcdef0123456789abcdef";
 const masterKey = "abcdef0123456789abcdef0123456789";
@@ -100,8 +103,9 @@ describe("goal diff and merge routes", () => {
     const { token, goalId } = await setupProjectAndGoal("goal-diff-empty@test.com");
     const res = await fetch(`${baseUrl}/api/v1/copilot/goals/${goalId}/diff`, { headers: authed(token) });
     assert.equal(res.status, 200);
-    const body = (await res.json()) as Envelope<{ files: DiffFile[] }>;
+    const body = (await res.json()) as Envelope<{ files: DiffFile[]; unintegratedTasks: unknown[] }>;
     assert.deepEqual(body.data!.files, []);
+    assert.deepEqual(body.data!.unintegratedTasks, [], "always present");
     await fetch(`${baseUrl}/api/v1/copilot/goals/${goalId}/cancel`, { method: "POST", headers: authed(token), body: JSON.stringify({}) });
   });
 
@@ -116,6 +120,38 @@ describe("goal diff and merge routes", () => {
     const strangerMerge = await fetch(`${baseUrl}/api/v1/copilot/goals/${setup.goalId}/merge`, { method: "POST", headers: authed(strangerToken), body: JSON.stringify({}) });
     assert.equal(strangerMerge.status, 404);
     await fetch(`${baseUrl}/api/v1/copilot/goals/${setup.goalId}/cancel`, { method: "POST", headers: authed(setup.token), body: JSON.stringify({}) });
+  });
+
+  it("lists unintegrated task worktrees in the diff and refuses to merge them away", async () => {
+    const { token, goalId, projectDir, userId } = await setupProjectAndGoal("goal-merge-tasks@test.com");
+    const gitIn = (...args: string[]) => execFileSync("git", ["-c", "user.name=o", "-c", "user.email=o@example.com", ...args], { cwd: projectDir, encoding: "utf8" }).trim();
+    gitIn("init", "-q", "-b", "main"); gitIn("add", "-A"); gitIn("commit", "-q", "-m", "initial");
+    const store = new CopilotGoalStore(db, userId);
+    let goal = store.getGoal(goalId)!;
+    await ensureGoalWorkspace(db, userId, goal, { id: goal.project_id!, path: fs.realpathSync(projectDir) });
+    const [task, cancelled] = store.addTasks(goalId, ["Member work", "Dropped"]);
+    goal = store.getGoal(goalId)!;
+    const ws = await ensureTaskWorkspace(db, userId, goal, task!.id);
+    await ensureTaskWorkspace(db, userId, goal, cancelled!.id);
+    fs.writeFileSync(path.join(ws.path, "member.txt"), "work\n");
+    db.prepare("UPDATE copilot_goal_tasks SET status='cancelled' WHERE id=?").run(cancelled!.id);
+    const diff = (await (await fetch(`${baseUrl}/api/v1/copilot/goals/${goalId}/diff`, { headers: authed(token) })).json()) as Envelope<{ unintegratedTasks: Array<{ taskId: string; description: string }> }>;
+    assert.deepEqual(diff.data!.unintegratedTasks, [{ taskId: task!.id, description: "Member work" }]);
+    db.prepare("UPDATE copilot_runs SET status='completed', completed_at=? WHERE user_id=? AND goal_id=? AND status IN ('pending','running')").run(Date.now(), userId, goalId);
+    store.setStatus(goalId, "completed");
+    const headBefore = gitIn("rev-parse", "HEAD");
+    const refused = await fetch(`${baseUrl}/api/v1/copilot/goals/${goalId}/merge`, { method: "POST", headers: authed(token), body: JSON.stringify({}) });
+    assert.equal(refused.status, 409);
+    const body = (await refused.json()) as { details: { code: string }; message: string };
+    assert.equal(body.details.code, "COPILOT_GOAL_STATE");
+    assert.ok(body.message.includes(task!.id));
+    assert.equal(gitIn("rev-parse", "HEAD"), headBefore);
+    await integrateTaskWorkspace(db, userId, store.getGoal(goalId)!, task!.id);
+    const after = (await (await fetch(`${baseUrl}/api/v1/copilot/goals/${goalId}/diff`, { headers: authed(token) })).json()) as Envelope<{ unintegratedTasks: unknown[] }>;
+    assert.deepEqual(after.data!.unintegratedTasks, []);
+    const merged = await fetch(`${baseUrl}/api/v1/copilot/goals/${goalId}/merge`, { method: "POST", headers: authed(token), body: JSON.stringify({}) });
+    assert.equal(merged.status, 200);
+    assert.equal(fs.readFileSync(path.join(projectDir, "member.txt"), "utf8"), "work\n");
   });
 
   it("diff shows added/modified/deleted (binary placeholder included) and merge returns merged/deleted/kept", async () => {

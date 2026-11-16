@@ -24,6 +24,7 @@ import { ForgeBadgerEventBus } from "../src/services/event-bus.js";
 import { computeToolSurface } from "../src/services/agent/tool-surface.js";
 import { createAgentToolRegistry } from "../src/services/agent/tool-registry.js";
 import { createPlatformTools } from "../src/services/agent/tools/index.js";
+import { defaultCopilotTeam, setCopilotTeamRoster } from "../src/services/agent/team-roster.js";
 
 const stateRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "fb-goal-board-state-")));
 process.env.FORGEBADGER_STATE_DIR = stateRoot;
@@ -207,14 +208,15 @@ describe("goal tasks on the project board", () => {
   });
 
   it("refuses to dispatch a task whose board blockers are not done", async () => {
-    process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS = "claude";
+    setCopilotTeamRoster({ maxParallelWriters: 3, members: [{ id: "claude-writer", name: "Claude", title: "", description: "",
+      adapter: "claude", roles: ["writer"], enabled: true }] });
     try {
       const f = tracked(fixture());
       const [schema, api] = await addTasks(f, ["Schema", "API"]);
       f.board.addWorkItemDependency(f.projectId, api!.work_item_id!, schema!.work_item_id!);
       await assert.rejects(f.tool("goal_dispatch_task").execute({ taskId: api!.id, aiTool: "claude", instructions: "build the API" }, f.context),
         (error: unknown) => rejectsWith("COPILOT_GOAL_TASK_BLOCKED")(error) && /Schema/.test((error as Error).message));
-    } finally { delete process.env.FORGEBADGER_CLI_AUTONOMY_ADAPTERS; }
+    } finally { setCopilotTeamRoster(defaultCopilotTeam()); }
   });
 
   it("offers board planning tools to goal runs, not to plain chat", () => {

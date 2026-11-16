@@ -195,7 +195,7 @@ export async function mergeGoalWorkspace(db: Database, userId: string, goal: Goa
     const integration = await integrateGoalWorktree({
       sourcePath: fs.realpathSync(project.path), path: workspace.path, branch, targetBranch, excludePaths: GOAL_MANAGED_PATHS
     });
-    new CopilotGoalStore(db, userId).setWorkspaceBase(goal.id, integration.commit);
+    workStore(db, userId, goal.id).setWorkspaceBase(goal.id, integration.commit);
     return {
       merged: integration.changes.filter(change => change.status !== 'deleted').map(change => change.path).sort(),
       deleted: integration.changes.filter(change => change.status === 'deleted').map(change => change.path).sort(),
