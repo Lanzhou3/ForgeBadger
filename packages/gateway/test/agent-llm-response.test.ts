@@ -277,6 +277,40 @@ it("openai tolerates a bare empty-delta frame after stop", async (t) => {
   assert.equal(result.message, "okay");
 });
 
+it("openai ignores empty placeholder arrays after stop", async (t) => {
+  const { run } = setup(t, "openai-compatible", sse(
+    frame(choice({ content: "okay" }, "stop")) + frame(choice({ tool_calls: [], reasoning_details: [] })) + frame("[DONE]"),
+  ));
+  const result = await run();
+  assert.equal(result.message, "okay");
+});
+
+it("openai tolerates a null delta chunk", async (t) => {
+  const { run } = setup(t, "openai-compatible", sse(
+    frame(choice({ content: "okay" })) + frame(choice(null)) + frame(choice({}, "stop")) + frame("[DONE]"),
+  ));
+  const result = await run();
+  assert.equal(result.message, "okay");
+});
+
+it("openai accepts a [DONE] frame that ends the body without a trailing newline", async (t) => {
+  const { run } = setup(t, "openai-compatible", sse(frame(choice({ content: "okay" }, "stop")) + "data: [DONE]"));
+  const result = await run();
+  assert.equal(result.message, "okay");
+});
+
+it("openai accepts a terminal frame that ends the body before its blank line", async (t) => {
+  const { run } = setup(t, "openai-compatible", sse(frame(choice({ content: "okay" }, "stop")) + "data: [DONE]\n"));
+  const result = await run();
+  assert.equal(result.message, "okay");
+});
+
+it("openai still rejects a stream cut inside the terminal frame", async (t) => {
+  const { run, events } = setup(t, "openai-compatible", sse(frame(choice({ content: "okay" })) + 'data: {"choi'));
+  await assert.rejects(run(), { code: "AGENT_LLM_INVALID_RESPONSE" });
+  assert.equal(events.some(e => e.type === "tool_call" || e.type === "done"), false);
+});
+
 const rejectedPostTerminationFrames: [string, string][] = [
   ["reasoning_content after stop", frame(choice({ reasoning_content: "more" }))],
   ["tool_calls after stop", frame(choice({ tool_calls: [{ index: 0, ...openaiTool() }] }))],

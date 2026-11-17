@@ -6,7 +6,7 @@ import type { AgentLlmStreamEvent } from '../src/services/agent/llm-client.js';
 function frame(toolCalls: unknown[], finishReason: string | null = null): string {
   return `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: toolCalls }, finish_reason: finishReason }] })}\n\n`;
 }
-const delta = (name: string, args: string, options: { index?: number; id?: string } = {}) => ({ index: options.index ?? 0, ...(options.id ? { id: options.id } : {}), function: { name, arguments: args } });
+const delta = (name: string, args: string, options: { index?: number; id?: string; type?: unknown } = {}) => ({ index: options.index ?? 0, ...(options.id ? { id: options.id } : {}), ...('type' in options ? { type: options.type } : {}), function: { name, arguments: args } });
 const done = 'data: [DONE]\n\n';
 function stream(body: string | ReadableStream<Uint8Array>) { return new Response(body, { headers: { 'content-type': 'text/event-stream' } }); }
 function run(body: string | ReadableStream<Uint8Array>, options: { allowFinishReasonEof?: boolean; toolNames?: readonly string[]; reasoningDetailsMode?: 'snapshot' } = {}) {
@@ -135,6 +135,32 @@ describe('OpenAI streaming tool-name deltas', () => {
       + frame([delta('foo', '}')], 'tool_calls') + done, { toolNames: [] });
     await promise;
     assert.equal(emittedTools(events)[0]?.name, 'foofoo');
+  });
+
+  it('tolerates a null tool type on later fragments of the same call', async () => {
+    const { events, promise } = run(frame([{ ...delta('get_session', '{', { id: 'null_type' }), type: 'function' }])
+      + frame([{ ...delta('get_session', '}'), type: null }], 'tool_calls') + done);
+    await promise;
+    assert.deepEqual(emittedTools(events), [{ id: 'null_type', name: 'get_session', arguments: '{}' }]);
+  });
+
+  it('tolerates a null tool type in a non-streamed completion', async () => {
+    const result = await readOpenAiCompletion(Response.json({ choices: [{ message: {
+      tool_calls: [{ id: 'json_null_type', type: null, function: { name: 'get_session', arguments: '{}' } }]
+    }, finish_reason: 'tool_calls' }] }), () => undefined, new AbortController().signal, { toolNames: ['get_session'] });
+    assert.deepEqual(result.assistant?.toolCalls, [{ id: 'json_null_type', name: 'get_session', arguments: '{}' }]);
+  });
+
+  it('tolerates a relabelled tool type when the function payload is present', async () => {
+    const { events, promise } = run(frame([{ index: 0, id: 'relabelled_type', type: 'function_call', function: { name: 'get_session', arguments: '{}' } }], 'tool_calls') + done);
+    await promise;
+    assert.deepEqual(emittedTools(events), [{ id: 'relabelled_type', name: 'get_session', arguments: '{}' }]);
+  });
+
+  it('still rejects a non-function tool payload', async () => {
+    const { events, promise } = run(frame([{ index: 0, id: 'custom_type', type: 'custom', custom: { name: 'get_session', input: '{}' } }], 'tool_calls') + done);
+    await assert.rejects(promise, /unsupported tool type/);
+    assertNoTools(events);
   });
 
 });

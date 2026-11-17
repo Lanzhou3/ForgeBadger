@@ -184,5 +184,15 @@ export async function* readSse(response: Response, signal: AbortSignal): AsyncGe
       else if (line.startsWith("event:")) event = line.slice(6).trim();
     }
   }
-  if (data.length || pending.trim()) invalidResponse("incomplete SSE frame");
+  // A body may end without a trailing blank line, or without a final newline at all.
+  // Flush the pending line so a complete-but-unterminated final frame (notably
+  // `data: [DONE]`) is still dispatched: genuinely truncated payloads then fail
+  // strict frame validation (malformed JSON / missing terminal marker) instead of
+  // being misreported as an incomplete frame.
+  if (pending) {
+    const line = pending.replace(/\r$/u, "");
+    if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /u, ""));
+    else if (line.startsWith("event:")) event = line.slice(6).trim();
+  }
+  if (data.length) yield { event, data: data.join("\n") };
 }

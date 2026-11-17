@@ -1,8 +1,16 @@
 import { checkedTool, invalidResponse, isSse, MAX_TOOL_ARGUMENT_BYTES, MAX_TOOL_CALLS, optionalText, parseJson, publishCompletion, readJsonResponse, readSse, record, usage, validateCompletion, type LlmCompletion, type LlmEmit, type LlmResult, type LlmToolCall } from "./llm-response.js";
 
+function toolTypeIsUnsupported(type: unknown, fn: unknown): boolean {
+  // Relay labels are descriptive: `null`, or a relabelled later fragment (`function_call`).
+  // Only skip the label when this fragment carries the `function` payload we read;
+  // a non-function payload is still rejected.
+  if (type === undefined || type === null || type === "function") return false;
+  return fn === undefined || fn === null;
+}
+
 function toolFromJson(value: unknown): LlmToolCall {
   const tool = record(value);
-  if (tool.type !== undefined && tool.type !== "function") invalidResponse("unsupported tool type");
+  if (toolTypeIsUnsupported(tool.type, tool.function)) invalidResponse("unsupported tool type");
   const fn = record(tool.function);
   return checkedTool({ id: optionalText(tool.id), name: optionalText(fn.name), arguments: optionalText(fn.arguments) });
 }
@@ -62,13 +70,13 @@ function appendTools(value: unknown, tools: Map<number, ToolAssembly>): void {
     if (!Number.isSafeInteger(delta.index) || (delta.index as number) < 0 || (delta.index as number) >= MAX_TOOL_CALLS) invalidResponse("invalid tool index");
     const index = delta.index as number;
     const tool = tools.get(index) ?? { id: "", name: "", arguments: "", compatibleName: "" };
-    if (delta.type !== undefined && delta.type !== "function") invalidResponse("unsupported tool type");
+    if (toolTypeIsUnsupported(delta.type, delta.function)) invalidResponse("unsupported tool type");
     if (delta.id !== undefined) {
       const id = optionalText(delta.id);
       if (tool.id && tool.id !== id) invalidResponse("conflicting tool identity");
       tool.id = id;
     }
-    const fn = delta.function === undefined ? {} : record(delta.function);
+    const fn = delta.function === undefined || delta.function === null ? {} : record(delta.function);
     const name = optionalText(fn.name);
     // Keep both interpretations until the complete name can be compared with
     // declared tools. Equal fragments alone cannot prove a provider name repeat.
@@ -86,9 +94,16 @@ function appendTools(value: unknown, tools: Map<number, ToolAssembly>): void {
 function choiceHasSubstance(choice: Record<string, unknown>, finishReason: string): boolean {
   const delta = choice.delta === undefined || choice.delta === null ? {} : record(choice.delta);
   if (deltaHasText(delta.content) || deltaHasText(delta.reasoning_content)) return true;
-  if (delta.reasoning_details !== undefined && delta.reasoning_details !== null) return true;
-  if (delta.tool_calls !== undefined && delta.tool_calls !== null) return true;
+  if (deltaHasItems(delta.reasoning_details)) return true;
+  if (deltaHasItems(delta.tool_calls)) return true;
   return choice.finish_reason !== null && choice.finish_reason !== undefined && choice.finish_reason !== finishReason;
+}
+
+/** Empty placeholder arrays (`tool_calls: []`, `reasoning_details: []`) are framing noise,
+ * not content. A non-array value is still substance so the parser rejects it normally. */
+function deltaHasItems(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  return Array.isArray(value) ? value.length > 0 : true;
 }
 
 function deltaHasText(value: unknown): boolean {
@@ -107,7 +122,8 @@ function applyChoice(value: unknown, completion: LlmCompletion, tools: Map<numbe
     if (!choiceHasSubstance(choice, completion.finishReason)) return;
     invalidResponse("choice after termination");
   }
-  const delta = record(choice.delta);
+  // Some relays send `delta: null` for empty keep-alive/termination chunks.
+  const delta = choice.delta === undefined || choice.delta === null ? {} : record(choice.delta);
   if (delta.role !== undefined && delta.role !== "assistant") invalidResponse("invalid message role");
   const text = optionalText(delta.content);
   const thinking = optionalText(delta.reasoning_content);
