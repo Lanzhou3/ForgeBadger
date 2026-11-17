@@ -60,4 +60,16 @@ describe("PageTitle", () => {
     renderTitle(client);
     expect(document.title).toBe("Workspace Alpha · Projects · ForgeBadger");
   });
+
+  it("uses cached fleet titles and covers skills/install", () => {
+    location.pathname = "/fleet/fleet-1";
+    const client = new QueryClient();
+    client.setQueryData(["fleet", "detail", "fleet-1"], { fleet: { title: "Alpha Fleet" } });
+    const view = renderTitle(client);
+    expect(document.title).toBe("Alpha Fleet · 舰队 · ForgeBadger");
+
+    location.pathname = "/skills/install";
+    view.rerender(<QueryClientProvider client={client}><LanguageProvider><PageTitle /></LanguageProvider></QueryClientProvider>);
+    expect(document.title).toBe("发现 Skills · ForgeBadger");
+  });
 });

@@ -86,7 +86,33 @@ describe("Sidebar mobile trigger", () => {
   it("exposes stable hooks for session focus-mode chrome hiding", () => {
     renderSidebar();
 
-    expect(document.querySelector("[data-app-sidebar]")).toBeTruthy();
+    const sidebar = document.querySelector("[data-app-sidebar]");
+    expect(sidebar).toBeTruthy();
+    expect(sidebar?.className).toContain("backdrop-blur-xl");
     expect(document.querySelector("[data-app-sidebar-trigger]")).toBeTruthy();
+  });
+
+  it("keeps accessible link labels and header expand button when collapsed", () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(
+      <LanguageProvider>
+        <Sidebar collapsed={false} onToggleCollapse={onToggle} />
+      </LanguageProvider>
+    );
+
+    const collapseBtn = screen.getByRole("button", { name: "收起侧边栏" });
+    expect(collapseBtn.className).not.toContain("-right-3");
+    fireEvent.click(collapseBtn);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <LanguageProvider>
+        <Sidebar collapsed onToggleCollapse={onToggle} />
+      </LanguageProvider>
+    );
+
+    expect(screen.getByRole("button", { name: "展开侧边栏" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "控制台" }).getAttribute("aria-label")).toBe("控制台");
+    expect(screen.getByRole("link", { name: "设置" }).getAttribute("aria-label")).toBe("设置");
   });
 });

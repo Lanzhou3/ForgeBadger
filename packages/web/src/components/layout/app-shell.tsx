@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { CommandPalette } from "@/components/command-palette";
 import { CopilotRobotHost } from "@/components/copilot/copilot-robot-host";
 import { SessionBookmark } from "@/components/session-bookmark";
+import { useLanguage } from "@/hooks/use-language";
 import {
   globalShortcutContextFromEvent,
   isCommandPaletteShortcut,
@@ -15,11 +16,34 @@ import {
 import { appShellContainerClassName, appShellMainClassName } from "@/lib/app-shell-layout";
 import { Sidebar } from "./sidebar";
 
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "forgebadger.sidebar-collapsed";
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const { t } = useLanguage();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const isTerminalRoute = /^\/sessions\/[^/]+/u.test(pathname ?? "");
+
+  useEffect(() => {
+    try {
+      setSidebarCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1");
+    } catch {
+      // Ignore storage access failures in restricted environments.
+    }
+  }, []);
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        // Ignore storage access failures.
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -30,7 +54,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       if (isSidebarToggleShortcut(event)) {
         event.preventDefault();
-        setSidebarCollapsed((current) => !current);
+        toggleSidebar();
         return;
       }
       if (isCommandPaletteShortcut(event)) {
@@ -49,11 +73,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:text-foreground focus:ring-2 focus:ring-ring"
       >
-        Skip to content
+        {t("nav.skipToContent")}
       </a>
       <Sidebar
         collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed((current) => !current)}
+        onToggleCollapse={toggleSidebar}
       />
       <main
         id="main-content"
@@ -66,7 +90,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         open={commandPaletteOpen}
         onOpenChange={setCommandPaletteOpen}
         sidebarCollapsed={sidebarCollapsed}
-        onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+        onToggleSidebar={toggleSidebar}
       />
       <CopilotRobotHost />
       <SessionBookmark />

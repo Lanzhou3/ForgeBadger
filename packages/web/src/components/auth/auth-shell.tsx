@@ -110,7 +110,7 @@ export function AuthShell({
       />
       <section
         data-auth-panel
-        className="relative z-10 w-full max-w-[420px] rounded-lg border border-border bg-card/85 p-6 text-card-foreground shadow-2xl shadow-black/40 backdrop-blur-md"
+        className="relative z-10 w-full max-w-[420px] rounded-lg border border-border bg-card/85 p-6 text-card-foreground shadow-overlay backdrop-blur-md"
       >
         <div className="mb-6 flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">

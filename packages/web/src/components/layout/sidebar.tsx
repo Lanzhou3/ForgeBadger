@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   LayoutDashboard,
   Bot,
@@ -18,10 +18,11 @@ import {
   Menu,
   LogOut,
   UsersRound,
-  ChevronsLeft,
-  ChevronsRight,
+  PanelLeftClose,
+  PanelLeftOpen,
   type LucideIcon,
 } from "lucide-react";
+import { Tooltip } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -94,7 +95,7 @@ function UnreadPreviewPopover({ children }: { children: ReactNode }) {
         side="right"
         align="start"
         sideOffset={12}
-        className="w-72 p-0"
+        className="w-72 border-border/70 bg-popover/85 p-0 shadow-overlay backdrop-blur-xl backdrop-saturate-150"
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
         onOpenAutoFocus={(event) => event.preventDefault()}
@@ -168,14 +169,13 @@ function NavLinkItem({
       href={item.href}
       onClick={onNavigate}
       aria-label={collapsed ? t(item.labelKey) : undefined}
-      title={collapsed ? t(item.labelKey) : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group relative flex h-8 items-center gap-2.5 rounded-md text-[13px] font-medium transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "group relative flex h-8 items-center gap-2.5 rounded-md text-[13px] font-medium transition-[background-color,color,box-shadow] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring",
         collapsed ? "justify-center px-2" : "px-2.5",
         active
-          ? "bg-muted text-foreground"
-          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          ? "bg-card/85 text-foreground shadow-[0_1px_2px_hsl(var(--shadow-color)/0.08),inset_0_1px_0_hsl(var(--foreground)/0.04)] ring-1 ring-border/70"
+          : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
       )}
     >
       {active && (
@@ -184,7 +184,7 @@ function NavLinkItem({
       <item.icon
         strokeWidth={1.75}
         className={cn(
-          "size-4 shrink-0 transition-colors duration-150",
+          "size-4 shrink-0 transition-transform duration-150 group-hover:scale-105",
           styles[item.iconColor]
         )}
       />
@@ -194,7 +194,7 @@ function NavLinkItem({
       {showBadge && (
         <span
           className={cn(
-            "flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-brand-accent px-1 text-[10px] font-semibold text-brand-accent-foreground",
+            "flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-brand-accent px-1 text-[10px] font-semibold text-brand-accent-foreground shadow-xs",
             collapsed && "absolute right-0.5 top-0.5 size-2 min-w-2 p-0 text-[0px]"
           )}
         >
@@ -204,10 +204,31 @@ function NavLinkItem({
     </Link>
   );
 
+  const wrappedLink = collapsed ? (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>{link}</Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content
+          side="right"
+          sideOffset={10}
+          className="z-50 flex items-center gap-2 rounded-md border border-border/70 bg-popover/90 px-2.5 py-1.5 text-xs font-medium text-popover-foreground shadow-raised backdrop-blur-xl backdrop-saturate-150"
+        >
+          <span>{t(item.labelKey)}</span>
+          {showBadge ? (
+            <span className="rounded-full bg-brand-accent px-1.5 py-0.5 text-[10px] font-semibold leading-none text-brand-accent-foreground">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          ) : null}
+          <Tooltip.Arrow className="fill-popover/90" />
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  ) : link;
+
   if (item.href !== "/notifications" || collapsed || !unreadPreview) {
-    return link;
+    return wrappedLink;
   }
-  return <UnreadPreviewPopover>{link}</UnreadPreviewPopover>;
+  return <UnreadPreviewPopover>{wrappedLink}</UnreadPreviewPopover>;
 }
 
 function NavLinks({
@@ -227,32 +248,34 @@ function NavLinks({
   const groups = groupNavItems(visibleItems);
 
   return (
-    <nav className={cn(styles.navigation, "flex-1 overflow-y-auto px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}>
-      {groups.map((group, groupIndex) => (
-        <div key={group.id} className={cn(groupIndex > 0 && "mt-3")}>
-          {collapsed ? (
-            groupIndex > 0 && <div className="mx-2 my-2 h-px bg-border/60" aria-hidden="true" />
-          ) : (
-            <div className="px-2.5 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground select-none">
-              {t(group.labelKey)}
+    <Tooltip.Provider delayDuration={150}>
+      <nav className={cn(styles.navigation, "relative z-10 flex-1 overflow-y-auto px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}>
+        {groups.map((group, groupIndex) => (
+          <div key={group.id} className={cn(groupIndex > 0 && "mt-3.5")}>
+            {collapsed ? (
+              groupIndex > 0 && <div className="mx-2 my-2 h-px bg-border/60" aria-hidden="true" />
+            ) : (
+              <div className="px-2.5 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground select-none">
+                {t(group.labelKey)}
+              </div>
+            )}
+            <div className="flex flex-col gap-0.5">
+              {group.items.map((item) => (
+                <NavLinkItem
+                  key={item.href}
+                  item={item}
+                  active={pathname === item.href || pathname.startsWith(`${item.href}/`)}
+                  collapsed={collapsed}
+                  unreadCount={unreadCount}
+                  unreadPreview={unreadPreview}
+                  onNavigate={onNavigate}
+                />
+              ))}
             </div>
-          )}
-          <div className="flex flex-col gap-0.5">
-            {group.items.map((item) => (
-              <NavLinkItem
-                key={item.href}
-                item={item}
-                active={pathname === item.href || pathname.startsWith(`${item.href}/`)}
-                collapsed={collapsed}
-                unreadCount={unreadCount}
-                unreadPreview={unreadPreview}
-                onNavigate={onNavigate}
-              />
-            ))}
           </div>
-        </div>
-      ))}
-    </nav>
+        ))}
+      </nav>
+    </Tooltip.Provider>
   );
 }
 
@@ -284,19 +307,78 @@ export function Sidebar({
   const { user, logout } = useAuth();
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
+  const [shortcutHint, setShortcutHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    const isApple = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
+    setShortcutHint(isApple ? "⌘B" : "Ctrl+B");
+  }, []);
 
   const initials = user?.email?.slice(0, 2).toUpperCase() ?? "??";
 
-  const BrandHeader = (
-    <div className="flex items-center gap-2.5 px-3 pb-3 select-none">
-      <BrandMark />
+  const collapseLabel = collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar");
+
+  const CollapseButton = onToggleCollapse ? (
+    <Tooltip.Provider delayDuration={180}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label={collapseLabel}
+            className={cn(
+              "inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground transition-[background-color,border-color,color,transform] duration-150 outline-none active:scale-95 focus-visible:ring-2 focus-visible:ring-ring",
+              collapsed
+                ? "size-8 border border-border/60 bg-card/60 shadow-card hover:border-border hover:bg-card/90 hover:text-foreground"
+                : "size-7 hover:bg-foreground/[0.06] hover:text-foreground"
+            )}
+          >
+            {collapsed ? (
+              <PanelLeftOpen strokeWidth={1.75} className="size-4" />
+            ) : (
+              <PanelLeftClose strokeWidth={1.75} className="size-4" />
+            )}
+          </button>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content
+            side={collapsed ? "right" : "bottom"}
+            sideOffset={collapsed ? 10 : 6}
+            className="z-50 flex items-center gap-2 rounded-md border border-border/70 bg-popover/90 px-2.5 py-1.5 text-xs font-medium text-popover-foreground shadow-raised backdrop-blur-xl backdrop-saturate-150"
+          >
+            <span>{collapseLabel}</span>
+            {shortcutHint ? (
+              <kbd className="rounded border border-border/70 bg-muted/70 px-1 py-0.5 font-mono text-[10px] leading-none text-muted-foreground">
+                {shortcutHint}
+              </kbd>
+            ) : null}
+            <Tooltip.Arrow className="fill-popover/90" />
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  ) : null;
+
+  const MobileBrandHeader = (
+    <div className="relative z-10 flex items-center gap-2.5 px-3 pb-3 select-none">
+      <BrandMark className="shadow-card ring-1 ring-border/50" />
       <div className="min-w-0 text-[15px] font-semibold tracking-tight">ForgeBadger</div>
     </div>
   );
 
+  const DesktopBrandHeader = (
+    <div className="relative z-10 flex items-center justify-between gap-2 px-3 pb-3 select-none">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <BrandMark className="shadow-card ring-1 ring-border/50" />
+        <div className="min-w-0 truncate text-[15px] font-semibold tracking-tight">ForgeBadger</div>
+      </div>
+      {CollapseButton}
+    </div>
+  );
+
   const UserSection = (
-    <div className="mt-auto border-t border-border px-2 py-2.5">
-      <div className="flex items-center gap-2.5 rounded-md px-1.5 py-1">
+    <div className="relative z-10 mt-auto border-t border-border/60 px-2 pt-2.5">
+      <div className="flex items-center gap-2.5 rounded-lg border border-border/50 bg-card/55 px-2 py-1.5 backdrop-blur-sm">
         <Avatar size="sm" className="size-6">
           <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
         </Avatar>
@@ -317,17 +399,12 @@ export function Sidebar({
     </div>
   );
 
-  const CollapseHandle = onToggleCollapse ? (
-    <button
-      type="button"
-      onClick={onToggleCollapse}
-      aria-label={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
-      title={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
-      className="absolute -right-3 top-1/2 z-20 flex size-6 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-lg transition-opacity duration-150 hover:text-foreground focus-visible:opacity-100 group-hover/sidebar:opacity-100"
-    >
-      {collapsed ? <ChevronsRight className="size-3.5" /> : <ChevronsLeft className="size-3.5" />}
-    </button>
-  ) : null;
+  const SidebarBackdropGlow = (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div className="absolute -left-16 -top-16 size-48 rounded-full bg-brand/10 blur-3xl dark:bg-brand/14" />
+      <div className="absolute -bottom-20 -right-14 size-44 rounded-full bg-hue-iris/8 blur-3xl dark:bg-hue-iris/12" />
+    </div>
+  );
 
   return (
     <>
@@ -339,15 +416,19 @@ export function Sidebar({
               variant="outline"
               size="icon"
               aria-label={t("nav.openNavigation")}
-              className="bg-card shadow-md"
+              className="border-border/70 bg-card/85 shadow-md backdrop-blur-xl backdrop-saturate-150"
             >
               <Menu className="size-5" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="w-[208px] p-0">
-            <div className="flex h-full flex-col py-3">
+          <SheetContent
+            side="left"
+            className="w-[216px] overflow-hidden border-r border-border/70 bg-sidebar/85 p-0 backdrop-blur-xl backdrop-saturate-150"
+          >
+            <div className="relative flex h-full flex-col py-3">
+              {SidebarBackdropGlow}
               <SheetTitle className="sr-only">{t("nav.sheetTitle")}</SheetTitle>
-              {BrandHeader}
+              {MobileBrandHeader}
               <NavLinks onNavigate={() => setOpen(false)} />
               {UserSection}
             </div>
@@ -359,18 +440,20 @@ export function Sidebar({
       <aside
         data-app-sidebar
         className={cn(
-          "group/sidebar relative hidden h-full flex-col border-r border-border bg-sidebar py-3 transition-[width] duration-200 ease-out md:flex",
+          "group/sidebar relative hidden h-full flex-col border-r border-border/70 bg-sidebar/78 py-3 shadow-[inset_-1px_0_0_hsl(var(--foreground)/0.03)] backdrop-blur-xl backdrop-saturate-150 transition-[width] duration-200 ease-out md:flex",
           collapsed ? "w-[60px]" : "w-[200px]"
         )}
       >
-        {CollapseHandle}
+        {SidebarBackdropGlow}
         {collapsed ? (
           <>
-            <div className="flex justify-center px-2 pb-3">
-              <BrandMark />
+            <div className="relative z-10 flex flex-col items-center gap-2 px-2 pb-1">
+              <BrandMark className="shadow-card ring-1 ring-border/50" />
+              {CollapseButton}
             </div>
+            <div className="relative z-10 mx-3 my-1.5 h-px bg-border/60" aria-hidden="true" />
             <NavLinks collapsed />
-            <div className="mt-auto flex flex-col items-center gap-2.5 border-t border-border px-2 pt-3">
+            <div className="relative z-10 mt-auto flex flex-col items-center gap-2.5 border-t border-border/60 px-2 pt-3">
               <Avatar size="sm" className="size-6">
                 <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
               </Avatar>
@@ -388,7 +471,7 @@ export function Sidebar({
           </>
         ) : (
           <>
-            {BrandHeader}
+            {DesktopBrandHeader}
             <NavLinks unreadPreview />
             {UserSection}
           </>

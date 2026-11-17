@@ -34,6 +34,7 @@ export function CommandPalette({
   const { t } = useLanguage();
   const { user } = useAuth();
   const [query, setQuery] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
 
   const commands = useMemo(() => {
     const visibleNavItems = navItems.filter((item) => !item.adminOnly || user?.role === "admin");
@@ -65,13 +66,17 @@ export function CommandPalette({
   const filteredCommands = normalizedQuery
     ? commands.filter((command) => command.label.toLowerCase().includes(normalizedQuery))
     : commands;
+  const activeIndex = filteredCommands.length > 0 ? Math.min(selectedIndex, filteredCommands.length - 1) : -1;
 
   return (
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
         onOpenChange(nextOpen);
-        if (!nextOpen) setQuery("");
+        if (!nextOpen) {
+          setQuery("");
+          setSelectedIndex(0);
+        }
       }}
     >
       <DialogContent className="gap-3 p-0 sm:max-w-xl" showCloseButton={false}>
@@ -85,24 +90,43 @@ export function CommandPalette({
             <Input
               autoFocus
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setSelectedIndex(0);
+              }}
+              onKeyDown={(event) => {
+                if (filteredCommands.length === 0) return;
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setSelectedIndex((current) => (current + 1) % filteredCommands.length);
+                } else if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setSelectedIndex((current) => (current - 1 + filteredCommands.length) % filteredCommands.length);
+                } else if (event.key === "Enter" && activeIndex >= 0) {
+                  event.preventDefault();
+                  filteredCommands[activeIndex]?.action();
+                }
+              }}
               className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
               placeholder={t("commandPalette.placeholder")}
             />
           </div>
         </div>
-        <div className="max-h-[420px] overflow-y-auto px-2 pb-2">
+        <div className="max-h-[420px] overflow-y-auto px-2 pb-2" role="listbox">
           {filteredCommands.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm text-muted-foreground">
               {t("commandPalette.noResults")}
             </div>
           ) : (
-            filteredCommands.map((command) => (
+            filteredCommands.map((command, index) => (
               <Button
                 key={command.id}
                 type="button"
                 variant="ghost"
-                className="h-auto w-full justify-start gap-3 rounded-md px-3 py-3 text-left"
+                role="option"
+                aria-selected={index === activeIndex}
+                className={`h-auto w-full justify-start gap-3 rounded-md px-3 py-3 text-left ${index === activeIndex ? "bg-accent text-accent-foreground" : ""}`}
+                onMouseEnter={() => setSelectedIndex(index)}
                 onClick={command.action}
               >
                 <command.icon className="size-4 text-muted-foreground" />

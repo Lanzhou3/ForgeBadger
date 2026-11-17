@@ -1,25 +1,15 @@
-/* Reference palette, deepened on light surfaces for >= 3:1 icon contrast.
-   Scoped to navigation so other theme accents keep their existing palette. */
+/* Map navigation icon hues to the active theme's calibrated tokens so every
+   theme (including Solarized Light, One Dark, and Tokyo Night) stays cohesive
+   while preserving >= 4.5:1 icon contrast. */
 .navigation {
-  --nav-icon-neutral: #0d0d0d;
-  --nav-icon-red: #db292f;
-  --nav-icon-orange: #c94e0b;
-  --nav-icon-yellow: #906500;
-  --nav-icon-green: #008535;
-  --nav-icon-blue: #006cdf;
-  --nav-icon-purple: #8338e8;
-  --nav-icon-pink: #c92e81;
-}
-
-:global(.dark) .navigation {
-  --nav-icon-neutral: #e6e6e8;
-  --nav-icon-red: #fa423e;
-  --nav-icon-orange: #fc6a21;
-  --nav-icon-yellow: #ffc300;
-  --nav-icon-green: #06b84c;
-  --nav-icon-blue: #0285ff;
-  --nav-icon-purple: #a16aff;
-  --nav-icon-pink: #ff66ad;
+  --nav-icon-neutral: hsl(var(--foreground));
+  --nav-icon-red: hsl(var(--brand-accent));
+  --nav-icon-orange: hsl(var(--hue-coral));
+  --nav-icon-yellow: hsl(var(--hue-gold));
+  --nav-icon-green: hsl(var(--hue-mint));
+  --nav-icon-blue: hsl(var(--hue-sky));
+  --nav-icon-purple: hsl(var(--hue-iris));
+  --nav-icon-pink: hsl(var(--hue-rose));
 }
 
 .neutral { color: var(--nav-icon-neutral); }
