@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -23,18 +23,26 @@ import { TemplateSelect } from "@/components/projects/template-select";
 import { createProject } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
 
-const formSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  path: z.string().min(1, "Path is required"),
-  description: z.string().optional(),
-});
-
-type FormValues = z.infer<typeof formSchema>;
+interface FormValues {
+  name: string;
+  path: string;
+  description?: string;
+}
 
 export default function NewProjectPage() {
   const router = useRouter();
   const { t } = useLanguage();
   const [templateId, setTemplateId] = useState("");
+
+  const formSchema = useMemo(
+    () =>
+      z.object({
+        name: z.string().min(1, t("projects.nameRequired")),
+        path: z.string().min(1, t("projects.pathRequired")),
+        description: z.string().optional(),
+      }),
+    [t]
+  );
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -86,7 +94,7 @@ export default function NewProjectPage() {
                   <FormItem>
                     <FormLabel>{t("common.name")}</FormLabel>
                     <FormControl>
-                      <Input placeholder="My Project" {...field} />
+                      <Input placeholder={t("projects.namePlaceholder")} {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

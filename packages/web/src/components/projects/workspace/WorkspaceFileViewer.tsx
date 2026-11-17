@@ -138,7 +138,7 @@ export function WorkspaceFileViewer({
               </span>
             ) : null}
             {savedFlash && !editing ? (
-              <span className="flex items-center gap-1 text-[11px] text-emerald-500">
+              <span className="flex items-center gap-1 text-[11px] text-success">
                 <Check className="size-3.5" />
                 {t("projects.workspaceFileSaved")}
               </span>
@@ -199,7 +199,7 @@ export function WorkspaceFileViewer({
       ) : null}
 
       {file?.truncated && !file.binary ? (
-        <div className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-400">
+        <div className="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-3 py-1.5 text-[11px] text-warning">
           <AlertTriangle className="size-3.5 shrink-0" />
           {t("projects.workspaceFileTruncated")}
         </div>

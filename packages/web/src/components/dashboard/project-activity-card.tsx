@@ -7,6 +7,7 @@ import { Activity, ArrowUpRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { IconTile } from "@/components/ui/icon-tile";
 import { getProjectActivity, type Project, type TokenDailyPoint } from "@/lib/api";
 import { gsap, matchMotionPreference, useGSAP } from "@/lib/gsap-motion";
 import { useLanguage } from "@/hooks/use-language";
@@ -145,9 +146,9 @@ export function ProjectActivityCard({ projects }: { projects: readonly ActivityP
       <CardHeader className="pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
-              <Activity className="size-4" />
-            </div>
+            <IconTile size="sm" tone="brand" className="mt-0.5">
+              <Activity strokeWidth={1.75} />
+            </IconTile>
             <div>
               <CardTitle className="text-sm font-semibold">{t("dashboard.activityTitle")}</CardTitle>
               <p className="mt-1 text-xs text-muted-foreground">{t("dashboard.activityDescription")}</p>

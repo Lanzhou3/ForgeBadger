@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { IconTile } from "@/components/ui/icon-tile";
 import { QueryState } from "@/components/ui/query-state";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CliBrandChip } from "@/components/cli-brand-chip";
@@ -105,9 +106,9 @@ export default function NotificationsPage() {
       ) : filteredNotifications.length === 0 ? (
         <Card className="forgebadger-animate-in">
           <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-            <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-              <Bell className="size-5" />
-            </div>
+            <IconTile size="lg" tone="brand">
+              <Bell strokeWidth={1.75} />
+            </IconTile>
             <div>
               <div className="text-sm font-medium">
                 {notifications.length === 0
@@ -124,7 +125,7 @@ export default function NotificationsPage() {
         </Card>
       ) : (
         <>
-          <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+          <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card shadow-card">
             {visibleNotifications.map((notification, index) => (
               <NotificationRow
                 key={notification.id}
@@ -195,7 +196,7 @@ function NotificationRow({
   contextLabels: { project: string; session: string; cli: string };
   onMarkRead: () => void;
 }) {
-  const { language } = useLanguage();
+  const { language, t } = useLanguage();
   const contextParts = notificationContextParts(notification, contextLabels).filter(
     (part) => !part.startsWith(`${contextLabels.cli}:`)
   );
@@ -203,7 +204,7 @@ function NotificationRow({
   return (
     <div
       className="flex items-start gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
-      style={{ animationDelay: `${index * 40}ms` }}
+      style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
     >
       <span
         className={cn(
@@ -217,7 +218,7 @@ function NotificationRow({
             <span
               className={cn(
                 "size-2 shrink-0 rounded-full",
-                notification.status === "success" ? "bg-emerald-400" : "bg-red-400"
+                notification.status === "success" ? "bg-success" : "bg-destructive"
               )}
               aria-label={notification.status}
               title={notification.status}
@@ -244,15 +245,21 @@ function NotificationRow({
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {!notification.read && (
-          <Button variant="ghost" size="sm" onClick={onMarkRead}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onMarkRead}
+            aria-label={t("notifications.markRead")}
+            title={t("notifications.markRead")}
+          >
             <CheckCheck className="size-4" />
           </Button>
         )}
-        <Link href={notification.href} onClick={onMarkRead}>
-          <Button variant="outline" size="sm">
+        <Button asChild variant="outline" size="sm">
+          <Link href={notification.href} onClick={onMarkRead}>
             {openLabel}
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       </div>
     </div>
   );

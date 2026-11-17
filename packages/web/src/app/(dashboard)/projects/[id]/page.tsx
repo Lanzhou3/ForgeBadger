@@ -35,7 +35,7 @@ export default function ProjectPage() {
   const error = context.error ?? detail.error;
   if (error)
     return (
-      <main className="p-6">
+      <div className="p-6">
         <ErrorNotice
           error={error}
           retry={() => {
@@ -43,13 +43,13 @@ export default function ProjectPage() {
             void detail.refetch();
           }}
         />
-      </main>
+      </div>
     );
   if (!context.data || !detail.data || !user)
     return (
-      <main role="status" className="p-6">
+      <div role="status" className="p-6 text-sm text-muted-foreground">
         {t("common.loading")}
-      </main>
+      </div>
     );
   const authority = {
     canEdit: context.data.access.capabilities.some(
@@ -63,7 +63,7 @@ export default function ProjectPage() {
   if (context.data.privateDetailAllowed)
     return <PrivateProjectPage key={`${user?.id}:${id}`} taskAuthority={authority} />;
   return (
-    <main className="mx-auto max-w-[1500px] space-y-5 p-4 md:p-6">
+    <div className="mx-auto max-w-[1500px] space-y-5 p-4 md:p-6">
       <Link href="/projects" className="text-sm text-muted-foreground hover:text-foreground">
         ← {t("projects.back")}
       </Link>
@@ -75,6 +75,6 @@ export default function ProjectPage() {
           selectedWorkItemId={search.get("workItemId") ?? search.get("task")}
           authority={authority}
         />
-    </main>
+    </div>
   );
 }

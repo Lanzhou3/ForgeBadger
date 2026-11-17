@@ -16,6 +16,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { IconTile } from "@/components/ui/icon-tile";
 import { QueryState } from "@/components/ui/query-state";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
@@ -279,7 +280,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {stats.map((stat) => (
           <Link
             key={stat.label}
@@ -287,11 +288,15 @@ export default function DashboardPage() {
             data-motion="dashboard-stat"
             className="group"
           >
-            <Card className={cn("h-full transition-all duration-200 group-hover:-translate-y-0.5 group-hover:shadow-lg", HUE_CLASSES[stat.hue].hoverBorder)}>
+            <Card
+              interactive
+              density="flush"
+              className={cn("h-full", HUE_CLASSES[stat.hue].hoverBorder)}
+            >
               <CardContent className="flex items-center gap-3 p-4">
-                <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg", HUE_CLASSES[stat.hue].tile)}>
-                  <stat.icon className="size-4" />
-                </div>
+                <IconTile size="lg" tone={stat.hue}>
+                  <stat.icon strokeWidth={1.75} />
+                </IconTile>
                 <div className="min-w-0 flex-1">
                   <div className="text-2xl font-semibold leading-none tracking-tight">
                     <AnimatedStatValue value={stat.value} />
@@ -407,9 +412,9 @@ export default function DashboardPage() {
           ) : recentSessions.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-                <div className="flex size-10 items-center justify-center rounded-lg bg-brand/10 text-brand">
-                  <TerminalSquare className="size-5" />
-                </div>
+                <IconTile size="lg" tone="brand">
+                  <TerminalSquare strokeWidth={1.75} />
+                </IconTile>
                 <div>
                   <div className="text-sm font-medium">{t("dashboard.noSessions")}</div>
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -425,7 +430,7 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+            <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card shadow-card">
               {recentSessions.map((session) => {
                 const relativeTime =
                   now === null ? null : formatSessionRelativeTime(session, now, language);
@@ -463,7 +468,7 @@ export default function DashboardPage() {
         {/* System status */}
         <section data-motion="dashboard-section" className="space-y-3 xl:col-span-2">
           <h2 className="text-sm font-semibold">{t("dashboard.systemStatus")}</h2>
-          <Card>
+          <Card density="flush">
             <CardContent className="space-y-0.5 p-2">
               {statusItems.map((item) => (
                 <Link
@@ -501,7 +506,7 @@ function SessionStatusDot({ status }: { status: string }) {
       className={cn(
         "size-2 shrink-0 rounded-full",
         normalized === "running"
-          ? "animate-pulse bg-success"
+          ? "forgebadger-pulse-dot bg-success"
           : normalized === "error"
             ? "bg-destructive"
             : normalized === "lost"

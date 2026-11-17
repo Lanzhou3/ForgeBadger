@@ -7,6 +7,7 @@ import { ArrowUpRight, Download, FolderOpen, Plus, GitBranch, Trash2 } from "luc
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { IconTile } from "@/components/ui/icon-tile";
 import { listProjects, deleteProject, getProjectGitChanges } from "@/lib/api";
 import { getProjectTaskContext } from "@/lib/project-task-api";
 import { collaborationApi } from "@/lib/collaboration-api";
@@ -69,9 +70,9 @@ export default function ProjectsPage() {
       ) : projects.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-              <FolderOpen className="size-5" />
-            </div>
+            <IconTile size="lg" tone="brand">
+              <FolderOpen strokeWidth={1.75} />
+            </IconTile>
             <div>
               <div className="text-sm font-medium">{t("projects.emptyTitle")}</div>
               <p className="mt-1 text-xs text-muted-foreground">
@@ -87,20 +88,20 @@ export default function ProjectsPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+        <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card shadow-card">
           {projects.map((project, index) => (
             <div
               key={project.id}
               className="forgebadger-animate-in flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40"
-              style={{ animationDelay: `${index * 40}ms` }}
+              style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
             >
               <Link
                 href={`/projects/${project.id}`}
                 className="group flex min-w-0 flex-1 items-center gap-3"
               >
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
-                  <FolderOpen className="size-4" />
-                </div>
+                <IconTile size="md" tone="brand">
+                  <FolderOpen strokeWidth={1.75} />
+                </IconTile>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{project.name}</div>
                   <div className="mt-0.5 truncate text-xs text-muted-foreground">

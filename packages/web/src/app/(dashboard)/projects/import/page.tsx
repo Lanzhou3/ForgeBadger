@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, FolderOpen, LoaderCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,17 +30,13 @@ import {
 import { useLanguage } from "@/hooks/use-language";
 import { cn } from "@/lib/utils";
 
-const pathSchema = z.object({
-  path: z.string().min(1, "Path is required"),
-});
+interface PathValues {
+  path: string;
+}
 
-type PathValues = z.infer<typeof pathSchema>;
-
-const confirmSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-});
-
-type ConfirmValues = z.infer<typeof confirmSchema>;
+interface ConfirmValues {
+  name: string;
+}
 
 type Step = "path" | "scan" | "confirm";
 
@@ -56,6 +52,15 @@ export default function ImportProjectPage() {
   const [pickingDirectory, setPickingDirectory] = useState(false);
   const [directoryPickerError, setDirectoryPickerError] = useState<string | null>(null);
   const [templateId, setTemplateId] = useState("");
+
+  const pathSchema = useMemo(
+    () => z.object({ path: z.string().min(1, t("projects.pathRequired")) }),
+    [t]
+  );
+  const confirmSchema = useMemo(
+    () => z.object({ name: z.string().min(1, t("projects.nameRequired")) }),
+    [t]
+  );
 
   useEffect(() => {
     let active = true;
@@ -256,9 +261,9 @@ export default function ImportProjectPage() {
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 {scanResult.exists && scanResult.isDirectory ? (
-                  <CheckCircle2 className="size-4 shrink-0 text-emerald-400" />
+                  <CheckCircle2 className="size-4 shrink-0 text-success" />
                 ) : (
-                  <XCircle className="size-4 shrink-0 text-red-400" />
+                  <XCircle className="size-4 shrink-0 text-destructive" />
                 )}
                 <span className="text-sm font-medium">
                   {scanResult.exists && scanResult.isDirectory
@@ -276,9 +281,9 @@ export default function ImportProjectPage() {
               </div>
 
               {!scanResult.exists || !scanResult.isDirectory ? (
-                <div className="flex items-center gap-2 rounded-md border border-amber-400/30 bg-amber-400/10 p-3">
-                  <AlertTriangle className="size-4 shrink-0 text-amber-400" />
-                  <p className="text-sm text-amber-200">
+                <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning/10 p-3">
+                  <AlertTriangle className="size-4 shrink-0 text-warning" />
+                  <p className="text-sm text-warning">
                     {t("projects.validDirectoryRequired")}
                   </p>
                 </div>
@@ -294,7 +299,7 @@ export default function ImportProjectPage() {
                   onClick={() => setStep("confirm")}
                   disabled={!scanResult.exists || !scanResult.isDirectory}
                 >
-                  {t("projects.importTitle")}
+                  {t("common.next")}
                 </Button>
               </div>
             </div>

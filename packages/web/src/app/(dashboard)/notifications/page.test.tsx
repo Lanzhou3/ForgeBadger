@@ -149,4 +149,14 @@ describe("NotificationsPage polish", () => {
     await screen.findByText("Task finished");
     expect(screen.getByText(/分钟前/)).toBeTruthy();
   });
+
+  it("exposes accessible mark-read control and avoids nested interactive elements", async () => {
+    notificationsRef.value = [makeNotification({ id: "n1", read: false })];
+    renderPage();
+
+    const markReadBtn = await screen.findByRole("button", { name: "标记已读" });
+    expect(markReadBtn).toBeTruthy();
+    const openLink = screen.getByRole("link", { name: "打开会话" });
+    expect(openLink.querySelector("button")).toBeNull();
+  });
 });

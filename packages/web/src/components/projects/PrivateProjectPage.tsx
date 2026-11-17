@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { IconTile } from "@/components/ui/icon-tile";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -419,10 +420,10 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
           )}
 
           {configNeedsReview && !isUntrackedTemplate && (
-            <Card className="forgebadger-animate-in border-amber-500/40 bg-amber-500/10">
+            <Card className="forgebadger-animate-in border-warning/40 bg-warning/10">
               <CardContent className="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between">
                 <div className="flex items-start gap-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-amber-500/15 text-amber-400">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-warning/15 text-warning">
                     <AlertTriangle className="size-4" />
                   </div>
                   <div>
@@ -504,9 +505,9 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                 {projectSessions.length === 0 ? (
                   <Card className="forgebadger-animate-in">
                     <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-                      <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-                        <TerminalSquare className="size-5" />
-                      </div>
+                      <IconTile size="lg" tone="brand">
+                        <TerminalSquare strokeWidth={1.75} />
+                      </IconTile>
                       <div className="text-sm font-medium">{t("projects.noSessions")}</div>
                       <Button
                         size="sm"
@@ -520,7 +521,7 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                     </CardContent>
                   </Card>
                 ) : (
-                  <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+                  <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card shadow-card">
                     {projectSessions.map((session, index) => {
                       const linkedTaskPacket = findSessionTaskPacket(taskPacketsData?.taskPackets ?? [], session.id);
                       const relativeTime = now === null ? null : formatSessionRelativeTime(session, now, language);
@@ -529,7 +530,7 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                         key={session.id}
                         href={`/sessions/${session.id}`}
                         className="group flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
-                        style={{ animationDelay: `${index * 40}ms` }}
+                        style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
                       >
                         <SessionStatusDot status={session.status} />
                         <div className="min-w-0 flex-1">
@@ -584,14 +585,14 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
               {skills.length === 0 ? (
                 <Card className="forgebadger-animate-in">
                   <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-                    <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-                      <Wrench className="size-5" />
-                    </div>
+                    <IconTile size="lg" tone="brand">
+                      <Wrench strokeWidth={1.75} />
+                    </IconTile>
                     <div className="text-sm font-medium">{t("skills.emptyTitle")}</div>
                   </CardContent>
                 </Card>
               ) : (
-                <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card">
+                <div className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-card shadow-card">
                   {skills.map((skill, index) => {
                     const projectSkill = projectSkillById.get(skill.id);
                     const isEnabled = enabledSkillIds.has(skill.id);
@@ -601,7 +602,7 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                         role="group"
                         aria-label={skill.name}
                         className="flex items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
-                        style={{ animationDelay: `${index * 40}ms` }}
+                        style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
                       >
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium">{skill.name}</div>
@@ -621,7 +622,7 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                           <span
                             className={cn(
                               "w-10 shrink-0 text-xs",
-                              isEnabled ? "text-emerald-400" : "text-muted-foreground"
+                              isEnabled ? "text-success" : "text-muted-foreground"
                             )}
                           >
                             {isEnabled ? t("common.enabled") : t("common.disabled")}
@@ -717,11 +718,11 @@ function SessionStatusDot({ status }: { status: string }) {
       className={cn(
         "size-2 shrink-0 rounded-full",
         normalized === "running"
-          ? "animate-pulse bg-emerald-400"
+          ? "forgebadger-pulse-dot bg-success"
           : normalized === "error"
-            ? "bg-red-400"
+            ? "bg-destructive"
             : normalized === "lost"
-              ? "bg-amber-400"
+              ? "bg-warning"
               : "bg-muted-foreground/40"
       )}
     />
@@ -736,11 +737,11 @@ function SessionStatusText({ status }: { status: string }) {
       className={cn(
         "shrink-0 text-xs",
         normalized === "running"
-          ? "text-emerald-400"
+          ? "text-success"
           : normalized === "error"
-            ? "text-red-400"
+            ? "text-destructive"
             : normalized === "lost"
-              ? "text-amber-400"
+              ? "text-warning"
               : "text-muted-foreground"
       )}
     >
@@ -1107,7 +1108,7 @@ function ProjectActivityList({ activities }: { activities: SessionActivity[] }) 
               <span
                 className={cn(
                   "mt-1.5 size-2 shrink-0 rounded-full",
-                  activity.status === "error" ? "bg-red-400" : "bg-emerald-400"
+                  activity.status === "error" ? "bg-destructive" : "bg-success"
                 )}
               />
               <div className="min-w-0 flex-1 space-y-1">
