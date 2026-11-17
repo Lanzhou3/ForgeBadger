@@ -103,6 +103,13 @@ describe("terminal palettes", () => {
     }
   });
 
+  it("keeps solarized-light ANSI bright and white slots readable on cream background", () => {
+    const palette = TERMINAL_PALETTES["solarized-light"];
+    for (const key of ["white", "brightGreen", "brightYellow", "brightBlue", "brightCyan"] as const) {
+      expect(contrastRatio(palette.background, palette[key]), `solarized-light.${key}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it("keeps each cursor readable on its own background", () => {
     for (const theme of COLOR_THEMES) {
       const palette = TERMINAL_PALETTES[theme.id];

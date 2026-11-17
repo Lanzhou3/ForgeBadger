@@ -82,10 +82,10 @@
     color-scheme: light;
     accent-color: hsl(var(--brand));
     caret-color: hsl(var(--brand-accent));
-    /* ForgeBadger Light: neutral zinc paper, ink text, a #0185FF blue primary,
-       a #FB413E spark accent (--brand-accent, decorative only: caret, progress,
-       unread markers, terminal cursor) and a six-hue spectrum (--hue-*) for section identity. Text tokens
-       hold >= 4.5:1 on background/card/muted; hues hold >= 3:1 for icons. */
+    /* ForgeBadger Light: neutral zinc paper, ink text, a high-contrast #0072DB
+       blue primary, a #DE1F1B spark accent (--brand-accent: caret, progress,
+       unread markers, terminal cursor) and a six-hue spectrum (--hue-*) for section identity.
+       Text and button foreground tokens hold >= 4.5:1 across background/card/muted. */
     --control-background: #ffffff;
     --control-hover-background: hsl(var(--muted));
     --background: 0 0% 98%;
@@ -94,7 +94,7 @@
     --card-foreground: 240 5.9% 10%;
     --popover: 0 0% 100%;
     --popover-foreground: 240 5.9% 10%;
-    --primary: 208.8 100% 50.2%;
+    --primary: 208.8 100% 43%;
     --primary-foreground: 0 0% 100%;
     --secondary: 240 7.7% 94.9%;
     --secondary-foreground: 240 5.9% 10%;
@@ -108,20 +108,20 @@
     --warning: 26.4 100% 32.9%;
     --border: 240 5.9% 90%;
     --input: 240 5% 64.9%;
-    --ring: 208.8 100% 50.2%;
-    --brand: 208.8 100% 50.2%;
+    --ring: 208.8 100% 43%;
+    --brand: 208.8 100% 43%;
     --brand-foreground: 0 0% 100%;
     --surface-raised: 0 0% 100%;
     --sidebar: 240 4.8% 95.9%;
     --terminal-bg: 0 0% 98%;
     --shadow-color: 240 5.9% 10%;
-    --hue-iris: 250.7 64% 58.6%;
+    --hue-iris: 250.7 64% 56%;
     --hue-sky: 215 75.1% 45.7%;
-    --hue-mint: 139.6 63.3% 33.1%;
-    --hue-gold: 38.1 100% 37.6%;
-    --hue-coral: 14.1 72.9% 50.8%;
-    --hue-rose: 331.7 64.9% 49.2%;
-    --brand-accent: 1 95.9% 61.4%;
+    --hue-mint: 139.6 63.3% 29%;
+    --hue-gold: 38.1 100% 30%;
+    --hue-coral: 14.1 76% 43%;
+    --hue-rose: 331.7 64.9% 46%;
+    --brand-accent: 1 78% 49%;
     --brand-accent-foreground: 0 0% 100%;
     --radius: 0.625rem;
     --forgebadger-motion-fast: 120ms;
@@ -177,7 +177,7 @@
     --card-foreground: 194 14.1% 33.5%;
     --popover: 44 86.7% 94.1%;
     --popover-foreground: 194 14.1% 33.5%;
-    --primary: 205 69.4% 48.6%;
+    --primary: 205 78% 36%;
     --primary-foreground: 44 86.7% 94.1%;
     --secondary: 44 40.5% 85.5%;
     --secondary-foreground: 194 14.1% 33.5%;
@@ -185,34 +185,34 @@
     --muted-foreground: 196 12.9% 38%;
     --accent: 44 40.5% 85.5%;
     --accent-foreground: 194 14.1% 33.5%;
-    --destructive: 1 71.2% 52.4%;
+    --destructive: 1 71.2% 44%;
     --destructive-foreground: 44 86.7% 94.1%;
-    --success: 68 100% 30%;
-    --warning: 45 100% 35.5%;
+    --success: 68 100% 22%;
+    --warning: 45 100% 26%;
     --border: 45 25.5% 78.4%;
     --input: 45 25.5% 78.4%;
-    --ring: 205 69.4% 48.6%;
-    --brand: 205 69.4% 48.6%;
+    --ring: 205 78% 36%;
+    --brand: 205 78% 36%;
     --brand-foreground: 44 86.7% 94.1%;
     --surface-raised: 44 86.7% 94.1%;
     --sidebar: 46 42.4% 88.4%;
     --terminal-bg: 44 86.7% 94.1%;
     --shadow-color: 45 30% 25%;
-    --hue-iris: 236.6 42.7% 59.6%;
-    --hue-sky: 204.8 69.4% 48.6%;
-    --hue-mint: 67.8 100% 30%;
-    --hue-gold: 45.4 100% 35.5%;
-    --hue-coral: 17.6 80.4% 44.1%;
-    --hue-rose: 331 64.1% 52%;
-    --brand-accent: 1 71.2% 52.4%;
+    --hue-iris: 236.6 48% 49%;
+    --hue-sky: 205 78% 36%;
+    --hue-mint: 68 100% 22%;
+    --hue-gold: 45 100% 26%;
+    --hue-coral: 17.6 82% 38%;
+    --hue-rose: 331 68% 43%;
+    --brand-accent: 1 71.2% 44%;
     --brand-accent-foreground: 0 0% 100%;
   }
 
   .dark {
     /* ForgeBadger Dark: untinted graphite surfaces stepped by lightness,
-       soft (not pure) white text, the #0185FF primary with the #FB413E spark
-       accent, and a softened six-hue
-       spectrum shared with the terminal ANSI palette. */
+       soft (not pure) white text, a bright blue primary (#339DFF) with dark
+       ink contrast, the #FB413E spark accent, and a softened six-hue spectrum
+       shared with the terminal ANSI palette. */
     --control-background: #131314;
     --control-hover-background: hsl(var(--muted));
     --background: 240 2.2% 8.8%;
@@ -221,8 +221,8 @@
     --card-foreground: 240 4.2% 90.6%;
     --popover: 240 2.8% 14.1%;
     --popover-foreground: 240 4.2% 90.6%;
-    --primary: 208.8 100% 50.2%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 208.8 100% 60%;
+    --primary-foreground: 240 5.9% 10%;
     --secondary: 240 3.6% 16.3%;
     --secondary-foreground: 240 4.2% 90.6%;
     --muted: 240 3.6% 16.3%;
@@ -235,9 +235,9 @@
     --warning: 42.5 81.7% 67.8%;
     --border: 240 4.1% 19.2%;
     --input: 240 3.8% 31%;
-    --ring: 208.8 100% 50.2%;
-    --brand: 208.8 100% 50.2%;
-    --brand-foreground: 0 0% 100%;
+    --ring: 208.8 100% 60%;
+    --brand: 208.8 100% 60%;
+    --brand-foreground: 240 5.9% 10%;
     --surface-raised: 240 2.8% 14.1%;
     --sidebar: 240 2.9% 6.9%;
     --terminal-bg: 240 2.2% 8.8%;
@@ -249,7 +249,7 @@
     --hue-coral: 17.9 85.8% 72.4%;
     --hue-rose: 333.6 76.9% 74.5%;
     --brand-accent: 1 95.9% 61.4%;
-    --brand-accent-foreground: 0 0% 100%;
+    --brand-accent-foreground: 240 5.9% 10%;
   }
 
   .dark[data-dark-theme="one-dark"] {
@@ -269,7 +269,7 @@
     --muted-foreground: 220 6.2% 64%;
     --accent: 220 15.5% 22.7%;
     --accent-foreground: 219 13.5% 71%;
-    --destructive: 355 65.2% 65.1%;
+    --destructive: 355 72% 70%;
     --destructive-foreground: 220 13% 14%;
     --success: 95 38.1% 62%;
     --warning: 39 67.1% 69%;
@@ -282,13 +282,13 @@
     --sidebar: 216 13.2% 14.9%;
     --terminal-bg: 220 13% 18%;
     --shadow-color: 220 30% 3%;
-    --hue-iris: 286.3 59.8% 66.9%;
+    --hue-iris: 286.3 66% 70%;
     --hue-sky: 207 81.6% 65.9%;
     --hue-mint: 94.9 38.1% 62%;
     --hue-gold: 39.1 67.1% 69%;
     --hue-coral: 29.2 53.8% 61%;
-    --hue-rose: 355.3 65.2% 65.1%;
-    --brand-accent: 355.3 65.2% 65.1%;
+    --hue-rose: 355 72% 70%;
+    --brand-accent: 355 72% 70%;
     --brand-accent-foreground: 220 13% 14%;
   }
 
