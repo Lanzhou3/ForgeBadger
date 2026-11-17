@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowDown, ListTodo, MessageSquare, PanelLeft, Send, Square, Target } from "lucide-react";
+import { ArrowDown, ListTodo, MessageSquare, PanelLeft, Plus, Send, Square, Target } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -481,9 +481,9 @@ export function CopilotChat() {
   useAutoGrowTextarea(composerRef, controller.input);
 
   return (
-    <div className="flex h-full min-h-0 w-full pt-16 md:pt-0">
+    <div className="flex h-full min-h-0 w-full">
       {sidebarOpen && (
-        <div className="hidden min-h-0 w-72 shrink-0 flex-col border-r border-border/50 bg-muted/20 md:flex">
+        <div className="hidden min-h-0 w-72 shrink-0 flex-col border-r border-border/60 bg-sidebar/65 backdrop-blur-lg backdrop-saturate-150 md:flex">
           <ConversationSidebar
             conversations={conversations}
             activeId={conversationId}
@@ -525,8 +525,8 @@ export function CopilotChat() {
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {isRunning ? (
-              <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-xs text-emerald-600 dark:text-emerald-400">
-                <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+              <Badge variant="outline" className="gap-1 border-success/40 bg-success/10 text-xs text-success">
+                <span className="size-1.5 forgebadger-pulse-dot rounded-full bg-success" />
                 <span className="sr-only sm:not-sr-only">{t("copilot.running")}</span>
               </Badge>
             ) : null}
@@ -547,7 +547,7 @@ export function CopilotChat() {
                 aria-label={goalsCopy.create}
                 title={goalsCopy.create}
               >
-                <Target className="size-4 sm:hidden" />
+                <Plus className="size-4 sm:hidden" />
                 <span className="hidden sm:inline">{goalsCopy.create}</span>
               </Button>
             ) : null}
@@ -685,7 +685,7 @@ export function CopilotChat() {
             />
             <div
               data-testid="copilot-composer"
-              className="rounded-xl border border-border/70 bg-card/90 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
+              className="rounded-xl border border-border/70 bg-card/90 shadow-raised backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-overlay focus-within:border-brand/60 focus-within:shadow-overlay focus-within:ring-1 focus-within:ring-brand/30"
             >
               <Textarea
                 ref={composerRef}
@@ -740,7 +740,7 @@ export function CopilotChat() {
       </div>
 
       <Sheet open={sidebarSheetOpen} onOpenChange={setSidebarSheetOpen}>
-        <SheetContent side="left" className="w-80 p-0" aria-describedby={undefined}
+        <SheetContent side="left" className="w-80 border-r border-border/70 bg-sidebar/85 p-0 backdrop-blur-xl backdrop-saturate-150" aria-describedby={undefined}
           onEscapeKeyDown={event => {
             // First Escape cancels inline renaming, retaining the history list.
             if (event.target instanceof HTMLElement && event.target.hasAttribute("data-conversation-rename")) event.preventDefault();

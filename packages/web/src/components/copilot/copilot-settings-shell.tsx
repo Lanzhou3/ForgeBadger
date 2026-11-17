@@ -54,10 +54,7 @@ export function CopilotSettingsShell({
   const router = useRouter();
   const items = useNavItems();
   return (
-    // p-4 keeps the gutters; pt-16 reserves the mobile top band for the fixed
-    // hamburger trigger (same pattern as the members page), md:p-6 restores
-    // desktop padding.
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-5 overflow-y-auto p-4 pt-16 md:p-6">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-5 overflow-y-auto p-4 md:p-6">
       <header className="forgebadger-animate-in flex items-start gap-2">
         <Button
           variant="ghost"
@@ -74,7 +71,7 @@ export function CopilotSettingsShell({
         </div>
       </header>
       <div className="flex min-h-0 flex-col gap-5 lg:flex-row lg:gap-8">
-        <div className="relative min-w-0 lg:w-[200px] lg:shrink-0">
+        <div className="relative min-w-0 lg:sticky lg:top-6 lg:w-[200px] lg:shrink-0 lg:self-start">
           {/* Right-edge fade hints that the chip row scrolls horizontally on
               small screens (removed on desktop where the nav is a column). */}
           <nav
@@ -90,13 +87,22 @@ export function CopilotSettingsShell({
                 key={item.key}
                 href={item.href}
                 aria-current={isActive ? "page" : undefined}
-                className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm whitespace-nowrap transition-colors ${
+                className={`relative flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium whitespace-nowrap transition-[background-color,color,box-shadow] duration-150 ${
                   isActive
-                    ? "bg-muted font-medium text-foreground"
+                    ? "bg-card text-foreground shadow-card ring-1 ring-border/70"
                     : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                 }`}
               >
-                <Icon className={`size-4 shrink-0 ${isActive ? "text-brand" : ""}`} />
+                {isActive && (
+                  <span
+                    className="hidden h-4 w-0.5 rounded-full bg-brand lg:block"
+                    aria-hidden="true"
+                  />
+                )}
+                <Icon
+                  strokeWidth={1.75}
+                  className={`size-4 shrink-0 ${isActive ? "text-brand" : "text-muted-foreground/75"}`}
+                />
                 {item.label}
               </Link>
             );

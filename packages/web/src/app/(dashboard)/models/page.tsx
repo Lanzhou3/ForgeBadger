@@ -522,7 +522,7 @@ export default function ModelsPage() {
           empty={null}
         />
       ) : (
-      <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
         <div className="min-w-0 space-y-6">
           <ProviderList
             providers={filteredProviders}

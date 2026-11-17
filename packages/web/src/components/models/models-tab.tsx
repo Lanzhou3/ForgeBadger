@@ -120,7 +120,7 @@ export function ModelsTab({
                 className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors forgebadger-animate-in hover:bg-muted/50 ${
                   model.id === selectedModelId ? "bg-accent" : ""
                 }`}
-                style={{ animationDelay: `${index * 40}ms` }}
+                style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">

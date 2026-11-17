@@ -82,21 +82,21 @@ export function CopilotSettingsPage() {
         skillCount !== undefined && connectionCount !== undefined
           ? `${skillCount} ${extensions.skills} · ${connectionCount} ${extensions.connections}`
           : undefined,
-      delay: 240,
+      delay: 80,
     },
     {
       href: "/copilot/channels",
       icon: Radio,
       title: copy.channelsCardTitle,
       description: copy.channelsCardDescription,
-      delay: 300,
+      delay: 110,
     },
     {
       href: "/copilot/automations",
       icon: CalendarClock,
       title: automations.title,
       description: automations.description,
-      delay: 360,
+      delay: 140,
     },
   ];
 
@@ -107,14 +107,14 @@ export function CopilotSettingsPage() {
       description={t("copilot.settingsDescription")}
     >
       <div className="space-y-4">
-        <Card className="forgebadger-animate-in" style={{ animationDelay: "120ms" }}>
+        <Card className="forgebadger-animate-in" style={{ animationDelay: "40ms" }}>
           <SettingsCardHeader
             icon={<Cpu className="size-4" />}
             title={t("copilot.runtimeTitle")}
             description={t("copilot.runtimeDescription")}
             action={
               <Badge variant="secondary" className="gap-1.5">
-                <span className="size-1.5 rounded-full bg-emerald-500" />
+                <span className="size-1.5 rounded-full bg-success" />
                 {t("copilot.nativeRuntime")}
               </Badge>
             }
@@ -163,7 +163,7 @@ export function CopilotSettingsPage() {
             );
           })}
         </div>
-        <div className="forgebadger-animate-in" style={{ animationDelay: "420ms" }}>
+        <div className="forgebadger-animate-in" style={{ animationDelay: "160ms" }}>
           <CopilotMemoryPanel />
         </div>
       </div>

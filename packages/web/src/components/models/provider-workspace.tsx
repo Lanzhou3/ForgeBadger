@@ -6,6 +6,7 @@ import { MoreHorizontal, Pencil, RefreshCw, ServerCog, ShieldCheck, Trash2, Wall
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { IconTile } from "@/components/ui/icon-tile";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import {
   DropdownMenu,
@@ -93,9 +94,9 @@ export function ProviderWorkspace({
         <CardContent className="space-y-3.5 p-4 md:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
-                <ServerCog className="size-5" />
-              </div>
+              <IconTile size="lg" tone="brand">
+                <ServerCog strokeWidth={1.75} />
+              </IconTile>
               <div className="min-w-0">
                 <div className="truncate text-lg font-semibold tracking-tight">{provider.name}</div>
                 <div className="truncate font-mono text-xs text-muted-foreground">

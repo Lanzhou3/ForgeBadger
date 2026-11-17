@@ -76,7 +76,7 @@ export function TemplateLibrary({
   return (
     <aside
       aria-label={pick("模板库", "範本庫", "Template library")}
-      className="flex min-h-0 flex-col border-r border-border"
+      className="flex min-h-0 max-h-80 flex-col border-b border-border lg:max-h-none lg:border-b-0 lg:border-r"
     >
       <search
         className="flex shrink-0 flex-col gap-3 border-b border-border/70 p-4"

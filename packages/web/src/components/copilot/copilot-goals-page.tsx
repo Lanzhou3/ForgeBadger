@@ -26,7 +26,7 @@ export function CopilotGoalsPage() {
   });
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-4 overflow-y-auto p-4 pt-16 md:p-6">
+    <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-4 overflow-y-auto p-4 md:p-6">
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="flex items-center gap-2 text-lg font-semibold">
@@ -74,7 +74,7 @@ function GoalRow({ goal }: { goal: CopilotGoalListItem }) {
   return (
     <Link
       href={`/copilot/goals/${encodeURIComponent(goal.id)}`}
-      className="block rounded-md border border-border/70 bg-card px-3 py-2.5 transition-colors hover:border-border hover:bg-muted/40"
+      className="block rounded-md border border-border/70 bg-card px-3 py-2.5 shadow-card forgebadger-motion-surface hover:-translate-y-px hover:border-border hover:shadow-raised"
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-sm font-medium" title={goal.title}>
@@ -95,7 +95,7 @@ function GoalRow({ goal }: { goal: CopilotGoalListItem }) {
           aria-label={`${goal.title} ${passes}/${total}`}
         >
           <div
-            className={cn("h-full rounded-full transition-[width] duration-700 ease-out", percent >= 100 ? "bg-emerald-500" : "bg-brand")}
+            className={cn("h-full rounded-full transition-[width] duration-700 ease-out", percent >= 100 ? "bg-success" : "bg-brand")}
             style={{ width: `${percent}%` }}
           />
         </div>

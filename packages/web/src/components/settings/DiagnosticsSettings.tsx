@@ -50,7 +50,7 @@ export function DiagnosticsSettings() {
           className={cn(
             "text-xs",
             diagnosticsState === "success"
-              ? "text-emerald-400"
+              ? "text-success"
               : diagnosticsState === "error"
                 ? "text-destructive"
                 : "text-muted-foreground"

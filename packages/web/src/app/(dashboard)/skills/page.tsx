@@ -280,7 +280,7 @@ export default function SkillsPage() {
           </div>
           <select
             aria-label={pick("来源筛选", "來源篩選", "Source filter")}
-            className="h-10 min-w-32 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-2 focus-visible:outline-ring sm:flex-none"
+            className="h-10 min-w-32 flex-1 rounded-md border border-input bg-control px-3 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-ring sm:flex-none"
             value={source}
             onChange={(event) => {
               setSource(event.target.value);
@@ -296,7 +296,7 @@ export default function SkillsPage() {
           </select>
           <select
             aria-label={t("common.visibility")}
-            className="h-10 min-w-32 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-2 focus-visible:outline-ring sm:flex-none"
+            className="h-10 min-w-32 flex-1 rounded-md border border-input bg-control px-3 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-ring sm:flex-none"
             value={visibility}
             onChange={(event) => {
               setVisibility(event.target.value as VisibilityFilter);

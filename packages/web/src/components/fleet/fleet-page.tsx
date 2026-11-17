@@ -38,7 +38,7 @@ function useNarrowScreen(): boolean {
   return narrow;
 }
 
-const shell = "mx-auto flex h-full w-full max-w-[1500px] flex-col gap-4 overflow-y-auto p-4 pt-16 md:p-6";
+const shell = "mx-auto flex h-full w-full max-w-[1500px] flex-col gap-4 overflow-y-auto p-4 md:p-6";
 
 export function FleetPage({ fleetId }: { fleetId: string }) {
   const copy = useFleetCopy();

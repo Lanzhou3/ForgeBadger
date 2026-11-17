@@ -247,7 +247,7 @@ export default function UsagePage() {
         <div className="flex items-center gap-2">
           <select
             aria-label={t("usage.activityTitle")}
-            className="h-8 rounded-lg border border-border/60 bg-background px-2.5 text-xs text-foreground"
+            className="h-8 rounded-md border border-input bg-control px-2.5 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
             value={range}
             onChange={(event) => {
               setRange(event.target.value);
@@ -276,14 +276,14 @@ export default function UsagePage() {
           className={cn(
             "flex items-center gap-2.5 rounded-lg border px-4 py-3 text-sm forgebadger-animate-in",
             noticeType === "error"
-              ? "border-red-500/40 bg-red-500/10 text-red-300"
-              : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+              ? "border-destructive/40 bg-destructive/10 text-destructive"
+              : "border-success/40 bg-success/10 text-success"
           )}
         >
           <span
             className={cn(
               "size-1.5 shrink-0 rounded-full",
-              noticeType === "error" ? "bg-red-400" : "bg-emerald-400"
+              noticeType === "error" ? "bg-destructive" : "bg-success"
             )}
           />
           {notice}

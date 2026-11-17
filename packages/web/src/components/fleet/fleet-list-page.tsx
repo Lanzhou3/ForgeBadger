@@ -23,7 +23,7 @@ export function FleetListPage() {
   });
   const items = fleets.data?.fleets ?? [];
   return (
-    <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-4 overflow-y-auto p-4 pt-16 md:p-6">
+    <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-4 overflow-y-auto p-4 md:p-6">
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="flex items-center gap-2 text-lg font-semibold">
@@ -32,7 +32,7 @@ export function FleetListPage() {
           </h1>
           <p className="mt-1 text-xs text-muted-foreground">{copy.description}</p>
         </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
+        <Button size="sm" variant="brand" onClick={() => setCreateOpen(true)}>
           <Plus className="size-4" />{copy.createFleet}
         </Button>
       </header>
@@ -66,7 +66,7 @@ function FleetRow({ fleet }: { fleet: FleetListItem }) {
     <li>
       <Link
         href={`/fleet/${encodeURIComponent(fleet.id)}`}
-        className="block rounded-lg border border-border bg-card px-4 py-3 transition-colors hover:border-foreground/25 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+        className="block rounded-lg border border-border bg-card px-4 py-3 shadow-card forgebadger-motion-surface hover:-translate-y-px hover:border-border/90 hover:shadow-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
       >
         <div className="flex flex-wrap items-center gap-2">
           <span className="min-w-0 flex-1 truncate text-sm font-medium" title={fleet.title}>{fleet.title}</span>

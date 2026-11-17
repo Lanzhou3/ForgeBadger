@@ -484,7 +484,7 @@ describe("CopilotChat console layout", () => {
     const composer = screen.getByTestId("copilot-composer");
     expect(composer.className).toContain("rounded-xl");
     expect(composer.className).toContain("backdrop-blur-md");
-    expect(composer.className).toContain("shadow-lg");
+    expect(composer.className).toContain("shadow-raised");
     expect(composer.className).toContain("hover:-translate-y-0.5");
     expect(composer.className).toContain("focus-within:ring-brand/30");
     // No docked footer strip above the composer (old border-t bar removed).

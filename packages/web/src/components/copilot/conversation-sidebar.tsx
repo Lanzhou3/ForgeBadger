@@ -71,32 +71,46 @@ export function ConversationSidebar({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="space-y-2 border-b border-border/60 p-3">
-        <Button size="sm" className="w-full justify-start gap-2" onClick={onCreate} disabled={creating}>
-          <Plus className="size-4" />
+        <Button
+          size="sm"
+          variant="outline"
+          className="w-full justify-start gap-2 bg-card/75 shadow-card hover:bg-card"
+          onClick={onCreate}
+          disabled={creating}
+        >
+          <Plus className="size-4 text-brand" strokeWidth={1.75} />
           {t("copilot.newConversation")}
         </Button>
         <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" strokeWidth={1.75} />
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder={t("copilot.search")}
             aria-label={t("copilot.search")}
-            className="h-8 border-border/60 bg-muted/30 pl-8 text-sm"
+            className="h-8 border-border/60 bg-card/55 pl-8 text-sm backdrop-blur-sm"
           />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
         {visible.map((conversation) => {
           const isActive = conversation.id === activeId;
           return (
             <div
               key={conversation.id}
               className={cn(
-                "group relative rounded-lg transition-colors",
-                isActive ? "bg-accent" : "hover:bg-muted/60"
+                "group relative rounded-lg transition-[background-color,box-shadow] duration-150",
+                isActive
+                  ? "bg-card/90 shadow-card ring-1 ring-border/70"
+                  : "hover:bg-foreground/[0.04]"
               )}
             >
+              {isActive && renamingId !== conversation.id && deletingId !== conversation.id && (
+                <span
+                  className="pointer-events-none absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-brand"
+                  aria-hidden="true"
+                />
+              )}
               {renamingId === conversation.id ? (
                 <div className="flex items-center gap-1 p-2">
                   <Input
@@ -138,10 +152,10 @@ export function ConversationSidebar({
                 <button
                   onClick={() => onSelect(conversation.id)}
                   aria-current={isActive ? "page" : undefined}
-                  className="block w-full rounded-lg px-2.5 py-2 pr-16 text-left"
+                  className="block w-full rounded-lg px-2.5 py-2 pr-14 text-left md:pr-2.5 md:group-hover:pr-14 md:group-focus-within:pr-14"
                 >
                   <span className="flex items-center gap-1.5 text-[13px]">
-                    <MessageSquare className={cn("size-3.5 shrink-0", isActive ? "text-brand" : "text-muted-foreground")} />
+                    <MessageSquare strokeWidth={1.75} className={cn("size-3.5 shrink-0", isActive ? "text-brand" : "text-muted-foreground")} />
                     <span className={cn("truncate", isActive && "font-medium")}>
                       {conversation.title || t("copilot.untitled")}
                     </span>
@@ -152,7 +166,7 @@ export function ConversationSidebar({
                 </button>
               )}
               {renamingId !== conversation.id && deletingId !== conversation.id && (
-                <div className="absolute right-1.5 top-1.5 flex gap-0.5 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+                <div className="absolute right-1.5 top-1.5 flex gap-0.5 rounded-md bg-card/85 px-0.5 backdrop-blur-sm transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
                   <Button
                     variant="ghost"
                     size="icon"

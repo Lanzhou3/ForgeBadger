@@ -169,7 +169,7 @@ export function CredentialTab({
               className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors forgebadger-animate-in hover:bg-muted/50 ${
                 credential.id === selectedCredentialId ? "bg-accent" : ""
               }`}
-              style={{ animationDelay: `${index * 40}ms` }}
+              style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
             >
               <button
                 type="button"

@@ -119,7 +119,7 @@ export function AccountSecuritySettings() {
         {passwordNotice && (
           // Rendered outside the form-open branch: on success the form closes
           // immediately, so a notice placed inside it would never be seen.
-          <p className="rounded-md border border-emerald-400/40 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-400">
+          <p className="rounded-md border border-success/40 bg-success/10 px-3 py-2 text-xs text-success">
             {passwordNotice}
           </p>
         )}

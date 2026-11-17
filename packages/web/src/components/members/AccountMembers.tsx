@@ -186,7 +186,7 @@ function MemberRow({
   return (
     <div
       className="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors forgebadger-animate-in hover:bg-muted/40"
-      style={{ animationDelay: `${index * 40}ms` }}
+      style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
     >
       <div className="min-w-0 basis-full md:flex-1">
         <div className="truncate text-sm font-medium">{member.email}</div>
@@ -200,7 +200,7 @@ function MemberRow({
           <Badge variant="secondary">{roleLabel(member.role, t)}</Badge>
         ) : (
           <select
-            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="h-8 w-full rounded-md border border-input bg-control px-2 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
             aria-label={`${t("members.role")}: ${member.email}`}
             disabled={mutation.isPending}
             value={form.role}
@@ -220,14 +220,14 @@ function MemberRow({
         <span
           className={cn(
             "size-1.5 shrink-0 rounded-full",
-            effectiveStatus === "disabled" ? "bg-muted-foreground/40" : "bg-emerald-400"
+            effectiveStatus === "disabled" ? "bg-muted-foreground/40" : "bg-success"
           )}
         />
         {isSelf ? (
           <Badge variant="outline">{statusLabel(member.status, t)}</Badge>
         ) : (
           <select
-            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="h-8 w-full rounded-md border border-input bg-control px-2 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
             aria-label={`${t("members.status")}: ${member.email}`}
             disabled={mutation.isPending}
             value={form.status}

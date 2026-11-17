@@ -7,6 +7,7 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import { IconTile } from "@/components/ui/icon-tile";
 import { Switch } from "@/components/ui/switch";
 
 interface SettingsSectionProps {
@@ -46,9 +47,9 @@ export function SettingsCardHeader({
 }: SettingsCardHeaderProps) {
   return (
     <CardHeader className="flex flex-wrap items-start gap-3 space-y-0">
-      <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+      <IconTile size="md" tone="brand">
         {icon}
-      </div>
+      </IconTile>
       <div className="min-w-0 flex-1">
         <CardTitle id={titleId} className="text-sm font-semibold">
           {title}

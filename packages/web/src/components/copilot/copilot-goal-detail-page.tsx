@@ -118,14 +118,14 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
 
   if (goalQuery.isPending) {
     return (
-      <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 pt-16 md:p-6">
+      <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 md:p-6">
         <p role="status" className="text-xs text-muted-foreground">{copy.loading}</p>
       </div>
     );
   }
   if (goalQuery.isError) {
     return (
-      <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 pt-16 md:p-6">
+      <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 md:p-6">
         <BackLink />
         <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           <p>{copy.loadFailed}</p>
@@ -150,7 +150,7 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
   const pendingIntegration = mergeable ? unintegratedTasks(sortedTasks, team?.tasks) : [];
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 pt-16 md:p-6">
+    <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 md:p-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <BackLink />

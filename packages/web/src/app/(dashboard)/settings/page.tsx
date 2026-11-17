@@ -141,27 +141,37 @@ export default function SettingsPage() {
           aria-label={t("settings.title")}
           className="mb-4 flex gap-1 overflow-x-auto lg:sticky lg:top-6 lg:mb-0 lg:flex-col lg:self-start"
         >
-          {sections.map((section) => (
-            <Link
-              key={section.id}
-              href={`/settings?section=${section.id}`}
-              aria-current={active.id === section.id ? "page" : undefined}
-              className={cn(
-                "flex h-8 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition-colors duration-150",
-                active.id === section.id
-                  ? "bg-brand/10 text-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
-            >
-              <section.icon
+          {sections.map((section) => {
+            const isActive = active.id === section.id;
+            return (
+              <Link
+                key={section.id}
+                href={`/settings?section=${section.id}`}
+                aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "size-4 shrink-0",
-                  active.id === section.id ? "text-brand" : "text-muted-foreground/70"
+                  "relative flex h-8 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition-[background-color,color,box-shadow] duration-150",
+                  isActive
+                    ? "bg-card text-foreground shadow-card ring-1 ring-border/70"
+                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                 )}
-              />
-              {t(section.labelKey)}
-            </Link>
-          ))}
+              >
+                {isActive && (
+                  <span
+                    className="hidden h-4 w-0.5 rounded-full bg-brand lg:block"
+                    aria-hidden="true"
+                  />
+                )}
+                <section.icon
+                  strokeWidth={1.75}
+                  className={cn(
+                    "size-4 shrink-0",
+                    isActive ? "text-brand" : "text-muted-foreground/75"
+                  )}
+                />
+                {t(section.labelKey)}
+              </Link>
+            );
+          })}
         </nav>
 
         <div key={active.id} className="min-w-0">

@@ -65,15 +65,17 @@ export function ProviderList({
                 <div
                   key={provider.id}
                   className={cn(
-                    "group relative flex w-full items-center gap-2.5 rounded-lg py-2 pl-3 pr-1.5 text-sm transition-colors forgebadger-animate-in",
-                    isSelected ? "bg-accent" : "hover:bg-muted/50"
+                    "group relative flex w-full items-center gap-2.5 rounded-lg py-2 pl-3 pr-1.5 text-sm transition-[background-color,box-shadow] duration-150 forgebadger-animate-in",
+                    isSelected
+                      ? "bg-card text-foreground shadow-card ring-1 ring-border/70"
+                      : "hover:bg-muted/55"
                   )}
-                  style={{ animationDelay: `${index * 40}ms` }}
+                  style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
                 >
                   {isSelected && (
                     <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-brand" aria-hidden="true" />
                   )}
-                  <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-brand/10 text-xs font-semibold text-brand" aria-hidden="true">
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-brand/10 text-xs font-semibold text-brand ring-1 ring-inset ring-brand/15" aria-hidden="true">
                     {provider.name.trim().charAt(0).toUpperCase() || "?"}
                   </span>
                   <button
