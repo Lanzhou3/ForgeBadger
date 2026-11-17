@@ -4,7 +4,10 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Square, ClipboardList, Copy, Download, ExternalLink, FileText, History, Maximize2, Minimize2 } from "lucide-react";
+import {
+  Square, ClipboardList, Copy, Download, ExternalLink, FileText, History, Maximize2, Minimize2,
+  PanelRightClose, PanelRightOpen,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -40,8 +44,9 @@ import {
   sessionTaskPacketProjectManagerHref,
 } from "@/components/sessions/session-task-packet";
 import { GitChangesPanel } from "@/components/sessions/git-changes-panel";
+import { SessionInspectorPanel } from "@/components/sessions/session-inspector-panel";
 import { SessionSummaryPanel } from '@/components/sessions/SessionSummaryPanel';
-import { ProviderQuotaPanel } from "@/components/sessions/provider-quota-panel";
+import { ProviderQuotaPanel, supportsProviderQuota } from "@/components/sessions/provider-quota-panel";
 import { SessionNotificationBell } from "@/components/sessions/session-notification-bell";
 import {
   auditSessionHandoffExportInput,
@@ -66,6 +71,41 @@ export default function TerminalPage() {
   const id = params.id as string;
   const [focusMode, setFocusMode] = useState(false);
   const [outputHistoryOpen, setOutputHistoryOpen] = useState(false);
+  // Independent of focus mode: the inspector pane can be collapsed on its own
+  // so the terminal gains the width without hiding the app navigation.
+  // Starts closed so a compact viewport never auto-opens the overlay sheet; the
+  // mount effect opens it on desktop unless the user collapsed it previously.
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [gitChangeCount, setGitChangeCount] = useState<number | null>(null);
+  const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
+
+  useEffect(() => {
+    let stored: string | null = null;
+    try {
+      stored = window.localStorage.getItem("forgebadger.session-inspector-open");
+    } catch {
+      // Storage access is optional.
+    }
+    if (stored === "0") return;
+    if (typeof window.matchMedia !== "function") {
+      // No media query support (e.g. a test/jsdom runtime): keep the explicit
+      // default rather than guessing a viewport.
+      return;
+    }
+    if (window.matchMedia("(min-width: 1024px)").matches) setInspectorOpen(true);
+  }, []);
+
+  const toggleInspector = () => {
+    setInspectorOpen((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem("forgebadger.session-inspector-open", next ? "1" : "0");
+      } catch {
+        // Persisting the pane preference is optional.
+      }
+      return next;
+    });
+  };
 
   const authToken = getToken() ?? "";
   const attachTokenOverride = searchParams.get("attachToken");
@@ -317,6 +357,52 @@ export default function TerminalPage() {
     return () => document.body.removeAttribute("data-session-focus-mode");
   }, [focusModeActive, view]);
 
+  const stopConfirmTitle = `${t("common.stop")} · ${session?.name ?? id}`;
+
+  const inspectorContent = (
+    <SessionInspectorPanel
+      open={inspectorOpen}
+      onOpenChange={(next) => {
+        setInspectorOpen(next);
+        try {
+          window.localStorage.setItem("forgebadger.session-inspector-open", next ? "1" : "0");
+        } catch {
+          // Persisting the pane preference is optional.
+        }
+      }}
+      gitContent={
+        session?.projectId ? (
+          <GitChangesPanel
+            projectId={session.projectId}
+            embedded
+            onChangedCount={setGitChangeCount}
+          />
+        ) : (
+          <p className="text-xs text-muted-foreground">{t("sessions.gitNotRepo")}</p>
+        )
+      }
+      gitCount={gitChangeCount}
+      taskContent={
+        <SessionTaskPacketPanel
+          error={taskPacketError}
+          isFetching={isTaskPacketFetching}
+          embedded
+          session={session}
+          taskPacket={sessionTaskPacket}
+        />
+      }
+      taskAvailable={Boolean(sessionTaskPacket) || isTaskPacketFetching || Boolean(taskPacketError)}
+      quotaContent={
+        supportsProviderQuota(session?.aiTool) && session?.aiTool ? (
+          <ProviderQuotaPanel aiTool={session.aiTool} embedded />
+        ) : (
+          <p className="text-xs text-muted-foreground">{t("sessions.providerQuotaEmpty")}</p>
+        )
+      }
+      quotaAvailable={supportsProviderQuota(session?.aiTool)}
+    />
+  );
+
   // 5. The chrome row (tabs + status + bell) is always rendered. The terminal
   //    toolbar actions only make sense against a live terminal, so they are
   //    gated on the terminal view.
@@ -334,12 +420,30 @@ export default function TerminalPage() {
                 <Button
                   variant="ghost"
                   size="icon"
+                  className={cn(
+                    "size-8 text-muted-foreground hover:text-foreground",
+                    focusMode && "hidden"
+                  )}
+                  onClick={toggleInspector}
+                  title={inspectorOpen ? t("sessions.hideInspector") : t("sessions.showInspector")}
+                  aria-label={inspectorOpen ? t("sessions.hideInspector") : t("sessions.showInspector")}
+                  aria-pressed={inspectorOpen}
+                >
+                  {inspectorOpen ? (
+                    <PanelRightClose className="size-4" aria-hidden="true" />
+                  ) : (
+                    <PanelRightOpen className="size-4" aria-hidden="true" />
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="size-8 text-muted-foreground hover:text-foreground"
                   title={t("terminal.historyOutput")}
                   aria-label={t("terminal.historyOutput")}
                   onClick={() => setOutputHistoryOpen(true)}
                 >
-                  <History className="size-4" />
+                  <History className="size-4" aria-hidden="true" />
                 </Button>
                 <Button
                   variant="ghost"
@@ -349,19 +453,19 @@ export default function TerminalPage() {
                   title={focusMode ? t("sessions.exitFocusMode") : t("sessions.focusMode")}
                   aria-label={focusMode ? t("sessions.exitFocusMode") : t("sessions.focusMode")}
                 >
-                  {focusMode ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                  {focusMode ? <Minimize2 className="size-4" aria-hidden="true" /> : <Maximize2 className="size-4" aria-hidden="true" />}
                 </Button>
                 <div className="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => stopMutation.mutate()}
+                  className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => setStopConfirmOpen(true)}
                   disabled={stopMutation.isPending}
                   title={stopMutation.isPending ? t("sessions.stopping") : t("common.stop")}
                   aria-label={stopMutation.isPending ? t("sessions.stopping") : t("common.stop")}
                 >
-                  <Square className="size-4" />
+                  <Square className="size-4" aria-hidden="true" />
                 </Button>
               </>
             )}
@@ -369,10 +473,20 @@ export default function TerminalPage() {
         }
       />
 
+      <StopSessionDialog
+        open={stopConfirmOpen}
+        title={stopConfirmTitle}
+        pending={stopMutation.isPending}
+        onOpenChange={setStopConfirmOpen}
+        onConfirm={() => {
+          stopMutation.mutate(undefined, { onSettled: () => setStopConfirmOpen(false) });
+        }}
+      />
+
       {session && (view !== "terminal" || !focusMode) && <SessionSummaryPanel sessionId={id} />}
       {view === "terminal" ? (
-        <div className={focusMode ? "grid min-h-0 flex-1 grid-cols-1 overflow-hidden" : "grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px]"}>
-          <div className="h-full min-h-0 overflow-hidden">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <div className="min-w-0 flex-1 overflow-hidden">
             <TerminalView
               sessionId={id}
               authToken={authToken}
@@ -383,15 +497,7 @@ export default function TerminalPage() {
               credentialsPending={!hasAttachToken}
             />
           </div>
-          {!focusMode && (
-            <SessionSidePanel
-              projectId={session?.projectId}
-              session={session}
-              taskPacket={sessionTaskPacket}
-              taskPacketError={taskPacketError}
-              taskPacketFetching={isTaskPacketFetching}
-            />
-          )}
+          {!focusMode ? inspectorContent : null}
         </div>
       ) : view === "preparing" ? (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
@@ -416,6 +522,39 @@ interface ProblemView {
   hint?: string;
   tone?: "destructive" | "warning" | "muted";
   action?: React.ReactNode;
+}
+
+/**
+ * Stop confirmation. Stopping kills the running CLI process, so a single
+ * mis-click next to the view controls must not do it silently; the dialog
+ * names the session and explains that unsaved terminal state is lost.
+ */
+function StopSessionDialog({
+  open,
+  title,
+  pending,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  pending: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useLanguage();
+  return (
+    <ConfirmDialog
+      open={open}
+      title={title}
+      description={t("sessions.stopConfirmDescription")}
+      confirmLabel={pending ? t("sessions.stopping") : t("common.stop")}
+      destructive
+      pending={pending}
+      onOpenChange={onOpenChange}
+      onConfirm={onConfirm}
+    />
+  );
 }
 
 /**
@@ -448,22 +587,22 @@ function SessionProblemBody({
 }) {
   const { t } = useLanguage();
   return (
-    <div className="flex flex-1 items-center justify-center">
+    <div className="flex flex-1 items-center justify-center p-6">
       <div
         className={cn(
-          "max-w-md rounded-lg border p-6 text-center",
+          "max-w-md rounded-xl border p-6 text-center shadow-card",
           tone === "warning"
-            ? "border-amber-500/50 bg-amber-500/10"
+            ? "border-warning/40 bg-warning/8"
             : tone === "muted"
-              ? "border-border/70 bg-muted/30"
-              : "border-destructive/50 bg-destructive/10"
+              ? "border-border/70 bg-card"
+              : "border-destructive/40 bg-destructive/8"
         )}
       >
         <h2
           className={cn(
-            "text-lg font-semibold",
+            "text-base font-semibold tracking-tight",
             tone === "warning"
-              ? "text-amber-500"
+              ? "text-warning"
               : tone === "muted"
                 ? "text-foreground"
                 : "text-destructive"
@@ -487,55 +626,26 @@ function SessionProblemBody({
   );
 }
 
-function SessionSidePanel({
-  projectId,
-  session,
-  taskPacket,
-  taskPacketError,
-  taskPacketFetching,
-}: {
-  projectId?: string;
-  session?: Session;
-  taskPacket: ProjectManagerTaskPacket | null;
-  taskPacketError: unknown;
-  taskPacketFetching: boolean;
-}) {
-  return (
-    <aside className="hidden min-h-0 overflow-auto border-t border-border bg-background/95 p-3 lg:block lg:border-l lg:border-t-0">
-      <div className="space-y-3">
-        <SessionTaskPacketPanel
-          error={taskPacketError}
-          isFetching={taskPacketFetching}
-          session={session}
-          taskPacket={taskPacket}
-        />
-        {session?.aiTool ? (
-          <ProviderQuotaPanel aiTool={session.aiTool} />
-        ) : null}
-        {projectId ? (
-          <GitChangesPanel projectId={projectId} />
-        ) : null}
-      </div>
-    </aside>
-  );
-}
-
 function SessionTaskPacketPanel({
   error,
   isFetching,
   session,
   taskPacket,
+  embedded = false,
 }: {
   error: unknown;
   isFetching: boolean;
   session?: Session;
   taskPacket: ProjectManagerTaskPacket | null;
+  /** Borderless variant for the tabbed inspector pane. */
+  embedded?: boolean;
 }) {
   const { t } = useLanguage();
+  const sectionClass = embedded ? "space-y-2" : "rounded-lg border border-border p-3";
 
   if (error) {
     return (
-      <section className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
+      <section className={embedded ? "rounded-lg border border-destructive/40 bg-destructive/8 p-3" : "rounded-lg border border-destructive/50 bg-destructive/10 p-3"}>
         <div className="flex items-center gap-2 text-sm font-medium text-destructive">
           <ClipboardList className="size-4" />
           {t("sessions.taskPacketHandoff")}
@@ -550,7 +660,7 @@ function SessionTaskPacketPanel({
   if (!taskPacket) {
     if (!isFetching) return null;
     return (
-      <section className="rounded-lg border border-border p-3">
+      <section className={sectionClass}>
         <div className="flex items-center gap-2 text-sm font-medium">
           <ClipboardList className="size-4 text-muted-foreground" />
           {t("sessions.taskPacketHandoff")}
@@ -563,7 +673,7 @@ function SessionTaskPacketPanel({
   }
 
   return (
-    <section className="rounded-lg border border-border p-3" data-testid="session-task-packet-handoff">
+    <section className={sectionClass} data-testid="session-task-packet-handoff">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <ClipboardList className="size-4 shrink-0 text-muted-foreground" />
@@ -835,8 +945,8 @@ function SessionStatusBadge({ status }: { status?: string }) {
   const normalizedStatus = normalizeSessionStatus(status);
   if (normalizedStatus === "running") {
     return (
-      <Badge variant="default" className="gap-1.5 bg-green-600 hover:bg-green-600">
-        <span className="size-1.5 rounded-full bg-white motion-safe:animate-pulse" />
+      <Badge variant="outline" className="gap-1.5 border-success/40 bg-success/10 text-success">
+        <span className="size-1.5 rounded-full bg-success forgebadger-pulse-dot" />
         {t("sessions.running")}
       </Badge>
     );
@@ -846,7 +956,7 @@ function SessionStatusBadge({ status }: { status?: string }) {
   }
   if (normalizedStatus === "lost") {
     return (
-      <Badge className="gap-1.5 bg-amber-600 text-white hover:bg-amber-600">
+      <Badge variant="outline" className="gap-1.5 border-warning/40 bg-warning/10 text-warning">
         {t("sessions.lost")}
       </Badge>
     );

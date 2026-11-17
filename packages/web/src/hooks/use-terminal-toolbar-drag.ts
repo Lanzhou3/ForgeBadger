@@ -105,7 +105,8 @@ export function useTerminalToolbarDrag(containerRef: RefObject<HTMLDivElement | 
     top: MARGIN + position.y * Math.max(0, geometry.height - geometry.toolbarHeight - MARGIN * 2),
     right: "auto", bottom: "auto",
   } : undefined;
-  return { toolbarRef, style, handleProps: {
+  const nearBottom = Boolean(position && position.y > 0.78);
+  return { toolbarRef, style, nearBottom, handleProps: {
     onPointerDown, onPointerMove, onPointerUp, onKeyDown,
     onPointerCancel: onPointerUp,
     onLostPointerCapture: () => { dragRef.current = null; },

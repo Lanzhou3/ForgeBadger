@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ChevronRight, MoreHorizontal, Plus, X } from "lucide-react";
@@ -99,7 +99,7 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
   const suppressTabClick = useRef(false);
   const dragClickTimer = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const [fadeRight, setFadeRight] = useState(false);
+  const [edgeFade, setEdgeFade] = useState({ left: false, right: false });
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
@@ -174,13 +174,15 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
     activeTab?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeSessionId, tabs, collapsedGroups]);
 
-  // Fade the trailing edge of the scroll area only when more tabs are hidden
-  // behind the pinned action cluster — soft gradient instead of a hard cut.
+  // Fade scrolled edges of the tab strip when more tabs lie beyond either side.
   useEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
     const update = () => {
-      setFadeRight(element.scrollWidth - element.scrollLeft - element.clientWidth > 1);
+      setEdgeFade({
+        left: element.scrollLeft > 1,
+        right: element.scrollWidth - element.scrollLeft - element.clientWidth > 1,
+      });
     };
     // No visible scrollbar by design; translate vertical wheel gestures into
     // horizontal scrolling so mouse users can still traverse the strip.
@@ -258,17 +260,21 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
       onDragEnd={reorderTab}
       accessibility={{ screenReaderInstructions: { draggable: t("sessions.tabDragInstructions") } }}
     >
-      <div className="flex h-10 min-w-0 items-end border-b border-border bg-muted/20 pl-16 pt-1.5 md:pl-2" data-testid="session-tabs">
+      <div className="flex h-10 min-w-0 shrink-0 items-center gap-1 border-b border-border bg-sidebar/90 pl-16 pr-1.5 md:pl-2.5" data-testid="session-tabs">
         {/* Only the tab labels scroll; the + and action cluster stay pinned right. */}
         <div
           ref={scrollRef}
-          className={
-            fadeRight
-              ? "flex min-w-0 flex-1 items-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%_-_40px),transparent)]"
-              : "flex min-w-0 flex-1 items-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={
+            edgeFade.left || edgeFade.right
+              ? {
+                  maskImage: `linear-gradient(to right, ${edgeFade.left ? "transparent, black 28px" : "black"}, ${edgeFade.right ? "black calc(100% - 36px), transparent" : "black"})`,
+                  WebkitMaskImage: `linear-gradient(to right, ${edgeFade.left ? "transparent, black 28px" : "black"}, ${edgeFade.right ? "black calc(100% - 36px), transparent" : "black"})`,
+                }
+              : undefined
           }
+          className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
-          {groupSessionTabs(tabs).map((group) => {
+          {groupSessionTabs(tabs).map((group, groupIndex) => {
             const visibleGroupTabs = group.tabs.filter((tab) => visibleIds.has(tab.id));
             const collapsed = collapsedGroups.has(group.id);
             const groupColor = sessionTabGroupColor(group.projectName ?? "");
@@ -278,11 +284,13 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
               .replace("{project}", projectName);
             const groupElementId = `session-tab-group-${encodeURIComponent(group.id)}`;
             return (
-              <div key={group.id} role="group" aria-label={projectName} className="flex shrink-0 items-end gap-1">
+              <div key={group.id} role="group" aria-label={projectName} className="flex shrink-0 items-center gap-1">
+                {groupIndex > 0 && (
+                  <span aria-hidden="true" className="mx-0.5 h-4 border-l border-border/60" />
+                )}
                 <button
                   type="button"
-                  className="mb-1 inline-flex h-7 max-w-44 shrink-0 items-center gap-1 rounded-md px-2 text-[10px] font-semibold hover:brightness-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[active-group=true]:ring-1 data-[active-group=true]:ring-inset data-[active-group=true]:ring-current"
-                  style={{ backgroundColor: `${groupColor}26`, color: groupColor }}
+                  className="inline-flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-card/55 px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:border-border hover:bg-card hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[active-group=true]:border-border data-[active-group=true]:bg-card/85 data-[active-group=true]:text-foreground"
                   title={toggleLabel}
                   aria-label={toggleLabel}
                   aria-expanded={!collapsed}
@@ -290,12 +298,19 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
                   data-active-group={group.tabs.some(tab => tab.id === activeSessionId) ? "true" : undefined}
                   onClick={() => setGroupCollapsed(group.id, !collapsed)}
                 >
-                  <ChevronRight className={collapsed ? "size-3 shrink-0" : "size-3 shrink-0 rotate-90"} />
+                  <span
+                    aria-hidden="true"
+                    className="size-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: groupColor }}
+                  />
                   <span className="truncate">{projectName}</span>
-                  <span className="shrink-0 opacity-70">({group.tabs.length})</span>
+                  <span className="forgebadger-tabular-nums shrink-0 text-[10px] opacity-65">
+                    {group.tabs.length}
+                  </span>
+                  <ChevronRight className={cn("size-3 shrink-0 opacity-60 transition-transform duration-150", !collapsed && "rotate-90")} aria-hidden="true" />
                 </button>
                 <SortableContext items={visibleGroupTabs.map(tab => tab.id)} strategy={horizontalListSortingStrategy}>
-                  <div id={groupElementId} className="flex items-end gap-1">
+                  <div id={groupElementId} className="flex items-center gap-1">
                     {visibleGroupTabs.map((tab) => {
                       const active = tab.id === activeSessionId || pathname === `/sessions/${tab.id}`;
                       return (
@@ -324,7 +339,7 @@ export function SessionTabs({ activeSessionId, trailing }: Props) {
             );
           })}
         </div>
-        <div className="flex shrink-0 items-center gap-1 self-center px-1">
+        <div className="flex shrink-0 items-center gap-1 pl-1">
           {hiddenTabs.length > 0 && (
             <OverflowTabsMenu
               workStates={workStates}
@@ -404,17 +419,17 @@ function SessionTabItem({
         listeners?.onPointerDown?.(event);
       }}
       className={cn(
-        "select-none cursor-grab active:cursor-grabbing",
-        isDragging && "relative z-10 opacity-80",
+        "relative select-none cursor-grab active:cursor-grabbing",
+        isDragging && "z-10 opacity-80",
         active
-          ? "group flex h-8 max-w-60 shrink-0 items-center gap-2 rounded-t-md border border-b-background border-border bg-background px-2.5 text-left text-xs text-foreground transition-colors duration-150"
-          : "group flex h-8 max-w-60 shrink-0 items-center gap-2 rounded-t-md border border-transparent bg-transparent px-2.5 text-left text-xs text-muted-foreground transition-colors duration-150 hover:border-border/60 hover:bg-muted/40 hover:text-foreground"
+          ? "group flex h-7 max-w-60 shrink-0 items-center gap-2 rounded-md border border-border bg-card px-2.5 text-left text-xs text-foreground shadow-xs transition-colors duration-150 after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:border-b-2 after:border-[var(--tab-brand-color)]"
+          : "group flex h-7 max-w-60 shrink-0 items-center gap-2 rounded-md border border-transparent bg-transparent px-2.5 text-left text-xs text-muted-foreground transition-colors duration-150 hover:border-border/60 hover:bg-card/50 hover:text-foreground"
       )}
       style={{
-        ...(active ? { boxShadow: `inset 0 2px 0 0 ${brand.color}` } : {}),
+        "--tab-brand-color": brand.color,
         transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
         transition: transition ?? undefined,
-      }}
+      } as CSSProperties}
       title={`${text}${tab.projectName ? ` · ${tab.projectName}` : ""} · ${brand.label}`}
     >
       <button
@@ -578,15 +593,16 @@ function NewCliSessionButton({
         <Button
           variant="ghost"
           size="icon"
-          className="mb-1 size-6 shrink-0 rounded-sm text-muted-foreground hover:text-foreground"
+          className="size-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground"
           title={label}
           aria-label={label}
           onClick={() => setOpen(true)}
         >
-          <Plus className="size-3.5" />
+          <Plus className="size-3.5" aria-hidden="true" />
         </Button>
       <SessionLaunchDialog
         projectId={projectId}
+        projectName={projectName}
         open={open}
         onOpenChange={setOpen}
         onCreated={(session) => {

@@ -177,8 +177,8 @@ export function SessionBookmark() {
           <CliBrandIcon aiTool={rendered.aiTool} className="size-4" />
         )}
         <span className="absolute right-1.5 top-1.5 flex size-2">
-          <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-          <span className="relative inline-flex size-2 rounded-full bg-emerald-500 ring-1 ring-card" />
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60" />
+          <span className="relative inline-flex size-2 rounded-full bg-success ring-1 ring-card" />
         </span>
       </button>
       <div className={cn(

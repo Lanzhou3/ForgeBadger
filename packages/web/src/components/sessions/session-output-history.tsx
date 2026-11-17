@@ -202,7 +202,7 @@ export function SessionOutputHistory({
             title={t("terminal.historyRefresh")}
             aria-label={t("terminal.historyRefresh")}
           >
-            <RefreshCw className={cn("size-3.5", loadState === "loading" && "animate-spin")} />
+            <RefreshCw className={cn("size-3.5", loadState === "loading" && "motion-safe:animate-spin")} aria-hidden="true" />
           </Button>
           <Button
             type="button"
@@ -213,7 +213,7 @@ export function SessionOutputHistory({
             title={t("common.close")}
             aria-label={t("common.close")}
           >
-            <X className="size-3.5" />
+            <X className="size-3.5" aria-hidden="true" />
           </Button>
         </div>
       </div>
@@ -224,13 +224,13 @@ export function SessionOutputHistory({
           className="h-full min-h-0 [&_.xterm-cursor]:!opacity-0 [&_.xterm-screen]:!h-full [&_.xterm-viewport]:!h-full [&_.xterm]:h-full"
         />
         {loadState === "loading" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-sm text-muted-foreground">
+          <div className="absolute inset-0 flex items-center justify-center bg-terminal/85 text-sm text-muted-foreground backdrop-blur-xs">
             {t("common.loading")}
           </div>
         )}
         {loadState === "error" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-            <div className="max-w-sm rounded-md border border-destructive/50 bg-destructive/10 p-4 text-center">
+          <div className="absolute inset-0 flex items-center justify-center bg-terminal/90 p-4 backdrop-blur-xs">
+            <div className="max-w-sm rounded-xl border border-destructive/40 bg-card/95 p-4 text-center shadow-card">
               <p className="text-sm font-medium text-destructive">
                 {t("terminal.historyLoadFailed")}
               </p>

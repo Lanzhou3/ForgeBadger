@@ -13,12 +13,16 @@ import { cn } from "@/lib/utils";
 
 interface Props {
   projectId: string;
+  /** Render borderless inside a tabbed inspector pane (avoids nested scrollbars). */
+  embedded?: boolean;
+  /** Reports the working-tree change count for the inspector tab badge. */
+  onChangedCount?: (count: number | null) => void;
 }
 
 const REFRESH_INTERVAL_MS = 15_000;
 const FILES_PER_PAGE = 100;
 
-export function GitChangesPanel({ projectId }: Props) {
+export function GitChangesPanel({ projectId, embedded = false, onChangedCount }: Props) {
   const { t } = useLanguage();
   const [diffTarget, setDiffTarget] = useState<GitDiffTarget | null>(null);
   const { data, error, isFetching, refetch } = useQuery({
@@ -28,12 +32,28 @@ export function GitChangesPanel({ projectId }: Props) {
     retry: false,
   });
 
+  // The inspector tab badge needs the working-tree size without duplicating
+  // the query; report it whenever a settled payload arrives.
+  // The payload is validated defensively: a Gateway version skew or a partial
+  // response must degrade to "no changes", never crash the inspector pane.
+  const changed = Array.isArray(data?.changed) ? data.changed : [];
+  const commits = Array.isArray(data?.commits) ? data.commits : [];
+  useEffect(() => {
+    if (!onChangedCount) return;
+    onChangedCount(data ? changed.length : null);
+  }, [changed.length, data, onChangedCount]);
+
   return (
-    <section className="rounded-lg border border-border p-3" data-testid="git-changes-panel">
+    <section
+      className={embedded ? "space-y-3" : "rounded-lg border border-border p-3"}
+      data-testid="git-changes-panel"
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <GitBranch className="size-4 shrink-0 text-muted-foreground" />
-          <span className="shrink-0">{t("sessions.gitChanges")}</span>
+          {/* The inspector tab already names this pane, so the embedded variant
+              leads with the branch instead of repeating the heading. */}
+          {embedded ? null : <span className="shrink-0">{t("sessions.gitChanges")}</span>}
           {data?.branch && (
             <span
               className="min-w-0 truncate rounded-full bg-muted/50 px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
@@ -67,25 +87,30 @@ export function GitChangesPanel({ projectId }: Props) {
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <FileDiff className="size-3.5" />
               {t("sessions.gitWorkingTree")}
-              {data && data.changed.length > 0 && (
-                <span className="text-muted-foreground/60">({data.changed.length})</span>
+              {changed.length > 0 && !embedded && (
+                <span className="text-muted-foreground/60">({changed.length})</span>
               )}
             </div>
-            {data.changed.length === 0 ? (
+            {changed.length === 0 ? (
               <p className="mt-1.5 text-xs text-muted-foreground">{t("sessions.gitNoChanges")}</p>
             ) : (
-              <GitWorkingTreeList key={projectId} entries={data.changed} onOpen={setDiffTarget} />
+              <GitWorkingTreeList
+                key={projectId}
+                entries={changed}
+                embedded={embedded}
+                onOpen={setDiffTarget}
+              />
             )}
           </div>
 
-          {data && data.commits.length > 0 && (
+          {commits.length > 0 && (
             <div className="mt-3 border-t border-border/70 pt-3">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <GitCommitHorizontal className="size-3.5" />
                 {t("sessions.gitCommits")}
               </div>
               <ul className="mt-1.5 space-y-1">
-                {data.commits.map((commit) => (
+                {commits.map((commit) => (
                   <li key={commit.hash} className="min-w-0">
                     <div className="flex items-baseline gap-2">
                       <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
@@ -116,10 +141,11 @@ export function GitChangesPanel({ projectId }: Props) {
 
 interface GitWorkingTreeListProps {
   entries: GitWorkingTreeEntry[];
+  embedded?: boolean;
   onOpen: (target: GitDiffTarget) => void;
 }
 
-function GitWorkingTreeList({ entries, onOpen }: GitWorkingTreeListProps) {
+function GitWorkingTreeList({ entries, embedded = false, onOpen }: GitWorkingTreeListProps) {
   const { t } = useLanguage();
   const [filter, setFilter] = useState("");
   const [page, setPage] = useState(0);
@@ -152,7 +178,10 @@ function GitWorkingTreeList({ entries, onOpen }: GitWorkingTreeListProps) {
         <p className="text-xs text-muted-foreground">{t("sessions.gitNoMatchingFiles")}</p>
       ) : (
         <>
-          <ul key={`${query}-${currentPage}`} className="max-h-80 space-y-0.5 overflow-y-auto">
+          <ul
+            key={`${query}-${currentPage}`}
+            className={cn("space-y-0.5", !embedded && "max-h-80 overflow-y-auto")}
+          >
             {visible.map((entry) => (
               <GitChangeRow key={`${entry.status}-${entry.path}`} entry={entry} onOpen={onOpen} />
             ))}
@@ -199,6 +228,12 @@ function GitWorkingTreeList({ entries, onOpen }: GitWorkingTreeListProps) {
   );
 }
 
+function splitPath(path: string): { dir: string; base: string } {
+  const index = path.lastIndexOf("/");
+  if (index < 0) return { dir: "", base: path };
+  return { dir: path.slice(0, index + 1), base: path.slice(index + 1) };
+}
+
 function GitChangeRow({
   entry,
   onOpen,
@@ -208,24 +243,32 @@ function GitChangeRow({
 }) {
   const meta = gitStatusMeta(entry.status);
   const untracked = entry.status === "??";
+  const { dir, base } = splitPath(entry.path);
   return (
     <li>
       <button
         type="button"
-        className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none"
+        className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
         onClick={() => onOpen({ path: entry.path, untracked })}
+        title={entry.path}
       >
         <span
-          className={cn("w-3 shrink-0 text-center font-mono text-[10px] font-semibold", meta.className)}
-          title={entry.status.trim() || entry.status}
+          className={cn(
+            "inline-flex size-4 shrink-0 items-center justify-center rounded font-mono text-[10px] font-semibold",
+            meta.className
+          )}
+          aria-hidden="true"
         >
           {meta.label}
         </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs" title={entry.path}>
-          {entry.path}
+        {/* The directory truncates first so the file name always stays
+            readable, which is what a changed-file list is scanned for. */}
+        <span className="flex min-w-0 flex-1 items-baseline font-mono text-xs">
+          <span className="min-w-0 truncate text-muted-foreground/55">{dir}</span>
+          <span className="shrink-0">{base}</span>
         </span>
         {entry.staged && (
-          <span className="size-1 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+          <span className="size-1.5 shrink-0 rounded-full bg-success" aria-hidden="true" />
         )}
       </button>
     </li>
@@ -233,20 +276,20 @@ function GitChangeRow({
 }
 
 function gitStatusMeta(status: string): { label: string; className: string } {
-  if (status === "??") return { label: "U", className: "text-emerald-400" };
+  if (status === "??") return { label: "U", className: "bg-success/12 text-success" };
   const code = status.trim().charAt(0) || status.charAt(1) || status.charAt(0);
   switch (code) {
     case "M":
-      return { label: "M", className: "text-amber-400" };
+      return { label: "M", className: "bg-warning/12 text-warning" };
     case "A":
-      return { label: "A", className: "text-emerald-400" };
+      return { label: "A", className: "bg-success/12 text-success" };
     case "D":
-      return { label: "D", className: "text-red-400" };
+      return { label: "D", className: "bg-destructive/12 text-destructive" };
     case "R":
-      return { label: "R", className: "text-sky-400" };
+      return { label: "R", className: "bg-hue-sky/12 text-hue-sky" };
     case "C":
-      return { label: "C", className: "text-sky-400" };
+      return { label: "C", className: "bg-hue-sky/12 text-hue-sky" };
     default:
-      return { label: code || "?", className: "text-muted-foreground" };
+      return { label: code || "?", className: "bg-muted text-muted-foreground" };
   }
 }

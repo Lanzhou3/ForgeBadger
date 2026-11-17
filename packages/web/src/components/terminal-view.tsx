@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit";
 import type { Terminal as TerminalInstance } from "@xterm/xterm";
-import { ArrowDown, ClipboardCopy, Copy, Eraser, GripVertical, Minus, Plus } from "lucide-react";
+import { ArrowDown, ClipboardCopy, Copy, Eraser, GripVertical, Loader2, Minus, Plus, RotateCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useTerminalWriter } from "@/hooks/use-terminal-writer";
@@ -872,8 +872,6 @@ export function TerminalView({
     };
   }, [terminalReady, fitAndSendResize]);
 
-  const showReconnectingOverlay = status === "reconnecting";
-  const showFailedOverlay = status === "failed";
   // The status strip floats over the terminal instead of taking flow space,
   // so a connecting → connected flip never re-layouts the pane.
   const showStatusBar = status !== "connected";
@@ -883,11 +881,11 @@ export function TerminalView({
   const missingCredentials = (!authToken || !attachToken) && !credentialsPending;
   const statusTone =
     status === "connected"
-      ? "bg-emerald-500"
+      ? "bg-success"
       : status === "reconnecting"
-        ? "bg-amber-400"
+        ? "bg-warning"
         : status === "failed"
-          ? "bg-red-500"
+          ? "bg-destructive"
           : "bg-muted-foreground";
   const ToastIcon = terminalToast ? toneIcons[terminalToast.tone] : null;
 
@@ -907,8 +905,15 @@ export function TerminalView({
       {/* Padding lives on the wrapper, NOT on the xterm host: FitAddon reads
           the host's computed width/height (border-box under Tailwind preflight)
           without subtracting host padding, so padding here would overshoot
-          cols/rows and clip the rightmost character column. */}
-      <div ref={toolbarContainerRef} className="relative flex h-full min-h-0 flex-col overflow-hidden p-2 pb-12">
+          cols/rows and clip the rightmost character column. Extra bottom
+          clearance only activates when the floating toolbar is dragged low. */}
+      <div
+        ref={toolbarContainerRef}
+        className={cn(
+          "relative flex h-full min-h-0 flex-col overflow-hidden p-2",
+          toolbarDrag.nearBottom && "pb-12"
+        )}
+      >
         {/* Screen readers still get the connecting → connected transition even
             though the healthy state has no visible strip. */}
         {!showStatusBar && (
@@ -916,38 +921,69 @@ export function TerminalView({
             {statusLabel}
           </span>
         )}
-        {/* Status strip and read-only banner float as a semi-transparent
-            overlay instead of in-flow rows: a status flip must not re-layout
-            the terminal. pointer-events-none keeps the terminal interactive
-            through the gaps; the panels themselves stay clickable. */}
+        {/* Non-blocking floating status capsule and read-only banner: keeps
+            terminal scrollback readable and selectable during reconnects
+            without full-screen black curtains or layout shifts. */}
         {(showStatusBar || writer.readOnly) && (
-          <div className="pointer-events-none absolute inset-x-0 top-12 z-20 flex flex-col items-stretch gap-2 p-2">
+          <div className="pointer-events-none absolute inset-x-0 top-11 z-20 flex flex-col items-center gap-2 px-3">
             {showStatusBar && (
-              <div className="pointer-events-auto flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-border bg-terminal/85 px-3 py-2 text-xs text-muted-foreground">
-                <span className={cn("size-2 rounded-full", statusTone)} aria-hidden="true" />
-                <span aria-live="polite">{statusLabel}</span>
+              <div
+                className={cn(
+                  "pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs shadow-overlay backdrop-blur-md",
+                  status === "failed"
+                    ? "border-destructive/45 bg-popover/95 text-destructive"
+                    : status === "reconnecting"
+                      ? "border-warning/45 bg-popover/95 text-foreground"
+                      : "border-border/80 bg-popover/90 text-muted-foreground"
+                )}
+              >
+                {status === "connecting" || status === "reconnecting" ? (
+                  <Loader2
+                    aria-hidden="true"
+                    className={cn(
+                      "size-3.5 shrink-0 motion-safe:animate-spin",
+                      status === "reconnecting" ? "text-warning" : "text-muted-foreground"
+                    )}
+                  />
+                ) : (
+                  <span className={cn("size-2 shrink-0 rounded-full", statusTone)} aria-hidden="true" />
+                )}
+                <span aria-live="polite" className="font-medium">
+                  {statusLabel}
+                </span>
                 {attemptCount > 0 && (
-                  <span className="text-amber-600 dark:text-amber-300">
+                  <span className="forgebadger-tabular-nums text-warning">
                     {attemptCount}/{MAX_RECONNECT_ATTEMPTS}
                   </span>
                 )}
-                <span className="min-w-0 truncate font-mono">session {sessionId}</span>
+                {status === "failed" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleManualReconnect}
+                    className="h-6 rounded-full border-destructive/40 px-2.5 text-[11px] text-destructive hover:bg-destructive/10"
+                  >
+                    <RotateCw className="size-3" aria-hidden="true" />
+                    {t("terminal.reconnect")}
+                  </Button>
+                )}
               </div>
             )}
             {writer.readOnly && (
-              <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-terminal/85 p-2 text-xs text-amber-600 dark:text-amber-300" role="status">
-                <span>
+              <div className="pointer-events-auto flex max-w-xl flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-popover/92 px-3 py-2 text-xs text-warning shadow-raised backdrop-blur-md" role="status">
+                <span className="min-w-0 flex-1">
                   {writer.loading
                     ? t("terminal.writer.checking")
                     : writer.error
                       ? t("terminal.writer.syncFailed")
                       : t("terminal.writer.copilotReadOnly")}
                 </span>
-                <Button size="sm" variant="outline" disabled={writer.loading || writer.takingOver} onClick={writer.takeover}>
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={writer.loading || writer.takingOver} onClick={writer.takeover}>
                   {t("terminal.writer.takeover")}
                 </Button>
-                <Button size="sm" variant="ghost" onClick={writer.refresh}>{t("terminal.writer.refresh")}</Button>
-                {writer.error && <span role="alert">{writer.error.message}</span>}
+                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={writer.refresh}>{t("terminal.writer.refresh")}</Button>
+                {writer.error && <span role="alert" className="w-full text-destructive">{writer.error.message}</span>}
               </div>
             )}
           </div>
@@ -958,12 +994,13 @@ export function TerminalView({
           title={t("terminal.selectionHint")}
           className="min-h-0 flex-1 [&_.xterm-screen]:!h-full [&_.xterm-viewport]:!h-full [&_.xterm]:h-full"
         />
-        {/* Default and reset position: top-right. Status overlays sit below
-            this corner, keeping the controls accessible during reconnects.
-            The bottom band still protects input when the toolbar is moved. */}
+        {/* Default and reset position: top-right. Subtle translucent chrome
+            fades back while idle and sharpens on hover, focus, or selection. */}
         <div
           ref={toolbarDrag.toolbarRef}
           style={toolbarDrag.style}
+          role="toolbar"
+          aria-label={toolbarCopy.toolbarLabel}
           data-testid="terminal-toolbar"
           aria-busy={copying}
           onMouseDown={(event) => {
@@ -971,100 +1008,118 @@ export function TerminalView({
             // can still tab to and activate the buttons normally.
             if (event.button === 0 && event.target instanceof Element && event.target.closest("button")) event.preventDefault();
           }}
-          className="absolute right-2 top-2 z-10 flex w-max max-w-[calc(100%-1rem)] flex-wrap items-center gap-0.5 rounded-md border border-border bg-terminal/85 px-1 py-0.5 shadow-sm backdrop-blur-sm"
+          className={cn(
+            "absolute right-2 top-2 z-10 flex w-max max-w-[calc(100%-1rem)] flex-wrap items-center gap-0.5 rounded-lg border bg-popover/80 px-1.5 py-0.5 shadow-card backdrop-blur-md transition-[opacity,border-color,box-shadow] duration-150",
+            hasSelection
+              ? "border-brand/40 opacity-100 shadow-raised"
+              : "border-border/70 opacity-65 hover:opacity-100 focus-within:opacity-100"
+          )}
         >
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6 touch-none cursor-grab select-none active:cursor-grabbing"
-            aria-label={toolbarCopy.moveToolbar}
-            title={toolbarCopy.moveToolbar}
-            data-testid="terminal-toolbar-drag-handle"
-            {...toolbarDrag.handleProps}
-          >
-            <GripVertical className="size-3.5" />
-          </Button>
-          <span
-            role="status"
-            aria-label={statusLabel}
-            title={statusLabel}
-            className={cn("mx-0.5 size-2 shrink-0 rounded-full", statusTone)}
-          />
-          {aiTool ? (
-            <span className="hidden px-1 font-mono text-[10px] uppercase tracking-wide text-muted-foreground sm:inline">
-              {aiTool}
+          <div role="group" aria-label={toolbarCopy.positionAndStatusGroup} className="flex items-center gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-6 touch-none cursor-grab select-none text-muted-foreground hover:text-foreground active:cursor-grabbing"
+              aria-label={toolbarCopy.moveToolbar}
+              title={toolbarCopy.moveToolbar}
+              data-testid="terminal-toolbar-drag-handle"
+              {...toolbarDrag.handleProps}
+            >
+              <GripVertical className="size-3.5" aria-hidden="true" />
+            </Button>
+            <span
+              role="status"
+              aria-label={statusLabel}
+              title={statusLabel}
+              className={cn("mx-0.5 size-2 shrink-0 rounded-full", statusTone)}
+            />
+            {aiTool ? (
+              <span className="hidden px-1 font-mono text-[10px] uppercase tracking-wide text-muted-foreground sm:inline">
+                {aiTool}
+              </span>
+            ) : null}
+          </div>
+          <span role="separator" aria-orientation="vertical" className="mx-0.5 h-3.5 border-l border-border/70" />
+          <div role="group" aria-label={toolbarCopy.fontSizeGroup} className="flex items-center gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground hover:text-foreground"
+              aria-label={toolbarCopy.fontSmaller}
+              title={toolbarCopy.fontSmaller}
+              disabled={terminalFont.fontSize <= MIN_TERMINAL_FONT_SIZE}
+              onClick={() => adjustFontSize(-1)}
+            >
+              <span className="flex items-center gap-px" aria-hidden="true">
+                <span className="text-[10px] font-semibold leading-none">A</span>
+                <Minus className="size-2.5" />
+              </span>
+            </Button>
+            <span className="forgebadger-tabular-nums hidden w-5 text-center text-[10px] text-muted-foreground sm:inline">
+              {terminalFont.fontSize}
             </span>
-          ) : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6"
-            aria-label={toolbarCopy.fontSmaller}
-            title={toolbarCopy.fontSmaller}
-            disabled={terminalFont.fontSize <= MIN_TERMINAL_FONT_SIZE}
-            onClick={() => adjustFontSize(-1)}
-          >
-            <span className="flex items-center gap-px">
-              <span className="text-[10px] font-semibold leading-none">A</span>
-              <Minus className="size-2.5" />
-            </span>
-          </Button>
-          <span className="hidden w-6 text-center text-[10px] tabular-nums text-muted-foreground sm:inline">
-            {terminalFont.fontSize}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6"
-            aria-label={toolbarCopy.fontLarger}
-            title={toolbarCopy.fontLarger}
-            disabled={terminalFont.fontSize >= MAX_TERMINAL_FONT_SIZE}
-            onClick={() => adjustFontSize(1)}
-          >
-            <span className="flex items-center gap-px">
-              <span className="text-[10px] font-semibold leading-none">A</span>
-              <Plus className="size-2.5" />
-            </span>
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6"
-            aria-label={toolbarCopy.clear}
-            title={alternateScreen ? toolbarCopy.clearAlternate : toolbarCopy.clear}
-            disabled={!terminalReady || alternateScreen}
-            onClick={clearTerminal}
-          >
-            <Eraser className="size-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6"
-            aria-label={toolbarCopy.copySelection}
-            title={toolbarCopy.copySelection}
-            disabled={!terminalReady || !hasSelection || copying}
-            onClick={copySelection}
-          >
-            <Copy className="size-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6"
-            aria-label={toolbarCopy.copyAll}
-            title={toolbarCopy.copyAll}
-            disabled={!terminalReady || copying}
-            onClick={copyEntireBuffer}
-          >
-            <ClipboardCopy className="size-3.5" />
-          </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground hover:text-foreground"
+              aria-label={toolbarCopy.fontLarger}
+              title={toolbarCopy.fontLarger}
+              disabled={terminalFont.fontSize >= MAX_TERMINAL_FONT_SIZE}
+              onClick={() => adjustFontSize(1)}
+            >
+              <span className="flex items-center gap-px" aria-hidden="true">
+                <span className="text-[10px] font-semibold leading-none">A</span>
+                <Plus className="size-2.5" />
+              </span>
+            </Button>
+          </div>
+          <span role="separator" aria-orientation="vertical" className="mx-0.5 h-3.5 border-l border-border/70" />
+          <div role="group" aria-label={toolbarCopy.bufferActionsGroup} className="flex items-center gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground hover:text-foreground"
+              aria-label={toolbarCopy.clear}
+              title={alternateScreen ? toolbarCopy.clearAlternate : toolbarCopy.clear}
+              disabled={!terminalReady || alternateScreen}
+              onClick={clearTerminal}
+            >
+              <Eraser className="size-3.5" aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "size-6",
+                hasSelection
+                  ? "bg-brand/12 text-brand hover:bg-brand/20 hover:text-brand"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-label={toolbarCopy.copySelection}
+              title={toolbarCopy.copySelection}
+              disabled={!terminalReady || !hasSelection || copying}
+              onClick={copySelection}
+            >
+              <Copy className="size-3.5" aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground hover:text-foreground"
+              aria-label={toolbarCopy.copyAll}
+              title={toolbarCopy.copyAll}
+              disabled={!terminalReady || copying}
+              onClick={copyEntireBuffer}
+            >
+              <ClipboardCopy className="size-3.5" aria-hidden="true" />
+            </Button>
+          </div>
         </div>
         {terminalToast && ToastIcon && (
           <div
@@ -1072,7 +1127,7 @@ export function TerminalView({
             role="status"
             aria-live="polite"
             className={cn(
-              "absolute left-1/2 top-12 z-20 flex max-w-[80%] -translate-x-1/2 items-start gap-2 rounded-md border bg-popover px-3 py-2 text-xs shadow-lg",
+              "absolute left-1/2 top-12 z-20 flex max-w-[80%] -translate-x-1/2 items-start gap-2 rounded-lg border bg-popover/95 px-3 py-2 text-xs shadow-overlay backdrop-blur-md",
               toneAccentClassNames[terminalToast.tone]
             )}
           >
@@ -1091,10 +1146,13 @@ export function TerminalView({
             size="sm"
             variant="secondary"
             onClick={handleScrollToBottom}
-            className="absolute bottom-12 right-4 z-10 gap-1 shadow md:bottom-4"
+            className={cn(
+              "absolute right-4 z-10 h-7 gap-1 rounded-full border border-border/80 bg-popover/90 px-3 text-xs shadow-raised backdrop-blur-md hover:bg-popover",
+              toolbarDrag.nearBottom ? "bottom-12" : "bottom-4"
+            )}
             aria-label={t("terminal.backToBottom")}
           >
-            <ArrowDown className="size-3.5" />
+            <ArrowDown className="size-3.5" aria-hidden="true" />
             {t("terminal.backToBottom")}
           </Button>
         )}
@@ -1105,32 +1163,6 @@ export function TerminalView({
             open={historyOpen}
             onClose={() => onHistoryClose?.()}
           />
-        )}
-        {showReconnectingOverlay && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-10">
-            <div className="text-center">
-              <p className="text-yellow-400 text-sm font-mono">
-                {t("terminal.reconnecting")}… ({attemptCount}/{MAX_RECONNECT_ATTEMPTS})
-              </p>
-            </div>
-          </div>
-        )}
-        {showFailedOverlay && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
-            <div className="text-center">
-              <p className="text-red-400 text-sm font-mono mb-3">
-                {t("terminal.connectionLost")}
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleManualReconnect}
-                className="text-red-400 border-red-400/50 hover:bg-red-400/10"
-              >
-                {t("terminal.reconnect")}
-              </Button>
-            </div>
-          </div>
         )}
       </div>
     </div>

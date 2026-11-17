@@ -1,24 +1,34 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
 import { GatewayApiError, type Session } from "@/lib/api";
 import { readSessionTabs, writeSessionTabs } from "@/lib/session-tabs";
 import TerminalPage from "./page";
 
-const { getSessionMock, connectSessionMock, startSessionMock, listTaskPacketsMock, getSessionWorkStatesMock, pushMock, replaceMock } = vi.hoisted(
-  () => ({
-    getSessionMock: vi.fn(),
-    connectSessionMock: vi.fn(),
-    startSessionMock: vi.fn(),
-    listTaskPacketsMock: vi.fn(),
-    getSessionWorkStatesMock: vi.fn(),
-    pushMock: vi.fn(),
-    replaceMock: vi.fn(),
-  })
-);
+const {
+  getSessionMock,
+  connectSessionMock,
+  startSessionMock,
+  stopSessionMock,
+  listTaskPacketsMock,
+  getProjectGitChangesMock,
+  getSessionWorkStatesMock,
+  pushMock,
+  replaceMock,
+} = vi.hoisted(() => ({
+  getSessionMock: vi.fn(),
+  connectSessionMock: vi.fn(),
+  startSessionMock: vi.fn(),
+  stopSessionMock: vi.fn(),
+  listTaskPacketsMock: vi.fn(),
+  getProjectGitChangesMock: vi.fn(),
+  getSessionWorkStatesMock: vi.fn(),
+  pushMock: vi.fn(),
+  replaceMock: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "s1" }),
@@ -48,7 +58,9 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getSession: getSessionMock,
     connectSession: connectSessionMock,
     startSession: startSessionMock,
+    stopSession: stopSessionMock,
     listProjectManagerTaskPackets: listTaskPacketsMock,
+    getProjectGitChanges: getProjectGitChangesMock,
     getSessionWorkStates: getSessionWorkStatesMock,
   };
 });
@@ -104,6 +116,13 @@ describe("TerminalPage lost session", () => {
     getSessionWorkStatesMock.mockResolvedValue({ states: [], snapshotAt: 0 });
     connectSessionMock.mockResolvedValue({ session: makeSession({}), attachToken: "" });
     startSessionMock.mockResolvedValue({ session: makeSession({ status: "running" }) });
+    stopSessionMock.mockResolvedValue({ session: makeSession({ status: "stopped" }) });
+    getProjectGitChangesMock.mockResolvedValue({
+      isGitRepo: true,
+      branch: "main",
+      changed: [{ path: "src/app.ts", status: " M", staged: false }],
+      commits: [],
+    });
   });
 
   it("shows the lost explanation and restart guidance instead of the stopped panel", async () => {
@@ -133,8 +152,8 @@ describe("TerminalPage lost session", () => {
     expect(title.className).toContain("text-foreground");
     expect(title.className).not.toContain("text-destructive");
     const card = title.closest(".max-w-md")!;
-    expect(card.className).toContain("bg-muted/30");
-    expect(card.className).not.toContain("bg-destructive/10");
+    expect(card.className).toContain("bg-card");
+    expect(card.className).not.toContain("bg-destructive/8");
     // The guidance references the Start action rendered on this panel…
     expect(screen.getByText(/点击下方「启动」按钮重新打开终端/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "启动" })).toBeTruthy();
@@ -204,5 +223,66 @@ describe("TerminalPage lost session", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "退出专注" }));
     expect(document.body.hasAttribute("data-session-focus-mode")).toBe(false);
+  });
+
+  it("asks before stopping the running CLI instead of killing it on one click", async () => {
+    getSessionMock.mockResolvedValue({ session: makeSession({ status: "running" }) });
+    connectSessionMock.mockResolvedValue({
+      session: makeSession({ status: "running" }),
+      attachToken: "attach-1",
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "停止" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/停止会终止该会话正在运行的 CLI 进程/)).toBeTruthy();
+    expect(stopSessionMock).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "停止" }));
+    await waitFor(() => expect(stopSessionMock).toHaveBeenCalledWith("s1"));
+  });
+
+  it("toggles the inspector pane independently of focus mode", async () => {
+    getSessionMock.mockResolvedValue({ session: makeSession({ status: "running" }) });
+    connectSessionMock.mockResolvedValue({
+      session: makeSession({ status: "running" }),
+      attachToken: "attach-1",
+    });
+    renderPage();
+
+    // Closed by default in a runtime without media queries; opening it must not
+    // touch focus mode (which also hides the app navigation).
+    fireEvent.click(await screen.findByRole("button", { name: "显示侧栏" }));
+    const inspector = await screen.findByRole("complementary", { name: "会话辅助面板" });
+    expect(within(inspector).getByRole("tab", { name: /变更/ })).toBeTruthy();
+    expect(document.body.hasAttribute("data-session-focus-mode")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "隐藏侧栏" }));
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "会话辅助面板" })).toBeNull());
+  });
+
+  it("omits the quota tab for plain shell terminal sessions while keeping it for CLI adapters", async () => {
+    getSessionMock.mockResolvedValue({ session: makeSession({ status: "running", aiTool: "terminal" }) });
+    connectSessionMock.mockResolvedValue({
+      session: makeSession({ status: "running", aiTool: "terminal" }),
+      attachToken: "attach-1",
+    });
+    const view = renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "显示侧栏" }));
+    const inspector = await screen.findByRole("complementary", { name: "会话辅助面板" });
+    expect(within(inspector).getByRole("tab", { name: /变更/ })).toBeTruthy();
+    expect(within(inspector).queryByRole("tab", { name: /额度/ })).toBeNull();
+
+    view.unmount();
+    getSessionMock.mockResolvedValue({ session: makeSession({ status: "running", aiTool: "claude" }) });
+    connectSessionMock.mockResolvedValue({
+      session: makeSession({ status: "running", aiTool: "claude" }),
+      attachToken: "attach-2",
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "显示侧栏" }));
+    const cliInspector = await screen.findByRole("complementary", { name: "会话辅助面板" });
+    expect(within(cliInspector).getByRole("tab", { name: /额度/ })).toBeTruthy();
   });
 });

@@ -66,15 +66,18 @@ describe("GitChangesPanel", () => {
     expect(screen.getByText("Showing 1–100 of 251")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Previous page" }).hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    expect(screen.getByText("src/file-100.ts")).toBeTruthy();
+    // Directory and file name are separate spans so the name never truncates.
+    expect(screen.getByRole("button", { name: /src\/file\-100\.ts/ })).toBeTruthy();
     expect(screen.getByText("Showing 101–200 of 251")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     expect(fileButtons()).toHaveLength(51);
-    expect(screen.getByText("src/file-250.ts")).toBeTruthy();
+    // Directory and file name are separate spans so the name never truncates.
+    expect(screen.getByRole("button", { name: /src\/file\-250\.ts/ })).toBeTruthy();
     expect(screen.getByText("Showing 201–251 of 251")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Next page" }).hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
-    expect(screen.getByText("src/file-100.ts")).toBeTruthy();
+    // Directory and file name are separate spans so the name never truncates.
+    expect(screen.getByRole("button", { name: /src\/file\-100\.ts/ })).toBeTruthy();
   });
 
   it("filters the full list by path, resets pagination and distinguishes no matches from a clean tree", async () => {
@@ -86,27 +89,32 @@ describe("GitChangesPanel", () => {
       target: { value: "FILE-250" },
     });
     expect(fileButtons()).toHaveLength(1);
-    expect(screen.getByText("src/file-250.ts")).toBeTruthy();
+    // Directory and file name are separate spans so the name never truncates.
+    expect(screen.getByRole("button", { name: /src\/file\-250\.ts/ })).toBeTruthy();
     expect(screen.getByText("(251)")).toBeTruthy();
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "no-such-file" } });
     expect(screen.getByText("No files match this filter")).toBeTruthy();
     expect(screen.queryByText("Working tree clean, nothing to commit")).toBeNull();
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "" } });
-    expect(screen.getByText("src/file-000.ts")).toBeTruthy();
+    // Directory and file name are separate spans so the name never truncates.
+    expect(screen.getByRole("button", { name: /src\/file\-000\.ts/ })).toBeTruthy();
   });
 
   it("opens a file diff from beyond the former 200-file limit", async () => {
     vi.mocked(getProjectGitChanges).mockResolvedValue(changes(251));
     vi.mocked(getProjectGitFileDiff).mockResolvedValue({
-      path: "src/file-250.ts", kind: "diff", diff: "-before\n+after", truncated: false,
+      path: "src/file-250.ts", kind: "diff", diff: "@@ -12,1 +12,1 @@\n-before\n+after", truncated: false,
     });
     renderPanel();
     await screen.findByText("(251)");
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    fireEvent.click(screen.getByRole("button", { name: /src\/file-250.ts/ }));
+    fireEvent.click(screen.getByRole("button", { name: /src\/file\-250\.ts/ }));
 
-    await within(screen.getByRole("dialog")).findByText("+after");
+    const dialog = screen.getByRole("dialog");
+    await within(dialog).findByText("+after");
+    expect(within(dialog).getByText("@@ -12,1 +12,1 @@")).toBeTruthy();
+    expect(within(dialog).getAllByText("12").length).toBeGreaterThanOrEqual(2);
     expect(getProjectGitFileDiff).toHaveBeenCalledWith("project-one", "src/file-250.ts", { untracked: false });
   });
 

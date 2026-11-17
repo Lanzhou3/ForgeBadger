@@ -531,4 +531,30 @@ describe("terminal chrome toolbar", () => {
     act(() => Socket.instances[0]!.dispatchEvent(new Event("open")));
     expect(within(toolbar).getByRole("status").getAttribute("aria-label")).toBe("terminal.status.connected");
   });
+
+  it("localizes toolbar accessibility labels and recovers via the floating failed capsule", async () => {
+    await start();
+    expect(screen.getByRole("toolbar", { name: "终端控制栏" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "位置与状态" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "字号调整" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "终端操作" })).toBeTruthy();
+
+    vi.useFakeTimers();
+    try {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const current = Socket.instances.at(-1)!;
+        act(() => {
+          current.close(1011);
+          vi.advanceTimersByTime(30_000);
+        });
+      }
+      act(() => Socket.instances.at(-1)!.close(1011));
+      expect(screen.getByText("terminal.status.failed")).toBeTruthy();
+      const socketsBefore = Socket.instances.length;
+      fireEvent.click(screen.getByRole("button", { name: "terminal.reconnect" }));
+      expect(Socket.instances).toHaveLength(socketsBefore + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

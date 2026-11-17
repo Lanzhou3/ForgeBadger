@@ -1,6 +1,10 @@
 import { useLanguage } from "@/hooks/use-language";
 
 const zh = {
+  toolbarLabel: "终端控制栏",
+  positionAndStatusGroup: "位置与状态",
+  fontSizeGroup: "字号调整",
+  bufferActionsGroup: "终端操作",
   moveToolbar: "拖动工具栏（双击或 Home 键复位）",
   fontSmaller: "减小字号",
   fontLarger: "增大字号",
@@ -14,6 +18,10 @@ const zh = {
 };
 
 const en: typeof zh = {
+  toolbarLabel: "Terminal controls",
+  positionAndStatusGroup: "Position and status",
+  fontSizeGroup: "Font size",
+  bufferActionsGroup: "Buffer actions",
   moveToolbar: "Drag toolbar (double-click or Home to reset)",
   fontSmaller: "Decrease font size",
   fontLarger: "Increase font size",
@@ -27,6 +35,10 @@ const en: typeof zh = {
 };
 
 const zhTW: typeof zh = {
+  toolbarLabel: "終端機控制列",
+  positionAndStatusGroup: "位置與狀態",
+  fontSizeGroup: "字級調整",
+  bufferActionsGroup: "終端機操作",
   moveToolbar: "拖動工具列（按兩下或 Home 鍵復位）",
   fontSmaller: "減小字級",
   fontLarger: "增大字級",

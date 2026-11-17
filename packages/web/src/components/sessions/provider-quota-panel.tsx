@@ -35,15 +35,22 @@ import { cn } from "@/lib/utils";
 
 interface Props {
   aiTool: string;
+  /** Render borderless inside a tabbed inspector pane. */
+  embedded?: boolean;
 }
 
 const REFRESH_INTERVAL_MS = 60_000;
 const KNOWN_TOOLS = new Set<string>(runtimeAdapterIds);
 
-export function ProviderQuotaPanel({ aiTool }: Props) {
+/** Returns true when `aiTool` corresponds to a supported provider/CLI adapter rather than a plain shell terminal. */
+export function supportsProviderQuota(aiTool?: string | null): boolean {
+  return Boolean(aiTool && KNOWN_TOOLS.has(aiTool));
+}
+
+export function ProviderQuotaPanel({ aiTool, embedded = false }: Props) {
   const { t } = useLanguage();
   const locale = useUiLocale();
-  const knownTool = KNOWN_TOOLS.has(aiTool);
+  const knownTool = supportsProviderQuota(aiTool);
   // Only CLIs with a native login/quota surface are probed by the gateway.
   // Derived from one list so a new adapter does not need a second edit here
   // (opencode and pi have no account surface, so they stay excluded).
@@ -128,7 +135,10 @@ export function ProviderQuotaPanel({ aiTool }: Props) {
   const refreshing = balanceQuery.isFetching;
 
   return (
-    <section className="rounded-lg border border-border p-3" data-testid="provider-quota-panel">
+    <section
+      className={embedded ? "space-y-2" : "rounded-lg border border-border p-3"}
+      data-testid="provider-quota-panel"
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <Gauge className="size-4 shrink-0 text-muted-foreground" />
