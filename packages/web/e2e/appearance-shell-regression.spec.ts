@@ -93,8 +93,14 @@ test("separates the active theme from system preferences and persists both palet
   await page.emulateMedia({ colorScheme: "dark" });
   const errors = await mockGateway(page, { mode: "system" });
   await page.goto("/settings?section=appearance");
-  await expect(page.getByRole("button", { name: "One Dark", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "GitHub Light", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "ForgeBadger Dark", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "ForgeBadger Light", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "One Dark", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.getByRole("button", { name: "ForgeBadger Light", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "ForgeBadger Dark", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.getByRole("button", { name: "ForgeBadger Dark", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Tokyo Night", exact: true }).click();
   await expect(page.locator("body")).toHaveCSS("background-color", "rgb(26, 27, 38)");
   await page.getByRole("button", { name: "Solarized Light", exact: true }).click();
