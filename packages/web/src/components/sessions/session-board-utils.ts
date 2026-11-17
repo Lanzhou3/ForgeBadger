@@ -64,7 +64,11 @@ export function sessionActivityTime(session: Session): number {
   );
 }
 
-export function sessionMatchesQuery(session: Session, normalizedQuery: string): boolean {
+export function sessionMatchesQuery(
+  session: Session,
+  normalizedQuery: string,
+  resolvedPrompt?: string
+): boolean {
   if (normalizedQuery.length === 0) {
     return true;
   }
@@ -77,13 +81,36 @@ export function sessionMatchesQuery(session: Session, normalizedQuery: string): 
     session.aiTool,
     session.status,
     normalizeSessionStatus(session.status),
+    session.lastPrompt,
+    resolvedPrompt,
   ].some((value) => value?.toLowerCase().includes(normalizedQuery));
+}
+
+export interface SessionStatusCounts {
+  all: number;
+  running: number;
+  stopped: number;
+  error: number;
+  lost: number;
+}
+
+export function countSessionsByStatus(sessions: readonly Session[]): SessionStatusCounts {
+  const counts: SessionStatusCounts = { all: sessions.length, running: 0, stopped: 0, error: 0, lost: 0 };
+  for (const session of sessions) {
+    const normalized = normalizeSessionStatus(session.status);
+    if (normalized === "running") counts.running += 1;
+    else if (normalized === "error") counts.error += 1;
+    else if (normalized === "lost") counts.lost += 1;
+    else counts.stopped += 1;
+  }
+  return counts;
 }
 
 export interface BoardFilterOptions {
   query: string;
   statusFilter: string;
   cliTools: ReadonlySet<string>;
+  prompts?: Readonly<Record<string, string>>;
 }
 
 export function filterBoardSessions(
@@ -98,7 +125,7 @@ export function filterBoardSessions(
     if (options.statusFilter !== "all" && normalizeSessionStatus(session.status) !== options.statusFilter) {
       return false;
     }
-    return sessionMatchesQuery(session, normalizedQuery);
+    return sessionMatchesQuery(session, normalizedQuery, options.prompts?.[session.id]);
   });
 }
 

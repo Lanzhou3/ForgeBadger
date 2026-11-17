@@ -16,14 +16,17 @@ import {
 } from "@/components/ui/dialog";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { Card, CardContent } from "@/components/ui/card";
+import { IconTile } from "@/components/ui/icon-tile";
 import { SessionBoard, SessionBoardSkeleton } from "@/components/sessions/SessionBoard";
 import { SessionBoardListView } from "@/components/sessions/SessionBoardListView";
 import { SessionBoardToolbar } from "@/components/sessions/SessionBoardToolbar";
+import { SessionLaunchDialog } from "@/components/sessions/session-launch-dialog";
 import { useSessionLastPrompts } from "@/components/sessions/use-session-last-prompts";
 import { useSessionBoardPrefs } from "@/components/sessions/use-session-board-prefs";
 import { applyColumnOrder } from "@/components/sessions/session-board-prefs";
 import {
   collectSessionCliTools,
+  countSessionsByStatus,
   filterBoardSessions,
   groupSessionsIntoColumns,
   resolveSessionPrompt,
@@ -43,6 +46,7 @@ import { pruneSessionTabs, readSessionTabs, removeSessionTab, sessionToTab, upse
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { toast } from "@/lib/toast";
 import { useLanguage } from "@/hooks/use-language";
+import { useSessionWorkStates } from "@/hooks/use-session-work-states";
 import { cn } from "@/lib/utils";
 
 export default function SessionsPage() {
@@ -53,9 +57,12 @@ export default function SessionsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedCliTools, setSelectedCliTools] = useState<ReadonlySet<string>>(new Set());
   const [showEmptyProjects, setShowEmptyProjects] = useState(false);
-  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [launchTarget, setLaunchTarget] = useState<{ open: boolean; projectId?: string; projectName?: string }>({
+    open: false,
+  });
   const [clearStoppedOpen, setClearStoppedOpen] = useState(false);
   const [forceDeleteId, setForceDeleteId] = useState<string | null>(null);
+  const workStates = useSessionWorkStates();
   const { data, isLoading, isFetching, isError } = useQuery({
     queryKey: ["sessions-board"],
     queryFn: getSessionBoard,
@@ -204,10 +211,23 @@ export default function SessionsPage() {
     notifySessionTabsChanged();
   }, [board, sessions, isFetching, isError]);
 
+  const localPrompts = useSessionLastPrompts();
+  const prompts = useMemo(() => {
+    const merged: Record<string, string> = {};
+    for (const session of sessions) {
+      const prompt = resolveSessionPrompt(session, localPrompts);
+      if (prompt) {
+        merged[session.id] = prompt;
+      }
+    }
+    return merged;
+  }, [sessions, localPrompts]);
+
   const cliTools = useMemo(() => collectSessionCliTools(sessions), [sessions]);
+  const statusCounts = useMemo(() => countSessionsByStatus(sessions), [sessions]);
   const filteredSessions = useMemo(
-    () => filterBoardSessions(sessions, { query, statusFilter, cliTools: selectedCliTools }),
-    [sessions, query, statusFilter, selectedCliTools]
+    () => filterBoardSessions(sessions, { query, statusFilter, cliTools: selectedCliTools, prompts }),
+    [sessions, query, statusFilter, selectedCliTools, prompts]
   );
   const searching = query.trim().length > 0;
   const columns = useMemo(
@@ -221,18 +241,6 @@ export default function SessionsPage() {
     () => applyColumnOrder(columns, prefs.columnOrder),
     [columns, prefs.columnOrder]
   );
-
-  const localPrompts = useSessionLastPrompts();
-  const prompts = useMemo(() => {
-    const merged: Record<string, string> = {};
-    for (const session of sessions) {
-      const prompt = resolveSessionPrompt(session, localPrompts);
-      if (prompt) {
-        merged[session.id] = prompt;
-      }
-    }
-    return merged;
-  }, [sessions, localPrompts]);
 
   // Relative times must not participate in SSR/hydration rendering (server
   // clock vs client clock diverge); render a placeholder until mounted, then
@@ -263,7 +271,16 @@ export default function SessionsPage() {
     router.push(`/sessions/${session.id}`);
   };
 
+  const openLaunchForProject = (projectId: string, projectName: string) => {
+    setLaunchTarget({ open: true, projectId, projectName });
+  };
+
+  const openGlobalLaunch = () => {
+    setLaunchTarget({ open: true });
+  };
+
   const sessionActions = {
+    onNewSessionForProject: openLaunchForProject,
     onOpenSession: openSession,
     onStartSession: (session: Session, options?: SessionStartOptions) => startMutation.mutate({ id: session.id, fresh: options?.fresh }),
     onStopSession: (session: Session) => stopMutation.mutate(session.id),
@@ -273,9 +290,9 @@ export default function SessionsPage() {
   const noMatchesCard = (
     <Card>
       <CardContent className="flex flex-col items-center justify-center gap-3 py-10 text-center">
-        <div className="flex size-10 items-center justify-center rounded-md bg-brand/10 text-brand">
-          <TerminalSquare className="size-5" />
-        </div>
+        <IconTile size="lg" tone="brand">
+          <TerminalSquare strokeWidth={1.75} />
+        </IconTile>
         <div>
           <div className="text-sm font-medium">{t("sessions.noMatchesTitle")}</div>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -286,9 +303,18 @@ export default function SessionsPage() {
     </Card>
   );
 
+  const fullHeightBoard = boardView === "board" && !isLoading && sessions.length > 0;
+
   return (
-    <div className="mx-auto max-w-[1440px] space-y-4 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div
+      className={cn(
+        "w-full p-5 md:p-6",
+        fullHeightBoard
+          ? "flex h-full min-h-0 flex-col gap-4 overflow-hidden"
+          : "mx-auto max-w-[1600px] space-y-4"
+      )}
+    >
+      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{t("sessions.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -300,13 +326,21 @@ export default function SessionsPage() {
             <Button size="sm" variant="outline" disabled={actionPending || isFetching || isError || stoppedSessions.length === 0} onClick={() => setClearStoppedOpen(true)}>
               <Trash2 className="size-4" />
               {t("sessions.clearStopped")}
+              {stoppedSessions.length > 0 ? (
+                <span
+                  aria-hidden="true"
+                  className="forgebadger-tabular-nums rounded-full bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                >
+                  {stoppedSessions.length}
+                </span>
+              ) : null}
             </Button>
           )}
           {hasProjects ? (
             <Button
               size="sm"
               variant="brand"
-              onClick={() => setProjectPickerOpen(true)}
+              onClick={openGlobalLaunch}
             >
               <Plus className="size-4" />
               {t("projects.newSession")}
@@ -327,18 +361,13 @@ export default function SessionsPage() {
       ) : sessions.length === 0 ? (
         <Card>
           <CardContent className="flex min-h-[50vh] flex-col items-center justify-center gap-4 py-12 text-center">
-            <div
-              className={cn(
-                "flex size-10 items-center justify-center rounded-md",
-                runtimeBlocked ? "bg-destructive/10 text-destructive" : "bg-brand/10 text-brand"
-              )}
-            >
+            <IconTile size="lg" tone={runtimeBlocked ? "destructive" : "brand"}>
               {runtimeBlocked ? (
-                <AlertTriangle className="size-5" />
+                <AlertTriangle strokeWidth={1.75} />
               ) : (
-                <TerminalSquare className="size-5" />
+                <TerminalSquare strokeWidth={1.75} />
               )}
-            </div>
+            </IconTile>
             <div className="space-y-1">
               <h3 className="text-sm font-medium">
                 {runtimeBlocked ? t(terminalSetupGuidance.titleKey) : t("sessions.emptyTitle")}
@@ -372,7 +401,7 @@ export default function SessionsPage() {
                 <Button
                   size="sm"
                   variant="brand"
-                  onClick={() => setProjectPickerOpen(true)}
+                  onClick={openGlobalLaunch}
                 >
                   <FolderOpen className="size-4" />
                   {t("sessions.createFromProject")}
@@ -389,28 +418,33 @@ export default function SessionsPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
-          <SessionBoardToolbar
-            query={query}
-            onQueryChange={setQuery}
-            statusFilter={statusFilter}
-            onStatusFilterChange={setStatusFilter}
-            cliTools={cliTools}
-            selectedCliTools={selectedCliTools}
-            onToggleCliTool={toggleCliTool}
-            showEmptyProjects={showEmptyProjects}
-            onShowEmptyProjectsChange={setShowEmptyProjects}
-            hasCustomColumnOrder={prefs.columnOrder.length > 0}
-            onResetColumnOrder={prefs.resetColumnOrder}
-            view={boardView}
-            onViewChange={prefs.setView}
-          />
+        <div className={cn(fullHeightBoard ? "flex min-h-0 flex-1 flex-col gap-4" : "space-y-4")}>
+          <div className="shrink-0">
+            <SessionBoardToolbar
+              query={query}
+              onQueryChange={setQuery}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+              statusCounts={statusCounts}
+              cliTools={cliTools}
+              selectedCliTools={selectedCliTools}
+              onToggleCliTool={toggleCliTool}
+              showEmptyProjects={showEmptyProjects}
+              onShowEmptyProjectsChange={setShowEmptyProjects}
+              hasCustomColumnOrder={prefs.columnOrder.length > 0}
+              onResetColumnOrder={prefs.resetColumnOrder}
+              view={boardView}
+              onViewChange={prefs.setView}
+            />
+          </div>
           {boardView === "list" ? (
             filteredSessions.length === 0 ? (
               noMatchesCard
             ) : (
               <SessionBoardListView
                 columns={orderedColumns}
+                sessionTasks={sessionTasks}
+                workStates={workStates}
                 prompts={prompts}
                 now={now}
                 actionPending={actionPending}
@@ -421,10 +455,11 @@ export default function SessionsPage() {
             <>
               {/* Keep the board mounted while filters hit zero results so its
                   one-time entrance does not replay when results return. */}
-              <div className={cn(filteredSessions.length === 0 && "hidden")}>
+              <div className={cn("min-h-0 flex-1", filteredSessions.length === 0 && "hidden")}>
                 <SessionBoard
                   columns={orderedColumns}
                   sessionTasks={sessionTasks}
+                  workStates={workStates}
                   prompts={prompts}
                   now={now}
                   actionPending={actionPending}
@@ -440,54 +475,17 @@ export default function SessionsPage() {
         </div>
       )}
 
-      <Dialog open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t("sessions.chooseProjectTitle")}</DialogTitle>
-            <DialogDescription>{t("sessions.chooseProjectDescription")}</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2">
-            {projects.map((project) => (
-              <Button
-                key={project.id}
-                variant="outline"
-                className="h-auto w-full min-w-0 justify-start gap-3 px-3 py-2.5"
-                onClick={() => {
-                  setProjectPickerOpen(false);
-                  router.push(`/projects/${project.id}?tab=sessions`);
-                }}
-              >
-                <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
-                <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                  <span className="max-w-full truncate text-sm font-medium">{project.name}</span>
-                  {project.path && (
-                    <span className="max-w-full truncate font-mono text-xs text-muted-foreground">
-                      {project.path}
-                    </span>
-                  )}
-                </span>
-              </Button>
-            ))}
-            {isLoading ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                {t("sessions.loading")}
-              </p>
-            ) : projects.length === 0 ? (
-              <div className="flex flex-col items-center gap-4 py-6 text-center">
-                <p className="text-sm text-muted-foreground">
-                  {t("sessions.chooseProjectEmpty")}
-                </p>
-                <Button asChild size="sm" variant="brand">
-                  <Link href="/projects/new">
-                    <Plus className="size-4" />
-                    {t("sessions.createProject")}
-                  </Link>
-                </Button>
-              </div>
-            ) : null}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <SessionLaunchDialog
+        open={launchTarget.open}
+        projectId={launchTarget.projectId}
+        projectName={launchTarget.projectName}
+        projects={launchTarget.projectId ? undefined : projects}
+        onOpenChange={(open) => setLaunchTarget((current) => ({ ...current, open }))}
+        onCreated={(session) => {
+          refreshSessions();
+          openSession(session);
+        }}
+      />
 
       <Dialog open={clearStoppedOpen} onOpenChange={(open) => { if (!clearStoppedMutation.isPending) setClearStoppedOpen(open); }}>
         <DialogContent className="sm:max-w-md">

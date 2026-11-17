@@ -12,7 +12,7 @@ import {
 } from "@dnd-kit/core";
 
 import { gsap, useGSAP } from "@/lib/gsap-motion";
-import type { Session, SessionBoardTask } from "@/lib/api";
+import type { Session, SessionBoardTask, SessionWorkState } from "@/lib/api";
 import { sessionTabGroupColor } from "@/lib/session-tabs";
 import { cn } from "@/lib/utils";
 import { SessionBoardCard } from "./SessionBoardCard";
@@ -42,12 +42,14 @@ export function buildEdgeFadeMask(fadeLeft: boolean, fadeRight: boolean): string
 interface SessionBoardProps {
   columns: SessionBoardColumnData[];
   sessionTasks: Record<string, SessionBoardTask[]>;
+  workStates?: ReadonlyMap<string, SessionWorkState>;
   prompts: Record<string, string>;
   now: number | null;
   actionPending: boolean;
   columnWidth: number;
   onColumnWidthChange: (width: number) => void;
   onColumnOrderChange: (order: string[]) => void;
+  onNewSessionForProject?: (projectId: string, projectName: string) => void;
   onOpenSession: (session: Session) => void;
   onStartSession: (session: Session, options?: SessionStartOptions) => void;
   onStopSession: (session: Session) => void;
@@ -57,12 +59,14 @@ interface SessionBoardProps {
 export function SessionBoard({
   columns,
   sessionTasks,
+  workStates,
   prompts,
   now,
   actionPending,
   columnWidth,
   onColumnWidthChange,
   onColumnOrderChange,
+  onNewSessionForProject,
   onOpenSession,
   onStartSession,
   onStopSession,
@@ -200,14 +204,14 @@ export function SessionBoard({
     <DndContext sensors={dragSensors} onDragEnd={handleDragEnd}>
       <div
         ref={scrollRef}
-        className="overflow-x-auto pb-2"
+        className="h-full min-h-0 overflow-x-auto overflow-y-hidden pb-1"
         style={
           maskImage
             ? { maskImage, WebkitMaskImage: maskImage }
             : undefined
         }
       >
-        <div className="flex items-start gap-4">
+        <div className="flex h-full min-h-0 items-stretch gap-3.5">
           {columns.map((column, index) => (
             <SessionBoardColumn
               key={column.key}
@@ -215,7 +219,13 @@ export function SessionBoard({
               index={index}
               color={column.unlinked ? null : sessionTabGroupColor(column.projectName)}
               width={width}
-              onNewSessionFor={(projectId) => router.push(`/projects/${projectId}?tab=sessions`)}
+              onNewSessionFor={(projectId, projectName) => {
+                if (onNewSessionForProject) {
+                  onNewSessionForProject(projectId, projectName);
+                } else {
+                  router.push(`/projects/${projectId}?tab=sessions`);
+                }
+              }}
               onOpenProject={(projectId) => router.push(`/projects/${projectId}`)}
               onResizeStart={beginResize}
             >
@@ -224,6 +234,7 @@ export function SessionBoard({
                   key={session.id}
                   session={session}
                   tasks={sessionTasks[session.id] ?? []}
+                  workState={workStates?.get(session.id)?.state}
                   lastPrompt={prompts[session.id]}
                   highlight={now !== null && isRecentlyCreated(session, now, 120_000)}
                   now={now}
@@ -244,15 +255,15 @@ export function SessionBoard({
 
 export function SessionBoardSkeleton() {
   return (
-    <div className="flex items-start gap-4 overflow-x-auto pb-2">
+    <div className="flex h-full min-h-0 items-stretch gap-3.5 overflow-x-auto pb-1">
       {[0, 1, 2].map((columnIndex) => (
-        <div key={columnIndex} className="flex w-[300px] shrink-0 flex-col gap-2">
+        <div key={columnIndex} className="flex h-full w-[300px] shrink-0 flex-col gap-2">
           <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 shadow-xs">
             <div className="size-2 rounded-full bg-muted-foreground/30" />
             <div className="h-4 w-24 animate-pulse rounded bg-muted" />
             <div className="ml-auto h-3 w-16 animate-pulse rounded bg-muted" />
           </div>
-          <div className="flex flex-col gap-2 rounded-xl bg-muted/20 p-2">
+          <div className="flex min-h-0 flex-1 flex-col gap-2 rounded-xl bg-muted/25 p-2">
             {[0, 1, 2].map((cardIndex) => (
               <div
                 key={cardIndex}

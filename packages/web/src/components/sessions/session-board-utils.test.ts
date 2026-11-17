@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Project, Session } from "@/lib/api";
 import {
   collectSessionCliTools,
+  countSessionsByStatus,
   filterBoardSessions,
   formatColumnStats,
   formatSessionRelativeTime,
@@ -66,6 +67,22 @@ describe("filterBoardSessions", () => {
     }),
   ];
 
+  it("matches the prompt that the card displays as its title", () => {
+    const base = { statusFilter: "all", cliTools: new Set<string>() };
+    // The card title falls back to the last prompt when a session has no
+    // custom name, so searching that visible title must find the session.
+    const prompted = [
+      makeSession({ id: "p-remote", name: "Project One", lastPrompt: "refactor the parser" }),
+      makeSession({ id: "p-local", name: "Project One" }),
+    ];
+    expect(filterBoardSessions(prompted, { ...base, query: "parser" }).map((s) => s.id)).toEqual(["p-remote"]);
+    expect(
+      filterBoardSessions(prompted, { ...base, query: "local capture", prompts: { "p-local": "add local capture" } }).map(
+        (s) => s.id
+      )
+    ).toEqual(["p-local"]);
+  });
+
   it("searches across name, runtime name, id, project, tool, and status fields", () => {
     const base = { statusFilter: "all", cliTools: new Set<string>() };
     expect(filterBoardSessions(sessions, { ...base, query: "bug" })).toHaveLength(1);
@@ -116,6 +133,21 @@ describe("collectSessionCliTools", () => {
       makeSession({ id: "z", aiTool: undefined }),
     ]);
     expect(tools).toEqual(["claude", "kimi"]);
+  });
+});
+
+describe("countSessionsByStatus", () => {
+  it("groups normalized statuses for the filter chips", () => {
+    const counts = countSessionsByStatus([
+      makeSession({ id: "running-1", status: "running" }),
+      makeSession({ id: "running-2", status: "running" }),
+      makeSession({ id: "lost-1", status: "lost" }),
+      makeSession({ id: "error-1", status: "error" }),
+      makeSession({ id: "stopped-1", status: "stopped" }),
+      makeSession({ id: "exited-1", status: "exited" }),
+      makeSession({ id: "completed-1", status: "completed" }),
+    ]);
+    expect(counts).toEqual({ all: 7, running: 2, stopped: 3, error: 1, lost: 1 });
   });
 });
 

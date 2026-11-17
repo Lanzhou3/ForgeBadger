@@ -16,7 +16,7 @@ interface SessionBoardColumnProps {
   color: string | null;
   /** Applied column width in px (shared across all columns). */
   width: number;
-  onNewSessionFor: (projectId: string) => void;
+  onNewSessionFor: (projectId: string, projectName: string) => void;
   onOpenProject: (projectId: string) => void;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
   children: ReactNode;
@@ -52,7 +52,7 @@ export function SessionBoardColumn({
       ref={setRefs}
       aria-label={column.projectName}
       className={cn(
-        "forgebadger-board-column relative flex shrink-0 flex-col self-start",
+        "forgebadger-board-column relative flex h-full min-h-0 shrink-0 flex-col",
         isDragging ? "z-20 opacity-80" : ""
       )}
       style={{
@@ -64,8 +64,11 @@ export function SessionBoardColumn({
     >
       {/* Entrance animation target: the section's inline transform is owned by
           dnd-kit, so GSAP animates this inner wrapper instead. */}
-      <div data-board-entrance className="flex flex-col gap-2">
-        <header className="sticky top-0 z-10 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 shadow-xs">
+      <div
+        data-board-entrance
+        className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/70 bg-muted/25"
+      >
+        <header className="flex shrink-0 items-center gap-2 rounded-t-xl border-b border-border/60 bg-card/60 px-3 py-2.5 backdrop-blur-xs">
           {sortable ? (
             <button
               type="button"
@@ -74,7 +77,7 @@ export function SessionBoardColumn({
               aria-label={`${t("sessions.dragColumn")} · ${column.projectName}`}
               className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing"
             >
-              <GripVertical className="size-4" />
+              <GripVertical className="size-4" aria-hidden="true" />
             </button>
           ) : null}
           <span
@@ -85,36 +88,47 @@ export function SessionBoardColumn({
             )}
             style={color ? { backgroundColor: color } : undefined}
           />
-          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold" title={column.projectName}>
+          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight" title={column.projectName}>
             {column.projectName}
           </h2>
-          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-            {formatColumnStats(t("sessions.columnStats"), column.runningCount, column.totalCount)}
+          <span
+            title={formatColumnStats(t("sessions.columnStats"), column.runningCount, column.totalCount)}
+            aria-label={formatColumnStats(t("sessions.columnStats"), column.runningCount, column.totalCount)}
+            className={cn(
+              "forgebadger-tabular-nums shrink-0 rounded-full px-1.5 py-0.5 text-[11px]",
+              column.runningCount > 0
+                ? "bg-success/10 font-medium text-success"
+                : "bg-muted/60 text-muted-foreground"
+            )}
+          >
+            {column.runningCount}/{column.totalCount}
           </span>
           {sortable && column.projectId ? (
             <div className="flex shrink-0 items-center gap-0.5">
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-7"
+                className="size-7 text-muted-foreground hover:text-foreground"
                 aria-label={`${t("projects.newSession")} · ${column.projectName}`}
-                onClick={() => onNewSessionFor(column.projectId ?? "")}
+                title={`${t("projects.newSession")} · ${column.projectName}`}
+                onClick={() => onNewSessionFor(column.projectId ?? "", column.projectName)}
               >
-                <Plus className="size-4" />
+                <Plus className="size-4" aria-hidden="true" />
               </Button>
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-7"
+                className="size-7 text-muted-foreground hover:text-foreground"
                 aria-label={`${t("sessions.openProject")} · ${column.projectName}`}
+                title={`${t("sessions.openProject")} · ${column.projectName}`}
                 onClick={() => onOpenProject(column.projectId ?? "")}
               >
-                <ArrowUpRight className="size-4" />
+                <ArrowUpRight className="size-4" aria-hidden="true" />
               </Button>
             </div>
           ) : null}
         </header>
-        <div className="flex flex-col gap-2 rounded-xl bg-muted/20 p-2">
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-2">
           {column.sessions.length === 0 ? (
             <div
               className={cn(

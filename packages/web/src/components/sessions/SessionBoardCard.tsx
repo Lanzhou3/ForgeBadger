@@ -1,8 +1,9 @@
 "use client";
 
-import { MoreHorizontal, RotateCcw, Square, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { MoreHorizontal, Play, RotateCcw, Square, Trash2 } from "lucide-react";
 
-import type { Session, SessionBoardTask } from "@/lib/api";
+import type { Session, SessionBoardTask, SessionWorkState } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -11,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { CliBrandChip } from "@/components/cli-brand-chip";
+import { getCliBrand } from "@/lib/cli-brand";
 import { useLanguage } from "@/hooks/use-language";
 import { normalizeSessionStatus } from "@/lib/session-status";
 import { cn } from "@/lib/utils";
@@ -32,6 +34,7 @@ const VISIBLE_TASKS_PER_CARD = 2;
 interface SessionBoardCardProps {
   session: Session;
   tasks: SessionBoardTask[];
+  workState?: SessionWorkState["state"];
   lastPrompt?: string;
   highlight: boolean;
   now: number | null;
@@ -45,6 +48,7 @@ interface SessionBoardCardProps {
 export function SessionBoardCard({
   session,
   tasks,
+  workState,
   lastPrompt,
   highlight,
   now,
@@ -57,38 +61,44 @@ export function SessionBoardCard({
   const { t, language } = useLanguage();
   const normalized = normalizeSessionStatus(session.status);
   const isRunning = normalized === "running";
+  const isWorking = isRunning && workState === "working";
   const picked = pickSessionTitle(session, lastPrompt);
+  const redundantProjectTitle =
+    picked.showNoInputHint && Boolean(session.projectName) && picked.title === session.projectName;
+  const displayTitle = redundantProjectTitle
+    ? `${getCliBrand(session.aiTool).label} · #${session.id.slice(0, 6)}`
+    : picked.title;
   const relativeTime = now === null ? null : formatSessionRelativeTime(session, now, language);
   const visibleTasks = tasks.slice(0, VISIBLE_TASKS_PER_CARD);
   const hiddenTaskCount = tasks.length - visibleTasks.length;
 
   return (
-    <div
-      role="link"
-      tabIndex={0}
+    <article
       data-session-id={session.id}
-      onClick={() => onOpen(session)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpen(session);
-        }
-      }}
       className={cn(
-        "group relative cursor-pointer rounded-lg border border-border bg-card p-3",
-        "transition-[border-color,box-shadow,transform] duration-200 ease-out",
-        "hover:border-border/80 hover:shadow-md motion-safe:hover:-translate-y-px",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        "group relative rounded-lg border p-3 pl-3.5",
+        "forgebadger-motion-surface",
+        "hover:shadow-raised motion-safe:hover:-translate-y-px",
+        "has-[a.session-card-link:focus-visible]:ring-2 has-[a.session-card-link:focus-visible]:ring-ring/60",
+        isWorking
+          ? "border-brand/35 bg-card shadow-card before:pointer-events-none before:absolute before:inset-y-2.5 before:left-0 before:w-[3px] before:rounded-r-full before:bg-brand hover:border-brand/55"
+          : isRunning
+            ? "border-border bg-card shadow-card before:pointer-events-none before:absolute before:inset-y-2.5 before:left-0 before:w-[3px] before:rounded-r-full before:bg-success/80 hover:border-border/90"
+            : normalized === "error"
+              ? "border-destructive/35 bg-card shadow-card hover:border-destructive/55"
+              : normalized === "lost"
+                ? "border-warning/35 bg-card/90 shadow-card hover:border-warning/55 hover:bg-card"
+                : "border-border/70 bg-card/90 hover:border-border hover:bg-card",
         highlight && "forgebadger-session-card-new"
       )}
     >
-      <div className="flex items-center gap-2">
-        <SessionStatusDot status={session.status} />
+      <header className="flex items-center gap-2">
+        <SessionStatusDot status={session.status} workState={workState} />
         {session.aiTool ? <CliBrandChip aiTool={session.aiTool} /> : null}
-        <SessionStatusText status={session.status} />
+        <SessionStatusText status={session.status} workState={workState} />
         {!isRunning && session.nativeSessionId ? (
           <span
-            className="shrink-0 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+            className="shrink-0 rounded-full border border-border/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
             title={`${t("sessions.nativeSessionBadge")}: ${session.nativeSessionId}`}
           >
             {shortNativeSessionId(session.nativeSessionId)}
@@ -97,17 +107,32 @@ export function SessionBoardCard({
         <div className="min-w-0 flex-1" />
         <div
           className={cn(
-            "flex items-center transition-opacity duration-150",
-            "opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
+            "flex items-center gap-0.5 transition-opacity duration-150",
+            "[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100"
           )}
-          onClick={(event) => event.stopPropagation()}
         >
+          {!isRunning ? (
+            <button
+              type="button"
+              disabled={actionPending}
+              aria-label={`${t("common.start")} · ${displayTitle}`}
+              title={t("common.start")}
+              onClick={() => onStart(session)}
+              className="relative z-10 flex size-7 items-center justify-center rounded-md text-muted-foreground transition-[background-color,color,scale] hover:bg-brand/12 hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 motion-safe:active:scale-95"
+            >
+              {normalized === "lost" || normalized === "error" ? (
+                <RotateCcw className="size-3.5" aria-hidden="true" />
+              ) : (
+                <Play className="size-3.5" aria-hidden="true" />
+              )}
+            </button>
+          ) : null}
           <DropdownMenu>
             <DropdownMenuTrigger
-              aria-label={`${t("common.actions")} · ${picked.title}`}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label={`${t("common.actions")} · ${displayTitle}`}
+              className="relative z-10 flex size-7 items-center justify-center rounded-md text-muted-foreground transition-[background-color,color,scale] hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 motion-safe:active:scale-95"
             >
-              <MoreHorizontal className="size-4" />
+              <MoreHorizontal className="size-4" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               {isRunning ? (
@@ -149,19 +174,31 @@ export function SessionBoardCard({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-      </div>
+      </header>
 
-      <div
+      <h3
         className={cn(
           "mt-2 text-sm font-medium leading-snug tracking-tight",
-          picked.fromPrompt ? "line-clamp-2 break-words" : "truncate"
+          picked.fromPrompt ? "line-clamp-2 break-words" : "truncate",
+          !isRunning && normalized === "stopped" ? "text-foreground/85 group-hover:text-foreground" : "text-foreground"
         )}
-        title={picked.title}
+        title={displayTitle}
       >
-        {picked.title}
-      </div>
+        <Link
+          href={`/sessions/${session.id}`}
+          onClick={(event) => {
+            if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+              event.preventDefault();
+              onOpen(session);
+            }
+          }}
+          className="session-card-link focus-visible:outline-none after:absolute after:inset-0 after:content-['']"
+        >
+          {displayTitle}
+        </Link>
+      </h3>
       {picked.showNoInputHint ? (
-        <p className="mt-0.5 text-xs italic text-muted-foreground">
+        <p className="mt-0.5 truncate text-[11px] text-muted-foreground/75">
           {t("sessions.noInputRecord")}
         </p>
       ) : null}
@@ -189,11 +226,11 @@ export function SessionBoardCard({
         </div>
       ) : null}
 
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="truncate text-xs tabular-nums text-muted-foreground">
+      <footer className="mt-2 flex items-center justify-between gap-2">
+        <span className="forgebadger-tabular-nums truncate text-xs text-muted-foreground">
           {now === null ? "" : (relativeTime ?? t("sessions.noActivity"))}
         </span>
-      </div>
-    </div>
+      </footer>
+    </article>
   );
 }

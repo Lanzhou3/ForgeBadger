@@ -15,12 +15,26 @@ class ResizeObserverStub {
 }
 window.ResizeObserver = window.ResizeObserver ?? (ResizeObserverStub as unknown as typeof ResizeObserver);
 
-const { getSessionBoardMock, getDependenciesMock, deleteSessionMock, toastWarningMock, pushMock } = vi.hoisted(() => ({
+const {
+  getSessionBoardMock,
+  getDependenciesMock,
+  deleteSessionMock,
+  toastWarningMock,
+  pushMock,
+  createSessionMock,
+  discoverAdaptersMock,
+  listTerminalShellsMock,
+  onSessionCreated,
+} = vi.hoisted(() => ({
   getSessionBoardMock: vi.fn(),
   getDependenciesMock: vi.fn(),
   deleteSessionMock: vi.fn(),
   toastWarningMock: vi.fn(),
   pushMock: vi.fn(),
+  createSessionMock: vi.fn(),
+  discoverAdaptersMock: vi.fn(),
+  listTerminalShellsMock: vi.fn(),
+  onSessionCreated: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -35,6 +49,9 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getSessionBoard: getSessionBoardMock,
     getDependencies: getDependenciesMock,
     deleteSession: deleteSessionMock,
+    createSession: createSessionMock,
+    discoverAdapters: discoverAdaptersMock,
+    listTerminalShells: listTerminalShellsMock,
   };
 });
 
@@ -109,6 +126,35 @@ describe("SessionsPage", () => {
         message: "",
       },
     });
+    discoverAdaptersMock.mockResolvedValue({ adapters: [] });
+    listTerminalShellsMock.mockResolvedValue({ platform: "darwin", shells: [] });
+    createSessionMock.mockImplementation(async (input: { projectId: string }) => {
+      onSessionCreated(input.projectId);
+      return { session: makeSession({ id: "created-1", projectId: input.projectId, status: "running" }) };
+    });
+  });
+
+  it("opens the launch dialog in place from a board column instead of navigating away", async () => {
+    renderPage();
+    const addButton = await screen.findByRole("button", { name: "新建会话 · Alpha" });
+
+    fireEvent.click(addButton);
+
+    const dialog = await screen.findByRole("dialog");
+    // The same dialog the terminal tab strip uses: no trip through the project
+    // page, and no navigation for a project-scoped launch.
+    expect(within(dialog).getByText("Alpha")).toBeTruthy();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("offers a project picker when the launch starts from the page header", async () => {
+    renderPage();
+    await screen.findByText("alpha-fix");
+
+    fireEvent.click(screen.getAllByRole("button", { name: /新建会话/ })[0]!);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByRole("combobox", { name: "项目" })).toBeTruthy();
   });
 
   it("clears stopped and lost sessions across filters and reports failures", async () => {
@@ -202,5 +248,23 @@ describe("SessionsPage", () => {
     const cardContent = emptyTitle.closest("div[class*='min-h-[50vh]']");
     expect(cardContent).toBeTruthy();
     expect(cardContent!.className).toContain("justify-center");
+  });
+
+  it("filters by status count pills and focuses search on slash", async () => {
+    renderPage();
+    const searchInput = await screen.findByPlaceholderText("搜索会话、项目或工具");
+    await screen.findByText("alpha-fix");
+    await screen.findByText("beta-lost");
+
+    fireEvent.keyDown(window, { key: "/" });
+    expect(document.activeElement).toBe(searchInput);
+
+    const statusGroup = screen.getByRole("group", { name: "状态过滤" });
+    fireEvent.click(within(statusGroup).getByRole("button", { name: /已丢失/ }));
+    expect(screen.queryByText("alpha-fix")).toBeNull();
+    expect(screen.getByText("beta-lost")).toBeTruthy();
+
+    fireEvent.click(within(statusGroup).getByRole("button", { name: /全部/ }));
+    expect(screen.getByText("alpha-fix")).toBeTruthy();
   });
 });
