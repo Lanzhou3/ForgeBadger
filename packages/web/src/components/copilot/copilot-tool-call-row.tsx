@@ -38,13 +38,13 @@ export function deriveToolStatus(resultContent: string | null | undefined): Tool
   return "ok";
 }
 
-// Semantic status colors: emerald = healthy, amber = needs attention (denied /
+// Semantic status colors: success = healthy, warning = needs attention (denied /
 // owner action), destructive = failed, muted = unknown.
 const STATUS_ICON_STYLES: Record<ToolStatus, string> = {
   unknown: "text-muted-foreground/60",
-  ok: "text-emerald-600 dark:text-emerald-400",
+  ok: "text-success",
   error: "text-destructive",
-  denied: "text-amber-600 dark:text-amber-400",
+  denied: "text-warning",
 };
 
 /** Exported for the process header, which summarizes mixed outcomes. */

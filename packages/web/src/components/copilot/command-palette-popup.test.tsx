@@ -86,8 +86,8 @@ it("opens the palette on '/' and lists all commands grouped by category", async 
   expect(palette.textContent).toContain("help");
   expect(palette.textContent).toContain("status");
   expect(palette.textContent).toContain("创建长期目标");
-  // Category headers in fixed order: Goal before Session/Model/Info.
-  const goalHeader = (await screen.findAllByText("Goal")).find((el) => el.tagName === "P")!;
+  // Category headers in fixed order: 目标 before 对话/模型/信息.
+  const goalHeader = (await screen.findAllByText("目标")).find((el) => el.tagName === "P")!;
   const modelHeader = (await screen.findAllByText("模型")).find((el) => el.tagName === "P")!;
   expect(goalHeader.compareDocumentPosition(modelHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

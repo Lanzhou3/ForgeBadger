@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, BookOpen, Plus } from "lucide-react";
@@ -32,6 +33,7 @@ import { validateSkillFiles } from "@/lib/copilot-skill-files";
 import { CopilotSkillImport, SkillFilePicker } from "./CopilotSkillImport";
 import { SkillUpdateComparison } from "./SkillUpdateComparison";
 import { CopilotEmptyState } from "./copilot-empty-state";
+import { CopilotStatusBadge } from "./copilot-status-badge";
 import { useExtensionsCopy } from "./extensions-copy";
 
 export function CopilotSkillsPanel() {
@@ -42,14 +44,26 @@ export function CopilotSkillsPanel() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">{copy.skillsHelp}</p>
+        <div className="space-y-1">
+          <p className="text-sm text-muted-foreground">{copy.skillsHelp}</p>
+          <p className="text-xs text-muted-foreground">
+            {copy.cliSkillsHint}{" "}
+            <Link href="/skills" className="font-medium text-brand underline-offset-4 hover:underline">
+              {copy.cliSkillsLink}
+            </Link>
+          </p>
+        </div>
         <Button size="sm" onClick={() => setImporting(true)}>
           <Plus className="size-4" />
           {copy.importSkill}
         </Button>
       </div>
       {skills.isPending ? (
-        <p>{copy.loading}</p>
+        <div className="space-y-3" aria-busy="true" aria-label={copy.loading}>
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="h-32 animate-pulse rounded-lg border border-border/50 bg-muted/40" />
+          ))}
+        </div>
       ) : skills.isError ? (
         <div role="alert" className="space-y-2 text-sm text-destructive">
           <p>{copy.loadError}</p>
@@ -84,7 +98,7 @@ export function CopilotSkillsPanel() {
 
 function WarningNote({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400">
+    <div className="flex items-start gap-2 rounded-md border border-warning/35 bg-warning/10 p-3 text-xs text-warning">
       <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
       <span className="min-w-0">{children}</span>
     </div>
@@ -93,11 +107,14 @@ function WarningNote({ children }: { children: ReactNode }) {
 
 function SkillState({ skill }: { skill: CopilotSkill }) {
   const copy = useExtensionsCopy();
+  const statusTone = skill.isEnabled ? (skill.available ? "success" : "warning") : "muted";
   return (
     <div className="space-y-1.5 text-xs">
       <div className="flex flex-wrap gap-1.5">
         <Badge variant="outline">{skill.kind === "builtin-playbook" ? copy.playbook : copy.imported}</Badge>
-        <Badge variant="secondary">{skill.isEnabled ? (skill.available ? copy.enabled : copy.effectiveUnavailable) : copy.disabled}</Badge>
+        <CopilotStatusBadge tone={statusTone}>
+          {skill.isEnabled ? (skill.available ? copy.enabled : copy.effectiveUnavailable) : copy.disabled}
+        </CopilotStatusBadge>
         <Badge variant="outline">v{skill.version}</Badge>
         {skill.customized && <Badge variant="outline">{copy.customized}</Badge>}
       </div>

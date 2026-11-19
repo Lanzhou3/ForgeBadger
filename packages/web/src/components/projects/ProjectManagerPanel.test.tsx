@@ -7,7 +7,6 @@ import { LanguageProvider } from "@/hooks/use-language";
 import { ProjectManagerPanel } from "./ProjectManagerPanel";
 
 const {
-  batchUpdateProjectManagerWorkItemStatusesMock,
   getProjectManagerGoalMock,
   discoverAdaptersMock,
   listProjectManagerWorkItemsMock,
@@ -17,14 +16,13 @@ const {
   listProjectManagerLedgerMock,
   getProjectManagerTaskPacketMock,
   listSessionsMock,
-  seedProjectManagerStageTemplateMock,
   startProjectManagerTaskPacketMock,
   createProjectManagerWorkItemMock,
   updateProjectManagerWorkItemMock,
-  addProjectManagerWorkItemDependencyMock,
-  removeProjectManagerWorkItemDependencyMock,
+  updateProjectManagerWorkItemStatusMock,
+  listGoalsMock,
+  getGoalMock,
 } = vi.hoisted(() => ({
-  batchUpdateProjectManagerWorkItemStatusesMock: vi.fn(),
   getProjectManagerGoalMock: vi.fn(),
   discoverAdaptersMock: vi.fn(),
   listProjectManagerWorkItemsMock: vi.fn(),
@@ -34,19 +32,18 @@ const {
   listProjectManagerLedgerMock: vi.fn(),
   getProjectManagerTaskPacketMock: vi.fn(),
   listSessionsMock: vi.fn(),
-  seedProjectManagerStageTemplateMock: vi.fn(),
   startProjectManagerTaskPacketMock: vi.fn(),
   createProjectManagerWorkItemMock: vi.fn(),
   updateProjectManagerWorkItemMock: vi.fn(),
-  addProjectManagerWorkItemDependencyMock: vi.fn(),
-  removeProjectManagerWorkItemDependencyMock: vi.fn(),
+  updateProjectManagerWorkItemStatusMock: vi.fn(),
+  listGoalsMock: vi.fn(),
+  getGoalMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
-    batchUpdateProjectManagerWorkItemStatuses: batchUpdateProjectManagerWorkItemStatusesMock,
     getProjectManagerGoal: getProjectManagerGoalMock,
     discoverAdapters: discoverAdaptersMock,
     listProjectManagerWorkItems: listProjectManagerWorkItemsMock,
@@ -56,14 +53,21 @@ vi.mock("@/lib/api", async (importOriginal) => {
     listProjectManagerLedger: listProjectManagerLedgerMock,
     getProjectManagerTaskPacket: getProjectManagerTaskPacketMock,
     listSessions: listSessionsMock,
-    seedProjectManagerStageTemplate: seedProjectManagerStageTemplateMock,
     startProjectManagerTaskPacket: startProjectManagerTaskPacketMock,
     createProjectManagerWorkItem: createProjectManagerWorkItemMock,
     updateProjectManagerWorkItem: updateProjectManagerWorkItemMock,
-    addProjectManagerWorkItemDependency: addProjectManagerWorkItemDependencyMock,
-    removeProjectManagerWorkItemDependency: removeProjectManagerWorkItemDependencyMock,
+    updateProjectManagerWorkItemStatus: updateProjectManagerWorkItemStatusMock,
   };
 });
+
+vi.mock("@/lib/copilot-api", () => ({
+  listGoals: listGoalsMock,
+  getGoal: getGoalMock,
+}));
+
+vi.mock("@/components/workspaces/TaskExecutionPanel", () => ({
+  TaskExecutionPanel: () => <div data-testid="task-execution-panel-stub" />,
+}));
 
 const stages = [
   {
@@ -76,16 +80,6 @@ const stages = [
     createdAt: 1,
     updatedAt: 1,
   },
-  {
-    id: "stage-2",
-    projectId: "project-1",
-    name: "测试验证",
-    description: null,
-    position: 1,
-    status: "completed",
-    createdAt: 2,
-    updatedAt: 2,
-  },
 ];
 
 const workItems = [
@@ -95,7 +89,7 @@ const workItems = [
     projectId: "project-1",
     title: "实现登录",
     description: null,
-    status: "in_progress",
+    status: "in_progress" as const,
     priority: 0,
     acceptanceCriteria: [],
     evidenceRefCount: 0,
@@ -106,10 +100,11 @@ const workItems = [
   },
   {
     id: "item-2",
+    revision: 1,
     projectId: "project-1",
     title: "整理需求",
     description: null,
-    status: "todo",
+    status: "todo" as const,
     priority: 0,
     acceptanceCriteria: [],
     evidenceRefCount: 0,
@@ -117,6 +112,21 @@ const workItems = [
     stageId: null,
     createdAt: 2,
     updatedAt: 2,
+  },
+  {
+    id: "item-3",
+    revision: 2,
+    projectId: "project-1",
+    title: "已完成基础脚手架",
+    description: null,
+    status: "done" as const,
+    priority: 0,
+    acceptanceCriteria: [],
+    evidenceRefCount: 1,
+    evidenceRefs: [{ kind: "test", ref: "scaffold.test.ts" }],
+    stageId: null,
+    createdAt: 0,
+    updatedAt: 0,
   },
 ];
 
@@ -135,8 +145,8 @@ const taskPackets = [
     id: "item-1:task-packet",
     projectId: "project-1",
     workItemId: "item-1",
-    workItemStatus: "in_progress",
-    queueStatus: "running",
+    workItemStatus: "in_progress" as const,
+    queueStatus: "running" as const,
     title: "实现登录",
     updatedAt: 1,
     prompt: "Task: 实现登录",
@@ -144,15 +154,20 @@ const taskPackets = [
     expectedVerification: [],
     evidenceRequirements: [],
     runtime: { adapter: "claude", templateId: null },
-    sessionLink: { sessionId: "session-1", status: "running", aiTool: "claude", href: "/sessions/session-1" },
+    sessionLink: {
+      sessionId: "session-1",
+      status: "running",
+      aiTool: "claude",
+      href: "/sessions/session-1",
+    },
     blockedReason: null,
   },
   {
     id: "item-2:task-packet",
     projectId: "project-1",
     workItemId: "item-2",
-    workItemStatus: "todo",
-    queueStatus: "planned",
+    workItemStatus: "todo" as const,
+    queueStatus: "planned" as const,
     title: "整理需求",
     updatedAt: 2,
     prompt: "Task: 整理需求",
@@ -199,18 +214,34 @@ function renderPanel(options: { embedded?: boolean } = {}) {
   return render(
     <LanguageProvider>
       <QueryClientProvider client={createQueryClient()}>
-        <ProjectManagerPanel projectId="project-1" enabled authority={{canEdit:true,canManage:true,legacySessions:true}} embedded={options.embedded} />
+        <ProjectManagerPanel
+          projectId="project-1"
+          enabled
+          authority={{ canEdit: true, canManage: true, legacySessions: true }}
+          embedded={options.embedded}
+        />
       </QueryClientProvider>
-    </LanguageProvider>
+    </LanguageProvider>,
   );
 }
 
-describe("ProjectManagerPanel stages and dependencies", () => {
+describe("ProjectManagerPanel Copilot-first supervision view", () => {
   beforeEach(() => {
     cleanup();
     window.localStorage.clear();
     vi.clearAllMocks();
-    getProjectManagerGoalMock.mockResolvedValue({ goal: null });
+    getProjectManagerGoalMock.mockResolvedValue({
+      goal: {
+        id: "g-1",
+        projectId: "project-1",
+        summary: "交付轻量化任务监工流",
+        constraints: [],
+        acceptanceCriteria: [],
+        status: "active",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    });
     discoverAdaptersMock.mockResolvedValue({ adapters });
     listProjectManagerWorkItemsMock.mockResolvedValue({ workItems });
     listProjectManagerTaskPacketsMock.mockResolvedValue({ taskPackets });
@@ -219,21 +250,28 @@ describe("ProjectManagerPanel stages and dependencies", () => {
     listProjectManagerLedgerMock.mockResolvedValue({ events: [] });
     getProjectManagerTaskPacketMock.mockResolvedValue({ taskPacket: taskPackets[0] });
     listSessionsMock.mockResolvedValue({ sessions: [] });
+    listGoalsMock.mockResolvedValue({ goals: [] });
+    getGoalMock.mockResolvedValue({ goal: null, tasks: [] });
     updateProjectManagerWorkItemMock.mockResolvedValue({ workItem: workItems[0] });
+    updateProjectManagerWorkItemStatusMock.mockResolvedValue({
+      workItem: { ...workItems[0], status: "done" },
+    });
     createProjectManagerWorkItemMock.mockResolvedValue({
       workItem: {
         ...workItems[1],
-        id: "item-3",
-        title: "补充创建流程",
+        id: "item-4",
+        title: "补充单行速记任务",
       },
     });
-    removeProjectManagerWorkItemDependencyMock.mockResolvedValue({});
-    addProjectManagerWorkItemDependencyMock.mockResolvedValue({ link: links[0] });
-    seedProjectManagerStageTemplateMock.mockResolvedValue({ stages });
     startProjectManagerTaskPacketMock.mockResolvedValue({
       taskPacket: {
         ...taskPackets[1],
-        sessionLink: { sessionId: "session-2", status: "idle", aiTool: "claude", href: "/sessions/session-2" },
+        sessionLink: {
+          sessionId: "session-2",
+          status: "idle",
+          aiTool: "claude",
+          href: "/sessions/session-2",
+        },
         blockedReason: null,
       },
       session: {
@@ -247,199 +285,205 @@ describe("ProjectManagerPanel stages and dependencies", () => {
     });
   });
 
-  it("requires a batch completion reason and preserves confirmed revisions through refresh and retry", async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    const items = workItems.map((item, index) => ({ ...item, status: "in_progress", revision: index === 0 ? 3 : 5 }));
-    listProjectManagerWorkItemsMock.mockResolvedValue({ workItems: items });
-    batchUpdateProjectManagerWorkItemStatusesMock.mockRejectedValueOnce(new Error("Network unavailable"));
-    batchUpdateProjectManagerWorkItemStatusesMock.mockResolvedValueOnce({ workItems: items.map(item => ({ ...item, status: "done" })) });
-    const client = createQueryClient();
-    render(<LanguageProvider><QueryClientProvider client={client}><ProjectManagerPanel projectId="project-1" enabled authority={{canEdit:true,canManage:true,legacySessions:false}} /></QueryClientProvider></LanguageProvider>);
-    for (const checkbox of await screen.findAllByRole("checkbox", { name: "选择工作项" })) fireEvent.click(checkbox);
-    fireEvent.keyDown(screen.getByRole("combobox", { name: "批量目标状态" }), { key: "ArrowDown" });
-    fireEvent.click(await screen.findByRole("option", { name: "完成" }));
-    fireEvent.click(screen.getByRole("button", { name: "移动已选择" }));
-    const dialog = await screen.findByRole("dialog");
-    expect(batchUpdateProjectManagerWorkItemStatusesMock).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole("button", { name: "确认变更" }));
-    expect(await within(dialog).findByText("请填写手动完成原因。")).toBeTruthy();
-    fireEvent.change(within(dialog).getByLabelText("手动完成原因"), { target: { value: "Manual bookkeeping only" } });
-    client.setQueriesData({ queryKey: ["project-manager", "project-1", "work-items"] }, { workItems: items.map(item => ({ ...item, revision: 99 })) });
-    fireEvent.click(within(dialog).getByRole("button", { name: "确认变更" }));
-    await within(dialog).findByText("无法批量更新工作项状态。");
-    const payload = { updates: items.map(item => ({ workItemId: item.id, status: "done", expectedRevision: item.revision, manualCompletionReason: "Manual bookkeeping only" })) };
-    expect(batchUpdateProjectManagerWorkItemStatusesMock).toHaveBeenNthCalledWith(1, "project-1", payload);
-    fireEvent.click(within(dialog).getByRole("button", { name: "确认变更" }));
-    await waitFor(() => expect(batchUpdateProjectManagerWorkItemStatusesMock).toHaveBeenNthCalledWith(2, "project-1", payload));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  });
-
-  it("groups work items into stage lanes with dependency badges and session chips", async () => {
-    renderPanel();
-    fireEvent.click((await screen.findAllByRole("button", { name: "阶段视图" }))[0]!);
-
-    const stageLane = await screen.findByTestId("project-manager-stage-lane-stage-1");
-    expect(stageLane.textContent).toContain("实现登录");
-    expect(stageLane.textContent).toContain("阻塞于: 1");
-
-    const backlogLane = screen.getByTestId("project-manager-stage-lane-backlog");
-    expect(backlogLane.textContent).toContain("整理需求");
-    expect(backlogLane.textContent).toContain("阻塞了: 1");
-
-    const sessionChip = stageLane.querySelector("a[href='/sessions/session-1']");
-    expect(sessionChip).not.toBeNull();
-  });
-
-  it("moves a work item to another stage from the lane card", async () => {
-    renderPanel();
-    fireEvent.click((await screen.findAllByRole("button", { name: "阶段视图" }))[0]!);
-
-    const stageLane = await screen.findByTestId("project-manager-stage-lane-stage-1");
-    const select = stageLane.querySelector("select");
-    expect(select).not.toBeNull();
-    fireEvent.change(select as HTMLSelectElement, { target: { value: "stage-2" } });
-
-    await waitFor(() => {
-      expect(updateProjectManagerWorkItemMock).toHaveBeenCalledWith("project-1", "item-1", { stageId: "stage-2", expectedRevision: 3 });
-    });
-  });
-
-  it("shows stage and dependency management in the work item detail sheet", async () => {
-    renderPanel();
-    fireEvent.click((await screen.findAllByRole("button", { name: "阶段视图" }))[0]!);
-
-    const stageLane = await screen.findByTestId("project-manager-stage-lane-stage-1");
-    fireEvent.click(within(stageLane as HTMLElement).getByText("实现登录"));
-    expect(stageLane.textContent).toContain("实现登录");
-
-    const dependencies = await screen.findByText("依赖关系");
-    expect(dependencies).not.toBeNull();
-
-    const fieldset = dependencies.closest("fieldset");
-    expect(fieldset?.textContent).toContain("整理需求");
-
-    const removeButton = fieldset?.querySelector("button[aria-label='删除']");
-    expect(removeButton).not.toBeNull();
-    fireEvent.click(removeButton as HTMLButtonElement);
-    await waitFor(() => {
-      expect(removeProjectManagerWorkItemDependencyMock).toHaveBeenCalledWith("project-1", "item-1", "item-2", 3);
-    });
-  });
-
-  it("offers the SDLC template seed when no stages exist", async () => {
-    listProjectManagerStagesMock.mockResolvedValue({ stages: [] });
+  it("renders status-grouped tasks with stage/blocker badges, collapses done items in active view, and supports quick-add", async () => {
     renderPanel();
 
-    const seedButton = await screen.findByText("使用 SDLC 模板");
-    fireEvent.click(seedButton);
+    expect(await screen.findByText("交付轻量化任务监工流")).toBeTruthy();
 
-    await waitFor(() => {
-      expect(seedProjectManagerStageTemplateMock).toHaveBeenCalledWith("project-1");
-    });
-  });
+    const row1 = await screen.findByTestId("project-manager-item-item-1");
+    expect(row1.textContent).toContain("实现登录");
+    expect(row1.textContent).toContain("编码实现");
+    expect(row1.textContent).toContain("被 1 项阻塞");
 
-  it("creates a todo work item without accepting status or source references", async () => {
-    renderPanel();
+    // Done item is collapsed by default in active view until expanded.
+    expect(screen.queryByTestId("project-manager-item-item-3")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /已完成与取消 \(1\)/ }));
+    expect(await screen.findByTestId("project-manager-item-item-3")).toBeTruthy();
 
-    fireEvent.click(await screen.findByRole("button", { name: "创建工作项" }));
-    const dialog = await screen.findByRole("dialog");
-
-    expect(within(dialog).getByText("新任务将从待办开始；证据可在任务详情或验收时补充。")).not.toBeNull();
-    expect(within(dialog).queryByLabelText("状态")).toBeNull();
-    expect(within(dialog).queryByText("初始证据引用")).toBeNull();
-    expect(within(dialog).queryByText("初始飞书引用")).toBeNull();
-
-    fireEvent.change(within(dialog).getByLabelText("标题"), { target: { value: "补充创建流程" } });
-    fireEvent.change(within(dialog).getByLabelText("描述"), { target: { value: "简化任务创建表单" } });
-    fireEvent.change(within(dialog).getByLabelText("优先级"), { target: { value: "7" } });
-    fireEvent.change(within(dialog).getByLabelText("验收标准"), {
-      target: { value: "新任务从待办开始\n证据在详情中补充" },
-    });
-    fireEvent.click(within(dialog).getByRole("button", { name: "创建工作项" }));
+    // 1-line quick-add creates a task with title only.
+    fireEvent.change(
+      screen.getByPlaceholderText("记一条需求或任务，回车添加（或交由 Copilot 拆解）…"),
+      {
+        target: { value: "补充单行速记任务" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
 
     await waitFor(() => {
       expect(createProjectManagerWorkItemMock).toHaveBeenCalledWith("project-1", {
-        title: "补充创建流程",
-        description: "简化任务创建表单",
-        priority: 7,
-        acceptanceCriteria: ["新任务从待办开始", "证据在详情中补充"],
+        title: "补充单行速记任务",
       });
     });
   });
 
-  it("creates a CLI session directly from a todo work item board card after choosing the CLI", async () => {
+  it("starts a CLI session directly from a todo item after selecting a launchable CLI", async () => {
     renderPanel();
 
-    const todoCard = await screen.findByTestId("project-manager-board-card-item-2");
-    fireEvent.click(within(todoCard).getByText("创建会话"));
+    const todoRow = await screen.findByTestId("project-manager-item-item-2");
+    fireEvent.click(within(todoRow).getByRole("button", { name: "启动 CLI" }));
 
-    expect(await screen.findByText("选择 Code CLI")).not.toBeNull();
+    expect(await screen.findByText("选择 Code CLI")).toBeTruthy();
     const claudeOption = await screen.findByTestId("quick-start-cli-option-claude");
     expect((claudeOption.querySelector("input") as HTMLInputElement).checked).toBe(true);
     expect(screen.queryByTestId("quick-start-cli-option-opencode")).toBeNull();
 
-    const confirmButton = screen.getByRole("button", { name: "创建任务会话" }) as HTMLButtonElement;
+    const confirmButton = screen.getByRole("button", {
+      name: "创建任务会话",
+    }) as HTMLButtonElement;
     await waitFor(() => expect(confirmButton.disabled).toBe(false));
     fireEvent.click(confirmButton);
 
     await waitFor(() => {
-      expect(startProjectManagerTaskPacketMock).toHaveBeenCalledWith("project-1", "item-2", { aiTool: "claude" });
+      expect(startProjectManagerTaskPacketMock).toHaveBeenCalledWith("project-1", "item-2", {
+        aiTool: "claude",
+      });
     });
   });
 
-  it("links to the running session instead of offering creation when one is linked", async () => {
+  it("links to the running session instead of offering CLI start and allows 1-click done on personal projects", async () => {
     renderPanel();
 
-    const runningCard = await screen.findByTestId("project-manager-board-card-item-1");
-    expect(within(runningCard).getByText("打开关联会话")).not.toBeNull();
-    expect(within(runningCard).queryByText("创建会话")).toBeNull();
+    const runningRow = await screen.findByTestId("project-manager-item-item-1");
+    expect(within(runningRow).getByText("进入终端")).toBeTruthy();
+    expect(within(runningRow).queryByText("启动 CLI")).toBeNull();
+
+    fireEvent.click(within(runningRow).getByRole("button", { name: "标记通过" }));
+    await waitFor(() => {
+      expect(updateProjectManagerWorkItemStatusMock).toHaveBeenCalledWith("project-1", "item-1", {
+        status: "done",
+        expectedRevision: 3,
+        manualCompletionReason: "所有者已手动验收通过",
+      });
+    });
   });
 
-it("keeps shared reviewers read-only and never requests legacy sessions, even on refresh", async () => {
-  const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
-  render(<QueryClientProvider client={client}><LanguageProvider><ProjectManagerPanel projectId="project-1" enabled authority={{canEdit: false, canManage: false, legacySessions: false}} /></LanguageProvider></QueryClientProvider>);
-  await screen.findByTestId("project-manager-stage-strip");
-  await waitFor(() => expect(listProjectManagerWorkItemsMock).toHaveBeenCalled());
-  expect(listProjectManagerTaskPacketsMock).not.toHaveBeenCalled();
-  const create = screen.getByRole("button", {name: "创建工作项"});
-  expect((create as HTMLButtonElement).disabled).toBe(true);
-  const edit = screen.getAllByRole("button", {name: "编辑工作项"});
-  expect(edit.every(b => (b as HTMLButtonElement).disabled)).toBe(true);
-  const card = screen.getByTestId("project-manager-board-card-item-1");
-  expect(card.getAttribute("aria-disabled")).toBe("true");
-  fireEvent.click(screen.getByRole("button", {name: "刷新开发任务"}));
-  await waitFor(() => expect(listProjectManagerWorkItemsMock).toHaveBeenCalledTimes(2));
-  expect(listProjectManagerTaskPacketsMock).not.toHaveBeenCalled();
-  expect(listSessionsMock).not.toHaveBeenCalled();
-});
+  it("keeps shared reviewers read-only and never requests legacy sessions or goals, even on refresh", async () => {
+    const client = createQueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <LanguageProvider>
+          <ProjectManagerPanel
+            projectId="project-1"
+            enabled
+            authority={{ canEdit: false, canManage: false, legacySessions: false }}
+          />
+        </LanguageProvider>
+      </QueryClientProvider>,
+    );
 
+    const row = await screen.findByTestId("project-manager-item-item-1");
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    expect(
+      screen.queryByPlaceholderText("记一条需求或任务，回车添加（或交由 Copilot 拆解）…"),
+    ).toBeNull();
+    expect(listProjectManagerTaskPacketsMock).not.toHaveBeenCalled();
+    expect(listGoalsMock).not.toHaveBeenCalled();
 
-it("uses the single PM editor for assignments and preserves the captured revision across refresh", async () => {
-  const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
-  const collaboration = {project: {id: "project-1", name: "Project", role: "owner" as const, memberCount: 2, revision: 1, verificationRevision: 1, executionEnabled: false, verification: null}, members: [{userId:"dev", email:"dev@test.invalid", role:"developer" as const, state:"active", revision:1}, {userId:"review", email:"review@test.invalid", role:"reviewer" as const, state:"active", revision:1}], tasks:[], events:[]};
-  render(<QueryClientProvider client={client}><LanguageProvider><ProjectManagerPanel projectId="project-1" enabled authority={{canEdit:true,canManage:true,legacySessions:false,collaboration}} /></LanguageProvider></QueryClientProvider>);
-  const card = await screen.findByTestId("project-manager-board-card-item-1");
-  fireEvent.click(within(card).getByRole("button", {name:"编辑工作项"}));
-  const dialog = await screen.findByRole("dialog");
-  fireEvent.change(within(dialog).getByLabelText("标题"),{target:{value:"One edited task"}});
-  fireEvent.change(within(dialog).getByLabelText("负责人"),{target:{value:"dev"}});
-  fireEvent.change(within(dialog).getByLabelText("审核人"),{target:{value:"review"}});
-  client.setQueriesData({queryKey:["project-manager","project-1","work-items"]},{workItems: workItems.map(item => ({...item,revision:9}))});
-  fireEvent.click(within(dialog).getByRole("button",{name:"保存工作项"}));
-  await waitFor(()=>expect(updateProjectManagerWorkItemMock).toHaveBeenCalledWith("project-1","item-1",expect.objectContaining({expectedRevision:3,title:"One edited task",assigneeId:"dev",reviewerId:"review"})));
-});
+    fireEvent.click(screen.getByRole("button", { name: "刷新开发任务" }));
+    await waitFor(() => expect(listProjectManagerWorkItemsMock).toHaveBeenCalledTimes(2));
+    expect(listProjectManagerTaskPacketsMock).not.toHaveBeenCalled();
+    expect(listSessionsMock).not.toHaveBeenCalled();
+  });
 
-it("keeps the Dev Tasks heading visible standalone but screen-reader-only when embedded under the tab", async () => {
-  const { unmount } = renderPanel();
-  const heading = await screen.findByRole("heading", { level: 2, name: "开发任务" });
-  expect(heading.className).toContain("text-sm");
-  expect(heading.className).not.toContain("sr-only");
-  unmount();
+  it("preserves captured revision for shared-project inline assignments and requires completion note for done", async () => {
+    const client = createQueryClient();
+    const collaboration = {
+      project: {
+        id: "project-1",
+        name: "Project",
+        role: "owner" as const,
+        memberCount: 2,
+        revision: 1,
+        verificationRevision: 1,
+        executionEnabled: false,
+        verification: null,
+      },
+      members: [
+        {
+          userId: "dev",
+          email: "dev@test.invalid",
+          role: "developer" as const,
+          state: "active",
+          revision: 1,
+        },
+        {
+          userId: "review",
+          email: "review@test.invalid",
+          role: "reviewer" as const,
+          state: "active",
+          revision: 1,
+        },
+      ],
+      tasks: [],
+      events: [],
+    };
+    render(
+      <QueryClientProvider client={client}>
+        <LanguageProvider>
+          <ProjectManagerPanel
+            projectId="project-1"
+            enabled
+            authority={{ canEdit: true, canManage: true, legacySessions: false, collaboration }}
+          />
+        </LanguageProvider>
+      </QueryClientProvider>,
+    );
 
-  renderPanel({ embedded: true });
-  const embeddedHeading = await screen.findByRole("heading", { level: 2, name: "开发任务" });
-  expect(embeddedHeading.className).toContain("sr-only");
-  // The description stays visible so the embedded panel keeps its guidance.
-  expect(screen.getByText("从目标到交付：按阶段推进工作项，以证据闭环验收。")).toBeTruthy();
-});
+    const row = await screen.findByTestId("project-manager-item-item-1");
+    fireEvent.click(within(row).getByRole("button", { name: "实现登录" }));
+
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.change(within(sheet).getByLabelText("负责人"), { target: { value: "dev" } });
+    fireEvent.change(within(sheet).getByLabelText("审核人"), { target: { value: "review" } });
+
+    // Background refresh bumps revision to 9; captured revision 3 must be preserved.
+    client.setQueriesData(
+      { queryKey: ["project-manager", "project-1", "work-items"] },
+      { workItems: workItems.map((item) => ({ ...item, revision: 9 })) },
+    );
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "保存分配" }));
+    await waitFor(() =>
+      expect(updateProjectManagerWorkItemMock).toHaveBeenCalledWith(
+        "project-1",
+        "item-1",
+        expect.objectContaining({
+          expectedRevision: 3,
+          assigneeId: "dev",
+          reviewerId: "review",
+        }),
+      ),
+    );
+
+    // Marking done in a shared project prompts for a 1-line completion note.
+    fireEvent.click(within(sheet).getByRole("button", { name: "标记通过" }));
+    const noteInput = await within(sheet).findByPlaceholderText("简短验收说明（协作项目必填）");
+    fireEvent.change(noteInput, { target: { value: "Reviewed and verified" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "确认" }));
+
+    await waitFor(() =>
+      expect(updateProjectManagerWorkItemStatusMock).toHaveBeenCalledWith("project-1", "item-1", {
+        status: "done",
+        expectedRevision: 3,
+        manualCompletionReason: "Reviewed and verified",
+      }),
+    );
+  });
+
+  it("keeps the Dev Tasks heading visible standalone but screen-reader-only when embedded under the tab", async () => {
+    const { unmount } = renderPanel();
+    const heading = await screen.findByRole("heading", { level: 2, name: "开发任务" });
+    expect(heading.className).toContain("text-sm");
+    expect(heading.className).not.toContain("sr-only");
+    unmount();
+
+    renderPanel({ embedded: true });
+    const embeddedHeading = await screen.findByRole("heading", { level: 2, name: "开发任务" });
+    expect(embeddedHeading.className).toContain("sr-only");
+    expect(
+      screen.getByText(
+        "由 Copilot 维护计划、拆解任务与沉淀验证证据；你只需下达目标、查看进度并确认验收。",
+      ),
+    ).toBeTruthy();
+  });
 });

@@ -15,23 +15,27 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("project detail exposes a safe workspace sidecar with lazy tree and sheet viewer", async ({ page }) => {
+test("code tab unifies files explorer, git, and code graph sub-views", async ({ page }) => {
   const unhandledApiRoutes = await mockWorkspaceApis(page);
 
   await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("tab", { name: "Code" }).click();
 
-  const panel = page.getByTestId("workspace-context-panel");
-  await expect(panel.getByRole("heading", { name: "Workspace" })).toBeVisible();
-  await expect(panel.getByText("/workspace/forgebadger")).toBeVisible();
+  const explorer = page.getByTestId("workspace-explorer");
+  await expect(explorer).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Git" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Code Graph" })).toBeVisible();
 
-  // Directories expand lazily; files open in the sheet viewer.
-  await panel.getByRole("button", { name: "src", exact: true }).click();
-  await panel.getByRole("button", { name: /index\.ts/ }).click();
-  await expect(page.getByTestId("workspace-file-viewer")).toContainText("export const workspace = true;");
+  await explorer.getByRole("button", { name: "src", exact: true }).click();
+  await explorer.getByRole("button", { name: /index\.ts/ }).click();
+  await expect(explorer.getByTestId("workspace-file-viewer")).toContainText(
+    "export const workspace = true;",
+  );
   expect(unhandledApiRoutes).toEqual([]);
 });
 
-test("files tab renders the workspace explorer with an inline viewer", async ({ page }) => {
+test("legacy ?tab=files link opens Code -> Files workspace explorer with inline viewer", async ({ page }) => {
   const unhandledApiRoutes = await mockWorkspaceApis(page);
 
   await page.goto(`/projects/${PROJECT_ID}?tab=files`);
@@ -75,6 +79,11 @@ async function mockWorkspaceApis(page: Page) {
 
     if (url.pathname === "/api/v1/model-providers" && method === "GET") {
       await route.fulfill({ json: envelope({ providers: [], models: [], credentials: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/adapters/order" && method === "GET") {
+      await route.fulfill({ json: envelope({ order: ["claude", "opencode", "codex", "kimi", "pi", "mcode", "grok"] }) });
       return;
     }
 
@@ -188,11 +197,6 @@ async function mockWorkspaceApis(page: Page) {
 
     if (url.pathname === "/api/v1/sessions" && method === "GET") {
       await route.fulfill({ json: envelope({ sessions: [] }) });
-      return;
-    }
-
-    if (url.pathname === "/api/v1/activities" && method === "GET") {
-      await route.fulfill({ json: envelope({ activities: [] }) });
       return;
     }
 

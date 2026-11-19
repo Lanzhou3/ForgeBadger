@@ -2,11 +2,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
+import { LanguageProvider } from "@/hooks/use-language";
 import {
   CopilotMarkdown,
   StreamingCopilotMarkdown,
   closeOpenMarkdown,
 } from "@/components/copilot/copilot-markdown";
+
+function renderMarkdown(ui: React.ReactElement) {
+  return render(<LanguageProvider>{ui}</LanguageProvider>);
+}
 
 vi.mock("@/components/projects/workspace/highlight", () => ({
   // Grammar loading is exercised by the workspace viewer tests; here the chat
@@ -22,7 +27,7 @@ describe("CopilotMarkdown", () => {
 
   describe("gfm structures", () => {
     it("renders tables as real table elements with headers and cells", () => {
-      const { container } = render(
+      const { container } = renderMarkdown(
         <CopilotMarkdown content={"| 模型 | 状态 |\n| --- | --- |\n| claude | 可用 |"} />
       );
 
@@ -35,7 +40,7 @@ describe("CopilotMarkdown", () => {
     });
 
     it("renders ordered lists with semantic ol/li instead of bullet divs", () => {
-      const { container } = render(<CopilotMarkdown content={"1. 第一步\n2. 第二步\n3. 第三步"} />);
+      const { container } = renderMarkdown(<CopilotMarkdown content={"1. 第一步\n2. 第二步\n3. 第三步"} />);
 
       expect(container.querySelector("ol")).toBeTruthy();
       expect(container.querySelectorAll("li")).toHaveLength(3);
@@ -46,7 +51,7 @@ describe("CopilotMarkdown", () => {
 
     it("renders nested unordered lists", () => {
       const content = "- 顶层 A\n- 顶层 B\n  - 嵌套 B1\n  - 嵌套 B2";
-      const { container } = render(<CopilotMarkdown content={content} />);
+      const { container } = renderMarkdown(<CopilotMarkdown content={content} />);
 
       expect(screen.getByText("顶层 A")).toBeTruthy();
       expect(screen.getByText("嵌套 B1")).toBeTruthy();
@@ -54,7 +59,7 @@ describe("CopilotMarkdown", () => {
     });
 
     it("renders task lists as styled checkboxes with checked state", () => {
-      const { container } = render(<CopilotMarkdown content={"- [x] 已完成项\n- [ ] 待办项"} />);
+      const { container } = renderMarkdown(<CopilotMarkdown content={"- [x] 已完成项\n- [ ] 待办项"} />);
 
       expect(screen.getByText("已完成项")).toBeTruthy();
       expect(screen.getByText("待办项")).toBeTruthy();
@@ -63,7 +68,7 @@ describe("CopilotMarkdown", () => {
     });
 
     it("renders strikethrough as a del element", () => {
-      const { container } = render(<CopilotMarkdown content={"~~过时方案~~ 已废弃"} />);
+      const { container } = renderMarkdown(<CopilotMarkdown content={"~~过时方案~~ 已废弃"} />);
 
       expect(container.querySelector("del")?.textContent).toBe("过时方案");
     });
@@ -71,7 +76,7 @@ describe("CopilotMarkdown", () => {
 
   describe("link safety", () => {
     it("opens http links in a new tab with noopener", () => {
-      render(<CopilotMarkdown content={"[文档](https://example.com/docs)"} />);
+      renderMarkdown(<CopilotMarkdown content={"[文档](https://example.com/docs)"} />);
 
       const link = screen.getByText("文档");
       expect(link.getAttribute("href")).toBe("https://example.com/docs");
@@ -80,7 +85,7 @@ describe("CopilotMarkdown", () => {
     });
 
     it("strips javascript: URLs instead of rendering them", () => {
-      render(<CopilotMarkdown content={"[点击](javascript:alert(1))"} />);
+      renderMarkdown(<CopilotMarkdown content={"[点击](javascript:alert(1))"} />);
 
       const link = screen.getByText("点击");
       expect(link.tagName).toBe("A");
@@ -92,7 +97,7 @@ describe("CopilotMarkdown", () => {
 
   describe("raw html is inert", () => {
     it("never mounts model-supplied HTML elements — they stay escaped text", () => {
-      const { container } = render(
+      const { container } = renderMarkdown(
         <CopilotMarkdown content={'hello <img src=x onerror="alert(1)"> world'} />
       );
 
@@ -107,15 +112,15 @@ describe("CopilotMarkdown", () => {
 
   describe("code blocks", () => {
     it("renders fenced code with a language label and a copy affordance", () => {
-      render(<CopilotMarkdown content={"```ts\nconst a = 1;\n```"} />);
+      renderMarkdown(<CopilotMarkdown content={"```ts\nconst a = 1;\n```"} />);
 
       expect(screen.getByText("ts")).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Copy code" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "复制代码" })).toBeTruthy();
       expect(screen.getByText(/const a = 1;/u)).toBeTruthy();
     });
 
     it("renders inline code as a mono chip", () => {
-      const { container } = render(<CopilotMarkdown content={"运行 `pnpm build` 即可"} />);
+      const { container } = renderMarkdown(<CopilotMarkdown content={"运行 `pnpm build` 即可"} />);
 
       const inlineCode = container.querySelector("p > code");
       expect(inlineCode?.textContent).toBe("pnpm build");
@@ -125,7 +130,7 @@ describe("CopilotMarkdown", () => {
 
   describe("images", () => {
     it("renders remote images as links instead of loading them", () => {
-      render(<CopilotMarkdown content={"![截图](https://example.com/a.png)"} />);
+      renderMarkdown(<CopilotMarkdown content={"![截图](https://example.com/a.png)"} />);
 
       expect(screen.queryByRole("img")).toBeNull();
       const link = screen.getByText("截图");
@@ -171,14 +176,14 @@ describe("StreamingCopilotMarkdown", () => {
   it("renders a partially streamed code block as a block, not raw syntax", () => {
     // JSX string attributes keep \n literal — expression form is required
     // for real newlines in multi-line fixtures.
-    render(<StreamingCopilotMarkdown text={"看这个：\n```bash\npnpm test"} />);
+    renderMarkdown(<StreamingCopilotMarkdown text={"看这个：\n```bash\npnpm test"} />);
 
     expect(screen.getByText("bash")).toBeTruthy();
     expect(screen.getByText(/pnpm test/u)).toBeTruthy();
   });
 
   it("renders plain partial text without mangling it", () => {
-    render(<StreamingCopilotMarkdown text="正在生成 **加粗** 与后续" />);
+    renderMarkdown(<StreamingCopilotMarkdown text="正在生成 **加粗** 与后续" />);
 
     expect(screen.getByText(/正在生成/u)).toBeTruthy();
   });

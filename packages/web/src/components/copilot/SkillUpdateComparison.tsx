@@ -1,5 +1,6 @@
 "use client";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { ExtensionFile } from "@/lib/copilot-extensions-api";
 import { useExtensionsCopy } from "./extensions-copy";
 
@@ -25,7 +26,15 @@ export function SkillUpdateComparison({ currentFiles, bundled, busy, editable, a
       <p className="text-xs text-muted-foreground">{copy.adoptHelp}</p>
       <Button size="sm" disabled={busy} onClick={onAdopt}>{copy.adoptBuiltin}</Button>
       <div className="space-y-2 border-t border-border/70 pt-3">
-        <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={acknowledged} disabled={busy} onChange={event => onAcknowledge(event.target.checked)} />{copy.acknowledge}</label>
+        <label className="flex items-start gap-2 text-sm">
+          <Checkbox
+            className="mt-0.5"
+            checked={acknowledged}
+            disabled={busy}
+            onCheckedChange={(checked) => onAcknowledge(checked === true)}
+          />
+          <span>{copy.acknowledge}</span>
+        </label>
         <Button size="sm" variant="outline" className="h-auto whitespace-normal text-left" disabled={busy || !acknowledged} onClick={onKeep}>{copy.keepReviewed}</Button>
       </div>
     </>}

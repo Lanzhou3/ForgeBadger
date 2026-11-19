@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
   CalendarClock,
@@ -12,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useSettingsCopy } from "./settings-copy";
 
@@ -22,15 +24,46 @@ interface NavItem {
   href: string;
   icon: LucideIcon;
   label: string;
+  count?: number;
+}
+
+function useNavCounts(): { extensions?: number; automations?: number } {
+  // Subscribe to React Query cache without issuing network calls so pages/tests
+  // that only mock a subset of Copilot APIs never fail or fire extra requests.
+  const skills = useQuery<{ skills?: unknown[] }>({ queryKey: ["copilot", "skills"], queryFn: skipToken, retry: false });
+  const connections = useQuery<{ connections?: { kind?: string }[] }>({
+    queryKey: ["copilot", "connections"],
+    queryFn: skipToken,
+    retry: false,
+  });
+  const roots = useQuery<{ roots?: unknown[] }>({ queryKey: ["copilot", "machine-roots"], queryFn: skipToken, retry: false });
+  const automations = useQuery<{ automations?: { status?: string }[] }>({
+    queryKey: ["copilot", "automations"],
+    queryFn: skipToken,
+    retry: false,
+  });
+
+  const hasExtensions = skills.data !== undefined || connections.data !== undefined || roots.data !== undefined;
+  const extensionsTotal =
+    (skills.data?.skills?.length ?? 0) +
+    (connections.data?.connections?.filter((item) => item.kind === "mcp").length ?? 0) +
+    (roots.data?.roots?.length ?? 0);
+  const enabledAutomations = automations.data?.automations?.filter((item) => item.status === "enabled").length;
+
+  return {
+    extensions: hasExtensions && extensionsTotal > 0 ? extensionsTotal : undefined,
+    automations: enabledAutomations && enabledAutomations > 0 ? enabledAutomations : undefined,
+  };
 }
 
 function useNavItems(): NavItem[] {
   const copy = useSettingsCopy();
+  const counts = useNavCounts();
   return [
     { key: "general", href: "/copilot/settings", icon: SlidersHorizontal, label: copy.navGeneral },
-    { key: "extensions", href: "/copilot/extensions", icon: Puzzle, label: copy.navExtensions },
+    { key: "extensions", href: "/copilot/extensions", icon: Puzzle, label: copy.navExtensions, count: counts.extensions },
     { key: "channels", href: "/copilot/channels", icon: Radio, label: copy.navChannels },
-    { key: "automations", href: "/copilot/automations", icon: CalendarClock, label: copy.navAutomations },
+    { key: "automations", href: "/copilot/automations", icon: CalendarClock, label: copy.navAutomations, count: counts.automations },
   ];
 }
 
@@ -103,7 +136,16 @@ export function CopilotSettingsShell({
                   strokeWidth={1.75}
                   className={`size-4 shrink-0 ${isActive ? "text-brand" : "text-muted-foreground/75"}`}
                 />
-                {item.label}
+                <span>{item.label}</span>
+                {item.count !== undefined ? (
+                  <Badge
+                    variant="secondary"
+                    aria-hidden="true"
+                    className="ml-auto h-4 px-1.5 text-[10px] font-normal tabular-nums text-muted-foreground"
+                  >
+                    {item.count}
+                  </Badge>
+                ) : null}
               </Link>
             );
           })}

@@ -1,7 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { PET_STORAGE_KEY, readPetPreference, subscribePetPreference, writePetPreference } from "./pet-preference";
+import {
+  PET_STORAGE_KEY,
+  PET_VISIBLE_STORAGE_KEY,
+  readPetPreference,
+  readPetVisiblePreference,
+  subscribePetPreference,
+  subscribePetVisiblePreference,
+  writePetPreference,
+  writePetVisiblePreference,
+} from "./pet-preference";
 
 beforeEach(() => window.localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
@@ -36,4 +45,19 @@ it("notifies local and other-tab consumers, ignores unrelated preferences, and c
   writePetPreference("robot");
   window.dispatchEvent(new StorageEvent("storage", { key: PET_STORAGE_KEY }));
   expect(onChange).toHaveBeenCalledTimes(3);
+});
+
+it("defaults floating pet visibility to true, persists toggles, and notifies subscribers", () => {
+  expect(readPetVisiblePreference()).toBe(true);
+  const onChange = vi.fn();
+  const unsubscribe = subscribePetVisiblePreference(onChange);
+  expect(writePetVisiblePreference(false)).toBe(true);
+  expect(readPetVisiblePreference()).toBe(false);
+  expect(window.localStorage.getItem(PET_VISIBLE_STORAGE_KEY)).toBe("0");
+  expect(onChange).toHaveBeenCalledTimes(1);
+  window.dispatchEvent(new StorageEvent("storage", { key: PET_VISIBLE_STORAGE_KEY, newValue: "1" }));
+  expect(onChange).toHaveBeenCalledTimes(2);
+  unsubscribe();
+  writePetVisiblePreference(true);
+  expect(onChange).toHaveBeenCalledTimes(2);
 });

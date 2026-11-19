@@ -25,10 +25,10 @@ export function CopilotSuggestionChips({ suggestions, onPick, compact = false, c
           type="button"
           onClick={() => onPick(suggestion)}
           className={cn(
-            "rounded-full border shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md",
+            "forgebadger-motion-surface rounded-full border shadow-xs hover:border-brand/50 hover:bg-brand/10 hover:text-foreground",
             compact
-              ? "border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground hover:border-brand/50 hover:bg-brand/10 hover:text-foreground"
-              : "border-border/70 bg-card px-3.5 py-1.5 text-sm text-muted-foreground hover:border-brand/60 hover:text-foreground"
+              ? "border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground"
+              : "border-border/70 bg-card px-3.5 py-1.5 text-sm text-muted-foreground",
           )}
         >
           {suggestion}

@@ -38,12 +38,13 @@ interface Props {
   account: ChannelAccountSnapshot | null;
   health: ChannelHealthSnapshot | null;
   busy: boolean;
+  completed?: boolean;
   onSaveFeishu: (appId: string, appSecret: string) => Promise<boolean>;
   onSaveTelegram: (botToken: string) => Promise<boolean>;
   onEmergencyStop: () => void;
 }
 
-export function ChannelConnectionStep({ channel, channelName, account, health, busy, onSaveFeishu, onSaveTelegram, onEmergencyStop }: Props) {
+export function ChannelConnectionStep({ channel, channelName, account, health, busy, completed = false, onSaveFeishu, onSaveTelegram, onEmergencyStop }: Props) {
   const copy = useSettingsCopy();
   const configured = !!account?.secretConfigured;
   const [editing, setEditing] = useState(!configured);
@@ -71,6 +72,7 @@ export function ChannelConnectionStep({ channel, channelName, account, health, b
     <ChannelSection
       id="channel-connection"
       step={1}
+      completed={completed}
       title={channel === "feishu" ? copy.connectionTitleFeishu : copy.connectionTitleTelegram}
       action={
         <Badge variant="secondary" className={connectionBadgeClass(healthState)}>

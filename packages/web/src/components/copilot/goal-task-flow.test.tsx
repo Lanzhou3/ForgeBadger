@@ -114,7 +114,7 @@ describe("GoalTaskFlow", () => {
     expect(first.getByText("审查要求修改，等 Copilot 交回")).toBeTruthy();
     expect(first.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["编写: 完成", "验证: 完成", "审查: 待处理", "集成: 未开始", "通过: 未开始"]);
     expect(first.getAllByRole("listitem").filter((item) => item.getAttribute("aria-current") === "step").map((item) => item.textContent)).toEqual(["审查: 待处理"]);
-    expect(first.getByText("独立工作区，尚未并入 Goal 分支")).toBeTruthy();
+    expect(first.getByText("独立工作区，尚未并入目标分支")).toBeTruthy();
     expect(first.queryByText("crashes on empty input")).toBeNull();
     fireEvent.click(first.getByRole("button", { name: /查看 1 条发现/ }));
     expect(first.getByText("crashes on empty input")).toBeTruthy();

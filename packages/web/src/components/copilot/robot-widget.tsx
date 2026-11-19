@@ -462,7 +462,7 @@ export function RobotWidget({ petId = DEFAULT_PET_ID, onActivate, suppressBubble
       {bubble && ToneIcon && (
         <div
           className={cn(
-            "forgebadger-bubble-pop absolute rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-lg shadow-black/40",
+            "forgebadger-bubble-pop absolute rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-overlay",
             placement.vertical === "above" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"
           )}
           style={{ left: bubbleRelLeft, width: bubbleWidth }}

@@ -47,21 +47,19 @@ test("first-value flow creates projects without CLI/template binding, runs an id
   await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+$/);
 
   await page.goto(createdProjectUrl);
-  await page.getByRole("tab", { name: "Project Manager" }).click();
+  await page.getByRole("tab", { name: "Dev Tasks" }).click();
   const manager = page.getByTestId("project-manager-panel");
-  await manager.getByRole("button", { name: "Create work item" }).click();
-  const dialog = page.getByRole("dialog", { name: "Create work item" });
-  await dialog.getByLabel("Title").fill("Verify manual task handoff");
-  await dialog.getByLabel("Acceptance criteria").fill("Task session remains idle\nPrompt stays manual");
-  await dialog.getByRole("button", { name: "Create work item" }).click();
-  await manager.getByRole("button", { name: "Table" }).click();
-  await manager.getByRole("row", { name: /Verify manual task handoff/ }).getByRole("button", { name: "View details" }).click();
+  await manager
+    .getByPlaceholder("Add a task or requirement, press Enter (or let Copilot plan)…")
+    .fill("Verify manual task handoff");
+  await manager.getByRole("button", { name: "Add" }).click();
+  await manager.getByRole("button", { name: "Verify manual task handoff" }).click();
 
   const taskPacket = page.getByTestId("project-manager-task-packet");
   await expect(taskPacket).toBeVisible();
-  await taskPacket.getByRole("button", { name: "Create task session" }).click();
-  await expect(taskPacket.getByRole("link", { name: "Open linked session" })).toBeVisible();
-  await taskPacket.getByRole("link", { name: "Open linked session" }).click();
+  await taskPacket.getByRole("button", { name: "Run in CLI" }).click();
+  await page.getByRole("button", { name: "Create task session" }).click();
+  await expect(page).toHaveURL(/\/sessions\/.+/);
   await page.getByRole("button", { name: "Start", exact: true }).click();
   await expect(page.locator(".xterm-screen")).toBeVisible({ timeout: 10_000 });
 

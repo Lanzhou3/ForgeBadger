@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { LanguageProvider } from "@/hooks/use-language";
 import { CopilotAutonomyPanel } from "@/components/copilot/copilot-autonomy-panel";
-import { runtimeSettingsQueryKey } from "@/components/settings/InstanceRuntimeSettings";
 
 vi.stubGlobal(
   "ResizeObserver",
@@ -12,21 +11,21 @@ vi.stubGlobal(
     observe() {}
     unobserve() {}
     disconnect() {}
-  }
+  },
 );
 
 const {
   roleRef,
   getRuntimeSettingsMock,
-  updateRuntimeSettingsMock
+  updateRuntimeSettingsMock,
 } = vi.hoisted(() => ({
   roleRef: { role: "admin" as "admin" | "user" },
   getRuntimeSettingsMock: vi.fn(),
-  updateRuntimeSettingsMock: vi.fn()
+  updateRuntimeSettingsMock: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-auth", () => ({
-  useAuth: () => ({ user: roleRef.role === "admin" ? { role: "admin" } : { role: "user" } })
+  useAuth: () => ({ user: roleRef.role === "admin" ? { role: "admin" } : { role: "user" } }),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -34,7 +33,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   return {
     ...actual,
     getRuntimeSettings: getRuntimeSettingsMock,
-    updateRuntimeSettings: updateRuntimeSettingsMock
+    updateRuntimeSettings: updateRuntimeSettingsMock,
   };
 });
 
@@ -45,9 +44,9 @@ function settingsState(overrides: Record<string, unknown> = {}) {
       { key: "registration", value: "open", source: "env", hot: true },
       { key: "mcp_enabled", value: false, source: "env", hot: false },
       { key: "session_prefix", value: "fb-", source: "env", hot: true },
-      { key: "pm_auto_dispatch", value: false, source: "env", hot: true }
+      { key: "pm_auto_dispatch", value: false, source: "env", hot: true },
     ],
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -57,7 +56,7 @@ function renderPanel() {
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <CopilotAutonomyPanel />
       </QueryClientProvider>
-    </LanguageProvider>
+    </LanguageProvider>,
   );
 }
 
@@ -73,9 +72,9 @@ describe("CopilotAutonomyPanel", () => {
           { key: "registration", value: "open", source: "env", hot: true },
           { key: "mcp_enabled", value: false, source: "env", hot: false },
           { key: "session_prefix", value: "fb-", source: "env", hot: true },
-          { key: "pm_auto_dispatch", value: patch.pm_auto_dispatch ?? false, source: "settings", hot: true }
-        ]
-      })
+          { key: "pm_auto_dispatch", value: patch.pm_auto_dispatch ?? false, source: "settings", hot: true },
+        ],
+      }),
     );
   });
 
@@ -83,42 +82,22 @@ describe("CopilotAutonomyPanel", () => {
     renderPanel();
     const switchEl = await screen.findByRole("switch", { name: "项目任务自动推进" });
     expect((switchEl as HTMLButtonElement).getAttribute("data-state") === "unchecked").toBe(true);
-    // No per-adapter opt-in surface exists anymore: every CLI is equal.
     expect(screen.queryByLabelText("pi")).toBeNull();
     expect(screen.queryByLabelText("claude")).toBeNull();
     expect(screen.queryByText(/未启用任何适配器/)).toBeNull();
   });
 
-  it("saves the auto-advance switch", async () => {
+  it("saves the auto-advance switch immediately without a sticky save bar", async () => {
     renderPanel();
     const switchEl = await screen.findByRole("switch", { name: "项目任务自动推进" });
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
     fireEvent.click(switchEl);
-    const save = screen.getByRole("button", { name: "保存" });
-    expect((save as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(save);
     await waitFor(() =>
-      expect(updateRuntimeSettingsMock).toHaveBeenCalledWith({ pm_auto_dispatch: true })
+      expect(updateRuntimeSettingsMock).toHaveBeenCalledWith({ pm_auto_dispatch: true }),
     );
-  });
-
-  it("keeps an unsaved toggle when another card saves runtime settings", async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <LanguageProvider>
-        <QueryClientProvider client={queryClient}>
-          <CopilotAutonomyPanel />
-        </QueryClientProvider>
-      </LanguageProvider>
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "项目任务自动推进" }).getAttribute("data-state")).toBe("checked"),
     );
-    const switchEl = await screen.findByRole("switch", { name: "项目任务自动推进" });
-    fireEvent.click(switchEl);
-    expect(switchEl.getAttribute("data-state")).toBe("checked");
-    // Another card (goal check isolation) writes a fresh settings object into the shared query.
-    const fresh = settingsState();
-    fresh.settings = [...fresh.settings, { key: "goal_check_sandbox", value: true, source: "settings", hot: true }];
-    act(() => queryClient.setQueryData(runtimeSettingsQueryKey, fresh));
-    await waitFor(() => expect(screen.getByRole("switch", { name: "项目任务自动推进" }).getAttribute("data-state")).toBe("checked"));
-    expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("is hidden for non-admin users", async () => {
@@ -134,15 +113,5 @@ describe("CopilotAutonomyPanel", () => {
     expect(await screen.findByText(/FORGEBADGER_RUNTIME_SETTINGS_READONLY/)).toBeTruthy();
     const switchEl = await screen.findByRole("switch", { name: "项目任务自动推进" });
     expect((switchEl as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it("pins the save action to the bottom of the settings scroll container", async () => {
-    renderPanel();
-    const save = await screen.findByRole("button", { name: "保存" });
-    const row = save.parentElement!;
-    // Sticky row inside the scroll container: the save button stays visible
-    // and clickable in the first viewport instead of being clipped.
-    expect(row.className).toContain("sticky");
-    expect(row.className).toContain("-bottom-6");
   });
 });

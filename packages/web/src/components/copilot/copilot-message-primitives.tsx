@@ -120,24 +120,29 @@ export function MessageRow({
     const time = formatMessageTime(message.createdAt, language);
     return (
       <div className="forgebadger-animate-in group flex justify-end">
-        <div className="relative flex max-w-[75%] flex-col items-end gap-0.5">
-          <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-brand px-3.5 py-2 text-sm text-brand-foreground [overflow-wrap:anywhere]">
+        <div className="flex max-w-[78%] flex-col items-end gap-1">
+          <div className="whitespace-pre-wrap rounded-2xl rounded-br-md border border-brand/20 bg-brand/10 px-3.5 py-2 text-sm text-foreground [overflow-wrap:anywhere]">
             {message.content}
           </div>
-          {time ? (
-            <time dateTime={message.createdAt} className="text-[10px] text-muted-foreground/70">{time}</time>
-          ) : null}
-          {canEdit && (
-            <button
-              type="button"
-              aria-label={t("copilot.editPrompt")}
-              title={t("copilot.editPrompt")}
-              onClick={() => onBeginEdit?.(message)}
-              className="absolute -left-9 top-1.5 flex size-7 items-center justify-center rounded-md border border-border/60 bg-background/80 text-muted-foreground opacity-100 transition-opacity hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
-            >
-              <Pencil className="size-3.5" />
-            </button>
-          )}
+          <div className="flex items-center gap-1.5 px-0.5">
+            <div className="flex items-center gap-0.5 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+              <CopyActionButton content={message.content} />
+              {canEdit && (
+                <button
+                  type="button"
+                  aria-label={t("copilot.editPrompt")}
+                  title={t("copilot.editPrompt")}
+                  onClick={() => onBeginEdit?.(message)}
+                  className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <Pencil className="size-3.5" />
+                </button>
+              )}
+            </div>
+            {time ? (
+              <time dateTime={message.createdAt} className="text-[10px] text-muted-foreground/70">{time}</time>
+            ) : null}
+          </div>
         </div>
       </div>
     );
@@ -149,7 +154,10 @@ export function MessageRow({
 /** Small brand-tinted bot marker that opens an assistant turn. */
 export function AssistantAvatar() {
   return (
-    <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-brand/10">
+    <span
+      data-testid="copilot-assistant-avatar"
+      className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-brand/10"
+    >
       <Bot className="size-3.5 text-brand" aria-hidden="true" />
     </span>
   );
@@ -199,15 +207,14 @@ function AssistantBody({
         {streaming ? (
           <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-[1px] bg-foreground/70 align-text-bottom" />
         ) : (
-          <AssistantActions content={content} time={time} createdAt={createdAt} />
+          <AssistantActions content={parsed.text || content} time={time} createdAt={createdAt} />
         )}
       </div>
     </AssistantRail>
   );
 }
 
-/** Copy affordance + timestamp under a completed assistant message. */
-function AssistantActions({ content, time, createdAt }: { content: string; time: string; createdAt?: string }) {
+function CopyActionButton({ content }: { content: string }) {
   const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -216,18 +223,25 @@ function AssistantActions({ content, time, createdAt }: { content: string; time:
     return () => clearTimeout(timer);
   }, [copied]);
   return (
+    <button
+      type="button"
+      aria-label={copied ? t("copilot.copied") : t("copilot.copy")}
+      title={copied ? t("copilot.copied") : t("copilot.copy")}
+      onClick={() => {
+        void navigator.clipboard?.writeText(content).then(() => setCopied(true));
+      }}
+      className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+    >
+      {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
+    </button>
+  );
+}
+
+/** Copy affordance + timestamp under a completed assistant message. */
+function AssistantActions({ content, time, createdAt }: { content: string; time: string; createdAt?: string }) {
+  return (
     <div className="flex items-center gap-1.5 pt-0.5">
-      <button
-        type="button"
-        aria-label={copied ? t("copilot.copied") : t("copilot.copy")}
-        title={copied ? t("copilot.copied") : t("copilot.copy")}
-        onClick={() => {
-          void navigator.clipboard?.writeText(content).then(() => setCopied(true));
-        }}
-        className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        {copied ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="size-3.5" />}
-      </button>
+      <CopyActionButton content={content} />
       {time && createdAt ? (
         <time dateTime={createdAt} className="text-[10px] text-muted-foreground/70">{time}</time>
       ) : null}
@@ -274,7 +288,7 @@ export function ThinkingSection({ text, live = false }: { text: string; live?: b
         )}
       </button>
       {open && (
-        <pre className="max-h-40 overflow-auto whitespace-pre-wrap border-t border-border/60 bg-background/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground/80">
+        <pre className="forgebadger-animate-in max-h-40 overflow-auto whitespace-pre-wrap border-t border-border/60 bg-background/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground/80">
           {text}
         </pre>
       )}

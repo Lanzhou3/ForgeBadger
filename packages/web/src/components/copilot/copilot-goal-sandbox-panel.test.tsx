@@ -54,7 +54,7 @@ function renderPanel() {
   );
 }
 
-const switchName = "隔离运行 Goal 检查";
+const switchName = "隔离运行目标检查";
 
 describe("CopilotGoalSandboxPanel", () => {
   beforeEach(() => {

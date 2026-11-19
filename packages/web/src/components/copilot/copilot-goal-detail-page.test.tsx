@@ -121,7 +121,7 @@ it("shows the pending-question card, hides pause, keeps cancel, and submits an a
     pendingQuestion: "Which project root should I use?",
   }));
   mount();
-  expect(await screen.findByText("Goal 等待你的答复")).toBeTruthy();
+  expect(await screen.findByText("目标等待你的答复")).toBeTruthy();
   expect(screen.getByText("Which project root should I use?")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "暂停" })).toBeNull();
   expect(screen.queryByRole("button", { name: "继续" })).toBeNull();
@@ -155,8 +155,8 @@ it("renders the diff file list with added/modified/deleted badges when expanded"
   // Per-file diff view with line coloring.
   fireEvent.click(screen.getByRole("button", { name: /src\/changed\.ts/ }));
   const row = screen.getByText("src/changed.ts").closest("div[class*='border-border/70']")!;
-  expect(within(row as HTMLElement).getByText("-old").className).toContain("bg-red-500/10");
-  expect(within(row as HTMLElement).getByText("+new").className).toContain("bg-emerald-500/10");
+  expect(within(row as HTMLElement).getByText("-old").className).toContain("bg-destructive/10");
+  expect(within(row as HTMLElement).getByText("+new").className).toContain("bg-success/10");
 });
 
 it("shows the empty diff state when the sandbox has no changes", async () => {
@@ -256,7 +256,7 @@ it("shows no Resume for a blocked goal and maps the blocked reason to copy", asy
     goal: { status: "blocked", blockedReason: "goal_budget_exhausted" },
   }));
   mount();
-  expect(await screen.findByText(/预算已耗尽/)).toBeTruthy();
+  expect(await screen.findByText(/已达到执行上限/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "继续" })).toBeNull();
   expect(screen.getByRole("button", { name: /取消/ })).toBeTruthy();
 });
@@ -370,7 +370,7 @@ it("warns about tasks that are not in the goal branch and holds the merge button
     tasks: [{ taskId: "t1", worker: null, workspace: "own", integrated: false, review: null }],
   });
   mount();
-  expect(await screen.findByText("1 个任务的改动还没并入 Goal 分支，现在合并会被拒绝。")).toBeTruthy();
+  expect(await screen.findByText("1 个任务的改动还没并入目标分支，现在合并会被拒绝。")).toBeTruthy();
   expect((screen.getByRole("button", { name: /合并到项目/ }) as HTMLButtonElement).disabled).toBe(true);
 });
 

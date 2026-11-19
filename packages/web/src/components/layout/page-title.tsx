@@ -68,7 +68,6 @@ export function PageTitle() {
     "/skills/install": pick("发现 Skills", "發現 Skills", "Discover Skills"),
     "/skills/sources": pick("来源管理", "來源管理", "Skill sources"),
     "/copilot/goals": pick("目标", "目標", "Goals"),
-    "/copilot/tasks": pick("受控开发任务", "受控開發任務", "Development tasks"),
     "/copilot/automations": pick("定时自动化", "定時自動化", "Automations"),
     "/copilot/channels": pick("远程渠道", "遠端頻道", "Remote channels"),
     "/copilot/extensions": pick("Copilot 扩展", "Copilot 擴充", "Copilot extensions"),

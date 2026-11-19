@@ -10,14 +10,32 @@ const files = [{ path: "SKILL.md", content: "---\nname: review\n---\nReview" }, 
 const skill: api.CopilotSkillDetail = { id: "s1", name: "Review", description: "Project review", kind: "imported", version: "1.0.0", currentVersion: "1.0.0", revisionId: "r1", source: { kind: "upload", label: "review" }, isEnabled: false, available: false, unavailableReason: "disabled", compatible: true, incompatibilityReasons: [], requiredTools: ["list_projects"], reviewRequired: false, editable: true, updatedAt: "2026-09-18", files, content: "Review" };
 let client: QueryClient;
 function mount() { render(<LanguageProvider><QueryClientProvider client={client}><CopilotSkillsPanel /></QueryClientProvider></LanguageProvider>); }
-beforeEach(() => { cleanup(); vi.resetAllMocks(); client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); vi.mocked(api.listCopilotSkills).mockResolvedValue({ skills: [skill] }); vi.mocked(api.getCopilotSkill).mockResolvedValue({ skill }); });
+beforeEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+  Element.prototype.hasPointerCapture = vi.fn(() => false);
+  Element.prototype.releasePointerCapture = vi.fn();
+  Element.prototype.scrollIntoView = vi.fn();
+  client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  vi.mocked(api.listCopilotSkills).mockResolvedValue({ skills: [skill] });
+  vi.mocked(api.getCopilotSkill).mockResolvedValue({ skill });
+});
+async function selectImportMethod(label: string) {
+  const trigger = screen.getByRole("combobox", { name: "导入方式" });
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  const option = await screen.findByRole("option", { name: label });
+  fireEvent.pointerDown(option, { button: 0 });
+  fireEvent.pointerUp(option, { button: 0 });
+  fireEvent.click(option);
+}
 it("imports pasted SKILL.md as a separate disabled package", async () => {
   vi.mocked(api.importCopilotSkill).mockResolvedValue({ skill }); mount(); fireEvent.click(screen.getByRole("button", { name: "导入 Skill" }));
   fireEvent.change(screen.getByLabelText("SKILL.md 正文"), { target: { value: files[0]!.content } }); fireEvent.click(screen.getByRole("button", { name: "导入并保留为停用" }));
   await waitFor(() => expect(api.importCopilotSkill).toHaveBeenCalledWith({ source: { kind: "paste" }, files: [files[0]] }));
 });
 it("imports public raw URLs without pretending supporting files were included", async () => {
-  vi.mocked(api.importCopilotSkill).mockResolvedValue({ skill }); mount(); fireEvent.click(screen.getByRole("button", { name: "导入 Skill" })); fireEvent.change(screen.getByLabelText("导入方式"), { target: { value: "url" } });
+  vi.mocked(api.importCopilotSkill).mockResolvedValue({ skill }); mount(); fireEvent.click(screen.getByRole("button", { name: "导入 Skill" })); await selectImportMethod("公开 raw URL");
   expect(screen.getByText(/公开 HTTPS raw URL 导入单个/)).toBeTruthy(); fireEvent.change(screen.getByLabelText("公开 raw URL"), { target: { value: "https://example.com/SKILL.md" } }); fireEvent.click(screen.getByRole("button", { name: "导入并保留为停用" }));
   await waitFor(() => expect(api.importCopilotSkill).toHaveBeenCalledWith({ source: { kind: "url", url: "https://example.com/SKILL.md" } }));
 });
@@ -67,11 +85,15 @@ it("keeps failed edits available without echoing errors or losing package files"
 
 it("uploads selected complete file bundles including nested reference files", async () => {
   vi.mocked(api.importCopilotSkill).mockResolvedValue({ skill }); mount(); fireEvent.click(screen.getByRole("button", { name: "导入 Skill" }));
-  fireEvent.change(screen.getByLabelText("导入方式"), { target: { value: "upload" } });
+  await selectImportMethod("选择文件包");
   const browserFiles = files.map(file => ({ name: file.path.split("/").at(-1), webkitRelativePath: `review/${file.path}`, size: new TextEncoder().encode(file.content).byteLength, arrayBuffer: async () => new TextEncoder().encode(file.content).buffer }));
   fireEvent.change(screen.getByLabelText("选择文件夹"), { target: { files: browserFiles } });
   await screen.findByText("已选择文件: 2"); fireEvent.click(screen.getByRole("button", { name: "导入并保留为停用" }));
   await waitFor(() => expect(api.importCopilotSkill).toHaveBeenCalledWith({ source: { kind: "upload" }, files }));
+});
+it("links users looking for terminal CLI skills to /skills", () => {
+  mount();
+  expect(screen.getByRole("link", { name: "CLI Skills 管理" }).getAttribute("href")).toBe("/skills");
 });
 it("shows an empty catalog and retries a failed list request", async () => {
   vi.mocked(api.listCopilotSkills).mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ skills: [] }); mount();

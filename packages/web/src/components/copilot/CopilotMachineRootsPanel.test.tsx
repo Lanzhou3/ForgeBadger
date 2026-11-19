@@ -33,3 +33,7 @@ it("surfaces a load failure with a retry affordance", async () => {
   expect(await screen.findByRole("alert")).toBeTruthy();
   expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
 });
+it("uses natural phrasing instead of raw tool names in help copy", () => {
+  mount();
+  expect(screen.queryByText(/machine_search|read_machine_file/)).toBeNull();
+});

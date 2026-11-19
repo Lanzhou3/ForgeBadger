@@ -194,7 +194,7 @@ export function CommandPalettePopup({ view, onHoverItem, onPickItem }: CommandPa
         role="listbox"
         aria-label={copy.paletteLabel}
         data-testid="command-palette"
-        className="absolute inset-x-0 bottom-full z-30 mb-1.5 overflow-hidden rounded-lg border border-border bg-card shadow-xl shadow-black/30"
+        className="forgebadger-palette-in absolute inset-x-0 bottom-full z-30 mb-1.5 overflow-hidden rounded-lg border border-border bg-card shadow-overlay"
       >
         <div className="max-h-64 overflow-y-auto p-1">
           {view.empty ? (
@@ -238,7 +238,7 @@ export function CommandPalettePopup({ view, onHoverItem, onPickItem }: CommandPa
     return (
       <div
         data-testid="command-usage-hint"
-        className="absolute inset-x-0 bottom-full z-30 mb-1.5 flex items-baseline gap-2 rounded-md border border-border/70 bg-card/95 px-2.5 py-1.5 shadow-lg shadow-black/20"
+        className="forgebadger-palette-in absolute inset-x-0 bottom-full z-30 mb-1.5 flex items-baseline gap-2 rounded-md border border-border/70 bg-card/95 px-2.5 py-1.5 shadow-raised"
       >
         <TerminalSquare className="size-3.5 shrink-0 self-center text-muted-foreground" aria-hidden />
         <span className="shrink-0 font-mono text-xs font-semibold">{view.hint.usage}</span>

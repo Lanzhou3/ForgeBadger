@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CopilotChannelsPage } from './CopilotChannelsPage';
@@ -247,7 +247,22 @@ it('renders the channels setup in English instead of hardcoded Chinese', async()
   expect(screen.getByText(/Feishu is not connected/)).toBeTruthy();
   expect(screen.queryByText('生成配对码')).toBeNull();
   expect(screen.queryByText('凭证已保存')).toBeNull();
+  expect(screen.getByRole('heading', {name:'Operations & diagnostics'})).toBeTruthy();
  } finally {
   window.localStorage.removeItem('forgebadger-language');
+ }
+});
+it('renders the operations & diagnostics sub-header and skips aggressive polling when unconfigured', async()=>{
+ vi.useFakeTimers();
+ try {
+  vi.mocked(api.getFeishuChannelAccount).mockResolvedValue(null);
+  render(<LanguageProvider><QueryClientProvider client={client}><CopilotChannelsPage /></QueryClientProvider></LanguageProvider>);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(screen.getByRole('heading',{name:'运维与诊断'})).toBeTruthy();
+  const initialCalls = vi.mocked(channels.getChannelRecords).mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+  expect(vi.mocked(channels.getChannelRecords).mock.calls.length).toBe(initialCalls);
+ } finally {
+  vi.useRealTimers();
  }
 });

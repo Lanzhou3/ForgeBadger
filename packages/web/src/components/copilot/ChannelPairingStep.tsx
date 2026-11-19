@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import type { ChannelPlatform } from "@/lib/api";
 import type { ChannelIdentity, ChannelPairing } from "@/lib/copilot-channels-api";
 import { ChannelSection } from "./ChannelSection";
+import { CopilotStatusBadge } from "./copilot-status-badge";
 import { useSettingsCopy } from "./settings-copy";
 
 export interface IssuedPairingToken {
@@ -23,6 +24,8 @@ interface Props {
   channelName: string;
   busy: boolean;
   canPair: boolean;
+  completed?: boolean;
+  muted?: boolean;
   queriesError: boolean;
   pairing: ChannelPairing | undefined;
   token: IssuedPairingToken | null;
@@ -40,7 +43,7 @@ interface Props {
 }
 
 export function ChannelPairingStep({
-  channel, channelName, busy, canPair, queriesError, pairing, token, candidate,
+  channel, channelName, busy, canPair, completed = false, muted = false, queriesError, pairing, token, candidate,
   accountIdentities, accountRevision, onCreatePairing, onConfirmPairing, onCancelPairing,
   onRevokeIdentity, whitelistIdsText, whitelistLoading, whitelistError, onSaveWhitelist,
 }: Props) {
@@ -72,6 +75,8 @@ export function ChannelPairingStep({
     <ChannelSection
       id="channel-pairing"
       step={2}
+      completed={completed}
+      muted={muted}
       title={copy.pairingTitle}
       action={
         <Button size="sm" variant="outline" disabled={busy || !canPair || queriesError} onClick={onCreatePairing}>
@@ -88,9 +93,9 @@ export function ChannelPairingStep({
                 <li key={identity.id} className="flex flex-wrap items-center gap-3 rounded-md border border-border/70 px-3 py-2.5 text-sm">
                   <UserRound className="size-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 break-all">{identity.externalUserId}</span>
-                  <Badge variant="secondary" className={stale ? "bg-amber-500/10 text-amber-400" : "bg-emerald-500/10 text-emerald-400"}>
+                  <CopilotStatusBadge tone={stale ? "warning" : "success"} dot={!stale}>
                     {stale ? copy.identityStale : copy.identityPaired}
-                  </Badge>
+                  </CopilotStatusBadge>
                   <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" disabled={busy} onClick={() => onRevokeIdentity(identity.id)}>{copy.revokeIdentity}</Button>
                 </li>
               );
@@ -103,7 +108,7 @@ export function ChannelPairingStep({
             <div className="flex flex-wrap items-center gap-2">
               <code className="block min-w-0 flex-1 break-all select-all font-mono text-sm">/pair {token.value}</code>
               <Button type="button" variant="outline" size="sm" onClick={() => void copyCommand()}>
-                {copied ? <Check className="size-3.5 text-emerald-400" /> : <Copy className="size-3.5" />}
+                {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
                 {copied ? copy.commandCopied : copy.copyCommand}
               </Button>
             </div>
@@ -112,7 +117,7 @@ export function ChannelPairingStep({
         )}
         {pairing?.status === "pending" && (
           <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="size-2 animate-pulse rounded-full bg-amber-400" />{copy.waitingClaim(channelName)}
+            <span className="size-2 rounded-full bg-warning forgebadger-pulse-dot" />{copy.waitingClaim(channelName)}
           </p>
         )}
         {pairing?.status === "claimed" && (

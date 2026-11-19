@@ -89,19 +89,21 @@ describe("CopilotTeamPanel", () => {
     );
   });
 
-  it("renders saved members", async () => {
+  it("renders saved members with anchor id, member count, and no footer until dirty", async () => {
     renderPanel();
     expect(await screen.findByText("小码")).toBeTruthy();
     expect(screen.getByText("后端工程师")).toBeTruthy();
     expect(screen.getByText("Codex")).toBeTruthy();
     expect(screen.getByText("负责网关服务")).toBeTruthy();
-    expect(saveButton().disabled).toBe(true);
+    expect(document.getElementById("copilot-team")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "放弃修改" })).toBeNull();
   });
 
   it("shows an empty state without members", async () => {
     getRuntimeSettingsMock.mockResolvedValue(state({ maxParallelWriters: 3, members: [] }));
     renderPanel();
-    expect(await screen.findByText(/无法把 Goal 任务派发给 CLI/)).toBeTruthy();
+    expect(await screen.findByText(/Copilot 才能将目标任务派发给对应的 CLI/)).toBeTruthy();
   });
 
   it("adds a member and saves the exact roster shape", async () => {
@@ -127,7 +129,7 @@ describe("CopilotTeamPanel", () => {
       roles: ["writer", "reviewer"],
       enabled: true
     });
-    await waitFor(() => expect(saveButton().disabled).toBe(true));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "保存" })).toBeNull());
   });
 
   it("keeps the id when editing a member", async () => {
@@ -163,7 +165,17 @@ describe("CopilotTeamPanel", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "可写代码" }));
     expect(screen.getByText("至少选择一个角色。")).toBeTruthy();
     expect((screen.getByRole("button", { name: "完成" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(saveButton().disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+  });
+
+  it("discards unsaved edits back to the saved roster", async () => {
+    renderPanel();
+    const toggle = await screen.findByRole("switch", { name: "启用 小码" });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("data-state")).toBe("unchecked");
+    fireEvent.click(screen.getByRole("button", { name: "放弃修改" }));
+    expect(screen.getByRole("switch", { name: "启用 小码" }).getAttribute("data-state")).toBe("checked");
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
   });
 
   it("marks dirty when toggling enabled", async () => {

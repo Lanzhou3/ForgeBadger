@@ -258,8 +258,8 @@ function TaskRow({ projectId, task, team, roster, flow, index, onOpenTask, headl
       </div>
 
       {attempts.length > 0 ? (
-        <div className="fb-flow-details" data-open={reviewOpen}>
-          <div>{reviewOpen ? <ReviewPanel attempts={attempts} roundsLeft={team?.review?.roundsLeft ?? 0} /> : null}</div>
+        <div className="forgebadger-collapse-grid" data-open={reviewOpen ? "true" : "false"}>
+          <div className="overflow-hidden">{reviewOpen ? <ReviewPanel attempts={attempts} roundsLeft={team?.review?.roundsLeft ?? 0} /> : null}</div>
         </div>
       ) : null}
 
@@ -280,7 +280,7 @@ function Chip({ tone, icon: Icon, children }: { tone: "good" | "warn" | "muted";
     <span
       className={cn(
         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
-        tone === "good" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+        tone === "good" && "bg-success/12 text-success",
         tone === "warn" && "bg-hue-gold/15 text-hue-gold",
         tone === "muted" && "bg-muted text-muted-foreground",
       )}
@@ -364,7 +364,7 @@ export function ReviewPanel({ attempts, roundsLeft }: { attempts: CopilotGoalRev
             <p className="text-xs font-medium">{copy.reviewAttempt(attempt.attempt, attempt.reviewer.name)}</p>
             {attempt.verdict ? (
               <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium",
-                attempt.verdict === "approve" ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-hue-coral/15 text-hue-coral")}>
+                attempt.verdict === "approve" ? "bg-success/12 text-success" : "bg-hue-coral/15 text-hue-coral")}>
                 {copy.reviewVerdicts[attempt.verdict] ?? attempt.verdict}
               </span>
             ) : (

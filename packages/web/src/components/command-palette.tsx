@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
+  Bot,
   FileCode2,
   FolderGit2,
   GitBranch,
@@ -14,7 +15,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Search,
-  Terminal,
+  SquarePen,
 } from "lucide-react";
 
 import {
@@ -81,6 +82,30 @@ export function CommandPalette({
     const visibleNavItems = navItems.filter((item) => !item.adminOnly || user?.role === "admin");
     const list: PaletteCommand[] = [
       {
+        id: "toggle-copilot",
+        label: t("commandPalette.openCopilot"),
+        group: t("commandPalette.actions"),
+        icon: Bot,
+        action: () => {
+          window.dispatchEvent(new CustomEvent("forgebadger:toggle-copilot"));
+          onOpenChange(false);
+        },
+      },
+      {
+        id: "new-copilot-chat",
+        label: t("commandPalette.newCopilotChat"),
+        group: t("commandPalette.actions"),
+        icon: SquarePen,
+        action: () => {
+          if (pathname?.startsWith("/copilot")) {
+            router.push("/copilot");
+          } else {
+            window.dispatchEvent(new CustomEvent("forgebadger:open-copilot", { detail: { newChat: true } }));
+          }
+          onOpenChange(false);
+        },
+      },
+      {
         id: "toggle-sidebar",
         label: sidebarCollapsed ? t("commandPalette.showSidebar") : t("commandPalette.hideSidebar"),
         group: t("commandPalette.actions"),
@@ -95,14 +120,13 @@ export function CommandPalette({
     if (currentProjectId) {
       const projectGroup = t("projects.commandInProjectGroup");
       const basePath = `/projects/${encodeURIComponent(currentProjectId)}`;
-      const projectActions: Array<{ id: string; label: string; tab?: string; icon: typeof ArrowRight }> = [
+      const projectActions: Array<{ id: string; label: string; query?: string; icon: typeof ArrowRight }> = [
         { id: "overview", label: t("projects.tabOverview"), icon: LayoutDashboard },
-        { id: "sessions", label: t("nav.sessions"), tab: "sessions", icon: Terminal },
-        { id: "git", label: t("projects.gitTab"), tab: "git", icon: GitBranch },
-        { id: "files", label: t("projects.filesTab"), tab: "files", icon: FolderGit2 },
-        { id: "graph", label: t("projects.graphTab"), tab: "graph", icon: Network },
-        { id: "project-manager", label: t("projects.devTasks"), tab: "project-manager", icon: ListChecks },
-        { id: "config", label: t("projects.aiConfig"), tab: "config", icon: FileCode2 },
+        { id: "project-manager", label: t("projects.devTasks"), query: "tab=project-manager", icon: ListChecks },
+        { id: "files", label: `${t("projects.tabCode")} · ${t("projects.filesTab")}`, query: "tab=code", icon: FolderGit2 },
+        { id: "git", label: `${t("projects.tabCode")} · ${t("projects.gitTab")}`, query: "tab=code&view=git", icon: GitBranch },
+        { id: "graph", label: `${t("projects.tabCode")} · ${t("projects.graphTab")}`, query: "tab=code&view=graph", icon: Network },
+        { id: "config", label: t("projects.aiConfig"), query: "tab=config", icon: FileCode2 },
       ];
       for (const act of projectActions) {
         list.push({
@@ -111,7 +135,7 @@ export function CommandPalette({
           group: projectGroup,
           icon: act.icon,
           action: () => {
-            router.push(act.tab ? `${basePath}?tab=${act.tab}` : basePath);
+            router.push(act.query ? `${basePath}?${act.query}` : basePath);
             onOpenChange(false);
           },
         });
@@ -149,6 +173,7 @@ export function CommandPalette({
     currentProjectId,
     onOpenChange,
     onToggleSidebar,
+    pathname,
     projectsQuery.data?.projects,
     router,
     sidebarCollapsed,

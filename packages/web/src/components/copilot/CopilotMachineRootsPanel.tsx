@@ -36,7 +36,11 @@ export function CopilotMachineRootsPanel() {
         </Button>
       </div>
       {roots.isPending ? (
-        <p>{copy.loading}</p>
+        <div className="space-y-3" aria-busy="true" aria-label={copy.loading}>
+          {[0, 1].map((index) => (
+            <div key={index} className="h-20 animate-pulse rounded-lg border border-border/50 bg-muted/40" />
+          ))}
+        </div>
       ) : roots.isError ? (
         <div role="alert" className="space-y-2 text-sm text-destructive">
           <p>{copy.loadError}</p>

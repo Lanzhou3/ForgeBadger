@@ -1,18 +1,21 @@
 "use client";
-import { hasCapability } from "@/lib/collaboration-api";
-import { TaskCopilotArtifacts } from "./TaskCopilotArtifacts";
-import { TaskExecutionPanel } from "@/components/workspaces/TaskExecutionPanel";
-import { useTaskAuthority } from "./TaskAuthority";
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, ExternalLink, Play, Plus, Sparkles, Terminal, X } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  CheckCircle2,
+  ExternalLink,
+  FileText,
+  Play,
+  Sparkles,
+  Terminal,
+  Trash2,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
@@ -20,92 +23,53 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TaskAssignments } from "./TaskAssignments";
+import { useTaskAuthority } from "./TaskAuthority";
+import { TaskExecutionPanel } from "@/components/workspaces/TaskExecutionPanel";
 import {
-  addProjectManagerWorkItemDependency,
   executeProjectManagerTaskPacket,
-  getProjectGitChanges,
-  removeProjectManagerWorkItemDependency,
+  updateProjectManagerWorkItem,
   type ProjectManagerLedgerEvent,
   type ProjectManagerStage,
   type ProjectManagerTaskPacket,
   type ProjectManagerWorkItem,
   type ProjectManagerWorkItemLink,
   type ProjectManagerWorkItemStatus,
-  type Session,
 } from "@/lib/api";
-import { toast } from "@/lib/toast";
 import {
-  taskPacketCanStart,
   taskPacketBlockedReasonKey,
-  taskPacketSessionOptionLabel,
-} from "../project-manager-task-packet";
-import { EVIDENCE_REFERENCE_TYPE_OPTIONS, type EvidenceDraft, type Translate } from "./types";
+  taskPacketCanStart,
+} from "@/components/projects/project-manager-task-packet";
+import { toast } from "@/lib/toast";
+import { PROJECT_MANAGER_STATUS_TRANSITIONS, type Translate } from "./types";
 import {
-  applyEvidenceReferenceType,
   formatEvidenceRef,
   formatTimestamp,
   projectManagerMutationMessage,
-  readEvidenceReferenceType,
+  statusBadgeClassName,
   statusBadgeVariant,
   statusLabel,
   workItemTraceMarkers,
 } from "./utils";
-import { LedgerDatum, SummaryMetric } from "./shared";
-import { ProjectManagerStageSelect } from "./PipelineBoard";
-import { ProjectManagerStatusActions } from "./WorkItemsSection";
+import { LedgerDatum } from "./shared";
 
-type DetailSheetTab = "overview" | "activity" | "copilot";
-
-export function ProjectManagerWorkItemDetailSheet({
-  evidenceDraft,
-  evidenceError,
-  goalLink = null,
-  isEvidenceSaving,
-  isTaskPacketLinking,
-  isTaskPacketLoading,
-  isTaskPacketStarting,
-  item,
-  ledgerEvents,
-  links,
-  onAttachEvidence,
-  onEvidenceDraftChange,
-  onNavigateToSession,
-  onOpenChange,
-  onStatusChange,
-  onTaskPacketSessionChange,
-  onTaskPacketSessionLink,
-  onTaskPacketStart,
-  open,
-  projectId,
-  stages,
-  statusMutationPending,
-  t,
-  taskPacket,
-  taskPacketError,
-  taskPacketLinkError,
-  taskPacketStartError,
-  taskPacketSessionId,
-  taskPacketSessions,
-  workItems,
-}: {
-  evidenceDraft: EvidenceDraft;
-  evidenceError: string | null;
+interface ProjectManagerWorkItemDetailSheetProps {
   goalLink?: { goalId: string; goalTitle: string; taskStatus: string } | null;
-  isEvidenceSaving: boolean;
-  isTaskPacketLinking: boolean;
   isTaskPacketLoading: boolean;
   isTaskPacketStarting: boolean;
   item: ProjectManagerWorkItem | null;
   ledgerEvents: ProjectManagerLedgerEvent[];
   links: ProjectManagerWorkItemLink[];
-  onAttachEvidence: () => void;
-  onEvidenceDraftChange: (draft: EvidenceDraft) => void;
+  onDelete: (item: ProjectManagerWorkItem) => void;
   onNavigateToSession?: (href: string) => void;
+  onOpenFile?: (path: string) => void;
   onOpenChange: (open: boolean) => void;
-  onStatusChange: (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => void;
-  onTaskPacketSessionChange: (sessionId: string) => void;
-  onTaskPacketSessionLink: () => void;
+  onSelectWorkItem?: (workItemId: string) => void;
+  onStatusChange: (
+    item: ProjectManagerWorkItem,
+    nextStatus: ProjectManagerWorkItemStatus,
+    manualCompletionReason?: string,
+  ) => void;
   onTaskPacketStart: () => void;
   open: boolean;
   projectId: string;
@@ -114,37 +78,142 @@ export function ProjectManagerWorkItemDetailSheet({
   t: Translate;
   taskPacket: ProjectManagerTaskPacket | null;
   taskPacketError: unknown;
-  taskPacketLinkError: string | null;
   taskPacketStartError: string | null;
-  taskPacketSessionId: string;
-  taskPacketSessions: Session[];
   workItems: ProjectManagerWorkItem[];
-}) {
+}
+
+/**
+ * Lightweight, Copilot-first supervision sheet for a single work item.
+ * Keeps read-only context, Copilot/CLI execution handoff, evidence links,
+ * and minimal owner sign-off actions without heavy manual Jira forms.
+ */
+export function ProjectManagerWorkItemDetailSheet({
+  goalLink = null,
+  isTaskPacketLoading,
+  isTaskPacketStarting,
+  item,
+  ledgerEvents,
+  links,
+  onDelete,
+  onNavigateToSession,
+  onOpenFile,
+  onOpenChange,
+  onSelectWorkItem,
+  onStatusChange,
+  onTaskPacketStart,
+  open,
+  projectId,
+  stages,
+  statusMutationPending,
+  t,
+  taskPacket,
+  taskPacketError,
+  taskPacketStartError,
+  workItems,
+}: ProjectManagerWorkItemDetailSheetProps) {
   const { canEdit, legacySessions, collaboration, actorId } = useTaskAuthority();
-  const [detailTab, setDetailTab] = useState<DetailSheetTab>("overview");
+  const queryClient = useQueryClient();
+
+  const [doneConfirmOpen, setDoneConfirmOpen] = useState(false);
+  const [doneReason, setDoneReason] = useState("");
+  const [assigneeDraft, setAssigneeDraft] = useState<{
+    assigneeId: string | null;
+    reviewerId: string | null;
+    capturedRevision?: number;
+  }>({ assigneeId: null, reviewerId: null });
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) {
-      setDetailTab("overview");
+    setDoneConfirmOpen(false);
+    setDoneReason("");
+    setAssignmentError(null);
+    if (item) {
+      setAssigneeDraft({
+        assigneeId: item.assigneeId ?? null,
+        reviewerId: item.reviewerId ?? null,
+        capturedRevision: item.revision,
+      });
     }
-  }, [open]);
+  }, [item?.id, open]);
 
-  const gitChangesQuery = useQuery({
-    queryKey: ["project-git-changes", projectId],
-    queryFn: () => getProjectGitChanges(projectId),
-    enabled: open && Boolean(item) && Boolean(projectId) && detailTab === "activity",
-    retry: false,
+  const assignmentMutation = useMutation({
+    mutationFn: () => {
+      if (!item) throw new Error("Missing work item");
+      return updateProjectManagerWorkItem(projectId, item.id, {
+        expectedRevision: assigneeDraft.capturedRevision,
+        title: item.title,
+        description: item.description ?? null,
+        priority: item.priority,
+        acceptanceCriteria: item.acceptanceCriteria,
+        assigneeId: assigneeDraft.assigneeId,
+        reviewerId: assigneeDraft.reviewerId,
+      });
+    },
+    onSuccess: async (res) => {
+      setAssignmentError(null);
+      if (typeof res.workItem.revision === "number") {
+        setAssigneeDraft((prev) => ({
+          ...prev,
+          capturedRevision: res.workItem.revision,
+        }));
+      }
+      toast.success(t("projects.tasksAssignmentsSaved"));
+      await queryClient.invalidateQueries({
+        queryKey: ["project-manager", projectId, "work-items"],
+      });
+    },
+    onError: (error) => {
+      setAssignmentError(
+        projectManagerMutationMessage(error, t("projects.projectManagerUpdateWorkItemError"), t),
+      );
+    },
   });
 
+  const stageName = item?.stageId
+    ? (stages.find((stage) => stage.id === item.stageId)?.name ?? null)
+    : null;
   const traceMarkers = item ? workItemTraceMarkers(item, ledgerEvents) : [];
-  const gitChangedEntries = gitChangesQuery.data?.changed ?? [];
+
+  const blockers = item
+    ? links
+        .filter((link) => link.blockedWorkItemId === item.id)
+        .map((link) => workItems.find((candidate) => candidate.id === link.blockerWorkItemId))
+        .filter((candidate): candidate is ProjectManagerWorkItem => Boolean(candidate))
+    : [];
+  const blocking = item
+    ? links
+        .filter((link) => link.blockerWorkItemId === item.id)
+        .map((link) => workItems.find((candidate) => candidate.id === link.blockedWorkItemId))
+        .filter((candidate): candidate is ProjectManagerWorkItem => Boolean(candidate))
+    : [];
+
+  const sharedCollaboration = !legacySessions ? collaboration : undefined;
+  const validTransitions = item ? PROJECT_MANAGER_STATUS_TRANSITIONS[item.status] : [];
+  const assignmentsDirty =
+    Boolean(item && sharedCollaboration) &&
+    (assigneeDraft.assigneeId !== (item?.assigneeId ?? null) ||
+      assigneeDraft.reviewerId !== (item?.reviewerId ?? null));
+
+  function handleStatusClick(nextStatus: ProjectManagerWorkItemStatus) {
+    if (!item || !canEdit || statusMutationPending) return;
+    if (nextStatus === "done" && !legacySessions) {
+      setDoneConfirmOpen(true);
+      return;
+    }
+    onStatusChange(item, nextStatus);
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-3xl">
+      <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
         <SheetHeader>
           <div className="flex flex-wrap items-center gap-2 pr-6">
             <SheetTitle>{item?.title ?? t("projects.projectManagerViewDetails")}</SheetTitle>
+            {stageName && (
+              <Badge variant="secondary" className="rounded-full text-[11px] font-normal">
+                {stageName}
+              </Badge>
+            )}
             {goalLink && (
               <Link
                 href={`/copilot/goals/${encodeURIComponent(goalLink.goalId)}`}
@@ -157,338 +226,329 @@ export function ProjectManagerWorkItemDetailSheet({
           </div>
           <SheetDescription>{t("projects.projectManagerWorkItemDetail")}</SheetDescription>
         </SheetHeader>
+
         {item && (
           <div className="space-y-4 px-4 pb-6">
-            <div className="flex flex-col gap-3 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={statusBadgeVariant(item.status)}>{statusLabel(item.status, t)}</Badge>
-                <span className="text-xs text-muted-foreground">
-                  {t("projects.projectManagerUpdated")}: {formatTimestamp(item.updatedAt)}
-                </span>
-              </div>
-              <ProjectManagerStatusActions
-                disabled={statusMutationPending}
-                item={item}
-                onStatusChange={onStatusChange}
-                t={t}
-              />
-            </div>
-
-            <Tabs
-              value={detailTab}
-              onValueChange={(value) => setDetailTab(value as DetailSheetTab)}
-            >
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="overview">
-                  {t("projects.projectManagerDetailTabOverview")}
-                </TabsTrigger>
-                <TabsTrigger value="activity">
-                  {t("projects.projectManagerDetailTabActivity")}
-                  {item.evidenceRefCount > 0 && (
-                    <span className="ml-1.5 rounded-full bg-background px-1.5 py-0.5 text-[10px] tabular-nums">
-                      {item.evidenceRefCount}
-                    </span>
-                  )}
-                </TabsTrigger>
-                <TabsTrigger value="copilot">
-                  {t("projects.projectManagerDetailTabCopilot")}
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="overview" className="mt-4 space-y-4">
-                <DetailField label={t("projects.projectManagerWorkItemDescription")}>
-                  {item.description ? (
-                    <p className="whitespace-pre-wrap break-words">{item.description}</p>
-                  ) : (
-                    <span className="text-muted-foreground">-</span>
-                  )}
-                </DetailField>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <SummaryMetric label={t("projects.projectManagerPriority")} value={item.priority} />
-                  <SummaryMetric label={t("projects.projectManagerEvidenceRefs")} value={item.evidenceRefCount} />
-                </div>
-                {collaboration && (
-                  <div className="grid gap-2 text-sm sm:grid-cols-2">
-                    <p>{t("workspace.assignee")}: {collaboration.members.find((m) => m.userId === item.assigneeId)?.email ?? t("workspace.unassigned")}</p>
-                    <p>{t("workspace.reviewAssignee")}: {collaboration.members.find((m) => m.userId === item.reviewerId)?.email ?? t("workspace.unassigned")}</p>
-                  </div>
-                )}
-                <DetailField label={t("projects.projectManagerStageAssign")}>
-                  <ProjectManagerStageSelect
-                    item={item}
-                    projectId={projectId}
-                    stages={stages}
-                    t={t}
-                  />
-                </DetailField>
-                <ProjectManagerDependenciesSection
-                  item={item}
-                  links={links}
-                  projectId={projectId}
-                  t={t}
-                  workItems={workItems}
-                />
-                <DetailField label={t("projects.projectManagerAcceptanceCriteria")}>
-                  {item.acceptanceCriteria.length > 0 ? (
-                    <ul className="list-disc space-y-1 pl-5">
-                      {item.acceptanceCriteria.map((criterion) => (
-                        <li key={criterion} className="break-words">{criterion}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <span className="text-muted-foreground">-</span>
-                  )}
-                </DetailField>
-                {item.manualCompletion && (
-                  <div className="space-y-1 rounded-md border border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
-                    <p className="font-medium text-foreground">{t("task.manualDone")}</p>
-                    <p>{item.manualCompletion.reason}</p>
-                    <p>{item.manualCompletion.actorId} · {formatTimestamp(item.manualCompletion.createdAt)}</p>
-                  </div>
-                )}
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <DetailField label={t("projects.projectManagerCreated")}>
-                    {formatTimestamp(item.createdAt)}
-                  </DetailField>
-                  <DetailField label={t("projects.projectManagerUpdated")}>
+            {/* Status & minimal owner sign-off actions */}
+            <div className="space-y-2.5 rounded-lg border border-border/70 bg-muted/20 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge
+                    variant={statusBadgeVariant(item.status)}
+                    className={statusBadgeClassName(item.status)}
+                  >
+                    {statusLabel(item.status, t)}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
                     {formatTimestamp(item.updatedAt)}
-                  </DetailField>
+                  </span>
                 </div>
-              </TabsContent>
 
-              <TabsContent value="activity" className="mt-4 space-y-4">
-                <DetailField label={t("projects.projectManagerEvidenceRefs")}>
-                  {item.evidenceRefs.length > 0 ? (
-                    <ul className="space-y-2">
-                      {item.evidenceRefs.map((ref, index) => (
-                        <li key={`${ref.ref ?? ref.path ?? index}`} className="rounded-md border border-border/70 px-3 py-2 text-xs">
-                          {formatEvidenceRef(ref)}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <span className="text-muted-foreground">-</span>
-                  )}
-                </DetailField>
-
-                {traceMarkers.length > 0 && (
-                  <DetailField label={t("projects.projectManagerLedger")}>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {traceMarkers.map((marker) => (
-                        <LedgerDatum
-                          key={`${marker.labelKey}-${marker.value}`}
-                          label={t(marker.labelKey)}
-                          value={marker.value}
-                        />
-                      ))}
-                    </div>
-                  </DetailField>
-                )}
-
-                <fieldset disabled={!canEdit} className="space-y-3 rounded-md border border-border/70 p-3">
-                  <legend className="px-1 text-sm font-medium">{t("projects.projectManagerAttachEvidence")}</legend>
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    {t("projects.projectManagerEvidenceReferenceHint")}
-                  </p>
-
-                  {(gitChangedEntries.length > 0 || taskPacketSessions.length > 0) && (
-                    <div className="flex flex-wrap gap-2">
-                      {gitChangedEntries.length > 0 && (
-                        <select
-                          aria-label={t("projects.projectManagerEvidencePickGit")}
-                          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-                          value=""
-                          onChange={(event) => {
-                            const selectedFilePath = event.target.value;
-                            if (!selectedFilePath) return;
-                            onEvidenceDraftChange({
-                              ...applyEvidenceReferenceType(evidenceDraft, "file_path", t),
-                              kind: "file_change",
-                              label: selectedFilePath,
-                              ref: selectedFilePath,
-                              path: selectedFilePath,
-                            });
-                          }}
-                        >
-                          <option value="">{t("projects.projectManagerEvidencePickGit")}</option>
-                          {gitChangedEntries.slice(0, 50).map((entry) => (
-                            <option key={entry.path} value={entry.path}>
-                              {entry.path} ({entry.status.trim() || "M"})
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                      {taskPacketSessions.length > 0 && (
-                        <select
-                          aria-label={t("projects.projectManagerEvidencePickSession")}
-                          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-                          value=""
-                          onChange={(event) => {
-                            const chosenId = event.target.value;
-                            if (!chosenId) return;
-                            const chosen = taskPacketSessions.find((s) => s.id === chosenId);
-                            onEvidenceDraftChange({
-                              ...applyEvidenceReferenceType(evidenceDraft, "session", t),
-                              kind: "session",
-                              label: chosen?.name || chosenId,
-                              ref: chosenId,
-                              sessionId: chosenId,
-                            });
-                          }}
-                        >
-                          <option value="">{t("projects.projectManagerEvidencePickSession")}</option>
-                          {taskPacketSessions.map((session) => (
-                            <option key={session.id} value={session.id}>
-                              {taskPacketSessionOptionLabel(session)}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="project-manager-evidence-type">{t("projects.projectManagerEvidenceReferenceType")}</Label>
-                      <select
-                        id="project-manager-evidence-type"
-                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
-                        value={evidenceDraft.referenceType}
-                        disabled={isEvidenceSaving}
-                        onChange={(event) =>
-                          onEvidenceDraftChange(applyEvidenceReferenceType(
-                            evidenceDraft,
-                            readEvidenceReferenceType(event.target.value),
-                            t
-                          ))
-                        }
+                {canEdit && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {validTransitions.includes("done") && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="brand"
+                        disabled={statusMutationPending}
+                        onClick={() => handleStatusClick("done")}
                       >
-                        {EVIDENCE_REFERENCE_TYPE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {t(option.labelKey)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="project-manager-evidence-kind">{t("projects.projectManagerRefKind")}</Label>
-                      <Input
-                        id="project-manager-evidence-kind"
-                        value={evidenceDraft.kind}
-                        aria-invalid={!!evidenceError && evidenceDraft.kind.trim().length === 0}
-                        disabled={isEvidenceSaving}
-                        onChange={(event) => onEvidenceDraftChange({ ...evidenceDraft, kind: event.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="project-manager-evidence-label">{t("projects.projectManagerRefLabel")}</Label>
-                      <Input
-                        id="project-manager-evidence-label"
-                        value={evidenceDraft.label}
-                        disabled={isEvidenceSaving}
-                        onChange={(event) => onEvidenceDraftChange({ ...evidenceDraft, label: event.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="project-manager-evidence-ref">{t("projects.projectManagerRefId")}</Label>
-                      <Input
-                        id="project-manager-evidence-ref"
-                        value={evidenceDraft.ref}
-                        aria-invalid={!!evidenceError && evidenceDraft.ref.trim().length === 0 && evidenceDraft.path.trim().length === 0}
-                        disabled={isEvidenceSaving}
-                        onChange={(event) => onEvidenceDraftChange({ ...evidenceDraft, ref: event.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="project-manager-evidence-path">{t("common.path")}</Label>
-                      <Input
-                        id="project-manager-evidence-path"
-                        value={evidenceDraft.path}
-                        aria-invalid={!!evidenceError && evidenceDraft.ref.trim().length === 0 && evidenceDraft.path.trim().length === 0}
-                        disabled={isEvidenceSaving}
-                        onChange={(event) => onEvidenceDraftChange({ ...evidenceDraft, path: event.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="project-manager-evidence-session-id">{t("projects.projectManagerEvidenceSessionId")}</Label>
-                      <Input
-                        id="project-manager-evidence-session-id"
-                        value={evidenceDraft.sessionId}
-                        aria-invalid={
-                          !!evidenceError &&
-                          (evidenceDraft.referenceType === "terminal_snapshot" || evidenceDraft.referenceType === "session") &&
-                          evidenceDraft.sessionId.trim().length === 0
-                        }
-                        disabled={isEvidenceSaving}
-                        onChange={(event) => onEvidenceDraftChange({ ...evidenceDraft, sessionId: event.target.value })}
-                      />
-                    </div>
-                  </div>
-                  {evidenceDraft.referenceType === "terminal_snapshot" && (
-                    <p className="text-xs leading-5 text-muted-foreground">
-                      {t("projects.projectManagerTerminalSnapshotMarkerHint")}
-                    </p>
-                  )}
-                  {evidenceError && (
-                    <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                      {evidenceError}
-                    </p>
-                  )}
-                  <div className="flex justify-end">
+                        <CheckCircle2 className="size-3.5" />
+                        {t("projects.tasksMarkDone")}
+                      </Button>
+                    )}
+                    {validTransitions.includes("in_progress") && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={statusMutationPending}
+                        onClick={() => handleStatusClick("in_progress")}
+                      >
+                        {item.status === "ready_for_review" || item.status === "blocked"
+                          ? t("projects.tasksReopen")
+                          : statusLabel("in_progress", t)}
+                      </Button>
+                    )}
+                    {validTransitions.includes("blocked") && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={statusMutationPending}
+                        onClick={() => handleStatusClick("blocked")}
+                      >
+                        {statusLabel("blocked", t)}
+                      </Button>
+                    )}
+                    {validTransitions.includes("cancelled") && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="text-muted-foreground"
+                        disabled={statusMutationPending}
+                        onClick={() => handleStatusClick("cancelled")}
+                      >
+                        {statusLabel("cancelled", t)}
+                      </Button>
+                    )}
                     <Button
-                      size="sm"
-                      variant="brand"
-                      onClick={onAttachEvidence}
-                      disabled={isEvidenceSaving}
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="size-8 text-muted-foreground hover:text-destructive"
+                      aria-label={t("projects.projectManagerDeleteWorkItem")}
+                      title={t("projects.projectManagerDeleteWorkItem")}
+                      disabled={statusMutationPending}
+                      onClick={() => onDelete(item)}
                     >
-                      <Plus className="mr-2 size-4" />
-                      {t("projects.projectManagerAttachEvidence")}
+                      <Trash2 className="size-3.5" />
                     </Button>
                   </div>
-                </fieldset>
-              </TabsContent>
+                )}
+              </div>
 
-              <TabsContent value="copilot" className="mt-4 space-y-4">
-                {collaboration && (
-                  <TaskCopilotArtifacts
-                    key={`artifact:${actorId}:${projectId}:${item.id}`}
-                    actorId={actorId}
-                    projectId={projectId}
-                    taskId={item.id}
-                    revision={item.revision}
-                    canLink={hasCapability(collaboration.project, "develop")}
+              {doneConfirmOpen && !legacySessions && (
+                <form
+                  className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2.5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const note = doneReason.trim();
+                    if (!note) return;
+                    onStatusChange(item, "done", note);
+                    setDoneConfirmOpen(false);
+                    setDoneReason("");
+                  }}
+                >
+                  <Input
+                    value={doneReason}
+                    onChange={(event) => setDoneReason(event.target.value)}
+                    placeholder={t("projects.tasksDoneNotePlaceholder")}
+                    className="h-8 min-w-[200px] flex-1 text-xs"
+                    autoFocus
                   />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    variant="brand"
+                    disabled={!doneReason.trim() || statusMutationPending}
+                  >
+                    {t("common.confirm")}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setDoneConfirmOpen(false)}
+                  >
+                    {t("common.cancel")}
+                  </Button>
+                </form>
+              )}
+            </div>
+
+            {/* Description & Acceptance Criteria (read-only) */}
+            {item.description && (
+              <DetailSection label={t("projects.projectManagerWorkItemDescription")}>
+                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+                  {item.description}
+                </p>
+              </DetailSection>
+            )}
+
+            {item.acceptanceCriteria.length > 0 && (
+              <DetailSection label={t("projects.projectManagerAcceptanceCriteria")}>
+                <ul className="list-disc space-y-1 pl-5 text-sm">
+                  {item.acceptanceCriteria.map((criterion) => (
+                    <li key={criterion} className="break-words">
+                      {criterion}
+                    </li>
+                  ))}
+                </ul>
+              </DetailSection>
+            )}
+
+            {/* Read-only Dependencies (maintained by Copilot) */}
+            {(blockers.length > 0 || blocking.length > 0) && (
+              <DetailSection label={t("projects.projectManagerDependencies")}>
+                <div className="space-y-2 text-xs">
+                  {blockers.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-muted-foreground">
+                        {t("projects.projectManagerDependencyBlockedBy")}:
+                      </span>
+                      {blockers.map((blocker) => (
+                        <button
+                          key={blocker.id}
+                          type="button"
+                          onClick={() => onSelectWorkItem?.(blocker.id)}
+                          className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background px-2 py-0.5 hover:border-primary/40"
+                        >
+                          <span className="max-w-[200px] truncate">{blocker.title}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            ({statusLabel(blocker.status, t)})
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {blocking.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-muted-foreground">
+                        {t("projects.projectManagerDependencyBlocking")}:
+                      </span>
+                      {blocking.map((target) => (
+                        <button
+                          key={target.id}
+                          type="button"
+                          onClick={() => onSelectWorkItem?.(target.id)}
+                          className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background px-2 py-0.5 hover:border-primary/40"
+                        >
+                          <span className="max-w-[200px] truncate">{target.title}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            ({statusLabel(target.status, t)})
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </DetailSection>
+            )}
+
+            {/* Shared project inline assignments */}
+            {sharedCollaboration && sharedCollaboration.members.length > 0 && (
+              <div className="space-y-2.5 rounded-md border border-border/70 p-3">
+                <TaskAssignments
+                  assigneeId={assigneeDraft.assigneeId}
+                  reviewerId={assigneeDraft.reviewerId}
+                  disabled={!canEdit || assignmentMutation.isPending}
+                  onChange={(patch) =>
+                    setAssigneeDraft((prev) => ({
+                      ...prev,
+                      ...patch,
+                    }))
+                  }
+                />
+                {assignmentError && (
+                  <p className="text-xs text-destructive">{assignmentError}</p>
                 )}
-                {collaboration && (
-                  <TaskExecutionPanel
-                    key={`execution:${actorId}:${projectId}:${item.id}`}
-                    detail={collaboration}
-                    taskId={item.id}
-                    actorId={actorId}
-                  />
+                {canEdit && assignmentsDirty && (
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={assignmentMutation.isPending}
+                      onClick={() => assignmentMutation.mutate()}
+                    >
+                      {assignmentMutation.isPending
+                        ? t("common.saving")
+                        : t("projects.tasksSaveAssignments")}
+                    </Button>
+                  </div>
                 )}
-                {legacySessions && (
-                  <ProjectManagerTaskPacketSection
-                    projectId={projectId}
-                    workItemId={item.id}
-                    error={taskPacketError}
-                    isLinking={isTaskPacketLinking}
-                    isLoading={isTaskPacketLoading}
-                    onNavigateToSession={onNavigateToSession}
-                    onSessionChange={onTaskPacketSessionChange}
-                    onSessionLink={onTaskPacketSessionLink}
-                    onStart={onTaskPacketStart}
-                    selectedSessionId={taskPacketSessionId}
-                    sessions={taskPacketSessions}
-                    t={t}
-                    taskPacket={taskPacket}
-                    linkError={taskPacketLinkError}
-                    startError={taskPacketStartError}
-                    isStarting={isTaskPacketStarting}
-                  />
-                )}
-              </TabsContent>
-            </Tabs>
+              </div>
+            )}
+
+            {/* Copilot & CLI Execution */}
+            {legacySessions && (
+              <TaskExecutionCard
+                projectId={projectId}
+                workItemId={item.id}
+                error={taskPacketError}
+                isLoading={isTaskPacketLoading}
+                isStarting={isTaskPacketStarting}
+                startError={taskPacketStartError}
+                taskPacket={taskPacket}
+                onStart={onTaskPacketStart}
+                onNavigateToSession={onNavigateToSession}
+                t={t}
+              />
+            )}
+
+            {sharedCollaboration && (
+              <TaskExecutionPanel
+                key={`execution:${actorId}:${projectId}:${item.id}`}
+                detail={sharedCollaboration}
+                taskId={item.id}
+                actorId={actorId}
+              />
+            )}
+
+            {/* Read-only Evidence & Copilot Trace */}
+            <DetailSection label={t("projects.projectManagerEvidenceRefs")}>
+              {item.evidenceRefs.length > 0 ? (
+                <ul className="space-y-1.5">
+                  {item.evidenceRefs.map((ref, index) => (
+                    <li
+                      key={`${ref.ref ?? ref.path ?? index}`}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 bg-background/60 px-3 py-2 text-xs"
+                    >
+                      <span className="min-w-0 flex-1 break-all">
+                        {formatEvidenceRef(ref)}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {ref.path && onOpenFile && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-2 text-[11px]"
+                            onClick={() => {
+                              onOpenChange(false);
+                              onOpenFile(ref.path!);
+                            }}
+                          >
+                            <FileText className="size-3" />
+                            {t("projects.overviewOpenInFiles")}
+                          </Button>
+                        )}
+                        {ref.sessionId && (
+                          <Button asChild size="sm" variant="ghost" className="h-6 px-2 text-[11px]">
+                            <Link href={`/sessions/${encodeURIComponent(ref.sessionId)}`}>
+                              <Terminal className="size-3" />
+                              {t("projects.projectManagerOpenSession")}
+                            </Link>
+                          </Button>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {t("projects.tasksEvidenceReadonlyEmpty")}
+                </p>
+              )}
+            </DetailSection>
+
+            {traceMarkers.length > 0 && (
+              <DetailSection label={t("projects.projectManagerLedger")}>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {traceMarkers.map((marker) => (
+                    <LedgerDatum
+                      key={`${marker.labelKey}-${marker.value}`}
+                      label={t(marker.labelKey)}
+                      value={marker.value}
+                    />
+                  ))}
+                </div>
+              </DetailSection>
+            )}
+
+            {item.manualCompletion && (
+              <div className="space-y-1 rounded-md border border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground">{t("task.manualDone")}</p>
+                <p>{item.manualCompletion.reason}</p>
+                <p>
+                  {item.manualCompletion.actorId} ·{" "}
+                  {formatTimestamp(item.manualCompletion.createdAt)}
+                </p>
+              </div>
+            )}
           </div>
         )}
       </SheetContent>
@@ -496,175 +556,41 @@ export function ProjectManagerWorkItemDetailSheet({
   );
 }
 
-function ProjectManagerDependenciesSection({
-  item,
-  links,
-  projectId,
-  t,
-  workItems,
-}: {
-  item: ProjectManagerWorkItem;
-  links: ProjectManagerWorkItemLink[];
-  projectId: string;
-  t: Translate;
-  workItems: ProjectManagerWorkItem[];
-}) {
-  const { canEdit: edit, canManage, legacySessions } = useTaskAuthority();
-  const canEdit = canManage ?? edit;
-
-  const queryClient = useQueryClient();
-  const [selection, setSelection] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const blockedBy = links.filter((link) => link.blockedWorkItemId === item.id);
-  const blocking = links.filter((link) => link.blockerWorkItemId === item.id);
-  const candidates = workItems.filter(
-    (workItem) => workItem.id !== item.id && !blockedBy.some((link) => link.blockerWorkItemId === workItem.id)
-  );
-  const titleFor = (workItemId: string) =>
-    workItems.find((workItem) => workItem.id === workItemId)?.title ?? workItemId;
-
-  const dependencyErrorMessage = (mutationError: unknown) =>
-    projectManagerMutationMessage(mutationError, t("projects.projectManagerDependencyMutationError"));
-  const addMutation = useMutation({
-    mutationFn: (blockerWorkItemId: string) =>
-      addProjectManagerWorkItemDependency(projectId, item.id, blockerWorkItemId, item.revision),
-    onSuccess: async () => {
-      setError(null);
-      setSelection("");
-      await queryClient.invalidateQueries({ queryKey: ["project-manager", projectId] });
-    },
-    onError: (mutationError) => setError(dependencyErrorMessage(mutationError)),
-  });
-  const removeMutation = useMutation({
-    mutationFn: (blockerWorkItemId: string) =>
-      removeProjectManagerWorkItemDependency(projectId, item.id, blockerWorkItemId, item.revision),
-    onSuccess: async () => {
-      setError(null);
-      await queryClient.invalidateQueries({ queryKey: ["project-manager", projectId] });
-    },
-    onError: (mutationError) => setError(dependencyErrorMessage(mutationError)),
-  });
-  const isPending = addMutation.isPending || removeMutation.isPending;
-
+function DetailSection({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <fieldset disabled={!canEdit} className="space-y-3 rounded-md border border-border/70 p-3">
-      <legend className="px-1 text-sm font-medium">{t("projects.projectManagerDependencies")}</legend>
-      {blockedBy.length === 0 && blocking.length === 0 && (
-        <p className="text-xs text-muted-foreground">{t("projects.projectManagerDependencyNone")}</p>
-      )}
-      {blockedBy.length > 0 && (
-        <div className="space-y-1">
-          <div className="text-xs font-medium text-muted-foreground">
-            {t("projects.projectManagerDependencyBlockedBy")}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {blockedBy.map((link) => (
-              <Badge key={link.id} variant="destructive" className="gap-1">
-                {titleFor(link.blockerWorkItemId)}
-                <button
-                  type="button"
-                  aria-label={t("common.delete")}
-                  className="rounded-full hover:bg-destructive-foreground/20"
-                  disabled={isPending}
-                  onClick={() => removeMutation.mutate(link.blockerWorkItemId)}
-                >
-                  <X className="size-3" />
-                </button>
-              </Badge>
-            ))}
-          </div>
-        </div>
-      )}
-      {blocking.length > 0 && (
-        <div className="space-y-1">
-          <div className="text-xs font-medium text-muted-foreground">
-            {t("projects.projectManagerDependencyBlocking")}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {blocking.map((link) => (
-              <Badge key={link.id} variant="secondary">
-                {titleFor(link.blockedWorkItemId)}
-              </Badge>
-            ))}
-          </div>
-        </div>
-      )}
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <select
-          aria-label={t("projects.projectManagerDependencyAdd")}
-          className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
-          value={selection}
-          disabled={isPending || candidates.length === 0}
-          onChange={(event) => setSelection(event.target.value)}
-        >
-          <option value="">{t("projects.projectManagerDependencyAddPlaceholder")}</option>
-          {candidates.map((workItem) => (
-            <option key={workItem.id} value={workItem.id}>
-              {workItem.title}
-            </option>
-          ))}
-        </select>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={isPending || !selection}
-          onClick={() => selection && addMutation.mutate(selection)}
-        >
-          <Plus className="mr-2 size-4" />
-          {t("projects.projectManagerDependencyAdd")}
-        </Button>
-      </div>
-      {error && (
-        <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </p>
-      )}
-    </fieldset>
+    <div className="space-y-1.5">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      {children}
+    </div>
   );
 }
 
-function ProjectManagerTaskPacketSection({
+function TaskExecutionCard({
+  projectId,
+  workItemId,
   error,
-  isLinking,
   isLoading,
   isStarting,
-  linkError,
-  onNavigateToSession,
-  onSessionChange,
-  onSessionLink,
-  onStart,
-  projectId,
-  selectedSessionId,
-  sessions,
   startError,
-  t,
   taskPacket,
-  workItemId,
+  onStart,
+  onNavigateToSession,
+  t,
 }: {
+  projectId: string;
+  workItemId: string;
   error: unknown;
-  isLinking: boolean;
   isLoading: boolean;
   isStarting: boolean;
-  linkError: string | null;
-  onNavigateToSession?: (href: string) => void;
-  onSessionChange: (sessionId: string) => void;
-  onSessionLink: () => void;
-  onStart: () => void;
-  projectId: string;
-  selectedSessionId: string;
-  sessions: Session[];
   startError: string | null;
-  t: Translate;
   taskPacket: ProjectManagerTaskPacket | null;
-  workItemId: string;
+  onStart: () => void;
+  onNavigateToSession?: (href: string) => void;
+  t: Translate;
 }) {
   const { canEdit } = useTaskAuthority();
   const queryClient = useQueryClient();
   const [executeError, setExecuteError] = useState<string | null>(null);
-  const selectedSessionAvailable = sessions.some((session) => session.id === selectedSessionId);
-  const canLinkSession = selectedSessionId.length > 0 && selectedSessionAvailable && !isLinking;
-  const canStartTask = taskPacketCanStart(taskPacket, isStarting);
 
   const executeMutation = useMutation({
     mutationFn: () => executeProjectManagerTaskPacket(projectId, workItemId),
@@ -683,7 +609,9 @@ function ProjectManagerTaskPacketSection({
       }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-item", workItemId, "task-packet"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["project-manager", projectId, "work-item", workItemId, "task-packet"],
+        }),
         queryClient.invalidateQueries({ queryKey: ["sessions", { projectId }] }),
       ]);
       const sid = result?.session?.id ?? result?.sessionId;
@@ -692,10 +620,13 @@ function ProjectManagerTaskPacketSection({
       }
     },
     onError: (err) => {
-      setExecuteError(projectManagerMutationMessage(err, t("projects.projectManagerTaskPacketStartError")));
+      setExecuteError(
+        projectManagerMutationMessage(err, t("projects.projectManagerTaskPacketStartError"), t),
+      );
     },
   });
 
+  const canStartTask = taskPacketCanStart(taskPacket, isStarting);
   const canExecuteAutonomous = Boolean(
     canEdit &&
       taskPacket &&
@@ -703,94 +634,77 @@ function ProjectManagerTaskPacketSection({
       (taskPacket.workItemStatus === "todo" || taskPacket.workItemStatus === "in_progress") &&
       !executeMutation.isPending,
   );
+  const blockedKey = taskPacket ? taskPacketBlockedReasonKey(taskPacket.blockedReason) : null;
 
   return (
-    <fieldset disabled={!canEdit} className="space-y-3 rounded-md border border-border/70 p-3" data-testid="project-manager-task-packet">
-      <legend className="flex items-center gap-2 px-1 text-sm font-medium">
-        <ClipboardList className="size-4" />
-        {t("projects.projectManagerTaskPacket")}
-      </legend>
+    <div
+      className="space-y-3 rounded-lg border border-border/70 bg-card p-3"
+      data-testid="project-manager-task-packet"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-xs font-semibold">
+          <Terminal className="size-3.5 text-brand" />
+          {t("projects.projectManagerTaskPacket")}
+        </span>
+        {taskPacket?.runtime.adapter && (
+          <Badge variant="outline" className="rounded-full font-mono text-[10px]">
+            {taskPacket.runtime.adapter}
+          </Badge>
+        )}
+      </div>
+
       {isLoading ? (
-        <p className="text-sm text-muted-foreground">{t("projects.projectManagerLoading")}</p>
+        <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
       ) : error ? (
-        <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {projectManagerMutationMessage(error, t("projects.projectManagerTaskPacketLoadError"))}
+        <p className="text-xs text-destructive">
+          {projectManagerMutationMessage(error, t("projects.projectManagerTaskPacketLoadError"), t)}
         </p>
-      ) : taskPacket ? (
-        <div className="space-y-3">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <LedgerDatum label={t("projects.projectManagerTaskPacketRuntimeAdapter")} value={taskPacket.runtime.adapter} />
-            <LedgerDatum label={t("projects.projectManagerTaskPacketRuntimeTemplate")} value={taskPacket.runtime.templateId} />
-            <LedgerDatum
-              label={t("projects.projectManagerTaskPacketStatus")}
-              value={t(taskPacketBlockedReasonKey(taskPacket.blockedReason))}
-            />
-            <LedgerDatum
-              label={t("projects.projectManagerTaskPacketLinkedSession")}
-              value={taskPacket.sessionLink?.sessionId ?? "-"}
-            />
-          </div>
-          <DetailField label={t("projects.projectManagerTaskPacketPrompt")}>
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border/70 bg-muted/20 p-3 text-xs leading-5">
-              {taskPacket.prompt}
-            </pre>
-          </DetailField>
-          <TaskPacketList
-            emptyLabel="-"
-            label={t("projects.projectManagerAcceptanceCriteria")}
-            values={taskPacket.acceptanceCriteria}
-          />
-          <TaskPacketList
-            emptyLabel="-"
-            label={t("projects.projectManagerTaskPacketExpectedVerification")}
-            values={taskPacket.expectedVerification}
-          />
-          <TaskPacketList
-            emptyLabel="-"
-            label={t("projects.projectManagerTaskPacketEvidenceRequirements")}
-            values={taskPacket.evidenceRequirements}
-          />
+      ) : !taskPacket ? (
+        <p className="text-xs text-muted-foreground">-</p>
+      ) : (
+        <>
+          {blockedKey && (
+            <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-600 dark:text-amber-300">
+              {t(blockedKey)}
+            </p>
+          )}
+
           <div className="flex flex-wrap items-center gap-2">
-            {taskPacket.sessionLink && (
-              <>
-                <a
-                  className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
-                  href={taskPacket.sessionLink.href}
-                >
-                  <ExternalLink className="size-3.5" />
-                  {t("projects.projectManagerTaskPacketOpenSession")}
-                </a>
-                {onNavigateToSession && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onNavigateToSession(taskPacket.sessionLink!.href)}
-                  >
-                    <Terminal className="size-3.5" />
-                    {t("projects.projectManagerOpenSession")}
-                  </Button>
-                )}
-              </>
-            )}
-            {!taskPacket.sessionLink && (
+            {taskPacket.sessionLink ? (
               <Button
+                type="button"
                 size="sm"
                 variant="brand"
-                className="w-fit"
+                onClick={() => {
+                  if (onNavigateToSession) {
+                    onNavigateToSession(taskPacket.sessionLink!.href);
+                  } else {
+                    window.location.assign(taskPacket.sessionLink!.href);
+                  }
+                }}
+              >
+                <ExternalLink className="size-3.5" />
+                {t("projects.projectManagerOpenSession")}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                variant="brand"
+                disabled={!canEdit || !canStartTask}
                 onClick={onStart}
-                disabled={!canStartTask}
               >
                 <Play className="size-3.5" />
                 {isStarting
                   ? t("projects.projectManagerTaskPacketStarting")
-                  : t("projects.projectManagerTaskPacketStart")}
+                  : t("projects.tasksStartCli")}
               </Button>
             )}
+
             <Button
               type="button"
               size="sm"
-              variant="secondary"
+              variant="outline"
               disabled={!canExecuteAutonomous}
               onClick={() => {
                 setExecuteError(null);
@@ -802,81 +716,42 @@ function ProjectManagerTaskPacketSection({
                 ? t("projects.projectManagerExecuting")
                 : t("projects.projectManagerExecuteAutonomous")}
             </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                window.dispatchEvent(
+                  new CustomEvent("forgebadger:open-copilot", {
+                    detail: { projectId },
+                  }),
+                );
+              }}
+            >
+              <Sparkles className="size-3.5 text-brand" />
+              {t("projects.overviewAskCopilot")}
+            </Button>
           </div>
+
           {(startError || executeError) && (
-            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {executeError ?? startError}
             </p>
           )}
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <select
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
-              value={selectedSessionId}
-              disabled={isLinking || sessions.length === 0}
-              onChange={(event) => onSessionChange(event.target.value)}
-            >
-              <option value="">
-                {sessions.length > 0
-                  ? t("projects.projectManagerTaskPacketSelectSession")
-                  : t("projects.projectManagerTaskPacketNoSessions")}
-              </option>
-              {sessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {taskPacketSessionOptionLabel(session)}
-                </option>
-              ))}
-            </select>
-            <Button
-              size="sm"
-              variant="brand"
-              onClick={onSessionLink}
-              disabled={!canLinkSession}
-            >
-              {t("projects.projectManagerTaskPacketLinkSession")}
-            </Button>
-          </div>
-          {linkError && (
-            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {linkError}
-            </p>
+
+          {taskPacket.prompt && (
+            <details className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs">
+              <summary className="cursor-pointer font-medium text-muted-foreground hover:text-foreground">
+                {t("projects.tasksPromptPreview")}
+              </summary>
+              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-foreground/90">
+                {taskPacket.prompt}
+              </pre>
+            </details>
           )}
-        </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">{t("projects.projectManagerTaskPacketUnavailable")}</p>
+        </>
       )}
-    </fieldset>
-  );
-}
-
-function TaskPacketList({
-  emptyLabel,
-  label,
-  values,
-}: {
-  emptyLabel: string;
-  label: string;
-  values: string[];
-}) {
-  return (
-    <DetailField label={label}>
-      {values.length > 0 ? (
-        <ul className="list-disc space-y-1 pl-5 text-sm">
-          {values.map((value) => (
-            <li key={value} className="break-words">{value}</li>
-          ))}
-        </ul>
-      ) : (
-        <span className="text-muted-foreground">{emptyLabel}</span>
-      )}
-    </DetailField>
-  );
-}
-
-function DetailField({ children, label }: { children: ReactNode; label: string }) {
-  return (
-    <div className="space-y-1 text-sm">
-      <div className="text-xs font-medium uppercase text-muted-foreground">{label}</div>
-      <div className="break-words">{children}</div>
     </div>
   );
 }

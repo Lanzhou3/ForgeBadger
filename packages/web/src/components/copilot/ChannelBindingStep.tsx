@@ -24,10 +24,13 @@ import {
 import type { ChannelIdentity, ChannelRoute } from "@/lib/copilot-channels-api";
 import { DESTRUCTIVE_ROUTE_STATES, type ChannelRouteStateKey, type SetupBlocker } from "./channel-setup";
 import { ChannelSection } from "./ChannelSection";
+import { COPILOT_TONE_BADGE_CLASSES } from "./copilot-status-badge";
 import { useSettingsCopy } from "./settings-copy";
 
 interface Props {
   busy: boolean;
+  completed?: boolean;
+  muted?: boolean;
   queriesError: boolean;
   channelName: string;
   identities: ChannelIdentity[];
@@ -43,14 +46,14 @@ interface Props {
 }
 
 function routeBadgeClass(state: ChannelRouteStateKey | null): string {
-  if (state === "authorized") return "bg-emerald-500/10 text-emerald-400";
-  if (state === "pending_review") return "bg-amber-500/10 text-amber-400";
-  if (state && DESTRUCTIVE_ROUTE_STATES.includes(state)) return "bg-destructive/10 text-destructive";
-  return "text-muted-foreground";
+  if (state === "authorized") return COPILOT_TONE_BADGE_CLASSES.success;
+  if (state === "pending_review") return COPILOT_TONE_BADGE_CLASSES.warning;
+  if (state && DESTRUCTIVE_ROUTE_STATES.includes(state)) return COPILOT_TONE_BADGE_CLASSES.destructive;
+  return COPILOT_TONE_BADGE_CLASSES.muted;
 }
 
 export function ChannelBindingStep({
-  busy, queriesError, channelName, identities, identityId, onIdentityChange,
+  busy, completed = false, muted = false, queriesError, channelName, identities, identityId, onIdentityChange,
   blocker, activationReason, showBlockerLink, onActivate, routes, routeState, onRevokeRoute,
 }: Props) {
   const copy = useSettingsCopy();
@@ -58,7 +61,7 @@ export function ChannelBindingStep({
   const identityHasRoute = routes.some((route) => route.identityId === identityId);
 
   return (
-    <ChannelSection id="channel-authorization" step={3} title={copy.bindingTitle}>
+    <ChannelSection id="channel-authorization" step={3} completed={completed} muted={muted} title={copy.bindingTitle}>
       <div className="space-y-4">
         {routes.length > 0 && (
           <ul className="space-y-2">

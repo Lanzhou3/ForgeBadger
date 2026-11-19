@@ -1,85 +1,66 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ClipboardList,
+  ExternalLink,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  Sparkles,
+  Target,
+} from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Input } from "@/components/ui/input";
 import { useLanguage } from "@/hooks/use-language";
 import {
-  attachProjectManagerWorkItemEvidence,
-  batchUpdateProjectManagerWorkItemStatuses,
   createProjectManagerWorkItem,
   deleteProjectManagerWorkItem,
   GatewayApiError,
   getProjectManagerGoal,
   getProjectManagerTaskPacket,
-  linkProjectManagerTaskPacketSession,
   listProjectManagerLedger,
   listProjectManagerStages,
   listProjectManagerTaskPackets,
   listProjectManagerWorkItemLinks,
-  listSessions,
   listProjectManagerWorkItems,
   startProjectManagerTaskPacket,
-  updateProjectManagerGoal,
-  updateProjectManagerWorkItem,
   updateProjectManagerWorkItemStatus,
-  type ProjectManagerEvidenceRef,
-  type ProjectManagerGoalInput,
   type ProjectManagerTaskPacket,
   type ProjectManagerWorkItem,
-  type ProjectManagerWorkItemInput,
   type ProjectManagerWorkItemStatus,
-  type ProjectManagerWorkItemStatusInput,
-  type ProjectManagerWorkItemUpdateInput,
   type RuntimeAdapterId,
-  type Session,
 } from "@/lib/api";
 import { getGoal, listGoals } from "@/lib/copilot-api";
-import { TaskAuthorityContext, useTaskAuthority, type TaskAuthority } from "./TaskAuthority";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { taskPacketSelectableSessions } from "../project-manager-task-packet";
-import { ProjectManagerGoalBanner } from "./GoalBanner";
-import { ProjectManagerStageStrip } from "./StageStrip";
-import { ProjectManagerWorkItemsSection } from "./WorkItemsSection";
+import { TaskAuthorityContext, useTaskAuthority, type TaskAuthority } from "./TaskAuthority";
 import { ProjectManagerWorkItemDetailSheet } from "./WorkItemDetailSheet";
 import { QuickStartSessionDialog } from "./QuickStartSessionDialog";
-import {
-  CreateWorkItemDialog,
-  DeleteWorkItemDialog,
-  DoneReasonDialog,
-  EditWorkItemDialog,
-} from "./WorkItemDialogs";
-import { ProjectManagerLedgerSection } from "./LedgerSection";
+import { EmptyState } from "./shared";
 import {
   LEDGER_PAGE_SIZE,
+  PROJECT_MANAGER_STATUS_TRANSITIONS,
   WORK_ITEM_LIMIT,
-  type EditWorkItemDraft,
-  type EvidenceDraft,
-  type GoalDraft,
-  type LedgerFilter,
-  type WorkItemDraft,
   type WorkItemStatusFilter,
-  type WorkItemViewMode,
 } from "./types";
 import {
-  batchStatusTargets,
-  createEditWorkItemDraft,
-  createEvidenceDraft,
-  createGoalDraft,
-  createSingleEvidenceReference,
-  createWorkItemDraft,
-  createWorkItemInput,
-  createWorkItemUpdateInput,
-  filterLedgerEvents,
-  filterWorkItemsForTable,
-  parseProjectManagerTextList,
   projectManagerMutationMessage,
   projectManagerViewStorageKey,
   readProjectManagerViewPrefs,
-  validateEvidenceReferenceInput,
+  statusDotClassName,
+  statusLabel,
   writeProjectManagerViewPrefs,
 } from "./utils";
 
@@ -89,16 +70,20 @@ interface ProjectManagerPanelProps {
   selectedWorkItemId?: string | null;
   authority: TaskAuthority;
   /**
-   * Rendered under a tab/breadcrumb that already names this panel (e.g. the
-   * project page's "Dev Tasks" tab): the internal heading becomes sr-only so
-   * the title is not duplicated visually while heading semantics stay.
+   * Rendered under a tab/breadcrumb that already names this panel: the internal
+   * heading becomes sr-only while keeping semantic outline intact.
    */
   embedded?: boolean;
   onNavigateToSession?: (href: string) => void;
+  onOpenFile?: (path: string) => void;
 }
 
 export function ProjectManagerPanel(props: ProjectManagerPanelProps) {
-  return <TaskAuthorityContext.Provider value={props.authority}><ProjectManagerPanelContent {...props} /></TaskAuthorityContext.Provider>;
+  return (
+    <TaskAuthorityContext.Provider value={props.authority}>
+      <ProjectManagerPanelContent {...props} />
+    </TaskAuthorityContext.Provider>
+  );
 }
 
 function ProjectManagerPanelContent({
@@ -107,52 +92,81 @@ function ProjectManagerPanelContent({
   selectedWorkItemId: requestedWorkItemId = null,
   embedded = false,
   onNavigateToSession,
+  onOpenFile,
 }: ProjectManagerPanelProps) {
   const { t } = useLanguage();
-  const {canEdit, canManage, legacySessions, actorId} = useTaskAuthority();
+  const { canEdit, legacySessions, collaboration, actorId } = useTaskAuthority();
   const queryClient = useQueryClient();
   const canLoad = enabled && projectId.length > 0;
-  const [isGoalEditing, setIsGoalEditing] = useState(false);
-  const [goalDraft, setGoalDraft] = useState<GoalDraft>(() => createGoalDraft(null));
-  const [goalFormError, setGoalFormError] = useState<string | null>(null);
+
   const viewStorageKey = projectManagerViewStorageKey(projectId);
-  const [workItemStatusFilter, setWorkItemStatusFilter] = useState<WorkItemStatusFilter>(
-    () => readProjectManagerViewPrefs(viewStorageKey).statusFilter
+  const [statusFilter, setStatusFilter] = useState<WorkItemStatusFilter>(
+    () => readProjectManagerViewPrefs(viewStorageKey).statusFilter,
   );
-  const [workItemViewMode, setWorkItemViewMode] = useState<WorkItemViewMode>(
-    () => readProjectManagerViewPrefs(viewStorageKey).viewMode
-  );
-  const [selectedBoardWorkItemIds, setSelectedBoardWorkItemIds] = useState<string[]>([]);
-  const [batchTargetStatus, setBatchTargetStatus] = useState<ProjectManagerWorkItemStatus | "">("");
-  const [batchStatusError, setBatchStatusError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [quickTitle, setQuickTitle] = useState("");
   const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(null);
-  const [isCreateWorkItemOpen, setIsCreateWorkItemOpen] = useState(false);
-  const [workItemDraft, setWorkItemDraft] = useState<WorkItemDraft>(() => createWorkItemDraft());
-  const [createWorkItemError, setCreateWorkItemError] = useState<string | null>(null);
-  const [editingWorkItemId, setEditingWorkItemId] = useState<string | null>(null);
-  const [editWorkItemDraft, setEditWorkItemDraft] = useState<EditWorkItemDraft>(() => createEditWorkItemDraft(null));
-  const [editWorkItemError, setEditWorkItemError] = useState<string | null>(null);
-  const [deletingWorkItemId, setDeletingWorkItemId] = useState<string | null>(null);
-  const [deleteWorkItemError, setDeleteWorkItemError] = useState<string | null>(null);
-  const [evidenceDraft, setEvidenceDraft] = useState<EvidenceDraft>(() => createEvidenceDraft());
-  const [evidenceAttachError, setEvidenceAttachError] = useState<string | null>(null);
-  const [taskPacketSessionId, setTaskPacketSessionId] = useState("");
-  const [taskPacketLinkError, setTaskPacketLinkError] = useState<string | null>(null);
-  const [taskPacketStartError, setTaskPacketStartError] = useState<string | null>(null);
-  const [quickStartPendingId, setQuickStartPendingId] = useState<string | null>(null);
+  const [deletingItem, setDeletingItem] = useState<ProjectManagerWorkItem | null>(null);
+  const [quickStartItem, setQuickStartItem] = useState<ProjectManagerWorkItem | null>(null);
   const [quickStartError, setQuickStartError] = useState<string | null>(null);
-  const [quickStartWorkItem, setQuickStartWorkItem] = useState<ProjectManagerWorkItem | null>(null);
-  const [ledgerFilter, setLedgerFilter] = useState<LedgerFilter>("all");
-  const [ledgerLimit, setLedgerLimit] = useState(LEDGER_PAGE_SIZE);
-  const [statusMutationError, setStatusMutationError] = useState<string | null>(null);
+  const [taskPacketStartError, setTaskPacketStartError] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [hasConflict, setHasConflict] = useState(false);
-  const [activeStageFilter, setActiveStageFilter] = useState<string | null>(null);
-  const [pendingDoneItems, setPendingDoneItems] = useState<ProjectManagerWorkItem[] | null>(null);
-  const [pendingDoneIsBatch, setPendingDoneIsBatch] = useState(false);
-  const [doneReason, setDoneReason] = useState("");
-  const [doneReasonError, setDoneReasonError] = useState<string | null>(null);
-  const doneReasonRef = useRef<HTMLTextAreaElement | null>(null);
-  const appliedRequestedWorkItemIdRef = useRef<string | null>(null);
+  const appliedRequestedIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    writeProjectManagerViewPrefs(viewStorageKey, { statusFilter });
+  }, [statusFilter, viewStorageKey]);
+
+  const goalQuery = useQuery({
+    queryKey: ["project-manager", projectId, "goal", actorId],
+    queryFn: () => getProjectManagerGoal(projectId),
+    enabled: canLoad,
+    retry: false,
+  });
+
+  const workItemsQuery = useQuery({
+    queryKey: ["project-manager", projectId, "work-items", { limit: WORK_ITEM_LIMIT }, actorId],
+    queryFn: () => listProjectManagerWorkItems(projectId, { limit: WORK_ITEM_LIMIT }),
+    enabled: canLoad,
+    retry: false,
+  });
+
+  const stagesQuery = useQuery({
+    queryKey: ["project-manager", projectId, "stages", actorId],
+    queryFn: () => listProjectManagerStages(projectId),
+    enabled: canLoad,
+    retry: false,
+  });
+
+  const linksQuery = useQuery({
+    queryKey: ["project-manager", projectId, "work-item-links", actorId],
+    queryFn: () => listProjectManagerWorkItemLinks(projectId),
+    enabled: canLoad,
+    retry: false,
+  });
+
+  const ledgerQuery = useQuery({
+    queryKey: ["project-manager", projectId, "ledger", { limit: LEDGER_PAGE_SIZE }, actorId],
+    queryFn: () => listProjectManagerLedger(projectId, { limit: LEDGER_PAGE_SIZE }),
+    enabled: canLoad && Boolean(selectedWorkItemId),
+    retry: false,
+  });
+
+  const taskPacketsQuery = useQuery({
+    queryKey: ["project-manager", projectId, "task-packets", { limit: WORK_ITEM_LIMIT }, actorId],
+    queryFn: () => listProjectManagerTaskPackets(projectId, { limit: WORK_ITEM_LIMIT }),
+    enabled: canLoad && legacySessions,
+    retry: false,
+  });
+
+  const taskPacketQuery = useQuery({
+    queryKey: ["project-manager", projectId, "work-item", selectedWorkItemId, "task-packet", actorId],
+    queryFn: () => getProjectManagerTaskPacket(projectId, selectedWorkItemId ?? ""),
+    enabled: canLoad && legacySessions && Boolean(selectedWorkItemId),
+    retry: false,
+  });
 
   const copilotGoalsQuery = useQuery({
     queryKey: ["copilot-goals"],
@@ -174,15 +188,40 @@ function ProjectManagerPanelContent({
     staleTime: 30_000,
   });
 
+  const workItems = workItemsQuery.data?.workItems ?? [];
+  const stages = stagesQuery.data?.stages ?? [];
+  const links = linksQuery.data?.links ?? [];
+  const ledgerEvents = ledgerQuery.data?.events ?? [];
+  const taskPackets = taskPacketsQuery.data?.taskPackets ?? [];
+  const goal = goalQuery.data?.goal ?? null;
+
+  useEffect(() => {
+    if (!requestedWorkItemId || appliedRequestedIdRef.current === requestedWorkItemId) return;
+    if (workItems.some((item) => item.id === requestedWorkItemId)) {
+      appliedRequestedIdRef.current = requestedWorkItemId;
+      setSelectedWorkItemId(requestedWorkItemId);
+    }
+  }, [requestedWorkItemId, workItems]);
+
+  const stageNameById = useMemo(
+    () => new Map(stages.map((stage) => [stage.id, stage.name])),
+    [stages],
+  );
+
+  const taskPacketByWorkItemId = useMemo(
+    () => new Map(taskPackets.map((packet) => [packet.workItemId, packet])),
+    [taskPackets],
+  );
+
   const goalTaskLinksByWorkItemId = useMemo(() => {
     const map = new Map<string, { goalId: string; goalTitle: string; taskStatus: string }>();
-    const goalDetail = activeGoalDetailQuery.data;
-    if (!goalDetail) return map;
-    for (const task of goalDetail.tasks ?? []) {
+    const detail = activeGoalDetailQuery.data;
+    if (!detail) return map;
+    for (const task of detail.tasks ?? []) {
       if (task.workItemId) {
         map.set(task.workItemId, {
-          goalId: goalDetail.goal.id,
-          goalTitle: goalDetail.goal.title,
+          goalId: detail.goal.id,
+          goalTitle: detail.goal.title,
           taskStatus: task.status,
         });
       }
@@ -190,622 +229,421 @@ function ProjectManagerPanelContent({
     return map;
   }, [activeGoalDetailQuery.data]);
 
-  const goalQuery = useQuery({
-    queryKey: ["project-manager", projectId, "goal", actorId],
-    queryFn: () => getProjectManagerGoal(projectId),
-    enabled: canLoad,
-    retry: false,
-  });
-
-  const goal = goalQuery.data?.goal ?? null;
-
-  const workItemsQuery = useQuery({
-    queryKey: ["project-manager", projectId, "work-items", { limit: WORK_ITEM_LIMIT }, actorId],
-    queryFn: () => listProjectManagerWorkItems(projectId, { limit: WORK_ITEM_LIMIT }),
-    enabled: canLoad,
-    retry: false,
-  });
-
-  const taskPacketsQuery = useQuery({
-    queryKey: ["project-manager", projectId, "task-packets", { limit: WORK_ITEM_LIMIT }, actorId],
-    queryFn: () => listProjectManagerTaskPackets(projectId, { limit: WORK_ITEM_LIMIT }),
-    enabled: canLoad && legacySessions,
-    retry: false,
-  });
-
-  const stagesQuery = useQuery({
-    queryKey: ["project-manager", projectId, "stages", actorId],
-    queryFn: () => listProjectManagerStages(projectId),
-    enabled: canLoad,
-    retry: false,
-  });
-
-  const workItemLinksQuery = useQuery({
-    queryKey: ["project-manager", projectId, "work-item-links", actorId],
-    queryFn: () => listProjectManagerWorkItemLinks(projectId),
-    enabled: canLoad,
-    retry: false,
-  });
-
-  const ledgerQuery = useQuery({
-    queryKey: ["project-manager", projectId, "ledger", { limit: ledgerLimit }, actorId],
-    queryFn: () => listProjectManagerLedger(projectId, { limit: ledgerLimit }),
-    enabled: canLoad,
-    retry: false,
-  });
-
-  const taskPacketQuery = useQuery({
-    queryKey: ["project-manager", projectId, "work-item", selectedWorkItemId, "task-packet", actorId],
-    queryFn: () => getProjectManagerTaskPacket(projectId, selectedWorkItemId ?? ""),
-    enabled: canLoad && legacySessions && !!selectedWorkItemId,
-    retry: false,
-  });
-
-  const sessionsQuery = useQuery({
-    queryKey: ["sessions", { projectId }, actorId],
-    queryFn: () => listSessions({ projectId }),
-    enabled: canLoad && legacySessions && !!selectedWorkItemId,
-    retry: false,
-  });
-
-  useEffect(() => {
-    if (!isGoalEditing) {
-      setGoalDraft(createGoalDraft(goal));
-    }
-  }, [goal, isGoalEditing]);
-
-  useEffect(() => {
-    writeProjectManagerViewPrefs(viewStorageKey, {
-      statusFilter: workItemStatusFilter,
-      viewMode: workItemViewMode,
-    });
-  }, [viewStorageKey, workItemStatusFilter, workItemViewMode]);
-
-  const invalidateProjectManagerQueries = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "goal"] }),
-      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
-      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
-      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
-        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
-        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
-      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "stages"] }),
-      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-item-links"] }),
-    ]);
-  };
-  const updateWorkItemsCache = (updater: (items: ProjectManagerWorkItem[]) => ProjectManagerWorkItem[]) => {
-    queryClient.setQueriesData<{ workItems: ProjectManagerWorkItem[] }>(
-      { queryKey: ["project-manager", projectId, "work-items"], predicate: query => query.queryKey.at(-1) === actorId },
-      (current) => current ? { workItems: updater(current.workItems) } : current
-    );
-  };
-
-  const goalMutation = useMutation({
-    mutationFn: (input: ProjectManagerGoalInput) => updateProjectManagerGoal(projectId, input),
-    onSuccess: async ({ goal: updatedGoal }) => {
-      setGoalFormError(null);
-      setGoalDraft(createGoalDraft(updatedGoal));
-      setIsGoalEditing(false);
-      await invalidateProjectManagerQueries();
-    },
-    onError: (error) => {
-      setGoalFormError(projectManagerMutationMessage(error, t("projects.projectManagerGoalMutationError")));
-    },
-  });
-
-  const createWorkItemMutation = useMutation({
-    mutationFn: (input: ProjectManagerWorkItemInput) => createProjectManagerWorkItem(projectId, input),
-    onSuccess: async ({ workItem }) => {
-      setCreateWorkItemError(null);
-      setWorkItemDraft(createWorkItemDraft());
-      setIsCreateWorkItemOpen(false);
-      updateWorkItemsCache((items) => [...items.filter((item) => item.id !== workItem.id), workItem]);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
-        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
-        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
-      ]);
-    },
-    onError: (error) => {
-      setCreateWorkItemError(projectManagerMutationMessage(error, t("projects.projectManagerCreateWorkItemError")));
-    },
-  });
-
-  const editWorkItemMutation = useMutation({
-    mutationFn: ({ input, workItemId }: { input: ProjectManagerWorkItemUpdateInput; workItemId: string }) =>
-      updateProjectManagerWorkItem(projectId, workItemId, input),
-    onSuccess: async ({ workItem }) => {
-      setEditWorkItemError(null);
-      setEditingWorkItemId(null);
-      setEditWorkItemDraft(createEditWorkItemDraft(null));
-      updateWorkItemsCache((items) => items.map((item) => item.id === workItem.id ? workItem : item));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
-        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
-        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
-      ]);
-    },
-    onError: (error) => {
-      setEditWorkItemError(projectManagerMutationMessage(error, t("projects.projectManagerUpdateWorkItemError")));
-    },
-  });
-
-  const deleteWorkItemMutation = useMutation({
-    mutationFn: ({ workItemId }: { workItemId: string }) =>
-      deleteProjectManagerWorkItem(projectId, workItemId, { confirm: true, expectedRevision: workItemsQuery.data?.workItems.find(item => item.id === workItemId)?.revision }),
-    onSuccess: async ({ workItem }, variables) => {
-      setDeleteWorkItemError(null);
-      setDeletingWorkItemId(null);
-      setSelectedWorkItemId((current) => current === variables.workItemId ? null : current);
-      setSelectedBoardWorkItemIds((ids) => ids.filter((id) => id !== variables.workItemId));
-      updateWorkItemsCache((items) => items.filter((item) => item.id !== workItem.id));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
-        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
-        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
-      ]);
-    },
-    onError: (error) => {
-      setDeleteWorkItemError(projectManagerMutationMessage(error, t("projects.projectManagerDeleteWorkItemError")));
-    },
-  });
-
-  const batchStatusMutation = useMutation({
-    mutationFn: (input: { updates: Array<{ workItemId: string; status: ProjectManagerWorkItemStatus; expectedRevision?: number; manualCompletionReason?: string }> }) =>
-      batchUpdateProjectManagerWorkItemStatuses(projectId, input),
-    onSuccess: async ({ workItems: updatedWorkItems }) => {
-      setHasConflict(false);
-      setBatchStatusError(null);
-      setBatchTargetStatus("");
-      setSelectedBoardWorkItemIds([]);
-      setPendingDoneItems(null);
-      setDoneReason("");
-      setDoneReasonError(null);
-      const updatedById = new Map(updatedWorkItems.map((item) => [item.id, item]));
-      updateWorkItemsCache((items) => items.map((item) => updatedById.get(item.id) ?? item));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
-        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
-        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
-      ]);
-    },
-    onError: (error) => {
-      if (error instanceof GatewayApiError && error.status === 409) {
-        setHasConflict(true);
+  const unresolvedBlockersByItemId = useMemo(() => {
+    const itemById = new Map(workItems.map((item) => [item.id, item]));
+    const counts = new Map<string, number>();
+    for (const link of links) {
+      const blocker = itemById.get(link.blockerWorkItemId);
+      if (blocker && blocker.status !== "done" && blocker.status !== "cancelled") {
+        counts.set(link.blockedWorkItemId, (counts.get(link.blockedWorkItemId) ?? 0) + 1);
       }
-      const message = projectManagerMutationMessage(error, t("projects.projectManagerBatchStatusError"));
-      setBatchStatusError(message);
-      if (pendingDoneItems) setDoneReasonError(message);
+    }
+    return counts;
+  }, [links, workItems]);
+
+  const memberEmailById = useMemo(
+    () => new Map((collaboration?.members ?? []).map((member) => [member.userId, member.email])),
+    [collaboration?.members],
+  );
+
+  async function invalidateAll() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["project-manager", projectId] }),
+      ...(legacySessions
+        ? [
+            queryClient.invalidateQueries({ queryKey: ["copilot-goals"] }),
+            queryClient.invalidateQueries({ queryKey: ["sessions", { projectId }] }),
+          ]
+        : []),
+    ]);
+  }
+
+  const createMutation = useMutation({
+    mutationFn: (title: string) => createProjectManagerWorkItem(projectId, { title }),
+    onSuccess: async () => {
+      setQuickTitle("");
+      await queryClient.invalidateQueries({
+        queryKey: ["project-manager", projectId, "work-items"],
+      });
+      if (legacySessions) {
+        await queryClient.invalidateQueries({
+          queryKey: ["project-manager", projectId, "task-packets"],
+        });
+      }
+    },
+    onError: (err) => {
+      toast.error(
+        projectManagerMutationMessage(err, t("projects.projectManagerCreateWorkItemError"), t),
+      );
     },
   });
 
   const statusMutation = useMutation({
-    mutationFn: ({ input, workItemId }: { input: ProjectManagerWorkItemStatusInput; workItemId: string }) =>
-      updateProjectManagerWorkItemStatus(projectId, workItemId, input),
+    mutationFn: ({
+      workItemId,
+      status,
+      expectedRevision,
+      manualCompletionReason,
+    }: {
+      workItemId: string;
+      status: ProjectManagerWorkItemStatus;
+      expectedRevision?: number;
+      manualCompletionReason?: string;
+    }) =>
+      updateProjectManagerWorkItemStatus(projectId, workItemId, {
+        status,
+        expectedRevision,
+        ...(manualCompletionReason ? { manualCompletionReason } : {}),
+      }),
     onSuccess: async () => {
       setHasConflict(false);
-      setStatusMutationError(null);
-      setPendingDoneItems(null);
-      setDoneReason("");
-      setDoneReasonError(null);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
-        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
-        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
-      ]);
+      setStatusError(null);
+      await invalidateAll();
     },
-    onError: (error) => {
-      if (error instanceof GatewayApiError && error.status === 409) {
+    onError: (err) => {
+      if (err instanceof GatewayApiError && err.status === 409) {
         setHasConflict(true);
       }
-      setStatusMutationError(projectManagerMutationMessage(error, t("projects.projectManagerStatusMutationError")));
-    },
-  });
-
-  const evidenceMutation = useMutation({
-    mutationFn: ({ reference, workItemId }: { reference: ProjectManagerEvidenceRef; workItemId: string }) =>
-      attachProjectManagerWorkItemEvidence(projectId, workItemId, { evidenceRefs: [reference], expectedRevision: workItemsQuery.data?.workItems.find(item => item.id === workItemId)?.revision }),
-    onSuccess: async () => {
-      setEvidenceAttachError(null);
-      setEvidenceDraft(createEvidenceDraft());
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "work-items"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] }),
-        queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "ledger"] }),
-        queryClient.invalidateQueries({ queryKey: ["collaboration", projectId] }),
-        queryClient.invalidateQueries({ queryKey: ["task-artifacts", projectId] }),
-      ]);
-    },
-    onError: (error) => {
-      setEvidenceAttachError(projectManagerMutationMessage(error, t("projects.projectManagerEvidenceAttachError")));
-    },
-  });
-
-  const taskPacketLinkMutation = useMutation({
-    mutationFn: ({ sessionId, workItemId }: { sessionId: string; workItemId: string }) =>
-      linkProjectManagerTaskPacketSession(projectId, workItemId, { sessionId }),
-    onSuccess: ({ taskPacket }) => {
-      setTaskPacketLinkError(null);
-      setTaskPacketSessionId(taskPacket.sessionLink?.sessionId ?? "");
-      queryClient.setQueryData<{ taskPacket: ProjectManagerTaskPacket }>(
-        ["project-manager", projectId, "work-item", taskPacket.workItemId, "task-packet"],
-        { taskPacket }
+      const msg = projectManagerMutationMessage(
+        err,
+        t("projects.projectManagerStatusMutationError"),
+        t,
       );
-      void queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] });
-    },
-    onError: (error) => {
-      setTaskPacketLinkError(projectManagerMutationMessage(error, t("projects.projectManagerTaskPacketLinkError")));
+      setStatusError(msg);
+      toast.error(msg);
     },
   });
 
-  const taskPacketStartMutation = useMutation({
+  const deleteMutation = useMutation({
+    mutationFn: (item: ProjectManagerWorkItem) =>
+      deleteProjectManagerWorkItem(projectId, item.id, {
+        confirm: true,
+        ...(typeof item.revision === "number" ? { expectedRevision: item.revision } : {}),
+      }),
+    onSuccess: async (_, deletedItem) => {
+      setDeletingItem(null);
+      if (selectedWorkItemId === deletedItem.id) setSelectedWorkItemId(null);
+      await invalidateAll();
+    },
+    onError: (err) => {
+      toast.error(
+        projectManagerMutationMessage(err, t("projects.projectManagerDeleteWorkItemError"), t),
+      );
+    },
+  });
+
+  const startSessionMutation = useMutation({
     mutationFn: ({ workItemId, aiTool }: { workItemId: string; aiTool?: RuntimeAdapterId }) =>
-      startProjectManagerTaskPacket(projectId, workItemId, { aiTool }),
-    onSuccess: ({ taskPacket, session }) => {
+      startProjectManagerTaskPacket(projectId, workItemId, aiTool ? { aiTool } : undefined),
+    onSuccess: async ({ session }) => {
+      setQuickStartItem(null);
+      setQuickStartError(null);
       setTaskPacketStartError(null);
-      setTaskPacketLinkError(null);
-      setQuickStartPendingId(null);
-      setQuickStartWorkItem(null);
-      setTaskPacketSessionId(taskPacket.sessionLink?.sessionId ?? "");
-      queryClient.setQueryData<{ taskPacket: ProjectManagerTaskPacket }>(
-        ["project-manager", projectId, "work-item", taskPacket.workItemId, "task-packet"],
-        { taskPacket }
-      );
-      queryClient.setQueryData<{ sessions: Session[] }>(
-        ["sessions", { projectId }],
-        (current) => current ? {
-          sessions: current.sessions.some((existing) => existing.id === session.id)
-            ? current.sessions.map((existing) => (existing.id === session.id ? session : existing))
-            : [...current.sessions, session],
-        } : current
-      );
-      void queryClient.invalidateQueries({ queryKey: ["project-manager", projectId, "task-packets"] });
-      void queryClient.invalidateQueries({ queryKey: ["sessions", { projectId }] });
+      await invalidateAll();
+      if (onNavigateToSession) {
+        onNavigateToSession(`/sessions/${encodeURIComponent(session.id)}`);
+      }
     },
-    onError: (error) => {
-      const message = projectManagerMutationMessage(error, t("projects.projectManagerTaskPacketStartError"));
-      setTaskPacketStartError(message);
-      setQuickStartError(message);
-      setQuickStartPendingId(null);
+    onError: (err) => {
+      const msg = projectManagerMutationMessage(
+        err,
+        t("projects.projectManagerTaskPacketStartError"),
+        t,
+      );
+      setQuickStartError(msg);
+      setTaskPacketStartError(msg);
     },
   });
 
-  const firstError = goalQuery.error ?? workItemsQuery.error;
-  const isNotFoundError = firstError instanceof GatewayApiError && firstError.status === 404;
-  const isLoading = goalQuery.isLoading || workItemsQuery.isLoading;
-  const isRefreshing = goalQuery.isFetching || workItemsQuery.isFetching || taskPacketsQuery.isFetching || ledgerQuery.isFetching;
-  const workItems = workItemsQuery.data?.workItems ?? [];
-  const taskPackets = legacySessions ? taskPacketsQuery.data?.taskPackets ?? [] : [];
-  const stages = stagesQuery.data?.stages ?? [];
-  const workItemLinks = workItemLinksQuery.data?.links ?? [];
-  const tableWorkItems = filterWorkItemsForTable(workItems, workItemStatusFilter);
-  const ledgerEvents = ledgerQuery.data?.events ?? [];
-  const filteredLedgerEvents = filterLedgerEvents(ledgerEvents, ledgerFilter);
-  const selectedWorkItem = workItems.find((item) => item.id === selectedWorkItemId) ?? null;
-  const taskPacket = taskPacketQuery.data?.taskPacket ?? null;
-  const taskPacketSessions = taskPacketSelectableSessions(sessionsQuery.data?.sessions ?? []);
-  const editingWorkItem = workItems.find((item) => item.id === editingWorkItemId) ?? null;
-  const deletingWorkItem = workItems.find((item) => item.id === deletingWorkItemId) ?? null;
-  const selectedBoardWorkItems = selectedBoardWorkItemIds
-    .map((id) => workItems.find((item) => item.id === id))
-    .filter((item): item is ProjectManagerWorkItem => Boolean(item));
-  const batchTargetOptions = batchStatusTargets(selectedBoardWorkItems);
-  const effectiveBatchTargetStatus = batchTargetOptions.includes(batchTargetStatus as ProjectManagerWorkItemStatus)
-    ? batchTargetStatus
-    : "";
-  const pendingDoneWorkItem = pendingDoneItems?.[0] ?? null;
-
-  useEffect(() => {
-    const requested = requestedWorkItemId?.trim() ?? "";
-    if (!requested) {
-      appliedRequestedWorkItemIdRef.current = null;
-      return;
-    }
-    if (appliedRequestedWorkItemIdRef.current === requested) return;
-    if (!workItems.some((item) => item.id === requested)) return;
-    setSelectedWorkItemId(requested);
-    appliedRequestedWorkItemIdRef.current = requested;
-  }, [requestedWorkItemId, workItems]);
-
-  useEffect(() => {
-    setEvidenceAttachError(null);
-    setEvidenceDraft(createEvidenceDraft());
-    setTaskPacketLinkError(null);
-    setTaskPacketStartError(null);
-    setQuickStartError(null);
-    setTaskPacketSessionId("");
-  }, [selectedWorkItemId]);
-
-  useEffect(() => {
-    setTaskPacketSessionId(taskPacket?.sessionLink?.sessionId ?? "");
-  }, [taskPacket?.sessionLink?.sessionId]);
-
-  useEffect(() => {
-    if (pendingDoneItems) {
-      doneReasonRef.current?.focus();
-    }
-  }, [pendingDoneItems]);
-
-  if (!enabled) {
-    return null;
+  function changeWorkItemStatus(
+    item: ProjectManagerWorkItem,
+    nextStatus: ProjectManagerWorkItemStatus,
+    manualCompletionReason?: string,
+  ) {
+    const resolvedReason =
+      manualCompletionReason?.trim() ||
+      (legacySessions && nextStatus === "done" && item.evidenceRefCount === 0
+        ? t("projects.tasksOwnerManualDoneReason")
+        : undefined);
+    statusMutation.mutate({
+      workItemId: item.id,
+      status: nextStatus,
+      expectedRevision: item.revision,
+      manualCompletionReason: resolvedReason,
+    });
   }
 
-  const refresh = () => {
-    if (!canLoad) return;
-    void goalQuery.refetch();
-    void workItemsQuery.refetch();
-    if (legacySessions) void taskPacketsQuery.refetch();
-    void ledgerQuery.refetch();
-    void stagesQuery.refetch();
-    void workItemLinksQuery.refetch();
-  };
+  function handleQuickAdd(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = quickTitle.trim();
+    if (!trimmed || !canEdit || createMutation.isPending) return;
+    createMutation.mutate(trimmed);
+  }
 
-  const refreshLedger = () => {
-    if (!canLoad) return;
-    void ledgerQuery.refetch();
-  };
+  function openCopilotPlanner() {
+    window.dispatchEvent(
+      new CustomEvent("forgebadger:open-copilot", {
+        detail: { projectId },
+      }),
+    );
+  }
 
-  const loadMoreLedger = () => {
-    setLedgerLimit((limit) => limit + LEDGER_PAGE_SIZE);
-  };
-
-  const startGoalEdit = () => {
-    setGoalFormError(null);
-    setGoalDraft(createGoalDraft(goal));
-    setIsGoalEditing(true);
-  };
-
-  const cancelGoalEdit = () => {
-    setGoalFormError(null);
-    setGoalDraft(createGoalDraft(goal));
-    setIsGoalEditing(false);
-  };
-
-  const saveGoal = () => {
-    if (!(canManage ?? canEdit)) return;
-    const summary = goalDraft.summary.trim();
-    if (!summary) {
-      setGoalFormError(t("projects.projectManagerGoalSummaryRequired"));
-      return;
-    }
-    setGoalFormError(null);
-    goalMutation.mutate({
-      summary,
-      constraints: parseProjectManagerTextList(goalDraft.constraintsText),
-      acceptanceCriteria: parseProjectManagerTextList(goalDraft.acceptanceCriteriaText),
-      status: goalDraft.status.trim() || "active",
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredItems = useMemo(() => {
+    return workItems.filter((item) => {
+      if (statusFilter === "active" && (item.status === "done" || item.status === "cancelled")) {
+        return false;
+      }
+      if (statusFilter !== "active" && statusFilter !== "all" && item.status !== statusFilter) {
+        return false;
+      }
+      if (normalizedQuery) {
+        const matchTitle = item.title.toLowerCase().includes(normalizedQuery);
+        const matchDesc = item.description?.toLowerCase().includes(normalizedQuery) ?? false;
+        if (!matchTitle && !matchDesc) return false;
+      }
+      return true;
     });
+  }, [normalizedQuery, statusFilter, workItems]);
+
+  const completedItems = useMemo(
+    () =>
+      workItems.filter((item) => {
+        if (item.status !== "done" && item.status !== "cancelled") return false;
+        if (!normalizedQuery) return true;
+        return (
+          item.title.toLowerCase().includes(normalizedQuery) ||
+          (item.description?.toLowerCase().includes(normalizedQuery) ?? false)
+        );
+      }),
+    [normalizedQuery, workItems],
+  );
+
+  const grouped = useMemo(() => {
+    const attention: ProjectManagerWorkItem[] = [];
+    const active: ProjectManagerWorkItem[] = [];
+    const queued: ProjectManagerWorkItem[] = [];
+    const done: ProjectManagerWorkItem[] = [];
+
+    for (const item of filteredItems) {
+      if (item.status === "ready_for_review" || item.status === "blocked") {
+        attention.push(item);
+      } else if (item.status === "in_progress") {
+        active.push(item);
+      } else if (item.status === "todo") {
+        queued.push(item);
+      } else {
+        done.push(item);
+      }
+    }
+    return { attention, active, queued, done };
+  }, [filteredItems]);
+
+  const selectedWorkItem = workItems.find((item) => item.id === selectedWorkItemId) ?? null;
+  const selectedTaskPacket =
+    taskPacketQuery.data?.taskPacket ??
+    (selectedWorkItem ? (taskPacketByWorkItemId.get(selectedWorkItem.id) ?? null) : null);
+
+  const firstError = goalQuery.error ?? workItemsQuery.error;
+  const isLoading = goalQuery.isLoading || workItemsQuery.isLoading;
+  const isRefreshing =
+    goalQuery.isFetching ||
+    workItemsQuery.isFetching ||
+    (legacySessions && taskPacketsQuery.isFetching);
+
+  const renderTaskRow = (item: ProjectManagerWorkItem) => {
+    const packet = legacySessions ? (taskPacketByWorkItemId.get(item.id) ?? null) : null;
+    const stageName = item.stageId ? (stageNameById.get(item.stageId) ?? null) : null;
+    const goalLink = goalTaskLinksByWorkItemId.get(item.id) ?? null;
+    const blockerCount = unresolvedBlockersByItemId.get(item.id) ?? 0;
+    const assigneeEmail = item.assigneeId ? memberEmailById.get(item.assigneeId) : null;
+    const canQuickDone =
+      canEdit && legacySessions && PROJECT_MANAGER_STATUS_TRANSITIONS[item.status].includes("done");
+    const canStartCli =
+      legacySessions &&
+      canEdit &&
+      !packet?.sessionLink &&
+      blockerCount === 0 &&
+      (item.status === "todo" || item.status === "in_progress");
+
+    return (
+      <div
+        key={item.id}
+        data-testid={`project-manager-item-${item.id}`}
+        aria-disabled={!canEdit ? true : undefined}
+        className={cn(
+          "flex flex-col gap-2 px-4 py-3 transition-colors hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between",
+          item.id === requestedWorkItemId && "bg-brand/5",
+        )}
+      >
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-start gap-2.5">
+            <span
+              className={cn(
+                "mt-1.5 size-2 shrink-0 rounded-full",
+                statusDotClassName(item.status),
+              )}
+              aria-hidden="true"
+            />
+            <button
+              type="button"
+              onClick={() => setSelectedWorkItemId(item.id)}
+              className="min-w-0 flex-1 break-words text-left text-sm font-medium leading-5 hover:text-brand hover:underline"
+            >
+              {item.title}
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 pl-4.5">
+            <Badge variant="outline" className="rounded-full text-[10px] font-normal">
+              {statusLabel(item.status, t)}
+            </Badge>
+            {stageName && (
+              <Badge variant="secondary" className="rounded-full text-[10px] font-normal">
+                {stageName}
+              </Badge>
+            )}
+            {goalLink && (
+              <Link
+                href={`/copilot/goals/${encodeURIComponent(goalLink.goalId)}`}
+                className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-secondary/40 px-2 py-0.5 text-[10px] text-foreground hover:bg-secondary"
+              >
+                <Sparkles className="size-2.5 text-brand" />
+                {t("projects.projectManagerViewCopilotGoal")}
+              </Link>
+            )}
+            {blockerCount > 0 && (
+              <Badge variant="destructive" className="rounded-full text-[10px] font-normal">
+                {t("projects.tasksBlockedByCount").replace("{count}", String(blockerCount))}
+              </Badge>
+            )}
+            {item.evidenceRefCount > 0 && (
+              <span className="text-[11px] text-muted-foreground tabular-nums">
+                {t("projects.projectManagerEvidenceRefs")}: {item.evidenceRefCount}
+              </span>
+            )}
+            {assigneeEmail && (
+              <span className="truncate text-[11px] text-muted-foreground">
+                {assigneeEmail}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 pl-4.5 sm:pl-0">
+          {packet?.sessionLink && (
+            <Button asChild size="sm" variant="outline" className="h-7 px-2.5 text-xs">
+              <Link href={packet.sessionLink.href}>
+                <ExternalLink className="size-3" />
+                {t("projects.projectManagerOpenSession")}
+              </Link>
+            </Button>
+          )}
+          {canStartCli && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 px-2.5 text-xs"
+              disabled={startSessionMutation.isPending}
+              onClick={() => {
+                setQuickStartError(null);
+                setQuickStartItem(item);
+              }}
+            >
+              <Play className="size-3" />
+              {t("projects.tasksStartCli")}
+            </Button>
+          )}
+          {canQuickDone && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-600 dark:text-emerald-400"
+              disabled={statusMutation.isPending}
+              onClick={() => changeWorkItemStatus(item, "done")}
+            >
+              <CheckCircle2 className="size-3.5" />
+              {t("projects.tasksMarkDone")}
+            </Button>
+          )}
+        </div>
+      </div>
+    );
   };
 
-  const openCreateWorkItemDialog = () => {
-    setCreateWorkItemError(null);
-    setWorkItemDraft(createWorkItemDraft());
-    setIsCreateWorkItemOpen(true);
-  };
-
-  const saveWorkItem = () => {
-    if (!canEdit) return;
-    const title = workItemDraft.title.trim();
-    if (!title) {
-      setCreateWorkItemError(t("projects.projectManagerWorkItemTitleRequired"));
-      return;
-    }
-
-    setCreateWorkItemError(null);
-    createWorkItemMutation.mutate(createWorkItemInput(workItemDraft, title));
-  };
-
-  const openEditWorkItemDialog = (item: ProjectManagerWorkItem) => {
-    setEditWorkItemError(null);
-    setEditWorkItemDraft(createEditWorkItemDraft(item));
-    setEditingWorkItemId(item.id);
-  };
-
-  const saveEditedWorkItem = () => {
-    if (!canEdit) return;
-    if (!editingWorkItem) return;
-    const title = editWorkItemDraft.title.trim();
-    if (!title) {
-      setEditWorkItemError(t("projects.projectManagerWorkItemTitleRequired"));
-      return;
-    }
-
-    setEditWorkItemError(null);
-    editWorkItemMutation.mutate({
-      workItemId: editingWorkItem.id,
-      input: createWorkItemUpdateInput(editWorkItemDraft, title),
-    });
-  };
-
-  const openDeleteWorkItemDialog = (item: ProjectManagerWorkItem) => {
-    setDeleteWorkItemError(null);
-    setDeletingWorkItemId(item.id);
-  };
-
-  const confirmDeleteWorkItem = () => {
-    if (!canEdit) return;
-    if (!deletingWorkItem) return;
-    setDeleteWorkItemError(null);
-    deleteWorkItemMutation.mutate({ workItemId: deletingWorkItem.id });
-  };
-
-  const toggleBoardWorkItemSelection = (item: ProjectManagerWorkItem, selected: boolean) => {
-    setBatchStatusError(null);
-    setSelectedBoardWorkItemIds((ids) => {
-      if (selected) return ids.includes(item.id) ? ids : [...ids, item.id];
-      return ids.filter((id) => id !== item.id);
-    });
-  };
-
-  const submitBatchStatusChange = () => {
-    if (!canEdit) return;
-    if (selectedBoardWorkItems.length === 0) {
-      setBatchStatusError(t("projects.projectManagerBatchStatusSelectionRequired"));
-      return;
-    }
-    if (!effectiveBatchTargetStatus) {
-      setBatchStatusError(t("projects.projectManagerBatchStatusTargetRequired"));
-      return;
-    }
-
-    setBatchStatusError(null);
-    if (effectiveBatchTargetStatus === "done") {
-      setPendingDoneItems(selectedBoardWorkItems.map((item) => ({ ...item })));
-      setPendingDoneIsBatch(true);
-      setDoneReason("");
-      setDoneReasonError(null);
-      return;
-    }
-    batchStatusMutation.mutate({
-      updates: selectedBoardWorkItems.map((item) => ({
-        workItemId: item.id,
-        expectedRevision: item.revision,
-        status: effectiveBatchTargetStatus,
-      })),
-    });
-  };
-
-  const attachEvidence = () => {
-    if (!canEdit) return;
-    if (!selectedWorkItem) return;
-    if (evidenceDraft.kind.trim().length === 0) {
-      setEvidenceAttachError(t("projects.projectManagerEvidenceKindRequired"));
-      return;
-    }
-    if (evidenceDraft.referenceType === "file_path" && evidenceDraft.path.trim().length === 0) {
-      setEvidenceAttachError(t("projects.projectManagerEvidencePathRequired"));
-      return;
-    }
-    if (
-      (evidenceDraft.referenceType === "terminal_snapshot" || evidenceDraft.referenceType === "session") &&
-      evidenceDraft.sessionId.trim().length === 0
-    ) {
-      setEvidenceAttachError(t("projects.projectManagerEvidenceSessionRequired"));
-      return;
-    }
-    const hasGeneratedMarker =
-      evidenceDraft.sessionId.trim().length > 0 &&
-      (evidenceDraft.referenceType === "terminal_snapshot" || evidenceDraft.referenceType === "session");
-    if (evidenceDraft.ref.trim().length === 0 && evidenceDraft.path.trim().length === 0 && !hasGeneratedMarker) {
-      setEvidenceAttachError(t("projects.projectManagerEvidenceReferenceRequired"));
-      return;
-    }
-    if (validateEvidenceReferenceInput(evidenceDraft)) {
-      setEvidenceAttachError(t("projects.projectManagerEvidenceUnsafeValue"));
-      return;
-    }
-
-    const reference = createSingleEvidenceReference(evidenceDraft);
-    if (!reference) {
-      setEvidenceAttachError(t("projects.projectManagerEvidenceReferenceRequired"));
-      return;
-    }
-
-    setEvidenceAttachError(null);
-    evidenceMutation.mutate({ workItemId: selectedWorkItem.id, reference });
-  };
-
-  const linkTaskPacketSession = () => {
-    if (!legacySessions) return;
-    if (!selectedWorkItem) return;
-    const sessionId = taskPacketSessionId.trim();
-    if (!sessionId) {
-      setTaskPacketLinkError(t("projects.projectManagerTaskPacketSessionRequired"));
-      return;
-    }
-
-    setTaskPacketLinkError(null);
-    taskPacketLinkMutation.mutate({ workItemId: selectedWorkItem.id, sessionId });
-  };
-
-  const startTaskPacket = () => {
-    if (!legacySessions) return;
-    if (!selectedWorkItem) return;
-    setTaskPacketStartError(null);
-    taskPacketStartMutation.mutate({ workItemId: selectedWorkItem.id });
-  };
-
-  const startTaskPacketForItem = (item: ProjectManagerWorkItem) => {
-    setQuickStartError(null);
-    setQuickStartWorkItem(item);
-  };
-
-  const confirmQuickStart = (aiTool: RuntimeAdapterId) => {
-    if (!quickStartWorkItem || taskPacketStartMutation.isPending) return;
-    setQuickStartError(null);
-    setQuickStartPendingId(quickStartWorkItem.id);
-    taskPacketStartMutation.mutate({ workItemId: quickStartWorkItem.id, aiTool });
-  };
-
-  const requestStatusChange = (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => {
-    if (!canEdit) return;
-    setStatusMutationError(null);
-    if (nextStatus === "done") {
-      setPendingDoneItems([{ ...item }]);
-      setPendingDoneIsBatch(false);
-      setDoneReason("");
-      setDoneReasonError(null);
-      return;
-    }
-
-    statusMutation.mutate({ workItemId: item.id, input: { status: nextStatus, expectedRevision: item.revision } });
-  };
-
-  const confirmDoneWithReason = () => {
-    if (!canEdit) return;
-    if (!pendingDoneWorkItem || !pendingDoneItems || statusMutation.isPending || batchStatusMutation.isPending) return;
-    const manualCompletionReason = doneReason.trim();
-    if (!manualCompletionReason) {
-      setDoneReasonError(t("projects.projectManagerDoneReasonRequired"));
-      return;
-    }
-
-    setDoneReasonError(null);
-    if (pendingDoneIsBatch) {
-      batchStatusMutation.mutate({
-        updates: pendingDoneItems.map((item) => ({
-          workItemId: item.id, status: "done", expectedRevision: item.revision, manualCompletionReason,
-        })),
-      });
-      return;
-    }
-    statusMutation.mutate({
-      workItemId: pendingDoneWorkItem.id,
-      input: { status: "done", manualCompletionReason, expectedRevision: pendingDoneWorkItem.revision },
-    });
+  const renderGroup = (title: string, items: ProjectManagerWorkItem[], accentClass?: string) => {
+    if (items.length === 0) return null;
+    return (
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-card">
+        <div className="flex items-center justify-between border-b border-border/70 bg-muted/25 px-4 py-2">
+          <span className={cn("text-xs font-semibold", accentClass ?? "text-foreground")}>
+            {title}
+          </span>
+          <span className="rounded-full bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground tabular-nums">
+            {items.length}
+          </span>
+        </div>
+        <div className="divide-y divide-border/70">{items.map(renderTaskRow)}</div>
+      </div>
+    );
   };
 
   return (
-    <div className="space-y-5" data-testid="project-manager-panel">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
-          <h2 className={embedded ? "sr-only" : "text-sm font-semibold"}>{t("projects.devTasks")}</h2>
-          <p className="text-xs text-muted-foreground">{t("projects.devTasksDescription")}</p>
+    <div className="space-y-4" data-testid="project-manager-panel">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="space-y-0.5">
+          <h2 className={embedded ? "sr-only" : "text-sm font-semibold"}>
+            {t("projects.devTasks")}
+          </h2>
+          <p className="text-xs text-muted-foreground">{t("projects.tasksCopilotHint")}</p>
         </div>
-        <Button size="sm" variant="outline" onClick={refresh} disabled={isRefreshing || !canLoad}>
-          <RefreshCw className={cn("mr-2 size-4", isRefreshing && "animate-spin")} />
-          {t("projects.devTasksRefresh")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {activeProjectGoal && (
+            <Button asChild size="sm" variant="secondary">
+              <Link href={`/copilot/goals/${encodeURIComponent(activeProjectGoal.id)}`}>
+                <Sparkles className="size-3.5 text-brand" />
+                {t("projects.activeGoalBadge")
+                  .replace("{passes}", String(activeProjectGoal.taskPasses))
+                  .replace("{total}", String(activeProjectGoal.taskTotal))}
+              </Link>
+            </Button>
+          )}
+          {legacySessions && (
+            <Button type="button" size="sm" variant="brand" onClick={openCopilotPlanner}>
+              <Sparkles className="size-3.5" />
+              {t("projects.tasksAskCopilotPlan")}
+            </Button>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => void invalidateAll()}
+            disabled={isRefreshing || !canLoad}
+            aria-label={t("projects.devTasksRefresh")}
+          >
+            <RefreshCw className={cn("size-3.5", isRefreshing && "animate-spin")} />
+            {t("projects.devTasksRefresh")}
+          </Button>
+        </div>
       </div>
 
       {firstError ? (
-        <ProjectManagerError
-          message={isNotFoundError
-            ? t("projects.projectManagerNotFound")
-            : t("projects.projectManagerLoadFailed")}
-          onRefresh={refresh}
-          refreshing={isRefreshing}
-        />
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
+            <AlertTriangle className="size-6 text-destructive" />
+            <p className="text-sm text-muted-foreground">
+              {firstError instanceof GatewayApiError && firstError.status === 404
+                ? t("projects.projectManagerNotFound")
+                : t("projects.projectManagerLoadFailed")}
+            </p>
+            <Button size="sm" variant="outline" onClick={() => void invalidateAll()}>
+              {t("projects.devTasksRefresh")}
+            </Button>
+          </CardContent>
+        </Card>
       ) : isLoading ? (
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
@@ -823,230 +661,260 @@ function ProjectManagerPanelContent({
                 variant="outline"
                 onClick={() => {
                   setHasConflict(false);
-                  void invalidateProjectManagerQueries();
+                  void invalidateAll();
                 }}
               >
                 {t("projects.projectManagerConflictRefresh")}
               </Button>
             </div>
           )}
-          <ProjectManagerGoalBanner
-            goal={goal}
-            t={t}
-            draft={goalDraft}
-            error={goalFormError}
-            isEditing={isGoalEditing}
-            isSaving={goalMutation.isPending}
-            onCancel={cancelGoalEdit}
-            onDraftChange={setGoalDraft}
-            onEdit={startGoalEdit}
-            onSave={saveGoal}
-          />
-          <ProjectManagerStageStrip
-            projectId={projectId}
-            stages={stages}
-            workItems={workItems}
-            activeStageId={activeStageFilter}
-            onSelectStageId={setActiveStageFilter}
-            onOpenStagesView={() => setWorkItemViewMode("stages")}
-            canEdit={canEdit}
-            t={t}
-          />
-          <ProjectManagerWorkItemsSection
-            activeStageFilter={activeStageFilter}
-            batchStatusError={batchStatusError}
-            batchStatusPending={batchStatusMutation.isPending}
-            batchTargetOptions={batchTargetOptions}
-            batchTargetStatus={effectiveBatchTargetStatus}
-            goalTaskLinksByWorkItemId={goalTaskLinksByWorkItemId}
-            isFetching={workItemsQuery.isFetching}
-            links={workItemLinks}
-            onBatchStatusSubmit={submitBatchStatusChange}
-            onBatchTargetStatusChange={setBatchTargetStatus}
-            onClearSelection={() => {
-              setBatchStatusError(null);
-              setBatchTargetStatus("");
-              setSelectedBoardWorkItemIds([]);
-            }}
-            onCreate={openCreateWorkItemDialog}
-            onDelete={openDeleteWorkItemDialog}
-            onEdit={openEditWorkItemDialog}
-            onQuickStart={startTaskPacketForItem}
-            onStatusFilterChange={setWorkItemStatusFilter}
-            onStatusChange={requestStatusChange}
-            onToggleSelection={toggleBoardWorkItemSelection}
-            onViewDetails={(item) => setSelectedWorkItemId(item.id)}
-            projectId={projectId}
-            quickStartError={quickStartError}
-            quickStartPendingWorkItemId={quickStartPendingId}
-            selectedWorkItemIds={selectedBoardWorkItemIds}
-            stages={stages}
-            stagesFetching={stagesQuery.isFetching}
-            statusError={statusMutationError}
-            statusFilter={workItemStatusFilter}
-            statusMutationPending={!canEdit || statusMutation.isPending}
-            viewMode={workItemViewMode}
-            onViewModeChange={setWorkItemViewMode}
-            highlightedWorkItemId={requestedWorkItemId}
-            t={t}
-            tableWorkItems={tableWorkItems}
-            taskPackets={taskPackets}
-            taskPacketsError={taskPacketsQuery.error}
-            taskPacketsFetching={taskPacketsQuery.isFetching}
-            workItems={workItems}
-          />
-          <ProjectManagerLedgerSection
-            error={ledgerQuery.error}
-            events={filteredLedgerEvents}
-            filter={ledgerFilter}
-            hasLoadedEvents={ledgerEvents.length > 0}
-            isFetching={ledgerQuery.isFetching}
-            onFilterChange={setLedgerFilter}
-            onLoadMore={loadMoreLedger}
-            onRefresh={refreshLedger}
-            refreshing={ledgerQuery.isFetching}
-            t={t}
-            totalCount={ledgerEvents.length}
-            workItems={workItems}
-          />
+
+          {statusError && (
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {statusError}
+            </p>
+          )}
+
+          {/* Read-only Copilot Goal Plan Strip */}
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border/80 bg-card px-4 py-3">
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                <Target className="size-3.5 text-brand" />
+                <span>{t("projects.projectManagerGoal")}</span>
+                {goal?.status && (
+                  <Badge variant="outline" className="rounded-full text-[10px] font-normal">
+                    {statusLabel(goal.status, t)}
+                  </Badge>
+                )}
+              </div>
+              {goal?.summary ? (
+                <p className="text-sm leading-relaxed text-foreground">{goal.summary}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">{t("projects.tasksNoGoalYet")}</p>
+              )}
+              {goal && (goal.constraints.length > 0 || goal.acceptanceCriteria.length > 0) && (
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {goal.constraints.length > 0 && (
+                    <Badge variant="secondary" className="rounded-full text-[10px] font-normal">
+                      {t("projects.projectManagerConstraints")}: {goal.constraints.length}
+                    </Badge>
+                  )}
+                  {goal.acceptanceCriteria.length > 0 && (
+                    <Badge variant="secondary" className="rounded-full text-[10px] font-normal">
+                      {t("projects.projectManagerAcceptanceCriteria")}:{" "}
+                      {goal.acceptanceCriteria.length}
+                    </Badge>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Minimal 1-line Quick-Add + Search & Status Filter */}
+          <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
+            {canEdit && (
+              <form
+                onSubmit={handleQuickAdd}
+                className="flex min-w-0 flex-1 items-center gap-2"
+              >
+                <Input
+                  value={quickTitle}
+                  onChange={(event) => setQuickTitle(event.target.value)}
+                  placeholder={t("projects.tasksQuickAddPlaceholder")}
+                  disabled={createMutation.isPending}
+                  className="h-9 flex-1 text-sm"
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  variant="outline"
+                  disabled={!quickTitle.trim() || createMutation.isPending}
+                >
+                  <Plus className="size-4" />
+                  {t("projects.tasksQuickAddAction")}
+                </Button>
+              </form>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative w-48">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={t("projects.projectManagerSearchPlaceholder")}
+                  className="h-9 pl-8 text-xs"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1 rounded-md border border-border/70 bg-muted/20 p-1">
+                {(
+                  [
+                    ["active", t("projects.tasksFilterActive")],
+                    ["all", t("projects.filterAll")],
+                    ["ready_for_review", statusLabel("ready_for_review", t)],
+                    ["blocked", statusLabel("blocked", t)],
+                    ["in_progress", statusLabel("in_progress", t)],
+                    ["todo", statusLabel("todo", t)],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setStatusFilter(value)}
+                    className={cn(
+                      "rounded px-2 py-1 text-xs transition-colors",
+                      statusFilter === value
+                        ? "bg-card font-medium text-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Status-Grouped Supervision List */}
+          {workItems.length === 0 ? (
+            <Card>
+              <CardContent className="py-4">
+                <EmptyState
+                  title={t("projects.projectManagerNoWorkItemsTitle")}
+                  body={t("projects.tasksNoGoalYet")}
+                  icon={ClipboardList}
+                />
+              </CardContent>
+            </Card>
+          ) : filteredItems.length === 0 &&
+            (statusFilter !== "active" || completedItems.length === 0) ? (
+            <Card>
+              <CardContent className="py-4">
+                <EmptyState
+                  title={t("projects.projectManagerFilterEmptyTitle")}
+                  body={t("projects.projectManagerFilterEmptyBody")}
+                  icon={ClipboardList}
+                />
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3" data-testid="project-manager-task-list">
+              {renderGroup(
+                t("projects.tasksGroupAttention"),
+                grouped.attention,
+                "text-amber-600 dark:text-amber-400",
+              )}
+              {renderGroup(t("projects.tasksGroupActive"), grouped.active, "text-brand")}
+              {renderGroup(t("projects.tasksGroupQueued"), grouped.queued)}
+              {statusFilter !== "active" &&
+                renderGroup(
+                  t("projects.tasksGroupCompleted"),
+                  grouped.done,
+                  "text-muted-foreground",
+                )}
+
+              {statusFilter === "active" && completedItems.length > 0 && (
+                <div className="overflow-hidden rounded-lg border border-border/70 bg-card/60">
+                  <button
+                    type="button"
+                    onClick={() => setShowCompleted((prev) => !prev)}
+                    className="flex w-full items-center justify-between px-4 py-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      {showCompleted ? (
+                        <ChevronDown className="size-3.5" />
+                      ) : (
+                        <ChevronRight className="size-3.5" />
+                      )}
+                      {t("projects.tasksGroupCompleted")} ({completedItems.length})
+                    </span>
+                  </button>
+                  {showCompleted && (
+                    <div className="divide-y divide-border/70 border-t border-border/70">
+                      {completedItems.map(renderTaskRow)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
+
       <ProjectManagerWorkItemDetailSheet
-        evidenceDraft={evidenceDraft}
-        evidenceError={evidenceAttachError}
-        goalLink={selectedWorkItem ? (goalTaskLinksByWorkItemId.get(selectedWorkItem.id) ?? null) : null}
-        isEvidenceSaving={evidenceMutation.isPending}
-        isTaskPacketLinking={taskPacketLinkMutation.isPending}
-        isTaskPacketLoading={taskPacketQuery.isLoading || sessionsQuery.isLoading}
-        isTaskPacketStarting={taskPacketStartMutation.isPending}
+        goalLink={
+          selectedWorkItem ? (goalTaskLinksByWorkItemId.get(selectedWorkItem.id) ?? null) : null
+        }
+        isTaskPacketLoading={taskPacketQuery.isLoading}
+        isTaskPacketStarting={startSessionMutation.isPending}
         item={selectedWorkItem}
         ledgerEvents={ledgerEvents}
-        links={workItemLinks}
-        onAttachEvidence={attachEvidence}
-        onEvidenceDraftChange={setEvidenceDraft}
+        links={links}
+        onDelete={(item) => setDeletingItem(item)}
         onNavigateToSession={onNavigateToSession}
+        onOpenFile={onOpenFile}
         onOpenChange={(open) => {
           if (!open) setSelectedWorkItemId(null);
         }}
-        onStatusChange={requestStatusChange}
-        onTaskPacketSessionChange={setTaskPacketSessionId}
-        onTaskPacketSessionLink={linkTaskPacketSession}
-        onTaskPacketStart={startTaskPacket}
-        open={!!selectedWorkItem}
+        onSelectWorkItem={(workItemId) => setSelectedWorkItemId(workItemId)}
+        onStatusChange={(item, nextStatus, manualCompletionReason) =>
+          changeWorkItemStatus(item, nextStatus, manualCompletionReason)
+        }
+        onTaskPacketStart={() => {
+          if (!selectedWorkItem) return;
+          setTaskPacketStartError(null);
+          setQuickStartItem(selectedWorkItem);
+        }}
+        open={Boolean(selectedWorkItem)}
         projectId={projectId}
         stages={stages}
         statusMutationPending={!canEdit || statusMutation.isPending}
         t={t}
-        taskPacket={taskPacket}
+        taskPacket={selectedTaskPacket}
         taskPacketError={taskPacketQuery.error}
-        taskPacketLinkError={taskPacketLinkError}
         taskPacketStartError={taskPacketStartError}
-        taskPacketSessionId={taskPacketSessionId}
-        taskPacketSessions={taskPacketSessions}
         workItems={workItems}
       />
+
       <QuickStartSessionDialog
         error={quickStartError}
-        isStarting={taskPacketStartMutation.isPending}
-        item={quickStartWorkItem}
-        onConfirm={confirmQuickStart}
+        isStarting={startSessionMutation.isPending}
+        item={quickStartItem}
+        onConfirm={(aiTool) => {
+          if (!quickStartItem) return;
+          startSessionMutation.mutate({ workItemId: quickStartItem.id, aiTool });
+        }}
         onOpenChange={(open) => {
           if (!open) {
-            setQuickStartWorkItem(null);
+            setQuickStartItem(null);
             setQuickStartError(null);
           }
         }}
         t={t}
         taskPacket={
-          quickStartWorkItem
-            ? taskPackets.find((packet) => packet.workItemId === quickStartWorkItem.id) ?? null
-            : null
+          quickStartItem ? (taskPacketByWorkItemId.get(quickStartItem.id) ?? null) : null
         }
       />
-      <CreateWorkItemDialog
-        draft={workItemDraft}
-        error={createWorkItemError}
-        isSaving={!canEdit || createWorkItemMutation.isPending}
-        onDraftChange={setWorkItemDraft}
-        onOpenChange={setIsCreateWorkItemOpen}
-        onSave={saveWorkItem}
-        open={isCreateWorkItemOpen}
-        t={t}
-      />
-      <EditWorkItemDialog
-        draft={editWorkItemDraft}
-        error={editWorkItemError}
-        isSaving={!canEdit || editWorkItemMutation.isPending}
-        item={editingWorkItem}
-        onDraftChange={setEditWorkItemDraft}
+
+      <ConfirmDialog
+        open={deletingItem !== null}
+        destructive
+        pending={deleteMutation.isPending}
+        title={t("projects.projectManagerDeleteWorkItem")}
+        description={
+          deletingItem
+            ? `${t("projects.projectManagerDeleteWorkItemBody")} (${deletingItem.title})`
+            : ""
+        }
+        confirmLabel={t("common.delete")}
         onOpenChange={(open) => {
-          if (!open) {
-            setEditingWorkItemId(null);
-            setEditWorkItemError(null);
-            setEditWorkItemDraft(createEditWorkItemDraft(null));
-          }
+          if (!open) setDeletingItem(null);
         }}
-        onSave={saveEditedWorkItem}
-        t={t}
-      />
-      <DeleteWorkItemDialog
-        error={deleteWorkItemError}
-        isDeleting={!canEdit || deleteWorkItemMutation.isPending}
-        item={deletingWorkItem}
-        onConfirm={confirmDeleteWorkItem}
-        onOpenChange={(open) => {
-          if (!open) {
-            setDeletingWorkItemId(null);
-            setDeleteWorkItemError(null);
-          }
+        onConfirm={() => {
+          if (deletingItem) deleteMutation.mutate(deletingItem);
         }}
-        t={t}
-      />
-      <DoneReasonDialog
-        error={doneReasonError}
-        isSaving={statusMutation.isPending || batchStatusMutation.isPending}
-        onConfirm={confirmDoneWithReason}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingDoneItems(null);
-            setDoneReason("");
-            setDoneReasonError(null);
-          }
-        }}
-        open={!!pendingDoneWorkItem}
-        reason={doneReason}
-        reasonRef={doneReasonRef}
-        setReason={setDoneReason}
-        t={t}
-        workItemTitle={pendingDoneItems?.map((item) => item.title).join(" · ") ?? ""}
       />
     </div>
-  );
-}
-
-function ProjectManagerError({
-  message,
-  onRefresh,
-  refreshing,
-}: {
-  message: string;
-  onRefresh: () => void;
-  refreshing: boolean;
-}) {
-  const { t } = useLanguage();
-
-  return (
-    <Card className="border-destructive/50 bg-destructive/10">
-      <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="flex items-center gap-2 text-sm text-destructive">
-          <AlertTriangle className="size-4" />
-          {message}
-        </p>
-        <Button size="sm" variant="outline" onClick={onRefresh} disabled={refreshing}>
-          <RefreshCw className={cn("mr-2 size-4", refreshing && "animate-spin")} />
-          {t("projects.devTasksRefresh")}
-        </Button>
-      </CardContent>
-    </Card>
   );
 }

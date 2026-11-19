@@ -50,7 +50,7 @@ export function ChannelStatusBanner({ channel, busy, onSwitch, state, statusText
           ))}
         </div>
         <div role="status" className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-          <Icon className={cn("size-4 shrink-0", state === "running" ? "text-emerald-400" : state === "stopped" || state === "unknown" ? "text-destructive" : "text-muted-foreground")} />
+          <Icon className={cn("size-4 shrink-0", state === "running" ? "text-success" : state === "stopped" || state === "unknown" ? "text-destructive" : "text-muted-foreground")} />
           <span className="min-w-0 font-medium">{statusText}</span>
           {blocker && state !== "running" && (
             <a className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" href={`#channel-${blocker.step}`}>

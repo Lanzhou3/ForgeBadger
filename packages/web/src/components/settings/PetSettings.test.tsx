@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { LanguageProvider } from "@/hooks/use-language";
-import { PET_STORAGE_KEY } from "@/lib/pet-preference";
+import { PET_STORAGE_KEY, PET_VISIBLE_STORAGE_KEY } from "@/lib/pet-preference";
 import { PetSettings } from "./PetSettings";
 
 beforeEach(() => window.localStorage.clear());
@@ -38,4 +38,16 @@ it("reports storage failure without claiming the selection was saved", () => {
   expect(screen.getByRole("alert").textContent).toContain("无法保存宠物选择");
   expect(screen.queryByRole("status")).toBeNull();
   expect(window.localStorage.getItem(PET_STORAGE_KEY)).toBeNull();
+});
+
+it("toggles floating companion visibility and persists preference", () => {
+  renderSettings();
+  const toggle = screen.getByRole("switch", { name: "在工作区显示浮动助手" });
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(toggle);
+  expect(window.localStorage.getItem(PET_VISIBLE_STORAGE_KEY)).toBe("0");
+  expect(screen.getByRole("status").textContent).toBe("宠物选择已保存。");
+  cleanup();
+  renderSettings();
+  expect(screen.getByRole("switch", { name: "在工作区显示浮动助手" }).getAttribute("aria-checked")).toBe("false");
 });

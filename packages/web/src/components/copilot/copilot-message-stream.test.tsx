@@ -159,7 +159,7 @@ describe("assistant rail", () => {
       message({ id: "answer", role: "assistant", kind: "text", content: "结论" }),
     ]);
 
-    expect(container.querySelectorAll(".bg-brand\\/10").length).toBe(1);
+    expect(container.querySelectorAll('[data-testid="copilot-assistant-avatar"]').length).toBe(1);
   });
 });
 

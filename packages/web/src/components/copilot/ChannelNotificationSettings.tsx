@@ -51,8 +51,8 @@ export function ChannelNotificationSettings({ channel, available }: Props) {
   const api = apis[channel];
   const key = [`${channel}-notification-settings`], deliveryKey = [`${channel}-notification-deliveries`];
   const client = useQueryClient();
-  const query = useQuery({ queryKey: key, queryFn: api.get, refetchInterval: 5000, refetchIntervalInBackground: false });
-  const deliveries = useQuery({ queryKey: deliveryKey, queryFn: api.deliveries, refetchInterval: 5000, refetchIntervalInBackground: false });
+  const query = useQuery({ queryKey: key, queryFn: api.get, refetchInterval: available ? 15000 : false, refetchIntervalInBackground: false });
+  const deliveries = useQuery({ queryKey: deliveryKey, queryFn: api.deliveries, refetchInterval: available ? 15000 : false, refetchIntervalInBackground: false });
   const [draft, setDraft] = useState<NotificationConfig | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [errorCode, setErrorCode] = useState("");

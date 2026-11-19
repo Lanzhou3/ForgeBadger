@@ -21,6 +21,10 @@ export function isSidebarToggleShortcut(event: KeyLikeEvent): boolean {
   return hasPrimaryModifier(event) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "b";
 }
 
+export function isCopilotToggleShortcut(event: KeyLikeEvent): boolean {
+  return hasPrimaryModifier(event) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "j";
+}
+
 function hasPrimaryModifier(event: KeyLikeEvent): boolean {
   return Boolean(event.ctrlKey || event.metaKey);
 }

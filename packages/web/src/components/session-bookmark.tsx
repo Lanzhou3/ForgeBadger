@@ -43,8 +43,18 @@ export function SessionBookmark() {
   const [rendered, setRendered] = useState<SessionTab | null>(null);
   const [positionY, setPositionY] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [copilotCorner, setCopilotCorner] = useState("");
   const dragRef = useRef<{ pointerId: number; startY: number; baseY: number } | null>(null);
   const suppressClickRef = useRef(false);
+
+  useEffect(() => {
+    const syncCopilotPanel = () => {
+      setCopilotCorner(document.body.dataset.copilotPanelOpen ?? "");
+    };
+    syncCopilotPanel();
+    window.addEventListener("forgebadger:copilot-panel-change", syncCopilotPanel);
+    return () => window.removeEventListener("forgebadger:copilot-panel-change", syncCopilotPanel);
+  }, []);
 
   useEffect(() => {
     const onResize = () => setPositionY((y) => y === null ? null : clampPosition(y));
@@ -117,7 +127,8 @@ export function SessionBookmark() {
     return () => window.removeEventListener(FORGEBADGER_GATEWAY_EVENT, onGatewayEvent);
   }, []);
 
-  const visible = tab !== null && !TERMINAL_ROUTE.test(pathname ?? "");
+  const rightPanelOpen = copilotCorner === "bottom-right" || copilotCorner === "top-right";
+  const visible = tab !== null && !TERMINAL_ROUTE.test(pathname ?? "") && !rightPanelOpen;
 
   useEffect(() => {
     if (visible) {

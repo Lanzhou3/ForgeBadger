@@ -2,7 +2,7 @@ import { useLanguage } from "@/hooks/use-language";
 
 const zh = {
   tab: "本机检索",
-  help: "把本机的本地目录注册为只读检索根，供 Copilot 的 machine_search / read_machine_file 读取。Copilot 只读、绝不写入这些目录。",
+  help: "将本机目录注册为只读检索范围，供 Copilot 在对话中按需搜索与读取文件。Copilot 仅可读取，绝不会修改或写入这些目录。",
   addRoot: "添加检索根",
   rootLabel: "名称",
   rootPath: "本地目录（绝对路径）",
@@ -21,7 +21,7 @@ const zh = {
 };
 const en: typeof zh = {
   tab: "Local search",
-  help: "Register local directories as read-only search roots for Copilot's machine_search / read_machine_file. Copilot only reads these paths and never writes to them.",
+  help: "Register local directories as read-only search roots so Copilot can search and read files when needed. Copilot only reads these paths and never modifies or writes to them.",
   addRoot: "Add search root",
   rootLabel: "Label",
   rootPath: "Local directory (absolute path)",
@@ -41,7 +41,7 @@ const en: typeof zh = {
 const zhTW: typeof zh = {
   ...zh,
   tab: "本機檢索",
-  help: "把本機的本地目錄註冊為唯讀檢索根，供 Copilot 的 machine_search / read_machine_file 讀取。Copilot 只讀、絕不寫入這些目錄。",
+  help: "將本機目錄註冊為唯讀檢索範圍，供 Copilot 在對話中按需搜尋與讀取檔案。Copilot 僅可讀取，絕不會修改或寫入這些目錄。",
   addRoot: "新增檢索根",
   rootLabel: "名稱",
   rootPath: "本地目錄（絕對路徑）",

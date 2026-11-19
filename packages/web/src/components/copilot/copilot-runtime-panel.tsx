@@ -6,6 +6,7 @@ import { Brain, Cpu, Search, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -43,31 +44,24 @@ const THINKING_EFFORT_OPTIONS: CopilotThinkingEffort[] = ["off", "low", "medium"
 const DEFAULT_MODEL_VALUE = "__default_model__";
 
 /**
- * Thin status strip for the self-owned Gateway runtime and its model
- * preferences. The server-side preference (per user) is the source of truth:
- * reads go through the preferences query and both pickers write back with a
- * mutation. The parent's modelId mirror stays in sync via onModelChange.
+ * Status controls for Copilot's model and thinking effort preferences.
+ * The server-side preference (per user) is the source of truth: reads go through
+ * the preferences query and both pickers write back with a mutation. The
+ * parent's modelId mirror stays in sync via onModelChange.
  */
 export function CopilotStatusBar({
   onModelChange,
   controlsDisabled,
   onSavingChange,
-  variant = "strip",
-  showRuntimeBadge,
+  showLabels = false,
 }: {
   /** When provided, the model label becomes a picker. */
   onModelChange?: (modelId: string | null) => void;
   /** Disables both pickers, e.g. while a run is in flight. */
   controlsDisabled?: boolean;
   onSavingChange?: (saving: boolean) => void;
-  /**
-   * "strip" renders the bordered full-width bar (console); "compact" renders
-   * borderless pill triggers for embedding inside another toolbar (robot
-   * panel composer, console composer).
-   */
-  variant?: "strip" | "compact";
-  /** Also render the Gateway-native runtime badge (console composer). */
-  showRuntimeBadge?: boolean;
+  /** Render labelled form controls (Settings page) instead of compact composer pills. */
+  showLabels?: boolean;
 }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -136,91 +130,111 @@ export function CopilotStatusBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelProviders.data, storedModelId, onModelChange]);
 
-  const compact = variant === "compact";
+  const modelPicker = onModelChange ? (
+    <Select
+      value={storedModelId ?? DEFAULT_MODEL_VALUE}
+      disabled={!preferencesReady || preferencesMutation.isPending || controlsDisabled}
+      onValueChange={(next) => {
+        void preferencesMutation.mutate({ modelId: next === DEFAULT_MODEL_VALUE ? null : next });
+      }}
+    >
+      <SelectTrigger
+        id={showLabels ? "copilot-default-model" : undefined}
+        aria-label={t("copilot.currentModel")}
+        title={modelLabel}
+        size="sm"
+        className={
+          showLabels
+            ? "h-9 w-full text-xs"
+            : cn(copilotContextTriggerClassName, "min-w-0 max-w-32")
+        }
+      >
+        <Cpu aria-hidden="true" className={showLabels ? "size-3.5 text-muted-foreground" : "size-3"} />
+        <SelectValue className="min-w-0 truncate">
+          {showLabels ? undefined : (storedModel?.name ?? t("copilot.followSystemDefault"))}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent
+        side={showLabels ? "bottom" : "top"}
+        align="start"
+        className={showLabels ? undefined : "max-w-[calc(100vw-1.5rem)]"}
+      >
+        <SelectGroup>
+          <SelectItem value={DEFAULT_MODEL_VALUE}>
+            {t("copilot.followSystemDefault")}
+            {defaultLabel ? `（${defaultLabel}）` : ""}
+          </SelectItem>
+          {models.map((model) => (
+            <SelectItem key={model.id} value={model.id}>
+              {model.providerName} / {model.name}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  ) : (
+    <span className={showLabels ? "block truncate rounded-md border border-border/70 px-3 py-2 text-xs" : "truncate"}>
+      {modelLabel}
+    </span>
+  );
+
+  const thinkingPicker = (
+    <Select
+      value={preferences.data?.thinkingEffort ?? "off"}
+      disabled={!preferencesReady || preferencesMutation.isPending || controlsDisabled}
+      onValueChange={(next) => {
+        void preferencesMutation.mutate({ thinkingEffort: next as CopilotThinkingEffort });
+      }}
+    >
+      <SelectTrigger
+        id={showLabels ? "copilot-thinking-effort" : undefined}
+        aria-label={t("copilot.thinkingEffort")}
+        size="sm"
+        title={t("copilot.thinkingEffort")}
+        className={showLabels ? "h-9 w-full text-xs" : cn(copilotContextTriggerClassName, "shrink-0")}
+      >
+        <Brain aria-hidden="true" className={showLabels ? "size-3.5 text-muted-foreground" : "size-3"} />
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent side={showLabels ? "bottom" : "top"} align="start">
+        <SelectGroup>
+          {THINKING_EFFORT_OPTIONS.map((effort) => (
+            <SelectItem key={effort} value={effort}>
+              {t(`copilot.thinking${effort.charAt(0).toUpperCase()}${effort.slice(1)}` as TranslationKey)}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  );
 
   return (
     <div
-      className={
-        compact
-          ? "contents"
-          : "flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/60 px-3 py-1.5 text-xs text-muted-foreground"
-      }
+      className={showLabels ? "grid gap-3 sm:grid-cols-2" : "contents"}
       data-testid="copilot-status-bar"
     >
-      <span className={compact ? "sr-only" : "sr-only shrink-0 sm:not-sr-only"}>{t("copilot.currentModel")}</span>
-      {onModelChange ? (
-        <Select
-          value={storedModelId ?? DEFAULT_MODEL_VALUE}
-          disabled={!preferencesReady || preferencesMutation.isPending || controlsDisabled}
-          onValueChange={(next) => {
-            void preferencesMutation.mutate({ modelId: next === DEFAULT_MODEL_VALUE ? null : next });
-          }}
-        >
-          <SelectTrigger
-            aria-label={t("copilot.currentModel")}
-            title={modelLabel}
-            size="sm"
-            className={
-              compact
-                ? cn(copilotContextTriggerClassName, "min-w-0 max-w-32")
-                : "min-w-0 max-w-64 flex-1 text-xs sm:flex-none"
-            }
-          >
-            {compact && <Cpu aria-hidden="true" className="size-3" />}
-            <SelectValue className="min-w-0 truncate">
-              {compact ? (storedModel?.name ?? t("copilot.followSystemDefault")) : undefined}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent side={compact ? "top" : "bottom"} align="start"
-            className={compact ? "max-w-[calc(100vw-1.5rem)]" : undefined}>
-            <SelectGroup>
-              <SelectItem value={DEFAULT_MODEL_VALUE}>
-                {t("copilot.followSystemDefault")}
-                {defaultLabel ? `（${defaultLabel}）` : ""}
-              </SelectItem>
-              {models.map((model) => (
-                <SelectItem key={model.id} value={model.id}>
-                  {model.providerName} / {model.name}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+      {showLabels ? (
+        <>
+          <div className="space-y-1.5">
+            <Label htmlFor="copilot-default-model" className="text-xs font-medium text-muted-foreground">
+              {t("copilot.currentModel")}
+            </Label>
+            {modelPicker}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="copilot-thinking-effort" className="text-xs font-medium text-muted-foreground">
+              {t("copilot.thinkingEffort")}
+            </Label>
+            {thinkingPicker}
+          </div>
+        </>
       ) : (
-        <span className="truncate">{modelLabel}</span>
-      )}
-      <span className={compact ? "sr-only" : "sr-only shrink-0 sm:not-sr-only"}>{t("copilot.thinkingEffort")}</span>
-      <Select
-        value={preferences.data?.thinkingEffort ?? "off"}
-        disabled={!preferencesReady || preferencesMutation.isPending || controlsDisabled}
-        onValueChange={(next) => {
-          void preferencesMutation.mutate({ thinkingEffort: next as CopilotThinkingEffort });
-        }}
-      >
-        <SelectTrigger
-          aria-label={t("copilot.thinkingEffort")}
-          size="sm"
-          title={t("copilot.thinkingEffort")}
-          className={compact ? cn(copilotContextTriggerClassName, "shrink-0") : "text-xs"}
-        >
-          {compact && <Brain aria-hidden="true" className="size-3" />}
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent side={compact ? "top" : "bottom"} align="start">
-          <SelectGroup>
-            {THINKING_EFFORT_OPTIONS.map((effort) => (
-              <SelectItem key={effort} value={effort}>
-                {t(`copilot.thinking${effort.charAt(0).toUpperCase()}${effort.slice(1)}` as TranslationKey)}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
-      {compact && !showRuntimeBadge ? null : (
-        <Badge variant="secondary" className={compact ? "ml-auto hidden h-6 gap-1.5 whitespace-nowrap border-0 bg-transparent px-1 text-[10px] font-normal text-muted-foreground/70 sm:inline-flex" : "ml-auto hidden gap-1.5 whitespace-nowrap sm:inline-flex"}>
-          <span className="size-1.5 rounded-full bg-emerald-500" />
-          {t("copilot.nativeRuntime")}
-        </Badge>
+        <>
+          <span className="sr-only">{t("copilot.currentModel")}</span>
+          {modelPicker}
+          <span className="sr-only">{t("copilot.thinkingEffort")}</span>
+          {thinkingPicker}
+        </>
       )}
     </div>
   );
@@ -284,7 +298,11 @@ export function CapabilitiesSection({ active }: { active: boolean }) {
         ) : null}
       </div>
       {capabilities.isPending ? (
-        <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
+        <div className="space-y-2" aria-busy="true" aria-label={t("common.loading")}>
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="h-14 animate-pulse rounded-md border border-border/50 bg-muted/40" />
+          ))}
+        </div>
       ) : capabilities.isError ? null : tools.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t("copilot.capabilitiesEmpty")}</p>
       ) : filtered.length === 0 ? (
@@ -362,8 +380,8 @@ function ToolRow({
           <Wrench className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="font-mono">{tool.name}</span>
           {tool.risk === "operate" ? (
-            <Badge variant="outline" className="border-amber-500/50 px-1 py-0 text-[10px] text-amber-500">
-              operate
+            <Badge variant="outline" className="border-warning/40 bg-warning/10 px-1 py-0 text-[10px] text-warning">
+              {t("copilot.toolRiskOperate")}
             </Badge>
           ) : null}
           {tool.requiresApproval && tool.available ? (
@@ -374,7 +392,7 @@ function ToolRow({
         </p>
         <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>
         {!tool.available ? (
-          <p className="text-xs text-amber-500">
+          <p className="text-xs text-warning">
             {t("copilot.toolUnavailable")}: {tool.unavailableReason ?? t("copilot.toolUnavailable")}
           </p>
         ) : null}

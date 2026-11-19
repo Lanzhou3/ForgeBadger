@@ -10,6 +10,7 @@ import { useLanguage } from "@/hooks/use-language";
 import {
   globalShortcutContextFromEvent,
   isCommandPaletteShortcut,
+  isCopilotToggleShortcut,
   isSidebarToggleShortcut,
   shouldHandleGlobalShortcut,
 } from "@/lib/keyboard-shortcuts";
@@ -55,6 +56,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (isSidebarToggleShortcut(event)) {
         event.preventDefault();
         toggleSidebar();
+        return;
+      }
+      if (isCopilotToggleShortcut(event)) {
+        event.preventDefault();
+        window.dispatchEvent(new CustomEvent("forgebadger:toggle-copilot"));
         return;
       }
       if (isCommandPaletteShortcut(event)) {

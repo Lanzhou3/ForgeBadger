@@ -35,6 +35,7 @@ describe("SessionBookmark dragging", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    delete document.body.dataset.copilotPanelOpen;
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
     writeSessionTabs([{ id: "s1", label: "Active session", status: "running", updatedAt: Date.now() }]);
   });
@@ -101,5 +102,19 @@ describe("SessionBookmark dragging", () => {
     pointer(button, "pointerup", 200, 2);
     pointer(button, "pointermove", 450);
     expect(button.parentElement?.style.top).toBe("450px");
+  });
+
+  it("hides smoothly when the floating Copilot panel is open on a right corner", () => {
+    const button = bookmark();
+    expect(button.parentElement?.className).toContain("opacity-100");
+
+    document.body.dataset.copilotPanelOpen = "bottom-right";
+    fireEvent(window, new CustomEvent("forgebadger:copilot-panel-change"));
+    expect(button.parentElement?.className).toContain("opacity-0");
+    expect(button.parentElement?.className).toContain("pointer-events-none");
+
+    document.body.dataset.copilotPanelOpen = "bottom-left";
+    fireEvent(window, new CustomEvent("forgebadger:copilot-panel-change"));
+    expect(button.parentElement?.className).toContain("opacity-100");
   });
 });

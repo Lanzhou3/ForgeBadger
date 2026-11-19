@@ -1,25 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { ArrowDown, Bot, Maximize2, Send, Square, SquarePen, XIcon } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeftRight,
+  Bot,
+  History,
+  Maximize2,
+  MessageSquare,
+  SquarePen,
+  XIcon,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  AssistantRail,
-  StreamingMessage,
-  ThinkingSection,
-} from "@/components/copilot/copilot-message-primitives";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { CopilotMessageStream } from "@/components/copilot/copilot-message-stream";
 import { CopilotWelcomeState } from "@/components/copilot/copilot-empty-state";
-import { CopilotFollowupChips } from "@/components/copilot/CopilotFollowupChips";
-import { CopilotComposerToolbar } from "@/components/copilot/CopilotComposerToolbar";
-import { CommandPalettePopup, useCommandPalette } from "@/components/copilot/command-palette-popup";
-import { CopilotApproval } from "@/components/copilot/CopilotApproval";
+import { CopilotActiveRunArea } from "@/components/copilot/CopilotActiveRunArea";
+import { CopilotComposer } from "@/components/copilot/CopilotComposer";
+import { formatConversationTime } from "@/components/copilot/conversation-sidebar";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
-import { useAutoGrowTextarea } from "@/hooks/use-auto-grow-textarea";
+import { useTerminalCommandProgress } from "@/hooks/use-terminal-command-progress";
 import { useCopilotChatController } from "@/hooks/use-copilot-chat-controller";
 import { useCopilotFollowups } from "@/hooks/use-copilot-followups";
 import { copilotPhaseLabel } from "@/lib/copilot-phase";
@@ -27,9 +30,11 @@ import { GatewayApiError, listProjects, type Project } from "@/lib/api";
 import {
   createConversation,
   getConversation,
+  listConversations,
   listMessages,
   renameConversation,
   updateConversationProject,
+  type CopilotConversation,
   type CopilotMessage,
 } from "@/lib/copilot-api";
 import { cn } from "@/lib/utils";
@@ -38,6 +43,7 @@ import { toast } from "@/lib/toast";
 import { LAST_COPILOT_CONVERSATION_KEY, readLastCopilotConversation, writeLastCopilotConversation } from "@/lib/copilot-conversation-storage";
 
 const AUTO_TITLE_MAX_CHARS = 24;
+const RECENT_CONVERSATIONS_LIMIT = 8;
 // Shared with the full /copilot console — keep the same storage key so both
 // surfaces resume the conversation the user last worked in.
 export const ROBOT_CONVERSATION_STORAGE_KEY = LAST_COPILOT_CONVERSATION_KEY;
@@ -45,14 +51,19 @@ export const ROBOT_CONVERSATION_STORAGE_KEY = LAST_COPILOT_CONVERSATION_KEY;
 // Desktop anchor per robot corner. The panel keeps the same 128px (md:*-32)
 // gap off the shared edge as the classic bottom-right placement: the robot
 // itself spans 20px corner margin + 88px sprite = 108px, leaving a 20px
-// breathing gap. The opposite edge releases the mobile sheet so the 380px
-// card hugs its corner; the shared 9rem max-height still reserves the 128px
-// robot zone plus a 16px margin on the far edge for every corner.
+// breathing gap.
 const PANEL_DESKTOP_ANCHOR_BY_CORNER: Record<RobotCorner, string> = {
   "bottom-right": "md:bottom-32 md:right-4 md:top-auto",
   "bottom-left": "md:bottom-32 md:left-4 md:top-auto",
   "top-right": "md:bottom-auto md:right-4 md:top-32",
   "top-left": "md:bottom-auto md:left-4 md:top-32",
+};
+
+const PANEL_ORIGIN_BY_CORNER: Record<RobotCorner, string> = {
+  "bottom-right": "origin-bottom-right",
+  "bottom-left": "origin-bottom-left",
+  "top-right": "origin-top-right",
+  "top-left": "origin-top-left",
 };
 
 interface RobotChatPanelProps {
@@ -65,30 +76,32 @@ interface RobotChatPanelProps {
    * so it opens beside the pet instead of always bottom-right.
    */
   corner?: RobotCorner;
-  /** Pre-selected project context when opened from a project detail page. */
+  /** Explicit project context (e.g. "Ask Copilot" triggered on a project). */
+  explicitProjectId?: string;
+  /** Passive project context inferred from the current route. */
+  routeProjectId?: string;
+  /** Legacy alias for passive default project context. */
   defaultProjectId?: string;
+  /** Incremented to force a clean new-chat draft while open or opening. */
+  newChatNonce?: number;
 }
 
 /**
  * Floating quick-chat panel anchored beside the robot (Linear/v0-style
- * side assistant). Desktop: a 380x520 card pinned to the robot's corner
- * (bottom-right by default); small screens: a near-fullscreen bottom sheet.
- * Conversations are created
- * lazily on the first message (no empty-conversation litter) and the active
- * conversation id persists in localStorage so reopening the panel resumes the
- * same conversation.
- *
- * Send / stop / edit / scroll-follow behavior lives in the shared
- * useCopilotChatController hook (same as the /copilot console); this surface
- * only owns conversation restore/lazy creation plus the parity controls
- * (project context picker and the model/thinking pickers from
- * CopilotStatusBar).
+ * side assistant). Desktop: a 416x580 card (expandable to 540px wide) pinned
+ * to the robot's corner; small screens: a near-fullscreen bottom sheet.
+ * Conversations are created lazily on the first message and the active
+ * conversation id persists in localStorage unless an explicit cross-project
+ * trigger requests a distinct project context.
  */
 export function RobotChatPanel({
   onClose,
   onExpandFull,
   corner = "bottom-right",
+  explicitProjectId,
+  routeProjectId,
   defaultProjectId,
+  newChatNonce = 0,
 }: RobotChatPanelProps) {
   const { t } = useLanguage();
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -98,10 +111,13 @@ export function RobotChatPanel({
     return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
   }, []);
 
+  const passiveProjectId = routeProjectId ?? defaultProjectId;
+  const initialProjectId = explicitProjectId ?? passiveProjectId ?? "";
+
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState(defaultProjectId ?? "");
+  const [projectId, setProjectId] = useState(initialProjectId);
   const projectMutationRef = useRef(0);
   const [projectPendingCount, setProjectPendingCount] = useState(0);
   const projectSaving = projectPendingCount > 0;
@@ -109,6 +125,18 @@ export function RobotChatPanel({
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [wide, setWide] = useState(false);
+
+  // Recent-conversations popover state (lazy loaded on open).
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [recentConversations, setRecentConversations] = useState<CopilotConversation[]>([]);
+  const [loadingRecent, setLoadingRecent] = useState(false);
+
+  // Track the active conversation's persisted project_id so cross-project
+  // triggers while the panel is already open know whether to branch a clean draft.
+  const currentConversationProjectRef = useRef<string | null>(null);
+  const explicitProjectIdRef = useRef(explicitProjectId);
+  explicitProjectIdRef.current = explicitProjectId;
 
   // Conversation ids created lazily by this panel and not yet auto-titled;
   // the controller's autoTitleIfUntitled renames at most once per id.
@@ -132,8 +160,6 @@ export function RobotChatPanel({
       if (current()) throw error;
       return false;
     }
-    // The controller refs are stable for the component lifetime; keeping this
-    // dependency-free mirrors the console's readMessages identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -143,6 +169,8 @@ export function RobotChatPanel({
       await readMessages(id);
     },
   });
+
+  const terminalProgress = useTerminalCommandProgress(conversationId);
 
   const appendUserMessage = useCallback((text: string) => {
     setMessages((current) => [
@@ -170,8 +198,6 @@ export function RobotChatPanel({
     await readMessages(id);
   }, [readMessages]);
 
-  // No conversation list on this surface: the controller only needs these as
-  // inert callbacks (the untitled check resolves through untitledRef instead).
   const refreshConversations = useCallback(async () => undefined, []);
 
   const controller = useCopilotChatController({
@@ -197,14 +223,32 @@ export function RobotChatPanel({
   const controllerMessageSerialRef = controller.messageSerialRef;
   const controllerConversationIdRef = controller.conversationIdRef;
 
-  // Restore the previous conversation on mount; a stale id (deleted on the
-  // server) is dropped so the panel falls back to a fresh draft. Runs once:
-  // the controller ref objects are stable for the component lifetime, while
-  // the controller return object is not. Runs that finished while the panel
-  // was hidden (expanded to the console, tab switched, …) are covered by
-  // useCopilotRun's focus/online/reconnect reconciliation, which reloads the
-  // durable messages via onSettled.
+  const startFreshDraft = useCallback(
+    (boundProjectId: string, clearStorage: boolean) => {
+      projectMutationRef.current++;
+      controller.advanceSelectionEpoch();
+      controller.messageSerialRef.current++;
+      controller.conversationIdRef.current = null;
+      untitledRef.current = null;
+      currentConversationProjectRef.current = null;
+      clearActive();
+      setConversationId(null);
+      setMessages([]);
+      setLoadError(null);
+      setRestoring(false);
+      setProjectId(boundProjectId);
+      controller.resetInteractionState();
+      controller.setInput("");
+      if (clearStorage) writeLastCopilotConversation(null);
+    },
+    [clearActive, controller],
+  );
+
+  // Restore the previous conversation on mount unless a fresh draft was
+  // explicitly requested or an explicit project context differs from the
+  // stored conversation's project_id.
   useEffect(() => {
+    if (newChatNonce > 0) return;
     const stored = readLastCopilotConversation();
     if (!stored) return;
     let disposed = false;
@@ -216,26 +260,71 @@ export function RobotChatPanel({
     setConversationId(stored);
     Promise.all([listMessages(stored), getConversation(stored)])
       .then(([{ messages: next }, { conversation }]) => {
-        if (!disposed && serial === controllerMessageSerialRef.current && projectSerial === projectMutationRef.current && epoch === controllerEpochRef.current && controller.conversationIdRef.current === stored) {
-          setMessages(next);
-          setProjectId(conversation.project_id || defaultProjectId || "");
-          setLoadError(null);
+        if (
+          disposed ||
+          serial !== controllerMessageSerialRef.current ||
+          projectSerial !== projectMutationRef.current ||
+          epoch !== controllerEpochRef.current ||
+          controller.conversationIdRef.current !== stored
+        ) {
+          return;
         }
+        const targetExplicit = explicitProjectIdRef.current;
+        if (targetExplicit && conversation.project_id !== targetExplicit) {
+          // Cross-project context fix: do not let an old conversation from a
+          // different project hijack an explicit "Ask Copilot" launch.
+          startFreshDraft(targetExplicit, false);
+          return;
+        }
+        currentConversationProjectRef.current = conversation.project_id ?? null;
+        setMessages(next);
+        setProjectId(targetExplicit ?? conversation.project_id ?? passiveProjectId ?? "");
+        setLoadError(null);
       })
       .catch((error: unknown) => {
         if (disposed || epoch !== controllerEpochRef.current || controller.conversationIdRef.current !== stored) return;
         if (error instanceof GatewayApiError && error.status === 404) {
           controller.conversationIdRef.current = null;
+          currentConversationProjectRef.current = null;
           writeLastCopilotConversation(null);
           setConversationId(null);
           setMessages([]);
           clearActive();
-        } else setLoadError(t("copilot.loadError"));
+        } else {
+          setLoadError(t("copilot.loadError"));
+        }
       })
-      .finally(() => { if (!disposed && epoch === controllerEpochRef.current) setRestoring(false); });
+      .finally(() => {
+        if (!disposed && epoch === controllerEpochRef.current) setRestoring(false);
+      });
     return () => { disposed = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // React to explicit project changes while the panel is already mounted.
+  const previousExplicitRef = useRef(explicitProjectId);
+  useEffect(() => {
+    if (previousExplicitRef.current === explicitProjectId) return;
+    previousExplicitRef.current = explicitProjectId;
+    if (!explicitProjectId) return;
+    if (!controller.conversationIdRef.current) {
+      setProjectId(explicitProjectId);
+      return;
+    }
+    if (currentConversationProjectRef.current !== explicitProjectId) {
+      startFreshDraft(explicitProjectId, false);
+    }
+  }, [explicitProjectId, controller.conversationIdRef, startFreshDraft]);
+
+  // React to external "new chat" trigger while mounted.
+  const previousNewChatNonceRef = useRef(newChatNonce);
+  useEffect(() => {
+    if (previousNewChatNonceRef.current === newChatNonce) return;
+    previousNewChatNonceRef.current = newChatNonce;
+    if (newChatNonce > 0) {
+      startFreshDraft(explicitProjectId ?? "", false);
+    }
+  }, [newChatNonce, explicitProjectId, startFreshDraft]);
 
   useEffect(() => {
     let cancelled = false;
@@ -249,10 +338,6 @@ export function RobotChatPanel({
     return () => { cancelled = true; };
   }, []);
 
-  // Lazy creation: the conversation only exists on the server once the user
-  // actually sends something. flushSync forces the id into the controller's
-  // options before controller.send reads them (React would otherwise batch
-  // the render until after the send guard has already bailed on a null id).
   const ensureConversation = useCallback((): Promise<string | null> => {
     if (controller.conversationIdRef.current) return Promise.resolve(controller.conversationIdRef.current);
     if (!creatingRef.current) {
@@ -263,6 +348,7 @@ export function RobotChatPanel({
           flushSync(() => {
             controller.conversationIdRef.current = conversation.id;
             untitledRef.current = conversation.id;
+            currentConversationProjectRef.current = conversation.project_id ?? (projectId || null);
             setConversationId(conversation.id);
             writeLastCopilotConversation(conversation.id);
           });
@@ -289,6 +375,7 @@ export function RobotChatPanel({
       const { conversation } = await updateConversationProject(conversationId, next);
       if (serial === projectMutationRef.current) {
         projectMutationRef.current++;
+        currentConversationProjectRef.current = conversation.project_id ?? null;
         setProjectId(conversation.project_id ?? "");
       }
     } catch {
@@ -306,20 +393,12 @@ export function RobotChatPanel({
       await controller.send(undefined, true);
       return;
     }
-    // Lazy creation in flight: the controller's sending guard is not armed
-    // yet, so a double Enter here would double-submit (duplicate message +
-    // run). Drop the duplicate and let the user know their input was not
-    // lost — the first submit owns the in-flight creation and will deliver
-    // the message.
     if (creatingRef.current) {
       toast.info(t("copilot.creatingConversation"));
       return;
     }
     const text = (textOverride ?? controller.input).trim();
     if (!text) return;
-    // A run already owns this conversation. Rather than dropping the input or
-    // racing a second turn, queue it behind the current run; the chip list
-    // above the composer shows what is waiting.
     if (runningRef.current) {
       if (!conversationId) { toast.info(t("copilot.creatingConversation")); return; }
       const clearSubmittedDraft = controller.captureDraft(text);
@@ -333,22 +412,56 @@ export function RobotChatPanel({
   }, [controller, ensureConversation, conversationId, projectSaving, t]);
 
   const newChat = useCallback(() => {
-    projectMutationRef.current++;
-    controller.advanceSelectionEpoch();
-    controller.messageSerialRef.current++;
-    controller.conversationIdRef.current = null;
-    untitledRef.current = null;
-    clearActive();
-    setConversationId(null);
-    setMessages([]);
-    setLoadError(null);
-    setProjectId("");
-    controller.resetInteractionState();
-    controller.setInput("");
-    writeLastCopilotConversation(null);
-  }, [clearActive, controller]);
+    startFreshDraft("", true);
+  }, [startFreshDraft]);
 
-  const isRunning = active && (active.status === "running" || active.status === "pending");
+  const switchConversation = useCallback(
+    async (conv: CopilotConversation) => {
+      setHistoryOpen(false);
+      projectMutationRef.current++;
+      const epoch = controller.advanceSelectionEpoch();
+      controller.conversationIdRef.current = conv.id;
+      untitledRef.current = null;
+      currentConversationProjectRef.current = conv.project_id ?? null;
+      clearActive();
+      setConversationId(conv.id);
+      writeLastCopilotConversation(conv.id);
+      setLoadError(null);
+      controller.resetInteractionState();
+      setProjectId(conv.project_id ?? "");
+      setMessages([]);
+      setRestoring(true);
+      try {
+        if (await readMessages(conv.id)) controller.pinToBottom();
+      } catch {
+        if (controller.conversationIdRef.current === conv.id) setLoadError(t("copilot.loadError"));
+      } finally {
+        if (controller.selectionEpochRef.current === epoch) setRestoring(false);
+      }
+    },
+    [clearActive, controller, readMessages, t],
+  );
+
+  const openHistoryPopover = useCallback(
+    (nextOpen: boolean) => {
+      setHistoryOpen(nextOpen);
+      if (!nextOpen) return;
+      setLoadingRecent(true);
+      void listConversations()
+        .then((result) => {
+          setRecentConversations(result.conversations.slice(0, RECENT_CONVERSATIONS_LIMIT));
+        })
+        .catch(() => {
+          setRecentConversations([]);
+        })
+        .finally(() => {
+          setLoadingRecent(false);
+        });
+    },
+    [],
+  );
+
+  const isRunning = Boolean(active && (active.status === "running" || active.status === "pending"));
   const isBusy = Boolean(isRunning || active?.status === "awaiting_approval");
 
   const followups = useCopilotFollowups({
@@ -358,22 +471,14 @@ export function RobotChatPanel({
   });
   const enqueueRef = useRef(followups.enqueue);
   enqueueRef.current = followups.enqueue;
-  // Only a run that is actually executing accepts queued follow-ups; while an
-  // approval is pending the composer stays inert, as it did before.
-  const runningRef = useRef(Boolean(isRunning));
-  runningRef.current = Boolean(isRunning);
+  const runningRef = useRef(isRunning);
+  runningRef.current = isRunning;
 
-  // Slash-command palette above the composer (same contract as the console:
-  // selection fills "/name "; submission queues behind a running turn).
-  const applySlashCommand = useCallback((text: string) => {
-    controller.setInput(text);
-    inputRef.current?.focus();
-  }, [controller]);
-  const palette = useCommandPalette(controller.input, applySlashCommand);
-
-  // Multi-line input grows the composer instead of staying one line tall;
-  // min-h/max-h on the textarea clamp the range and scroll past the max.
-  useAutoGrowTextarea(inputRef, controller.input);
+  const projectsById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.name])),
+    [projects],
+  );
+  const selectedProjectName = projectId ? projectsById.get(projectId) : undefined;
 
   const showEmpty = !loadError && !restoring && messages.length === 0 && !active;
   const streamingShowsAvatar = messages[messages.length - 1]?.role !== "assistant";
@@ -387,8 +492,10 @@ export function RobotChatPanel({
         if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); onClose(); }
       }}
       className={cn(
-        "fixed inset-x-2 bottom-2 top-14 z-40 flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl shadow-black/40 md:inset-x-auto md:h-[520px] md:max-h-[calc(100dvh-9rem)] md:w-[380px]",
-        PANEL_DESKTOP_ANCHOR_BY_CORNER[corner]
+        "forgebadger-panel-pop fixed inset-x-2 bottom-2 top-3 z-50 flex flex-col overflow-hidden rounded-2xl border border-border/70 bg-card shadow-overlay transition-[width] duration-150 md:inset-x-auto md:h-[580px] md:max-h-[calc(100dvh-9rem)]",
+        wide ? "md:w-[540px]" : "md:w-[416px]",
+        PANEL_DESKTOP_ANCHOR_BY_CORNER[corner],
+        PANEL_ORIGIN_BY_CORNER[corner],
       )}
     >
       <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3">
@@ -398,7 +505,7 @@ export function RobotChatPanel({
             <span
               className={cn(
                 "absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-card",
-                isRunning ? "animate-pulse bg-brand" : "bg-emerald-500"
+                isRunning ? "forgebadger-pulse-dot bg-brand" : "bg-success"
               )}
               aria-hidden="true"
             />
@@ -411,6 +518,62 @@ export function RobotChatPanel({
           </div>
         </div>
         <div className="flex items-center gap-0.5">
+          <Popover open={historyOpen} onOpenChange={openHistoryPopover}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 text-muted-foreground hover:text-foreground"
+                aria-label={t("copilot.recentConversations")}
+                title={t("copilot.recentConversations")}
+              >
+                <History className="size-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-72 p-1.5">
+              <p className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                {t("copilot.recentConversations")}
+              </p>
+              {loadingRecent ? (
+                <p className="px-2 py-3 text-xs text-muted-foreground">{t("common.loading")}</p>
+              ) : recentConversations.length === 0 ? (
+                <p className="px-2 py-3 text-xs text-muted-foreground">{t("copilot.noConversations")}</p>
+              ) : (
+                <div className="max-h-64 space-y-0.5 overflow-y-auto">
+                  {recentConversations.map((conv) => {
+                    const isCurrent = conv.id === conversationId;
+                    return (
+                      <button
+                        key={conv.id}
+                        type="button"
+                        onClick={() => void switchConversation(conv)}
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
+                          isCurrent ? "bg-brand/10 font-medium text-foreground" : "text-foreground/85 hover:bg-muted",
+                        )}
+                      >
+                        <MessageSquare className={cn("size-3.5 shrink-0", isCurrent ? "text-brand" : "text-muted-foreground")} />
+                        <span className="min-w-0 flex-1 truncate">{conv.title || t("copilot.untitled")}</span>
+                        <span className="shrink-0 text-[10px] text-muted-foreground forgebadger-tabular-nums">
+                          {formatConversationTime(conv.updated_at)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="hidden size-7 text-muted-foreground hover:text-foreground md:inline-flex"
+            aria-label={wide ? t("copilot.panelCompact") : t("copilot.panelWider")}
+            title={wide ? t("copilot.panelCompact") : t("copilot.panelWider")}
+            onClick={() => setWide((current) => !current)}
+          >
+            <ArrowLeftRight className="size-3.5" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -458,7 +621,13 @@ export function RobotChatPanel({
               {t("common.loading")}
             </p>
           )}
-          {showEmpty && <CopilotWelcomeState compact onSuggestion={(text) => void send(text)} />}
+          {showEmpty && (
+            <CopilotWelcomeState
+              compact
+              projectName={selectedProjectName}
+              onSuggestion={(text) => void send(text)}
+            />
+          )}
           {messages.length > 0 && (
             <CopilotMessageStream
               messages={messages}
@@ -473,44 +642,21 @@ export function RobotChatPanel({
               onCancelEdit={controller.cancelEditMessage}
             />
           )}
-          {(syncError || active?.error) && (
-            <p role="status" className="text-sm text-muted-foreground">
-              {syncError || active?.error}
-              {!syncError && active?.errorCode ? (
-                <span className="text-xs opacity-70"> ({active.errorCode})</span>
-              ) : null}
-            </p>
-          )}
-          {active?.status === "awaiting_approval" && (active.pendingAction
-            ? <CopilotApproval key={active.pendingAction.id} action={active.pendingAction} onDecided={reconcile} />
-            : <p role="status" className="text-sm text-muted-foreground">{t("copilot.awaitingApproval")}</p>)}
-          {isRunning && (
-            <p className="inline-flex items-center gap-1.5 rounded-full bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground">
-              <span className="size-1.5 animate-pulse rounded-full bg-brand" />
-              {t(copilotPhaseLabel(active?.phase))}
-            </p>
-          )}
-          {active?.thinking ? (
-            <AssistantRail>
-              <ThinkingSection text={active.thinking} live={isRunning === true} />
-            </AssistantRail>
-          ) : null}
-          {active?.text ? (
-            <StreamingMessage text={active.text} showAvatar={streamingShowsAvatar} />
-          ) : null}
-          {controller.sendFailed && (
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => void send(undefined, true)}>
-                {t("copilot.retry")}
-              </Button>
-            </div>
-          )}
+          <CopilotActiveRunArea
+            active={active}
+            syncError={syncError}
+            sendFailed={controller.sendFailed}
+            streamingShowsAvatar={streamingShowsAvatar}
+            terminalProgress={terminalProgress}
+            onDecided={reconcile}
+            onRetry={() => void send(undefined, true)}
+          />
         </div>
         {!controller.pinnedToBottom && (
           <Button
             variant="outline"
             size="icon"
-            className="absolute bottom-3 right-3 z-10 size-7 rounded-full shadow"
+            className="absolute bottom-3 right-3 z-10 size-7 rounded-full shadow-raised"
             onClick={controller.scrollToBottom}
             aria-label={t("copilot.scrollDown")}
           >
@@ -519,77 +665,35 @@ export function RobotChatPanel({
         )}
       </div>
 
-      {/* Shared external toolbar keeps the quick-chat message card uncluttered. */}
       <div className="relative shrink-0 px-3 pb-3">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 bottom-full h-10 bg-gradient-to-t from-card via-card/80 to-transparent"
         />
-        {conversationId && (
-          <CopilotFollowupChips items={followups.items} onCancel={(id) => void followups.cancel(id)} />
-        )}
-        <div className="relative">
-          <CopilotComposerToolbar projects={projects} projectId={projectId} conversationId={conversationId}
-            onProjectChange={next => void changeProject(next)} onModelChange={setModelId} onSavingChange={setSavingPreferences}
-            disabled={isBusy || controller.sending || projectSaving} />
-          <CommandPalettePopup
-            view={palette.view}
-            onHoverItem={palette.hoverItem}
-            onPickItem={palette.pickItem}
-          />
-          <div
-            data-testid="robot-chat-composer"
-            className="rounded-xl border border-border/70 bg-card/90 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border hover:shadow-xl hover:shadow-black/30 focus-within:border-brand/60 focus-within:shadow-xl focus-within:shadow-black/30 focus-within:ring-1 focus-within:ring-brand/30"
-          >
-            <Textarea
-              ref={inputRef}
-              value={controller.input}
-              onChange={(event) => controller.setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (palette.handleTextareaKeyDown(event)) return;
-                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault();
-                  void send();
-                }
-              }}
-              role="combobox"
-              aria-expanded={palette.view.open}
-              aria-controls="command-palette"
-              aria-activedescendant={palette.view.open && palette.view.highlighted ? `command-option-${palette.view.highlighted}` : undefined}
-              aria-autocomplete="list"
-            placeholder={isRunning ? t("copilot.followups.placeholder") : t("copilot.placeholder")}
-            aria-label={t("copilot.placeholder")}
-            className="max-h-32 min-h-[40px] w-full flex-1 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-3 pb-1 pt-2.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
-            rows={1}
-          />
-          <div className="flex items-center justify-end gap-1 px-1.5 pb-1.5">
-            {isBusy ? (
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-7 shrink-0 rounded-full"
-                onClick={() => void controller.stopRun()}
-                disabled={!active?.runId}
-                aria-label={t("copilot.stop")}
-                title={t("copilot.stop")}
-              >
-                <Square className="size-3.5" />
-              </Button>
-            ) : (
-              <Button
-                size="icon"
-                className="size-7 shrink-0 rounded-full"
-                onClick={() => void send()}
-                disabled={controller.sending || savingPreferences || projectSaving || followups.enqueuing || !controller.input.trim()}
-                aria-label={t("copilot.send")}
-                title={t("copilot.send")}
-              >
-                <Send className="size-3.5" />
-              </Button>
-            )}
-          </div>
-          </div>
-        </div>
+        <CopilotComposer
+          testId="robot-chat-composer"
+          compact
+          textareaRef={inputRef}
+          input={controller.input}
+          onInputChange={controller.setInput}
+          onSubmit={() => void send()}
+          onStop={() => void controller.stopRun()}
+          canStop={Boolean(active?.runId)}
+          isRunning={isRunning}
+          isBusy={isBusy}
+          sendDisabled={
+            controller.sending || savingPreferences || projectSaving || followups.enqueuing || !controller.input.trim()
+          }
+          projects={projects}
+          projectId={projectId}
+          conversationId={conversationId}
+          onProjectChange={(next) => void changeProject(next)}
+          onModelChange={setModelId}
+          onSavingChange={setSavingPreferences}
+          toolbarDisabled={isBusy || controller.sending || projectSaving}
+          followups={followups.items}
+          onCancelFollowup={(id) => void followups.cancel(id)}
+        />
       </div>
     </div>
   );

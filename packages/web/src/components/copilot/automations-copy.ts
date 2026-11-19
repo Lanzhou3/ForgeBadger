@@ -2,13 +2,18 @@ import { useLanguage } from "@/hooks/use-language";
 
 const zh = {
   title: "定时自动化",
-  description: "创建按计划自动运行的 Copilot 任务，结果投递到会话与通知。",
+  description: "创建按计划自动运行的 Copilot 任务，结果投递到对话与通知。",
   suggestionsDescription: "根据使用历史推荐的可复用任务，接受后会加入下方自动化列表。",
   listDescription: "已创建的定时任务；可暂停、启用、立即运行或删除。",
   list: "自动化",
   create: "新建",
   prompt: "任务提示词",
   scheduleKind: "调度类型",
+  scheduleKinds: {
+    cron: "定时 Cron",
+    interval: "固定间隔",
+    once: "单次执行",
+  } as Record<"cron" | "interval" | "once", string>,
   expression: "表达式",
   save: "创建",
   createFailed: "创建失败，请检查输入。",
@@ -50,6 +55,11 @@ const en: typeof zh = {
   create: "New",
   prompt: "Task prompt",
   scheduleKind: "Schedule type",
+  scheduleKinds: {
+    cron: "Cron schedule",
+    interval: "Fixed interval",
+    once: "One-time",
+  },
   expression: "Expression",
   save: "Create",
   createFailed: "Creation failed; check your input.",
@@ -82,13 +92,18 @@ const en: typeof zh = {
 };
 const zhTW: typeof zh = {
   title: "定時自動化",
-  description: "建立按計畫自動執行的 Copilot 任務，結果投遞到會話與通知。",
+  description: "建立按計畫自動執行的 Copilot 任務，結果投遞到對話與通知。",
   suggestionsDescription: "根據使用歷史推薦的可複用任務，接受後會加入下方自動化列表。",
   listDescription: "已建立的定時任務；可暫停、啟用、立即執行或刪除。",
   list: "自動化",
   create: "新建",
   prompt: "任務提示詞",
   scheduleKind: "排程類型",
+  scheduleKinds: {
+    cron: "定時 Cron",
+    interval: "固定間隔",
+    once: "單次執行",
+  },
   expression: "運算式",
   save: "建立",
   createFailed: "建立失敗，請檢查輸入。",

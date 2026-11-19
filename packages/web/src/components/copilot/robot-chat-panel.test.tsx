@@ -16,6 +16,7 @@ import {
 
 const {
   createConversationMock,
+  listConversationsMock,
   listMessagesMock,
   getConversationMock,
   updateConversationProjectMock,
@@ -33,6 +34,7 @@ const {
   toastErrorMock,
 } = vi.hoisted(() => ({
   createConversationMock: vi.fn(),
+  listConversationsMock: vi.fn(),
   listMessagesMock: vi.fn(),
   getConversationMock: vi.fn(),
   updateConversationProjectMock: vi.fn(),
@@ -55,6 +57,7 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
   return {
     ...actual,
     createConversation: createConversationMock,
+    listConversations: listConversationsMock,
     listMessages: listMessagesMock,
     getConversation: getConversationMock,
     updateConversationProject: updateConversationProjectMock,
@@ -154,21 +157,23 @@ function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-function renderPanel(overrides: { onClose?: () => void; onExpandFull?: (id: string | null) => void; corner?: RobotCorner } = {}) {
+function renderPanel(overrides: { onClose?: () => void; onExpandFull?: (id: string | null) => void; corner?: RobotCorner; explicitProjectId?: string; routeProjectId?: string } = {}) {
   const onClose = overrides.onClose ?? vi.fn();
   const onExpandFull = overrides.onExpandFull ?? vi.fn();
-  render(
+  const result = render(
     <LanguageProvider>
       <QueryClientProvider client={createQueryClient()}>
         <RobotChatPanel
           onClose={onClose}
           onExpandFull={onExpandFull}
           corner={overrides.corner ?? "bottom-right"}
+          explicitProjectId={overrides.explicitProjectId}
+          routeProjectId={overrides.routeProjectId}
         />
       </QueryClientProvider>
     </LanguageProvider>
   );
-  return { onClose, onExpandFull };
+  return { onClose, onExpandFull, ...result };
 }
 
 function dispatchRunUpdated(payload: Record<string, unknown>) {
@@ -215,7 +220,7 @@ describe("RobotChatPanel", () => {
     renderPanel();
 
     const stop = await screen.findByRole("button", { name: "停止" });
-    fireEvent.change(screen.getByRole("combobox", { name: "输入消息……" }), { target: { value: "下一条消息" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "输入消息…" }), { target: { value: "下一条消息" } });
     expect(screen.queryByRole("button", { name: /^(发送|加入队列)$/ })).toBeNull();
 
     const cancelled = { ...run, status: "cancelled", revision: 4 };
@@ -230,7 +235,7 @@ describe("RobotChatPanel", () => {
   it("focuses the quick-chat input and lets keyboard users close with Escape", () => {
     const { onClose } = renderPanel();
     // The chat input is a combobox bridged to the slash-command palette.
-    const input = screen.getByRole("combobox", { name: "输入消息……" });
+    const input = screen.getByRole("combobox", { name: "输入消息…" });
     expect(document.activeElement).toBe(input);
     fireEvent.keyDown(input, { key: "Escape" });
     expect(onClose).toHaveBeenCalledOnce();
@@ -241,6 +246,7 @@ describe("RobotChatPanel", () => {
     listRunsMock.mockResolvedValue({ runs: [], activeRun: null });
     window.localStorage.clear();
     createConversationMock.mockResolvedValue({ conversation: newConversation });
+    listConversationsMock.mockResolvedValue({ conversations: [] });
     listMessagesMock.mockResolvedValue({ messages: [] });
     getConversationMock.mockImplementation(async (id: string) => ({ conversation: { ...newConversation, id, project_id: null } }));
     updateConversationProjectMock.mockImplementation(async (id: string, projectId: string) => ({ conversation: { ...newConversation, id, project_id: projectId || null } }));
@@ -274,7 +280,7 @@ describe("RobotChatPanel", () => {
   it("retries an uncertain send using the same request identity without duplicating the local message", async () => {
     sendMessageMock.mockRejectedValueOnce(new Error("response lost"));
     renderPanel();
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "派发任务" } });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "派发任务" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "重试" })).toBeTruthy());
     // Console-aligned failure surface: a toast plus the inline retry action.
@@ -301,7 +307,7 @@ describe("RobotChatPanel", () => {
   it("keeps an accepted run when the subsequent message refresh fails", async () => {
     listMessagesMock.mockRejectedValue(new Error("offline"));
     renderPanel();
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "派发任务" } });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "派发任务" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     // Console-aligned: a refresh failure surfaces as a toast, not a send error.
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("加载失败，请检查 Gateway 服务。"));
@@ -335,13 +341,14 @@ describe("RobotChatPanel", () => {
     expect(screen.getByRole("combobox", { name: "项目上下文" })).toBeTruthy();
     // The empty state shares the console's suggestion set.
     expect(screen.getByRole("button", { name: "项目整体进展如何？" })).toBeTruthy();
-    // Mobile (<768px): near-fullscreen bottom sheet; desktop: 380x520 card
+    // Mobile (<768px): near-fullscreen sheet; desktop: 416x580 card
     // anchored to the robot's corner (bottom-right by default) beside it.
     const panel = screen.getByTestId("robot-chat-panel");
     expect(panel.className).toContain("inset-x-2");
     expect(panel.className).toContain("bottom-2");
-    expect(panel.className).toContain("md:w-[380px]");
-    expect(panel.className).toContain("md:h-[520px]");
+    expect(panel.className).toContain("top-3");
+    expect(panel.className).toContain("md:w-[416px]");
+    expect(panel.className).toContain("md:h-[580px]");
     expect(panel.className).toContain("md:bottom-32");
     expect(panel.className).toContain("md:right-4");
   });
@@ -361,25 +368,22 @@ describe("RobotChatPanel", () => {
     expect(panel.className).toContain(released);
     // Mobile keeps the near-fullscreen sheet regardless of the robot corner.
     expect(panel.className).toContain("inset-x-2");
-    expect(panel.className).toContain("top-14");
+    expect(panel.className).toContain("top-3");
     expect(panel.className).toContain("bottom-2");
   });
 
-  it("renders a floating composer instead of a docked bottom bar", () => {
+  it("renders an integrated composer card without hover lift jitter", () => {
     renderPanel();
 
     const panel = screen.getByTestId("robot-chat-panel");
     const composer = screen.getByTestId("robot-chat-composer");
 
-    // Detached elevated card: rounded, translucent + blur, drop shadow.
+    // Clean integrated card: rounded, solid card surface, raised shadow.
     expect(composer.className).toContain("rounded-xl");
-    expect(composer.className).toContain("bg-card/90");
-    expect(composer.className).toContain("backdrop-blur-md");
-    expect(composer.className).toContain("shadow-lg");
-    // Hover lift and focus glow affordances.
-    expect(composer.className).toContain("hover:-translate-y-0.5");
-    expect(composer.className).toContain("hover:shadow-xl");
-    expect(composer.className).toContain("focus-within:ring-brand/30");
+    expect(composer.className).toContain("bg-card");
+    expect(composer.className).toContain("shadow-raised");
+    expect(composer.className).not.toContain("hover:-translate-y-0.5");
+    expect(composer.className).toContain("focus-within:ring-brand/15");
 
     // No docked footer strip above the composer (old border-t bar removed).
     expect(composer.parentElement?.className).not.toContain("border-t");
@@ -390,8 +394,8 @@ describe("RobotChatPanel", () => {
   it("creates the conversation lazily on the first message and persists its id", async () => {
     renderPanel();
 
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "帮我看看进度" } });
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "帮我看看进度" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     // Optimistic user bubble appears immediately.
     expect(screen.getByText("帮我看看进度")).toBeTruthy();
@@ -409,7 +413,7 @@ describe("RobotChatPanel", () => {
     sendMessageMock.mockReturnValue(blockedSend.promise);
     renderPanel();
 
-    const input = screen.getByPlaceholderText("输入消息……");
+    const input = screen.getByPlaceholderText("输入消息…");
     fireEvent.change(input, { target: { value: "双击发送" } });
     fireEvent.keyDown(input, { key: "Enter" });
     // Second Enter lands while createConversation is still in flight and the
@@ -439,8 +443,8 @@ describe("RobotChatPanel", () => {
     sendMessageMock.mockReturnValue(blockedSend.promise);
     renderPanel();
 
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "hi" } });
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "hi" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     // The lazy create round-trip has not resolved yet, so the controller has
     // not started the turn; no dead-air claim before the send exists.
@@ -471,8 +475,8 @@ describe("RobotChatPanel", () => {
     sendMessageMock.mockReturnValue(blockedSend.promise);
     renderPanel();
 
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "hi" } });
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "hi" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
     expect(screen.getAllByText("等待执行").length).toBeGreaterThan(0);
 
@@ -488,8 +492,8 @@ describe("RobotChatPanel", () => {
   it("renders streaming text deltas for the active run", async () => {
     renderPanel();
 
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "hi" } });
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "hi" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
 
     dispatchRunUpdated({ run_id: "run-1", status: "running", text_delta: "正在" });
@@ -582,8 +586,8 @@ describe("RobotChatPanel", () => {
   it("treats an unterminated <think> in the stream as live reasoning", async () => {
     renderPanel();
 
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "hi" } });
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "hi" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
 
     dispatchRunUpdated({ run_id: "run-1", status: "running", text_delta: "<think>推理中" });
@@ -614,8 +618,8 @@ describe("RobotChatPanel", () => {
   it("follows the stream at the bottom and pauses when the user scrolls up", async () => {
     renderPanel();
 
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "hi" } });
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "hi" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
     await waitFor(() => expect(scrollToSpy).toHaveBeenCalled());
 
@@ -644,8 +648,8 @@ describe("RobotChatPanel", () => {
     renderPanel();
 
     await pickOption("项目上下文", "示例项目");
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "检查这个项目" } });
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "检查这个项目" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
 
     await waitFor(() => expect(createConversationMock).toHaveBeenCalledWith(undefined, "project-1"));
     expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "检查这个项目", undefined, {
@@ -662,14 +666,14 @@ describe("RobotChatPanel", () => {
     await waitFor(() => expect(getConversationMock).toHaveBeenCalledWith("conv-stored"));
 
     await pickOption("项目上下文", "示例项目");
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "检查这个项目" } });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "检查这个项目" } });
     expect(screen.getByRole("button", { name: "发送" })).toHaveProperty("disabled", true);
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     expect(sendMessageMock).not.toHaveBeenCalled();
 
     await act(async () => pending.resolve({ conversation: { ...newConversation, id: "conv-stored", project_id: "project-1" } }));
     await waitFor(() => expect(screen.getByRole("button", { name: "发送" })).toHaveProperty("disabled", false));
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-stored", "检查这个项目", undefined, { clientRequestId: expect.any(String) }));
   });
 
@@ -695,8 +699,8 @@ describe("RobotChatPanel", () => {
     // No conversation yet: nothing to queue behind.
     expect(screen.queryByTestId("copilot-followup-chips")).toBeNull();
 
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "hi" } });
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "hi" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
 
     // The run owns the conversation; the composer switches to queue mode and
@@ -707,8 +711,8 @@ describe("RobotChatPanel", () => {
     const response = deferred<{ followup: { id: string; status: string; runId: null } }>();
     queueFollowupMock.mockReturnValueOnce(response.promise);
     renderPanel();
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "start" } });
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "start" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     const input = await screen.findByPlaceholderText("执行中，按 Enter 加入队列…");
     fireEvent.change(input, { target: { value: "queued A" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -722,8 +726,8 @@ describe("RobotChatPanel", () => {
     const response = deferred<{ followup: { id: string; status: string; runId: null } }>();
     queueFollowupMock.mockReturnValueOnce(response.promise);
     renderPanel();
-    fireEvent.change(screen.getByPlaceholderText("输入消息……"), { target: { value: "start" } });
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息……"), { key: "Enter" });
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "start" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
     const input = await screen.findByPlaceholderText("执行中，按 Enter 加入队列…");
     fireEvent.change(input, { target: { value: "queued A" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -732,6 +736,67 @@ describe("RobotChatPanel", () => {
     fireEvent.change(input, { target: { value: "queued A" } });
     await act(async () => { response.resolve({ followup: { id: 'q1', status: 'queued', runId: null } }); });
     expect((input as HTMLTextAreaElement).value).toBe("queued A");
+  });
+
+  it("preserves explicit cross-project context on open instead of letting an unrelated stored conversation overwrite it", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-proj-a");
+    listProjectsMock.mockResolvedValue({
+      projects: [
+        { id: "proj-a", name: "项目 A" },
+        { id: "proj-b", name: "项目 B" },
+      ],
+    });
+    listMessagesMock.mockResolvedValue({ messages: [{ ...storedMessage, conversationId: "conv-proj-a" }] });
+    getConversationMock.mockResolvedValue({
+      conversation: { ...storedConversation, id: "conv-proj-a", project_id: "proj-a" },
+    });
+
+    const { rerender, onClose, onExpandFull } = renderPanel({ explicitProjectId: "proj-b" });
+
+    await waitFor(() => expect(getConversationMock).toHaveBeenCalledWith("conv-proj-a"));
+    // Old conversation from proj-a must be skipped in favor of a fresh draft bound to proj-b.
+    expect(await screen.findByRole("button", { name: "总结当前项目的近期进展" })).toBeTruthy();
+    expect(screen.queryByText("上次的问题")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "项目上下文" }).textContent).toContain("项目 B");
+
+    // Switching explicitProjectId while open updates draft binding cleanly.
+    rerender(
+      <LanguageProvider>
+        <QueryClientProvider client={createQueryClient()}>
+          <RobotChatPanel onClose={onClose} onExpandFull={onExpandFull} explicitProjectId="proj-a" />
+        </QueryClientProvider>
+      </LanguageProvider>
+    );
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "项目上下文" }).textContent).toContain("项目 A"));
+  });
+
+  it("toggles between standard and wider panel widths", () => {
+    renderPanel();
+    const panel = screen.getByTestId("robot-chat-panel");
+    expect(panel.className).toContain("md:w-[416px]");
+    fireEvent.click(screen.getByRole("button", { name: "加宽窗口" }));
+    expect(panel.className).toContain("md:w-[540px]");
+    fireEvent.click(screen.getByRole("button", { name: "标准宽度" }));
+    expect(panel.className).toContain("md:w-[416px]");
+  });
+
+  it("switches conversations from the recent conversations popover", async () => {
+    listConversationsMock.mockResolvedValue({
+      conversations: [
+        { ...storedConversation, id: "conv-recent", title: "最近一条对话", project_id: null },
+      ],
+    });
+    listMessagesMock.mockResolvedValue({
+      messages: [{ ...storedMessage, conversationId: "conv-recent", content: "切换后的消息" }],
+    });
+
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "最近对话" }));
+    const item = await screen.findByRole("button", { name: /最近一条对话/ });
+    fireEvent.click(item);
+
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledWith("conv-recent"));
+    await waitFor(() => expect(screen.getByText("切换后的消息")).toBeTruthy());
   });
 
 });

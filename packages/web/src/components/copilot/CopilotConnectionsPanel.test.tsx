@@ -6,7 +6,6 @@ import { LanguageProvider } from "@/hooks/use-language";
 import * as api from "@/lib/copilot-extensions-api";
 import { CopilotConnectionsPanel } from "./CopilotConnectionsPanel";
 vi.mock("@/lib/copilot-extensions-api", async original => ({ ...await original<typeof import("@/lib/copilot-extensions-api")>(), listCopilotConnections: vi.fn(), createCopilotConnection: vi.fn(), updateCopilotConnection: vi.fn(), discoverCopilotConnection: vi.fn(), deleteCopilotConnection: vi.fn() }));
-vi.mock("./copilot-runtime-panel", () => ({ CapabilitiesSection: () => <div>Platform tool switches</div> }));
 const connection: api.CopilotConnection = { id: "c1", name: "Docs server", kind: "mcp", endpoint: "https://mcp.example.com/mcp", enabled: false, revision: 3, hasCredential: true, status: "ready", lastDiscoveredAt: 10, tools: [
   { name: "lookup", modelName: "mcp_c1_lookup", description: "Search docs", inputSchema: { type: "object" }, enabled: false, compatible: true, unavailableReason: null },
   { name: "unsupported", modelName: "mcp_c1_bad", description: "Unsupported", inputSchema: {}, enabled: false, compatible: false, unavailableReason: "invalid_schema" },
@@ -14,8 +13,10 @@ const connection: api.CopilotConnection = { id: "c1", name: "Docs server", kind:
 let client: QueryClient;
 function mount() { render(<LanguageProvider><QueryClientProvider client={client}><CopilotConnectionsPanel /></QueryClientProvider></LanguageProvider>); }
 beforeEach(() => { cleanup(); vi.resetAllMocks(); client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); vi.mocked(api.listCopilotConnections).mockResolvedValue({ connections: [connection] }); });
-it("opens platform controls only inside the built-in Connection", () => {
-  mount(); expect(screen.queryByText("Platform tool switches")).toBeNull(); fireEvent.click(screen.getByRole("button", { name: "管理工具" })); expect(screen.getByText("Platform tool switches")).toBeTruthy();
+it("does not render the redundant ForgeBadger built-in modal card inside MCP Connections", () => {
+  mount();
+  expect(screen.queryByRole("button", { name: "管理工具" })).toBeNull();
+  expect(screen.queryByText("ForgeBadger")).toBeNull();
 });
 it("clears write-only bearer before failed submission and never caches or renders it", async () => {
   vi.mocked(api.createCopilotConnection).mockRejectedValue(new Error("test-secret-value")); mount();
@@ -46,8 +47,8 @@ it("toggles and deletes external connections through explicit revision-bound act
   await waitFor(() => expect(screen.getByRole("button", { name: "删除" })).toHaveProperty("disabled", false)); fireEvent.click(screen.getByRole("button", { name: "删除" }));
   fireEvent.click(screen.getByRole("button", { name: "删除" })); await waitFor(() => expect(api.deleteCopilotConnection).toHaveBeenCalledWith("c1", 3));
 });
-it("keeps built-in controls visible on external catalog failure", async () => {
-  vi.mocked(api.listCopilotConnections).mockRejectedValue(new Error("offline")); mount(); expect(await screen.findByRole("alert")).toBeTruthy(); expect(screen.getByText("ForgeBadger")).toBeTruthy(); expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
+it("surfaces a load error with retry on external catalog failure", async () => {
+  vi.mocked(api.listCopilotConnections).mockRejectedValue(new Error("offline")); mount(); expect(await screen.findByRole("alert")).toBeTruthy(); expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
 });
 it("removes saved credentials only through an explicit edit choice", async () => {
   vi.mocked(api.updateCopilotConnection).mockResolvedValue({ connection }); mount(); await screen.findByText("Docs server"); fireEvent.click(screen.getByRole("button", { name: "编辑" }));

@@ -54,6 +54,19 @@ describe("message row metadata", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "已复制" })).toBeTruthy());
   });
 
+  it("strips inline <think> blocks when copying an assistant message", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const withThink: CopilotMessage = {
+      ...assistantText,
+      id: "assistant-think",
+      content: "<think>内部推理过程</think>\n\n最终答复内容",
+    };
+    render(<LanguageProvider><MessageRow message={withThink} pairedResult={null} suppressRender={false} /></LanguageProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    expect(writeText).toHaveBeenCalledWith("最终答复内容");
+  });
+
   it("keeps the edit affordance reachable on mobile", () => {
     render(
       <LanguageProvider>
@@ -64,6 +77,7 @@ describe("message row metadata", () => {
     // No `hidden` breakpoint class: the pencil stays visible without hover.
     expect(edit.className).not.toContain("hidden");
     expect(edit.className).not.toContain("md:flex");
+    expect(screen.getByRole("button", { name: "复制" })).toBeTruthy();
   });
 });
 

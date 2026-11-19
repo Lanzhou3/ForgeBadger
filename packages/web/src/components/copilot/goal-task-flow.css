@@ -53,21 +53,6 @@
   animation-delay: calc(var(--fb-flow-i, 0) * 55ms);
 }
 
-.fb-flow-details {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 220ms ease;
-}
-
-.fb-flow-details[data-open="true"] {
-  grid-template-rows: 1fr;
-}
-
-.fb-flow-details > div {
-  overflow: hidden;
-  min-height: 0;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .fb-flow-live .fb-flow-link[data-state="active"],
   .fb-flow-live .fb-flow-node[data-state="active"],
@@ -77,8 +62,5 @@
   .fb-flow-link[data-state="active"] {
     background-image: none;
     background-color: hsl(var(--brand) / 0.7);
-  }
-  .fb-flow-details {
-    transition: none;
   }
 }

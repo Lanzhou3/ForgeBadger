@@ -1,22 +1,21 @@
 "use client";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plug, Plus, Wrench } from "lucide-react";
+import { Plug, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { CapabilitiesSection } from "./copilot-runtime-panel";
 import { CopilotEmptyState } from "./copilot-empty-state";
+import { CopilotStatusBadge } from "./copilot-status-badge";
 import { useExtensionsCopy } from "./extensions-copy";
 import { copilotConnectionsKey, copilotSkillsKey, createCopilotConnection, deleteCopilotConnection, discoverCopilotConnection, listCopilotConnections, updateCopilotConnection, type CopilotConnection } from "@/lib/copilot-extensions-api";
 
 export function CopilotConnectionsPanel() {
   const copy = useExtensionsCopy();
   const [creating, setCreating] = useState(false);
-  const [builtinOpen, setBuiltinOpen] = useState(false);
   const connections = useQuery({ queryKey: copilotConnectionsKey, queryFn: listCopilotConnections, retry: false });
   const external = connections.data?.connections.filter((item) => item.kind === "mcp") ?? [];
   return (
@@ -28,17 +27,12 @@ export function CopilotConnectionsPanel() {
           {copy.addConnection}
         </Button>
       </div>
-      <section className="forgebadger-animate-in space-y-3 rounded-lg border border-border bg-card p-4">
-        <div className="flex items-center gap-2">
-          <Wrench className="size-4 text-brand" />
-          <h2 className="font-medium">ForgeBadger</h2>
-          <Badge variant="secondary">{copy.builtin}</Badge>
-        </div>
-        <p className="text-sm text-muted-foreground">{copy.builtinHelp}</p>
-        <Button size="sm" variant="outline" onClick={() => setBuiltinOpen(true)}>{copy.manageTools}</Button>
-      </section>
       {connections.isPending ? (
-        <p>{copy.loading}</p>
+        <div className="space-y-3" aria-busy="true" aria-label={copy.loading}>
+          {[0, 1].map((index) => (
+            <div key={index} className="h-32 animate-pulse rounded-lg border border-border/50 bg-muted/40" />
+          ))}
+        </div>
       ) : connections.isError ? (
         <div role="alert" className="space-y-2 text-sm text-destructive">
           <p>{copy.loadError}</p>
@@ -49,15 +43,6 @@ export function CopilotConnectionsPanel() {
       ) : (
         external.map((item) => <ConnectionCard key={`${item.id}:${item.revision}`} connection={item} />)
       )}
-      <Dialog open={builtinOpen} onOpenChange={setBuiltinOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>ForgeBadger · {copy.tools}</DialogTitle>
-            <DialogDescription>{copy.builtinHelp}</DialogDescription>
-          </DialogHeader>
-          <CapabilitiesSection active={builtinOpen} />
-        </DialogContent>
-      </Dialog>
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
@@ -184,9 +169,9 @@ function ConnectionCard({ connection }: { connection: CopilotConnection }) {
             <Plug className="size-4 shrink-0 text-brand" />
             <h2 className="break-all font-medium">{connection.name}</h2>
             <Badge variant="outline">MCP</Badge>
-            <Badge variant="secondary" className={connection.enabled ? "bg-emerald-500/15 text-emerald-400" : "text-muted-foreground"}>
+            <CopilotStatusBadge tone={connection.enabled ? "success" : "muted"}>
               {connection.enabled ? copy.enabled : copy.disabled}
-            </Badge>
+            </CopilotStatusBadge>
           </div>
           <p className="break-all text-xs text-muted-foreground">{connection.endpoint}</p>
         </div>
@@ -199,7 +184,7 @@ function ConnectionCard({ connection }: { connection: CopilotConnection }) {
       </div>
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
         {connection.status === "not_discovered" ? (
-          <Badge variant="secondary" className="bg-amber-500/15 text-amber-400">{copy.notDiscovered}</Badge>
+          <CopilotStatusBadge tone="warning">{copy.notDiscovered}</CopilotStatusBadge>
         ) : (
           <Badge variant="outline">{enabledToolCount}/{connection.tools.length} {copy.tools}</Badge>
         )}
@@ -234,7 +219,7 @@ function ConnectionCard({ connection }: { connection: CopilotConnection }) {
                 </span>
               </label>
               <p className="break-all text-xs text-muted-foreground">{tool.modelName}</p>
-              {!tool.compatible && <p className="text-xs text-amber-500">{copy.incompatible}: {tool.unavailableReason}</p>}
+              {!tool.compatible && <p className="text-xs text-warning">{copy.incompatible}: {tool.unavailableReason}</p>}
               <details className="text-xs text-muted-foreground">
                 <summary>{copy.schema}</summary>
                 <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(tool.inputSchema, null, 2)}</pre>

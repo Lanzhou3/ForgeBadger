@@ -1,4 +1,5 @@
 import type { ChannelIdentity, ChannelPairing, ChannelRoute } from '@/lib/copilot-channels-api';
+import { COPILOT_TONE_BADGE_CLASSES } from './copilot-status-badge';
 
 interface SetupState {
   account: { enabled: boolean; secretConfigured: boolean } | null;
@@ -110,8 +111,8 @@ export function channelOverallState(state: OverallStateInput): ChannelOverallSta
 
 /** Semantic badge classes for a raw connection/health state. */
 export function connectionBadgeClass(state: string): string {
-  if (state === 'connected') return 'bg-emerald-500/15 text-emerald-400';
-  if (state === 'connecting' || state === 'reconnecting') return 'bg-amber-500/15 text-amber-400';
-  if (state === 'unhealthy') return 'bg-destructive/15 text-destructive';
-  return 'text-muted-foreground';
+  if (state === 'connected') return COPILOT_TONE_BADGE_CLASSES.success;
+  if (state === 'connecting' || state === 'reconnecting') return COPILOT_TONE_BADGE_CLASSES.warning;
+  if (state === 'unhealthy') return COPILOT_TONE_BADGE_CLASSES.destructive;
+  return COPILOT_TONE_BADGE_CLASSES.muted;
 }

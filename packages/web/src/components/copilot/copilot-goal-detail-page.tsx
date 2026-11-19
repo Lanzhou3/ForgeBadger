@@ -118,8 +118,30 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
 
   if (goalQuery.isPending) {
     return (
-      <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 md:p-6">
-        <p role="status" className="text-xs text-muted-foreground">{copy.loading}</p>
+      <div role="status" className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-4 md:p-6">
+        <span className="sr-only">{copy.loading}</span>
+        <div className="space-y-2">
+          <div className="h-5 w-28 animate-pulse rounded bg-muted" />
+          <div className="flex items-center gap-2">
+            <div className="h-6 w-56 animate-pulse rounded bg-muted" />
+            <div className="h-5 w-16 animate-pulse rounded-full bg-muted" />
+          </div>
+          <div className="h-3.5 w-36 animate-pulse rounded bg-muted/70" />
+        </div>
+        <Card>
+          <CardContent className="space-y-2">
+            <div className="h-4 w-24 animate-pulse rounded bg-muted" />
+            <div className="h-4 w-full animate-pulse rounded bg-muted/70" />
+            <div className="h-4 w-4/5 animate-pulse rounded bg-muted/70" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="space-y-3">
+            <div className="h-4 w-28 animate-pulse rounded bg-muted" />
+            <div className="h-12 w-full animate-pulse rounded bg-muted/70" />
+            <div className="h-12 w-full animate-pulse rounded bg-muted/70" />
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -175,7 +197,7 @@ export function CopilotGoalDetailPage({ goalId }: { goalId: string }) {
               <span
                 key={grant}
                 title={copy.grantTooltips[grant] ?? grant}
-                className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400"
+                className="inline-flex items-center gap-1 rounded-full bg-hue-sky/12 px-2 py-0.5 text-[11px] font-medium text-hue-sky"
               >
                 <KeyRound className="size-3" aria-hidden />
                 {copy.grantLabels[grant] ?? grant}
@@ -377,9 +399,9 @@ function CancelButton({ pending, onConfirm }: { pending: boolean; onConfirm: () 
 }
 
 const DIFF_STATUS_META: Record<CopilotGoalDiffFile["status"], { key: "diffFileAdded" | "diffFileModified" | "diffFileDeleted"; className: string }> = {
-  added: { key: "diffFileAdded", className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" },
-  modified: { key: "diffFileModified", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
-  deleted: { key: "diffFileDeleted", className: "bg-red-500/15 text-red-600 dark:text-red-400" },
+  added: { key: "diffFileAdded", className: "bg-success/12 text-success" },
+  modified: { key: "diffFileModified", className: "bg-warning/12 text-warning" },
+  deleted: { key: "diffFileDeleted", className: "bg-destructive/12 text-destructive" },
 };
 
 export interface DiffQueryState {
@@ -405,31 +427,37 @@ export function DiffReviewCard({ open, onToggle, query }: { open: boolean; onTog
           <FileDiff className="size-4 shrink-0" />
           {copy.diff}
         </button>
-        {open ? (
-          query.isError ? (
-            <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
-              <p>{copy.diffLoadFailed}</p>
-              <Button size="sm" variant="outline" onClick={() => query.refetch()}>
-                {copy.diffRetry}
-              </Button>
-            </div>
-          ) : query.isPending ? (
-            <p role="status" className="text-xs text-muted-foreground">{copy.loading}</p>
-          ) : (
-            <>
-              {query.data?.truncated ? (
-                <p role="status" className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
-                  {copy.diffTruncatedBanner}
-                </p>
-              ) : null}
-              {files && files.length > 0 ? (
-                files.map((file) => <DiffFileRow key={file.path} file={file} />)
-              ) : (
-                <p className="text-sm text-muted-foreground">{copy.diffEmpty}</p>
-              )}
-            </>
-          )
-        ) : null}
+        <div className="forgebadger-collapse-grid" data-open={open ? "true" : "false"}>
+          <div className="overflow-hidden">
+            {open ? (
+              <div className="space-y-2 pt-1">
+                {query.isError ? (
+                  <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+                    <p>{copy.diffLoadFailed}</p>
+                    <Button size="sm" variant="outline" onClick={() => query.refetch()}>
+                      {copy.diffRetry}
+                    </Button>
+                  </div>
+                ) : query.isPending ? (
+                  <p role="status" className="text-xs text-muted-foreground">{copy.loading}</p>
+                ) : (
+                  <>
+                    {query.data?.truncated ? (
+                      <p role="status" className="rounded-md border border-warning/35 bg-warning/10 px-3 py-1.5 text-xs text-warning">
+                        {copy.diffTruncatedBanner}
+                      </p>
+                    ) : null}
+                    {files && files.length > 0 ? (
+                      files.map((file) => <DiffFileRow key={file.path} file={file} />)
+                    ) : (
+                      <p className="text-sm text-muted-foreground">{copy.diffEmpty}</p>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
@@ -458,7 +486,11 @@ function DiffFileRow({ file }: { file: CopilotGoalDiffFile }) {
           </span>
         ) : null}
       </button>
-      {open ? <DiffView diff={file.diff} /> : null}
+      <div className="forgebadger-collapse-grid" data-open={open ? "true" : "false"}>
+        <div className="overflow-hidden">
+          {open ? <DiffView diff={file.diff} /> : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -471,9 +503,9 @@ function DiffView({ diff }: { diff: string }) {
           key={index}
           className={
             line.startsWith("+") && !line.startsWith("+++")
-              ? "whitespace-pre bg-emerald-500/10 px-1"
+              ? "whitespace-pre bg-success/10 px-1"
               : line.startsWith("-") && !line.startsWith("---")
-                ? "whitespace-pre bg-red-500/10 px-1"
+                ? "whitespace-pre bg-destructive/10 px-1"
                 : line.startsWith("@@")
                   ? "whitespace-pre bg-muted/40 px-1 text-muted-foreground"
                   : "whitespace-pre px-1"

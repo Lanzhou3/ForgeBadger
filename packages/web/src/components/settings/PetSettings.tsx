@@ -4,21 +4,31 @@ import { useId, useState } from "react";
 import { Bot, Check } from "lucide-react";
 
 import { RobotSprite } from "@/components/copilot/RobotSprite";
-import { SettingsCardHeader } from "@/components/settings/ui";
+import { SettingRow, SettingsCardHeader } from "@/components/settings/ui";
 import { Card, CardContent } from "@/components/ui/card";
 import { useLanguage } from "@/hooks/use-language";
-import { usePetPreference } from "@/hooks/use-pet-preference";
-import { PET_OPTIONS, writePetPreference, type PetId } from "@/lib/pet-preference";
+import { usePetPreference, usePetVisiblePreference } from "@/hooks/use-pet-preference";
+import {
+  PET_OPTIONS,
+  writePetPreference,
+  writePetVisiblePreference,
+  type PetId,
+} from "@/lib/pet-preference";
 import { cn } from "@/lib/utils";
 
 export function PetSettings() {
   const { t } = useLanguage();
   const petId = usePetPreference();
+  const petVisible = usePetVisiblePreference();
   const titleId = useId();
   const [saveState, setSaveState] = useState<"idle" | "saved" | "error">("idle");
 
   function selectPet(id: PetId) {
     setSaveState(writePetPreference(id) ? "saved" : "error");
+  }
+
+  function toggleVisible(visible: boolean) {
+    setSaveState(writePetVisiblePreference(visible) ? "saved" : "error");
   }
 
   return (
@@ -30,6 +40,12 @@ export function PetSettings() {
         titleId={titleId}
       />
       <CardContent className="space-y-3">
+        <SettingRow
+          title={t("settings.petShowFloating")}
+          description={t("settings.petShowFloatingDescription")}
+          checked={petVisible}
+          onCheckedChange={toggleVisible}
+        />
         <div role="radiogroup" aria-labelledby={titleId} className="grid gap-3 sm:grid-cols-2">
           {PET_OPTIONS.map((pet) => {
             const selected = petId === pet.id;

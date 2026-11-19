@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { GatewayApiError } from "@/lib/api";
-import type { TranslationKey } from "@/lib/i18n";
+import { ShieldAlert } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { IconTile } from "@/components/ui/icon-tile";
 import { useLanguage } from "@/hooks/use-language";
+import { GatewayApiError } from "@/lib/api";
 import { decidePendingAction, type CopilotPendingAction } from "@/lib/copilot-api";
-import { getSessionStopApprovalTarget, SessionStopApprovalTarget } from './SessionStopApprovalTarget';
+import type { TranslationKey } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { getSessionStopApprovalTarget, SessionStopApprovalTarget } from "./SessionStopApprovalTarget";
 
 interface Props {
   action: CopilotPendingAction;
@@ -32,6 +37,15 @@ function isUnsandboxedCheck(action: CopilotPendingAction): boolean {
   } catch { return false; }
 }
 
+/** Pretty-print approval argument JSON when parseable; fall back to raw text. */
+function formatApprovalInput(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
 /** One exact server-issued action; approval never grants future authority. */
 export function CopilotApproval({ action, onDecided }: Props) {
   const { t } = useLanguage();
@@ -41,6 +55,8 @@ export function CopilotApproval({ action, onDecided }: Props) {
   const submitting = useRef(false);
   const stopTarget = getSessionStopApprovalTarget(action);
   const stopBlocked = action.tool === 'stop_session' && !stopTarget;
+  const unsandboxed = isUnsandboxedCheck(action);
+  const escalated = unsandboxed || action.tool === "stop_session";
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const decide = async (approved: boolean) => {
@@ -71,17 +87,33 @@ export function CopilotApproval({ action, onDecided }: Props) {
 
   if (action.status !== "pending") return null;
   return (
-    <section className="space-y-2 rounded-lg border border-amber-500/40 p-3">
-      <p className="text-sm font-medium">{t("copilot.approvalTitle")}</p>
-      <p className="break-all font-mono text-xs">{action.tool}</p>
+    <section
+      className={cn(
+        "forgebadger-animate-in space-y-3 rounded-xl border p-3.5 shadow-card",
+        escalated ? "border-destructive/45 bg-destructive/5" : "border-warning/40 bg-warning/5",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-2.5">
+        <IconTile size="xs" tone={escalated ? "destructive" : "warning"}>
+          <ShieldAlert aria-hidden="true" />
+        </IconTile>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">{t("copilot.approvalTitle")}</p>
+        </div>
+        <Badge variant="outline" className="max-w-full break-all border-border/70 bg-background/70 font-mono text-xs">
+          {action.tool}
+        </Badge>
+      </div>
       {action.tool === 'stop_session' && <SessionStopApprovalTarget target={stopTarget} />}
-      {isUnsandboxedCheck(action) && (
+      {unsandboxed && (
         <p role="note" className="rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs font-medium text-destructive">{t("copilot.approvalUnsandboxed")}</p>
       )}
-      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 text-xs">{action.inputJson}</pre>
+      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-border/50 bg-background/75 p-2.5 font-mono text-xs leading-relaxed text-foreground/90">
+        {formatApprovalInput(action.inputJson)}
+      </pre>
       <p className="text-xs text-muted-foreground">{t("copilot.approvalScope")}</p>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" disabled={pending || stopBlocked} onClick={() => void decide(true)}>{t("copilot.approvalAllow")}</Button>
+        <Button size="sm" variant="brand" disabled={pending || stopBlocked} onClick={() => void decide(true)}>{t("copilot.approvalAllow")}</Button>
         <Button size="sm" variant="outline" disabled={pending} onClick={() => void decide(false)}>{t("copilot.approvalReject")}</Button>
       </div>
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}

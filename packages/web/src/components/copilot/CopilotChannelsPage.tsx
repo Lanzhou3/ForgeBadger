@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { useTrilingual } from '@/hooks/use-trilingual';
 import type { ChannelPlatform } from '@/lib/api';
 import { getFeishuChannelAccount, getFeishuConnectionHealth, saveFeishuChannelAccount, emergencyStopFeishu, getTelegramChannelAccount, getTelegramConnectionHealth, saveTelegramChannelAccount, getTelegramIntegrationConfig, updateTelegramIntegrationConfig, getFeishuIntegrationConfig, updateFeishuIntegrationConfig, emergencyStopTelegram, getChannelDiagnostics } from '@/lib/api';
 import * as channels from '@/lib/copilot-channels-api';
@@ -22,33 +24,79 @@ const pairingKey=(p:channels.ChannelPairing|undefined)=>p?`${p.id}:${p.revision}
 
 export function CopilotChannelsPage() {
   const copy=useSettingsCopy();
+  const t3=useTrilingual();
   const client=useQueryClient();
   const [channel,setChannel]=useState<ChannelPlatform>('feishu');
-  const query=useQuery({queryKey:channelKey,queryFn:channels.getChannelRecords,refetchInterval:3000,refetchIntervalInBackground:false});
-  const accountQuery=useQuery({queryKey:['copilot-channel-account',channel],queryFn:async()=>{
-    if(channel==='feishu') {
-      const [account,health]=await Promise.all([getFeishuChannelAccount(),getFeishuConnectionHealth()]);
-      return {account,health,telegramAccount:null,telegramHealth:null};
-    }
-    const [telegramAccount,telegramHealth]=await Promise.all([getTelegramChannelAccount(),getTelegramConnectionHealth()]);
-    return {account:null,health:null,telegramAccount,telegramHealth};
-  },refetchInterval:3000,refetchIntervalInBackground:false});
-  const diagnostics=useQuery({queryKey:['channel-diagnostics',channel],queryFn:()=>getChannelDiagnostics(channel),refetchInterval:5000,refetchIntervalInBackground:false});
-  const integrationConfig=useQuery({queryKey:['channel-integration-config',channel],queryFn:()=>channel==='telegram'?getTelegramIntegrationConfig():getFeishuIntegrationConfig(),refetchInterval:5000,refetchIntervalInBackground:false});
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [success,setSuccess]=useState('');
   const [token,setToken]=useState<IssuedPairingToken&{id:string}|null>(null);
   const [identityId,setIdentityId]=useState('');
   const [now,setNow]=useState(Date.now());
   const [failedChecks,setFailedChecks]=useState(0);
+
+  const accountQuery=useQuery({
+    queryKey:['copilot-channel-account',channel],
+    queryFn:async()=>{
+      if(channel==='feishu') {
+        const [account,health]=await Promise.all([getFeishuChannelAccount(),getFeishuConnectionHealth()]);
+        return {account,health,telegramAccount:null,telegramHealth:null};
+      }
+      const [telegramAccount,telegramHealth]=await Promise.all([getTelegramChannelAccount(),getTelegramConnectionHealth()]);
+      return {account:null,health:null,telegramAccount,telegramHealth};
+    },
+    refetchInterval:(q)=>{
+      const snapshot=q.state.data;
+      const acc=channel==='feishu'?snapshot?.account:snapshot?.telegramAccount;
+      const h=channel==='feishu'?snapshot?.health:snapshot?.telegramHealth;
+      if(!acc?.secretConfigured)return false;
+      const records=client.getQueryData<Awaited<ReturnType<typeof channels.getChannelRecords>>>(channelKey);
+      const hasActivePairing=Boolean(token||records?.pairings.some(p=>p.accountId===acc.id&&p.accountRevision===acc.configRevision&&['pending','claimed'].includes(p.status)&&p.expiresAt>Date.now()));
+      if(hasActivePairing||h?.state==='connecting'||h?.state==='reconnecting')return 3000;
+      return 15000;
+    },
+    refetchIntervalInBackground:false,
+  });
+
+  const accountData=accountQuery.data;
+  const account=(channel==='feishu'?accountData?.account:accountData?.telegramAccount)??null;
+  const health=(channel==='feishu'?accountData?.health:accountData?.telegramHealth)??null;
+  const isConfigured=Boolean(account?.secretConfigured);
+  const isConnecting=health?.state==='connecting'||health?.state==='reconnecting';
+
+  const query=useQuery({
+    queryKey:channelKey,
+    queryFn:channels.getChannelRecords,
+    refetchInterval:(q)=>{
+      if(!isConfigured)return false;
+      const accId=account?.id;
+      const accRev=account?.configRevision;
+      const hasActivePairing=Boolean(token||q.state.data?.pairings.some(p=>p.accountId===accId&&p.accountRevision===accRev&&['pending','claimed'].includes(p.status)&&p.expiresAt>Date.now()));
+      if(hasActivePairing||isConnecting)return 3000;
+      return 15000;
+    },
+    refetchIntervalInBackground:false,
+  });
+
   const data=query.data && accountQuery.data ? {...query.data,...accountQuery.data} : undefined;
-  const account=(channel==='feishu'?data?.account:data?.telegramAccount)??null;
-  const health=(channel==='feishu'?data?.health:data?.telegramHealth)??null;
   const channelName=channel==='feishu'?copy.channelNameFeishu:copy.channelNameTelegram;
   const accountId=account?.id;
   const accountRevision=account?.configRevision;
   const pairing=data?.pairings.find(p=>p.accountId===accountId && p.accountRevision===accountRevision && ['pending','claimed'].includes(p.status) && p.expiresAt>now);
   const candidate=pairingKey(pairing);
   const timeSensitive=!!(pairing||token);
+
+  const diagnostics=useQuery({
+    queryKey:['channel-diagnostics',channel],
+    queryFn:()=>getChannelDiagnostics(channel),
+    refetchInterval:()=>!isConfigured?false:(timeSensitive||isConnecting?3000:15000),
+    refetchIntervalInBackground:false,
+  });
+  const integrationConfig=useQuery({
+    queryKey:['channel-integration-config',channel],
+    queryFn:()=>channel==='telegram'?getTelegramIntegrationConfig():getFeishuIntegrationConfig(),
+    refetchInterval:()=>isConfigured?15000:false,
+    refetchIntervalInBackground:false,
+  });
+
   useEffect(()=>{
     if(!timeSensitive)return;
     setNow(Date.now());
@@ -106,11 +154,14 @@ export function CopilotChannelsPage() {
   }
   const handleFailedCount=useCallback((count:number)=>setFailedChecks(count),[]);
   const activationReason=queriesError?copy.activationLoadError:blocker?.message??copy.activationReady;
+  const step1Completed=isConfigured&&canPair;
+  const step2Completed=identities.length>0;
+  const step3Completed=authorized;
+
   return (
     <CopilotSettingsShell active="channels" title={copy.channelsCardTitle} description={copy.channelsCardDescription}>
       <div className="flex flex-col gap-4">
-        {(query.isPending || accountQuery.isPending) && <p role="status">{copy.channelsLoading}</p>}
-        {(query.isError || accountQuery.isError || integrationConfig.isError) && <div role="alert">{copy.loadFailed}<Button variant="outline" onClick={()=>void refresh()}>{copy.reloadAction}</Button></div>}
+        {(query.isError || accountQuery.isError || integrationConfig.isError) && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{copy.loadFailed}<Button size="sm" variant="outline" onClick={()=>void refresh()}>{copy.reloadAction}</Button></div>}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         {success && <p role="status" className="text-sm text-muted-foreground">{success}</p>}
         <ChannelStatusBanner
@@ -122,6 +173,7 @@ export function CopilotChannelsPage() {
           blocker={blocker}
           failedChecks={failedChecks}
         />
+        {(query.isPending || accountQuery.isPending) && <ChannelsSkeleton label={copy.channelsLoading} />}
         {data && <>
           <ChannelConnectionStep
             key={`connection:${channel}`}
@@ -130,6 +182,7 @@ export function CopilotChannelsPage() {
             account={account}
             health={health}
             busy={busy}
+            completed={step1Completed}
             onSaveFeishu={(appId,appSecret)=>{setToken(null);return perform(()=>saveFeishuChannelAccount({appId,enabled:true,...(appSecret?{appSecret}:{})}));}}
             onSaveTelegram={(botToken)=>{setToken(null);return perform(()=>saveTelegramChannelAccount({enabled:true,...(botToken?{botToken}:{})}));}}
             onEmergencyStop={()=>{setToken(null);void perform(channel==='feishu'?emergencyStopFeishu:emergencyStopTelegram);}}
@@ -140,6 +193,8 @@ export function CopilotChannelsPage() {
             channelName={channelName}
             busy={busy}
             canPair={canPair}
+            completed={step2Completed}
+            muted={!isConfigured}
             queriesError={queriesError}
             pairing={pairing}
             token={tokenVisible&&token?{value:token.value,expiresAt:token.expiresAt}:null}
@@ -165,6 +220,8 @@ export function CopilotChannelsPage() {
           <ChannelBindingStep
             key={`binding:${channel}`}
             busy={busy}
+            completed={step3Completed}
+            muted={!isConfigured}
             queriesError={queriesError}
             channelName={channelName}
             identities={identities}
@@ -183,16 +240,42 @@ export function CopilotChannelsPage() {
           />
           {channel==='feishu' && <FeishuNotificationSettings available={canPair&&!queriesError} />}
           {channel==='telegram' && <TelegramNotificationSettings available={canPair&&!queriesError} />}
-          <ChannelDiagnostics
-            channelName={channelName}
-            isPending={diagnostics.isPending}
-            isError={diagnostics.isError}
-            checks={diagnostics.data?.checks}
-            onFailedCountChange={handleFailedCount}
-          />
-          <ChannelDeliveries deliveries={deliveries}/>
+          <section className="space-y-3 pt-1">
+            <h2 className="px-1 text-xs font-medium tracking-wide text-muted-foreground">
+              {t3("运维与诊断", "運維與診斷", "Operations & diagnostics")}
+            </h2>
+            <ChannelDiagnostics
+              channelName={channelName}
+              isPending={diagnostics.isPending}
+              isError={diagnostics.isError}
+              checks={diagnostics.data?.checks}
+              onFailedCountChange={handleFailedCount}
+            />
+            <ChannelDeliveries deliveries={deliveries}/>
+          </section>
         </>}
       </div>
     </CopilotSettingsShell>
+  );
+}
+
+function ChannelsSkeleton({ label }: { label: string }) {
+  return (
+    <div role="status" className="space-y-4">
+      <span className="sr-only">{label}</span>
+      {[0, 1, 2].map((index) => (
+        <Card key={index} className="gap-0 overflow-hidden py-0 shadow-none">
+          <div className="flex min-h-16 items-center gap-3 px-4 py-3 sm:px-5">
+            <div className="size-7 animate-pulse rounded-md bg-muted" />
+            <div className="h-4 w-36 animate-pulse rounded bg-muted" />
+            <div className="ml-auto h-5 w-16 animate-pulse rounded-full bg-muted" />
+          </div>
+          <div className="space-y-2 border-t border-border/70 px-4 py-4 sm:px-5">
+            <div className="h-4 w-2/3 animate-pulse rounded bg-muted/70" />
+            <div className="h-9 w-full animate-pulse rounded bg-muted/50" />
+          </div>
+        </Card>
+      ))}
+    </div>
   );
 }

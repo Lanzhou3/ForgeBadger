@@ -8,7 +8,9 @@ export const PET_OPTIONS = [
 export type PetId = (typeof PET_OPTIONS)[number]["id"];
 export const DEFAULT_PET_ID: PetId = "honey-badger";
 export const PET_STORAGE_KEY = "forgebadger.pet";
+export const PET_VISIBLE_STORAGE_KEY = "forgebadger.pet-visible";
 const PET_CHANGED_EVENT = "forgebadger:pet-changed";
+const PET_VISIBLE_CHANGED_EVENT = "forgebadger:pet-visible-changed";
 
 function isPetId(value: unknown): value is PetId {
   return PET_OPTIONS.some((pet) => pet.id === value);
@@ -43,6 +45,37 @@ export function subscribePetPreference(onChange: () => void): () => void {
   window.addEventListener("storage", onStorage);
   return () => {
     window.removeEventListener(PET_CHANGED_EVENT, onChange);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+/** Whether the floating companion widget is shown on dashboard pages (default: on). */
+export function readPetVisiblePreference(): boolean {
+  try {
+    return window.localStorage.getItem(PET_VISIBLE_STORAGE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function writePetVisiblePreference(visible: boolean): boolean {
+  try {
+    window.localStorage.setItem(PET_VISIBLE_STORAGE_KEY, visible ? "1" : "0");
+  } catch {
+    return false;
+  }
+  window.dispatchEvent(new Event(PET_VISIBLE_CHANGED_EVENT));
+  return true;
+}
+
+export function subscribePetVisiblePreference(onChange: () => void): () => void {
+  function onStorage(event: StorageEvent) {
+    if (event.key === PET_VISIBLE_STORAGE_KEY || event.key === null) onChange();
+  }
+  window.addEventListener(PET_VISIBLE_CHANGED_EVENT, onChange);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(PET_VISIBLE_CHANGED_EVENT, onChange);
     window.removeEventListener("storage", onStorage);
   };
 }

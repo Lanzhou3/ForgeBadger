@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Lightbulb, Play, Plus, Trash2 } from "lucide-react";
 
 import { SettingsCardHeader } from "@/components/settings/ui";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -29,6 +28,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { CopilotSettingsShell } from "./copilot-settings-shell";
 import { CopilotEmptyState } from "./copilot-empty-state";
+import { CopilotStatusBadge } from "./copilot-status-badge";
 import { useAutomationsCopy } from "./automations-copy";
 import { useLanguage } from "@/hooks/use-language";
 import {
@@ -168,9 +168,9 @@ export function CopilotAutomationsPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="cron">cron</SelectItem>
-                      <SelectItem value="interval">interval</SelectItem>
-                      <SelectItem value="once">once</SelectItem>
+                      <SelectItem value="cron">{copy.scheduleKinds.cron}</SelectItem>
+                      <SelectItem value="interval">{copy.scheduleKinds.interval}</SelectItem>
+                      <SelectItem value="once">{copy.scheduleKinds.once}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -200,7 +200,11 @@ export function CopilotAutomationsPage() {
           )}
           <CardContent className="space-y-2">
             {automations.isPending ? (
-              <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
+              <div className="space-y-2" aria-busy="true" aria-label={t("common.loading")}>
+                {[0, 1, 2].map((index) => (
+                  <div key={index} className="h-14 animate-pulse rounded-md border border-border/50 bg-muted/40" />
+                ))}
+              </div>
             ) : automations.isError ? (
               <p role="alert" className="text-sm text-destructive">{t("copilot.loadError")}</p>
             ) : items.length === 0 ? (
@@ -242,8 +246,9 @@ function AutomationRow({ automation, pending, onToggle, onRun, onDelete }: {
           <span className="line-clamp-2 min-w-0 break-all" title={automation.name}>{automation.name}</span>
           <StatusBadge status={automation.status} />
         </p>
-        <p className="truncate font-mono text-xs text-muted-foreground">
-          {automation.scheduleKind} {automation.scheduleExpression}
+        <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>{copy.scheduleKinds[automation.scheduleKind] ?? automation.scheduleKind}</span>
+          <span className="truncate font-mono">{automation.scheduleExpression}</span>
         </p>
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -287,13 +292,9 @@ function AutomationRow({ automation, pending, onToggle, onRun, onDelete }: {
 
 function StatusBadge({ status }: { status: CopilotAutomationStatus }) {
   const copy = useAutomationsCopy();
-  const classes = status === "enabled"
-    ? "bg-emerald-500/15 text-emerald-400"
-    : status === "paused"
-      ? "bg-amber-500/15 text-amber-400"
-      : "text-muted-foreground";
+  const tone = status === "enabled" ? "success" : status === "paused" ? "warning" : "muted";
   const label = status === "enabled" ? copy.statusEnabled : status === "paused" ? copy.statusPaused : copy.statusDraft;
-  return <Badge variant="secondary" className={classes}>{label}</Badge>;
+  return <CopilotStatusBadge tone={tone} dot={status === "enabled"}>{label}</CopilotStatusBadge>;
 }
 
 function SuggestionRow({ suggestion, pending, onAccept, onDismiss }: {

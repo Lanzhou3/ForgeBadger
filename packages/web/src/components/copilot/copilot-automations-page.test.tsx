@@ -82,6 +82,7 @@ it("renders the automation list with localized status badges", async () => {
   expect(screen.getByText("Weekly digest")).toBeTruthy();
   expect(screen.getByText("已启用")).toBeTruthy();
   expect(screen.getByText("已暂停")).toBeTruthy();
+  expect(screen.getAllByText("定时 Cron").length).toBeGreaterThan(0);
 });
 
 it("shows an icon empty state when no automations exist", async () => {
@@ -123,7 +124,7 @@ it("keeps non-cron schedules exempt from cron validation", async () => {
   fireEvent.change(screen.getByLabelText("任务提示词"), { target: { value: "Tick" } });
   const trigger = screen.getByRole("combobox", { name: "调度类型" });
   fireEvent.keyDown(trigger, { key: "Enter" });
-  const option = await screen.findByRole("option", { name: "interval" });
+  const option = await screen.findByRole("option", { name: "固定间隔" });
   fireEvent.pointerDown(option, { button: 0 });
   fireEvent.pointerUp(option, { button: 0 });
   fireEvent.click(option);
@@ -187,7 +188,7 @@ it("gives the suggestions and automations cards their own descriptions", async (
   await screen.findByText("Morning report");
   // The page subtitle is no longer repeated on both cards: it renders exactly
   // once (in the shell header), with a dedicated description per card.
-  expect(screen.getAllByText("创建按计划自动运行的 Copilot 任务，结果投递到会话与通知。").length).toBe(1);
+  expect(screen.getAllByText("创建按计划自动运行的 Copilot 任务，结果投递到对话与通知。").length).toBe(1);
   expect(screen.getByText("根据使用历史推荐的可复用任务，接受后会加入下方自动化列表。")).toBeTruthy();
   expect(screen.getByText("已创建的定时任务；可暂停、启用、立即运行或删除。")).toBeTruthy();
 });

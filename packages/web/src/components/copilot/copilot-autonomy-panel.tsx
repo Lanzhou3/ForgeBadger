@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, Lock } from "lucide-react";
 
@@ -9,31 +8,26 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/hooks/use-auth";
-import { useLanguage } from "@/hooks/use-language";
 import {
   getRuntimeSettings,
   updateRuntimeSettings,
   runtimeSettingsMeta,
   runtimeSettingsValue,
+  type RuntimeSettingsState,
 } from "@/lib/api";
 import { runtimeSettingsQueryKey } from "@/components/settings/InstanceRuntimeSettings";
 import { toast } from "@/lib/toast";
 import { useSettingsCopy } from "./settings-copy";
 
 /**
- * Dispatch behavior card (Copilot settings → general): whether confirmed CLI
- * completion evidence auto-advances linked work items. Programmatic dispatch
- * is open to every project by default — there is deliberately no per-adapter
- * allowlist, so every code CLI is equal. Admin-only (the API enforces the
- * same boundary).
+ * Dispatch behavior card (retained standalone export): whether confirmed CLI
+ * completion evidence auto-advances linked work items. Saves immediately on
+ * toggle. Admin-only (the API enforces the same boundary).
  */
 export function CopilotAutonomyPanel() {
   const { user } = useAuth();
-  const { t } = useLanguage();
   const copy = useSettingsCopy();
   const queryClient = useQueryClient();
-  const [autoDispatch, setAutoDispatch] = useState(false);
-  const [dirty, setDirty] = useState(false);
 
   const settings = useQuery({
     queryKey: runtimeSettingsQueryKey,
@@ -42,22 +36,10 @@ export function CopilotAutonomyPanel() {
     enabled: user?.role === "admin",
   });
 
-  // Sync on this card's own value only: other cards save through the same
-  // query, and that must not discard an unsaved toggle here.
-  const savedAutoDispatch = settings.data
-    ? runtimeSettingsValue<boolean>(settings.data, "pm_auto_dispatch") ?? false
-    : undefined;
-  useEffect(() => {
-    if (savedAutoDispatch === undefined) return;
-    setAutoDispatch(savedAutoDispatch);
-    setDirty(false);
-  }, [savedAutoDispatch]);
-
   const save = useMutation({
-    mutationFn: () => updateRuntimeSettings({ pm_auto_dispatch: autoDispatch }),
-    onSuccess: () => {
-      setDirty(false);
-      void queryClient.invalidateQueries({ queryKey: runtimeSettingsQueryKey });
+    mutationFn: (enabled: boolean) => updateRuntimeSettings({ pm_auto_dispatch: enabled }),
+    onSuccess: (state: RuntimeSettingsState) => {
+      queryClient.setQueryData(runtimeSettingsQueryKey, state);
       toast.success(copy.autonomySaved);
     },
     onError: () => toast.error(copy.autonomySaveError),
@@ -66,6 +48,9 @@ export function CopilotAutonomyPanel() {
   if (user?.role !== "admin") return null;
 
   const readonly = settings.data?.readonly ?? false;
+  const autoDispatch = settings.data
+    ? runtimeSettingsValue<boolean>(settings.data, "pm_auto_dispatch") ?? false
+    : false;
   const source = settings.data ? runtimeSettingsMeta(settings.data, "pm_auto_dispatch")?.source : undefined;
 
   return (
@@ -95,7 +80,7 @@ export function CopilotAutonomyPanel() {
             </Button>
           </div>
         ) : settings.isLoading ? (
-          <p className="text-xs text-muted-foreground">…</p>
+          <div className="h-16 animate-pulse rounded-md border border-border/50 bg-muted/40" />
         ) : (
           <>
             {readonly && (
@@ -107,27 +92,9 @@ export function CopilotAutonomyPanel() {
               title={copy.autonomyAutoDispatch}
               description={copy.autonomyAutoDispatchDescription}
               checked={autoDispatch}
-              disabled={readonly}
-              onCheckedChange={(value) => {
-                setAutoDispatch(value);
-                setDirty(true);
-              }}
+              disabled={readonly || save.isPending}
+              onCheckedChange={(value) => save.mutate(value)}
             />
-            {/* Sticky so the save action stays visible at the bottom of the
-                settings scroll container instead of being clipped below the
-                first viewport. -bottom-6 matches the Card's py-6 bottom
-                padding so the row settles into its natural rest position
-                without a jump when the scroll reaches the end. */}
-            <div className="sticky -bottom-6 z-10 -mx-6 flex justify-end border-t border-border/70 bg-card/95 px-6 py-2.5 backdrop-blur-sm">
-              <Button
-                size="sm"
-                className="h-8"
-                disabled={readonly || !dirty || save.isPending}
-                onClick={() => save.mutate()}
-              >
-                {save.isPending ? copy.autonomySaving : t("common.save")}
-              </Button>
-            </div>
           </>
         )}
       </CardContent>

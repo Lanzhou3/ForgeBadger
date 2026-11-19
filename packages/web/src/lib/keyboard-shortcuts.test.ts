@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isCommandPaletteShortcut,
+  isCopilotToggleShortcut,
   isSidebarToggleShortcut,
   shouldHandleGlobalShortcut,
 } from "./keyboard-shortcuts";
@@ -18,6 +19,14 @@ describe("keyboard shortcuts", () => {
     expect(isSidebarToggleShortcut({ key: "B", metaKey: true })).toBe(true);
     expect(isSidebarToggleShortcut({ key: "b", ctrlKey: true, shiftKey: true })).toBe(false);
     expect(isSidebarToggleShortcut({ key: "b", ctrlKey: true, altKey: true })).toBe(false);
+  });
+
+  it("detects copilot toggle shortcut (Cmd/Ctrl+J) without shift/alt modifiers", () => {
+    expect(isCopilotToggleShortcut({ key: "j", ctrlKey: true })).toBe(true);
+    expect(isCopilotToggleShortcut({ key: "J", metaKey: true })).toBe(true);
+    expect(isCopilotToggleShortcut({ key: "j" })).toBe(false);
+    expect(isCopilotToggleShortcut({ key: "j", ctrlKey: true, shiftKey: true })).toBe(false);
+    expect(isCopilotToggleShortcut({ key: "j", metaKey: true, altKey: true })).toBe(false);
   });
 
   it("does not handle global shortcuts while terminal or form fields own keyboard input", () => {

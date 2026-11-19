@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import type { ThemedToken } from "shiki";
 
 import { highlightWorkspaceCode, tokenFontStyle } from "@/components/projects/workspace/highlight";
+import { useLanguage } from "@/hooks/use-language";
 import { cn } from "@/lib/utils";
 
 /**
@@ -244,6 +245,7 @@ async function highlightChatCode(code: string, language: string): Promise<Themed
  * Memoized so completed blocks are never re-highlighted during streaming.
  */
 const ChatCodeBlock = memo(function ChatCodeBlock({ code, language }: { code: string; language: string }) {
+  const { t } = useLanguage();
   const [tokens, setTokens] = useState<ThemedToken[][] | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -277,11 +279,11 @@ const ChatCodeBlock = memo(function ChatCodeBlock({ code, language }: { code: st
         <button
           type="button"
           onClick={() => void onCopy()}
-          aria-label={copied ? "Copied" : "Copy code"}
+          aria-label={copied ? t("copilot.copied") : t("copilot.copyCode")}
           className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 normal-case tracking-normal transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
-          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-          <span>{copied ? "Copied" : "Copy"}</span>
+          {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
+          <span>{copied ? t("copilot.copied") : t("copilot.copy")}</span>
         </button>
       </div>
       <pre className="overflow-x-auto p-3 font-mono text-xs leading-[1.6]">

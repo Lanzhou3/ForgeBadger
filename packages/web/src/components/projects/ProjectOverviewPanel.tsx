@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
+  ArrowUpRight,
   Bot,
   Check,
   Copy,
@@ -12,10 +13,9 @@ import {
   FolderGit2,
   GitBranch,
   Layers,
+  Link2,
   ListChecks,
   Network,
-  PanelRightClose,
-  PanelRightOpen,
   Pencil,
   Play,
   Sparkles,
@@ -25,49 +25,45 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MarkdownRenderer } from "@/components/projects/markdown-renderer";
-import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
+import { CliBrandChip } from "@/components/cli-brand-chip";
 import { WORK_ITEM_LIMIT } from "@/components/projects/project-manager/types";
+import { findSessionTaskPacket } from "@/components/sessions/session-task-packet";
+import { formatSessionRelativeTime } from "@/components/sessions/session-board-utils";
 import { useLanguage } from "@/hooks/use-language";
 import {
   getProjectGitChanges,
   getProjectGraphOverview,
   getProjectManagerGoal,
-  getProjectWorkspaceFile,
   getProjectWorkspaceTree,
   listProjectManagerWorkItems,
   type Project,
+  type ProjectManagerTaskPacket,
   type Session,
 } from "@/lib/api";
 import { listGoals } from "@/lib/copilot-api";
 import { listFleets } from "@/lib/fleet-api";
+import { normalizeSessionStatus } from "@/lib/session-status";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
-export type ProjectOverviewTabTarget =
-  | "overview"
-  | "sessions"
-  | "git"
-  | "files"
-  | "graph"
-  | "project-manager"
-  | "skills"
-  | "config"
-  | "activity";
+export type ProjectOverviewTarget =
+  | { tab: "project-manager"; workItemId?: string }
+  | { tab: "code"; view: "files" | "git" | "graph"; file?: string }
+  | { tab: "config"; view?: "rules" | "skills" };
 
 interface ProjectOverviewPanelProps {
   project: Project;
   sessions: Session[];
+  taskPackets?: ProjectManagerTaskPacket[];
+  now?: number | null;
   actorId?: string | null;
   templateName?: string | null;
   overrideSkillCount?: number;
   appliedProviderLabel?: string | null;
-  sidebarOpen: boolean;
-  onToggleSidebar: () => void;
-  onSelectTab: (tab: ProjectOverviewTabTarget) => void;
-  onOpenFileInFiles: (filePath: string) => void;
+  onNavigate: (target: ProjectOverviewTarget) => void;
   onEditMetadata: () => void;
   onStartSession?: () => void;
+  onStartShell?: () => void;
   onAskCopilot?: () => void;
 }
 
@@ -79,34 +75,36 @@ const RULE_FILE_CANDIDATES = [
   ".cursorrules",
 ];
 
+const INITIAL_SESSION_LIMIT = 6;
+
 function isSessionLive(status: string): boolean {
-  const normalized = status.toLowerCase();
-  return normalized === "running" || normalized === "active" || normalized === "busy" || normalized === "idle";
+  const normalized = normalizeSessionStatus(status);
+  return normalized === "running";
 }
 
 /**
- * Vibe Coding Command Center overview for a project: unifies active goal &
- * context, running AI CLI sessions, Copilot Goals & Fleets, task progress,
- * AI rules preview, and a collapsible workspace snapshot sidebar.
+ * Focused Vibe Coding Command Center overview for a project:
+ * unifies project goal/context, live & recent CLI sessions, active Copilot
+ * Goals & Fleets, task progress, and a compact engineering snapshot sidebar.
  */
 export function ProjectOverviewPanel({
   project,
   sessions,
+  taskPackets = [],
+  now = null,
   actorId = null,
   templateName = null,
   overrideSkillCount = 0,
   appliedProviderLabel = null,
-  sidebarOpen,
-  onToggleSidebar,
-  onSelectTab,
-  onOpenFileInFiles,
+  onNavigate,
   onEditMetadata,
   onStartSession,
+  onStartShell,
   onAskCopilot,
 }: ProjectOverviewPanelProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [copiedPath, setCopiedPath] = useState(false);
-  const [selectedRuleFile, setSelectedRuleFile] = useState<string | null>(null);
+  const [showAllSessions, setShowAllSessions] = useState(false);
 
   const goalQuery = useQuery({
     queryKey: ["project-manager", project.id, "goal", actorId],
@@ -166,20 +164,6 @@ export function ProjectOverviewPanel({
     return found;
   }, [workspaceRootQuery.data?.entries]);
 
-  const activeRulePath = useMemo(() => {
-    if (selectedRuleFile && detectedRuleFiles.includes(selectedRuleFile)) {
-      return selectedRuleFile;
-    }
-    return detectedRuleFiles[0] ?? null;
-  }, [detectedRuleFiles, selectedRuleFile]);
-
-  const ruleFileQuery = useQuery({
-    queryKey: ["project-workspace-file", project.id, activeRulePath],
-    queryFn: () => getProjectWorkspaceFile(project.id, activeRulePath!),
-    enabled: Boolean(activeRulePath),
-    retry: false,
-  });
-
   const orderedSessions = useMemo(() => {
     return [...sessions].sort((a, b) => {
       const aLive = isSessionLive(a.status) ? 0 : 1;
@@ -190,6 +174,15 @@ export function ProjectOverviewPanel({
       return (Number.isFinite(bTs) ? bTs : 0) - (Number.isFinite(aTs) ? aTs : 0);
     });
   }, [sessions]);
+
+  const runningCount = useMemo(
+    () => sessions.filter((s) => isSessionLive(s.status)).length,
+    [sessions],
+  );
+
+  const visibleSessions = showAllSessions
+    ? orderedSessions
+    : orderedSessions.slice(0, INITIAL_SESSION_LIMIT);
 
   const projectGoals = useMemo(
     () => (copilotGoalsQuery.data?.goals ?? []).filter((g) => g.projectId === project.id),
@@ -250,159 +243,139 @@ export function ProjectOverviewPanel({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-end">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onToggleSidebar}
-          className="text-xs text-muted-foreground"
-        >
-          {sidebarOpen ? (
-            <PanelRightClose className="size-4" />
-          ) : (
-            <PanelRightOpen className="size-4" />
-          )}
-          {t("projects.toggleSidebar")}
-        </Button>
-      </div>
-
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
-        <div className="min-w-0 flex-1 space-y-5">
-          {/* 1. Current Goal & Project Context */}
-          <section className="rounded-lg border bg-card p-5 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Target className="size-4 text-primary" />
-                <h2 className="text-sm font-semibold">
-                  {t("projects.overviewGoalTitle")}
-                </h2>
-                {goal?.status && (
-                  <Badge variant="outline" className="rounded-full text-[11px]">
-                    {goal.status}
-                  </Badge>
-                )}
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={onEditMetadata}
-                >
-                  <Pencil className="size-3.5" />
-                  {t("projects.editMetadata")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleAskCopilot}
-                >
-                  <Sparkles className="size-3.5" />
-                  {t("projects.overviewAskCopilot")}
-                </Button>
-              </div>
-            </div>
-
-            {goal?.summary ? (
-              <div className="space-y-2">
-                <p className="text-sm leading-relaxed">{goal.summary}</p>
-                {project.description && (
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {project.description}
-                  </p>
-                )}
-                {(goal.constraints.length > 0 || goal.acceptanceCriteria.length > 0) && (
-                  <div className="flex flex-wrap gap-2 pt-1 text-xs text-muted-foreground">
-                    {goal.constraints.length > 0 && (
-                      <Badge variant="secondary" className="rounded-full font-normal">
-                        {t("projects.projectManagerConstraints")}: {goal.constraints.length}
-                      </Badge>
-                    )}
-                    {goal.acceptanceCriteria.length > 0 && (
-                      <Badge variant="secondary" className="rounded-full font-normal">
-                        {t("projects.projectManagerAcceptanceCriteria")}: {goal.acceptanceCriteria.length}
-                      </Badge>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : project.description ? (
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                {project.description}
-              </p>
-            ) : (
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                {t("projects.overviewNoGoal")}
-              </p>
-            )}
-          </section>
-
-          {/* 2. Live AI CLI Sessions */}
-          <section className="rounded-lg border bg-card p-5 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Terminal className="size-4 text-primary" />
-                <h2 className="text-sm font-semibold">
-                  {t("projects.overviewActiveSessions")}
-                </h2>
-                <Badge variant="secondary" className="rounded-full text-[11px] tabular-nums">
-                  {sessions.length}
+    <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
+      <div className="min-w-0 flex-1 space-y-4">
+        {/* 1. Project Goal & Context */}
+        <section className="space-y-3 rounded-lg border bg-card p-5 shadow-card">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Target className="size-4 text-brand" />
+              <h2 className="text-sm font-semibold">{t("projects.overviewGoalTitle")}</h2>
+              {goal?.status && (
+                <Badge variant="outline" className="rounded-full text-[11px]">
+                  {goal.status}
                 </Badge>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {onStartSession && (
-                  <Button type="button" size="sm" variant="outline" onClick={onStartSession}>
-                    <Play className="size-3.5" />
-                    {t("projects.newSession")}
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onSelectTab("sessions")}
-                >
-                  {t("nav.sessions")}
-                  <ArrowRight className="size-3.5" />
-                </Button>
-              </div>
+              )}
             </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button type="button" variant="ghost" size="sm" onClick={onEditMetadata}>
+                <Pencil className="size-3.5" />
+                {t("projects.editMetadata")}
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={handleAskCopilot}>
+                <Sparkles className="size-3.5 text-brand" />
+                {t("projects.overviewAskCopilot")}
+              </Button>
+            </div>
+          </div>
 
-            {orderedSessions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {t("projects.overviewNoSessions")}
-              </p>
-            ) : (
-              <div className="divide-y rounded-md border">
-                {orderedSessions.slice(0, 5).map((session) => {
-                  const live = isSessionLive(session.status);
+          {goal?.summary ? (
+            <div className="space-y-1.5">
+              <p className="text-sm leading-relaxed">{goal.summary}</p>
+              {project.description && (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {project.description}
+                </p>
+              )}
+            </div>
+          ) : project.description ? (
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {project.description}
+            </p>
+          ) : (
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {t("projects.overviewNoGoal")}
+            </p>
+          )}
+        </section>
+
+        {/* 2. Project AI CLI & Shell Sessions */}
+        <section className="space-y-3 rounded-lg border bg-card p-5 shadow-card">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Terminal className="size-4 text-brand" />
+              <h2 className="text-sm font-semibold">{t("nav.sessions")}</h2>
+              <Badge variant="secondary" className="rounded-full text-[11px] tabular-nums">
+                {t("projects.sessionsSummary")
+                  .replace("{total}", String(sessions.length))
+                  .replace("{running}", String(runningCount))}
+              </Badge>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {onStartShell && (
+                <Button type="button" size="sm" variant="ghost" onClick={onStartShell}>
+                  <Terminal className="size-3.5" />
+                  {t("projects.startShell")}
+                </Button>
+              )}
+              {onStartSession && (
+                <Button type="button" size="sm" variant="outline" onClick={onStartSession}>
+                  <Play className="size-3.5" />
+                  {t("projects.newSession")}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {orderedSessions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t("projects.overviewNoSessions")}</p>
+          ) : (
+            <div className="space-y-2">
+              <div className="divide-y divide-border/70 rounded-md border border-border/70">
+                {visibleSessions.map((session) => {
+                  const normalized = normalizeSessionStatus(session.status);
+                  const live = normalized === "running";
+                  const linkedPacket = findSessionTaskPacket(taskPackets, session.id);
+                  const relativeTime =
+                    now === null ? null : formatSessionRelativeTime(session, now, language);
+
                   return (
                     <div
                       key={session.id}
-                      className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5"
+                      className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/30"
                     >
                       <div className="min-w-0 flex-1 space-y-0.5">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span
                             className={cn(
                               "size-2 shrink-0 rounded-full",
-                              live ? "bg-emerald-500" : "bg-muted-foreground/40",
+                              live
+                                ? "forgebadger-pulse-dot bg-success"
+                                : normalized === "error"
+                                  ? "bg-destructive"
+                                  : normalized === "lost"
+                                    ? "bg-warning"
+                                    : "bg-muted-foreground/40",
                             )}
                           />
-                          <span className="truncate text-sm font-medium">
-                            {session.name || session.id}
-                          </span>
-                          {session.aiTool && (
-                            <Badge variant="outline" className="rounded-full text-[10px]">
-                              {session.aiTool}
-                            </Badge>
+                          <Link
+                            href={`/sessions/${session.id}`}
+                            className="truncate text-sm font-medium hover:text-brand hover:underline"
+                          >
+                            {session.name || session.runtimeSessionName || session.id}
+                          </Link>
+                          {session.aiTool && <CliBrandChip aiTool={session.aiTool} />}
+                          {linkedPacket && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onNavigate({
+                                  tab: "project-manager",
+                                  workItemId: linkedPacket.workItemId,
+                                })
+                              }
+                              className="inline-flex max-w-44 items-center gap-1 rounded-md border border-border/70 px-1.5 py-0.5 text-[11px] text-brand hover:underline"
+                              title={linkedPacket.title}
+                            >
+                              <Link2 className="size-3 shrink-0" />
+                              <span className="truncate">{linkedPacket.title}</span>
+                            </button>
                           )}
-                          <Badge variant="secondary" className="rounded-full text-[10px]">
-                            {session.status}
-                          </Badge>
+                          {relativeTime && (
+                            <span className="text-[11px] text-muted-foreground">
+                              {relativeTime}
+                            </span>
+                          )}
                         </div>
                         {session.lastPrompt && (
                           <p className="truncate pl-4 text-xs text-muted-foreground">
@@ -410,336 +383,301 @@ export function ProjectOverviewPanel({
                           </p>
                         )}
                       </div>
-                      <Button asChild variant="outline" size="sm">
+                      <Button asChild variant="outline" size="sm" className="h-7 px-2.5 text-xs">
                         <Link href={`/sessions/${session.id}`}>
                           {t("projects.projectManagerOpenSession")}
+                          <ArrowUpRight className="size-3.5" />
                         </Link>
                       </Button>
                     </div>
                   );
                 })}
               </div>
-            )}
-          </section>
 
-          {/* 3. Copilot Goals & Fleet */}
-          <section className="rounded-lg border bg-card p-5 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Bot className="size-4 text-primary" />
-                <h2 className="text-sm font-semibold">
-                  {t("projects.overviewGoalsAndFleet")}
-                </h2>
-              </div>
+              {orderedSessions.length > INITIAL_SESSION_LIMIT && (
+                <div className="flex justify-center">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs text-muted-foreground"
+                    onClick={() => setShowAllSessions((prev) => !prev)}
+                  >
+                    {showAllSessions
+                      ? t("projects.overviewCollapseSessions")
+                      : t("projects.overviewShowAllSessions").replace(
+                          "{count}",
+                          String(orderedSessions.length),
+                        )}
+                  </Button>
+                </div>
+              )}
             </div>
+          )}
+        </section>
 
-            {projectGoals.length === 0 && projectFleets.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {t("projects.overviewNoGoalsOrFleet")}
-              </p>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {projectFleets.map((fleet) => (
-                  <Link
-                    key={fleet.id}
-                    href={`/fleet/${fleet.id}`}
-                    className="group rounded-md border p-3 transition-colors hover:border-primary/40 hover:bg-muted/30"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <Badge variant="secondary" className="rounded-full text-[10px]">
-                        {t("projects.activeFleetBadge")
-                          .replace("{running}", String(fleet.taskRunning))
-                          .replace("{total}", String(fleet.taskTotal))}
-                      </Badge>
-                      <span className="text-[11px] text-muted-foreground">
-                        {fleet.status}
-                      </span>
-                    </div>
-                    <p className="mt-1.5 truncate text-sm font-medium group-hover:underline">
-                      {fleet.title}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                      {fleet.taskDone}/{fleet.taskTotal}
-                    </p>
-                  </Link>
-                ))}
-                {projectGoals.map((cGoal) => (
-                  <Link
-                    key={cGoal.id}
-                    href={`/copilot/goals/${cGoal.id}`}
-                    className="group rounded-md border p-3 transition-colors hover:border-primary/40 hover:bg-muted/30"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline" className="rounded-full text-[10px]">
-                        {t("projects.activeGoalBadge")
-                          .replace("{passes}", String(cGoal.taskPasses))
-                          .replace("{total}", String(cGoal.taskTotal))}
-                      </Badge>
-                      <span className="text-[11px] text-muted-foreground">
-                        {cGoal.status}
-                      </span>
-                    </div>
-                    <p className="mt-1.5 truncate text-sm font-medium group-hover:underline">
-                      {cGoal.title}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                      {cGoal.taskPasses}/{cGoal.taskTotal}
-                    </p>
-                  </Link>
-                ))}
-              </div>
-            )}
+        {/* 3. Autonomous Copilot Goals & Fleet */}
+        {(projectGoals.length > 0 || projectFleets.length > 0) && (
+          <section className="space-y-3 rounded-lg border bg-card p-5 shadow-card">
+            <div className="flex items-center gap-2">
+              <Bot className="size-4 text-brand" />
+              <h2 className="text-sm font-semibold">{t("projects.overviewGoalsAndFleet")}</h2>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {projectFleets.map((fleet) => (
+                <Link
+                  key={fleet.id}
+                  href={`/fleet/${fleet.id}`}
+                  className="group rounded-md border border-border/70 p-3 transition-colors hover:border-brand/40 hover:bg-muted/30"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge variant="secondary" className="rounded-full text-[10px]">
+                      {t("projects.activeFleetBadge")
+                        .replace("{running}", String(fleet.taskRunning))
+                        .replace("{total}", String(fleet.taskTotal))}
+                    </Badge>
+                    <span className="text-[11px] text-muted-foreground">{fleet.status}</span>
+                  </div>
+                  <p className="mt-1.5 truncate text-sm font-medium group-hover:underline">
+                    {fleet.title}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+                    {fleet.taskDone}/{fleet.taskTotal}
+                  </p>
+                </Link>
+              ))}
+              {projectGoals.map((cGoal) => (
+                <Link
+                  key={cGoal.id}
+                  href={`/copilot/goals/${cGoal.id}`}
+                  className="group rounded-md border border-border/70 p-3 transition-colors hover:border-brand/40 hover:bg-muted/30"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge variant="outline" className="rounded-full text-[10px]">
+                      {t("projects.activeGoalBadge")
+                        .replace("{passes}", String(cGoal.taskPasses))
+                        .replace("{total}", String(cGoal.taskTotal))}
+                    </Badge>
+                    <span className="text-[11px] text-muted-foreground">{cGoal.status}</span>
+                  </div>
+                  <p className="mt-1.5 truncate text-sm font-medium group-hover:underline">
+                    {cGoal.title}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+                    {cGoal.taskPasses}/{cGoal.taskTotal}
+                  </p>
+                </Link>
+              ))}
+            </div>
           </section>
+        )}
 
-          {/* 4. Task Pipeline Progress */}
-          <section className="rounded-lg border bg-card p-5 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <ListChecks className="size-4 text-primary" />
-                <h2 className="text-sm font-semibold">
-                  {t("projects.overviewWorkProgress")}
-                </h2>
+        {/* 4. Compact Task Progress Strip */}
+        <section className="space-y-3 rounded-lg border bg-card p-5 shadow-card">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ListChecks className="size-4 text-brand" />
+              <h2 className="text-sm font-semibold">{t("projects.overviewWorkProgress")}</h2>
+              {workItemCounts.total > 0 && (
                 <Badge variant="secondary" className="rounded-full text-[11px] tabular-nums">
                   {workItemCounts.done}/{workItemCounts.total}
                 </Badge>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => onSelectTab("project-manager")}
-              >
-                {t("projects.overviewOpenBoard")}
-                <ArrowRight className="size-3.5" />
-              </Button>
+              )}
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onNavigate({ tab: "project-manager" })}
+            >
+              {t("projects.overviewOpenBoard")}
+              <ArrowRight className="size-3.5" />
+            </Button>
+          </div>
 
-            {workItemCounts.total > 0 ? (
-              <div className="space-y-2.5">
-                <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
-                  {workItemCounts.done > 0 && (
-                    <div
-                      className="bg-emerald-500 transition-all"
-                      style={{
-                        width: `${(workItemCounts.done / workItemCounts.total) * 100}%`,
-                      }}
-                    />
-                  )}
-                  {workItemCounts.ready_for_review > 0 && (
-                    <div
-                      className="bg-amber-500 transition-all"
-                      style={{
-                        width: `${(workItemCounts.ready_for_review / workItemCounts.total) * 100}%`,
-                      }}
-                    />
-                  )}
-                  {workItemCounts.in_progress > 0 && (
-                    <div
-                      className="bg-primary transition-all"
-                      style={{
-                        width: `${(workItemCounts.in_progress / workItemCounts.total) * 100}%`,
-                      }}
-                    />
-                  )}
-                  {workItemCounts.blocked > 0 && (
-                    <div
-                      className="bg-destructive transition-all"
-                      style={{
-                        width: `${(workItemCounts.blocked / workItemCounts.total) * 100}%`,
-                      }}
-                    />
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-3 text-xs text-muted-foreground tabular-nums">
-                  <span>{t("projects.projectManagerStatusTodo")}: {workItemCounts.todo}</span>
-                  <span>{t("projects.projectManagerStatusInProgress")}: {workItemCounts.in_progress}</span>
-                  <span>{t("projects.projectManagerStatusReadyForReview")}: {workItemCounts.ready_for_review}</span>
-                  {workItemCounts.blocked > 0 && (
-                    <span className="text-destructive">
-                      {t("projects.projectManagerStatusBlocked")}: {workItemCounts.blocked}
-                    </span>
-                  )}
-                  <span>{t("projects.projectManagerStatusDone")}: {workItemCounts.done}</span>
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                {t("projects.projectManagerNoWorkItemsBody")}
-              </p>
-            )}
-          </section>
-
-          {/* 5. AI Rules & Context Preview */}
-          <section className="rounded-lg border bg-card p-5 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <FileCode2 className="size-4 text-primary" />
-                <h2 className="text-sm font-semibold">
-                  {t("projects.overviewRulesPreview")}
-                </h2>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {activeRulePath && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onOpenFileInFiles(activeRulePath)}
-                  >
-                    {t("projects.overviewOpenInFiles")}
-                    <ArrowRight className="size-3.5" />
-                  </Button>
+          {workItemCounts.total > 0 ? (
+            <div className="space-y-2.5">
+              <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
+                {workItemCounts.done > 0 && (
+                  <div
+                    className="bg-emerald-500 transition-all"
+                    style={{ width: `${(workItemCounts.done / workItemCounts.total) * 100}%` }}
+                  />
+                )}
+                {workItemCounts.ready_for_review > 0 && (
+                  <div
+                    className="bg-amber-500 transition-all"
+                    style={{
+                      width: `${(workItemCounts.ready_for_review / workItemCounts.total) * 100}%`,
+                    }}
+                  />
+                )}
+                {workItemCounts.in_progress > 0 && (
+                  <div
+                    className="bg-brand transition-all"
+                    style={{
+                      width: `${(workItemCounts.in_progress / workItemCounts.total) * 100}%`,
+                    }}
+                  />
+                )}
+                {workItemCounts.blocked > 0 && (
+                  <div
+                    className="bg-destructive transition-all"
+                    style={{
+                      width: `${(workItemCounts.blocked / workItemCounts.total) * 100}%`,
+                    }}
+                  />
                 )}
               </div>
-            </div>
-
-            {detectedRuleFiles.length > 0 ? (
-              <div className="space-y-3">
-                <div className="flex flex-wrap gap-1.5">
-                  {detectedRuleFiles.map((filePath) => (
-                    <Button
-                      key={filePath}
-                      type="button"
-                      size="sm"
-                      variant={activeRulePath === filePath ? "secondary" : "outline"}
-                      className="h-7 px-2.5 font-mono text-xs"
-                      onClick={() => setSelectedRuleFile(filePath)}
-                    >
-                      {filePath}
-                    </Button>
-                  ))}
-                </div>
-                {ruleFileQuery.isLoading ? (
-                  <p className="text-xs text-muted-foreground">{t("projects.workspaceLoading")}</p>
-                ) : ruleFileQuery.data?.content ? (
-                  <div className="max-h-72 overflow-y-auto rounded-md border bg-muted/20 p-3 text-sm">
-                    <MarkdownRenderer content={ruleFileQuery.data.content} />
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    {t("projects.workspaceFileEmpty")}
-                  </p>
+              <div className="flex flex-wrap gap-3 text-xs text-muted-foreground tabular-nums">
+                <span>
+                  {t("projects.projectManagerStatusTodo")}: {workItemCounts.todo}
+                </span>
+                <span>
+                  {t("projects.projectManagerStatusInProgress")}: {workItemCounts.in_progress}
+                </span>
+                <span>
+                  {t("projects.projectManagerStatusReadyForReview")}:{" "}
+                  {workItemCounts.ready_for_review}
+                </span>
+                {workItemCounts.blocked > 0 && (
+                  <span className="text-destructive">
+                    {t("projects.projectManagerStatusBlocked")}: {workItemCounts.blocked}
+                  </span>
                 )}
+                <span>
+                  {t("projects.projectManagerStatusDone")}: {workItemCounts.done}
+                </span>
               </div>
-            ) : (
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm text-muted-foreground">
-                  {t("projects.scanNoInstructionFiles")}
-                </p>
-                <Button
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t("projects.tasksNoGoalYet")}</p>
+          )}
+        </section>
+      </div>
+
+      {/* Focused Engineering Snapshot Sidebar (no duplicate file tree) */}
+      <aside className="w-full shrink-0 lg:w-[320px] xl:w-[340px]">
+        <section className="space-y-3 rounded-lg border bg-card p-4 shadow-card">
+          <h2 className="text-sm font-semibold">{t("projects.overviewProperties")}</h2>
+
+          <div className="space-y-2 text-xs">
+            <div className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <GitBranch className="size-3.5" />
+                <span>{t("projects.overviewGitBranch")}</span>
+              </div>
+              {gitData?.isGitRepo ? (
+                <button
                   type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onSelectTab("config")}
+                  onClick={() => onNavigate({ tab: "code", view: "git" })}
+                  className="font-medium hover:text-brand hover:underline"
+                >
+                  {gitData.branch || "HEAD"} ·{" "}
+                  {gitData.changed.length === 0
+                    ? t("projects.gitClean")
+                    : t("projects.gitDirtyCount").replace("{count}", String(gitData.changed.length))}
+                </button>
+              ) : (
+                <span className="text-muted-foreground">{t("projects.scanNotGitRepo")}</span>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Layers className="size-3.5" />
+                <span>{t("projects.overviewConfigStatus")}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate({ tab: "config" })}
+                className="truncate font-medium hover:text-brand hover:underline"
+              >
+                {templateName ?? t("projects.templateUnbound")}
+                {overrideSkillCount > 0 ? ` · ${overrideSkillCount}` : ""}
+              </button>
+            </div>
+
+            {appliedProviderLabel && (
+              <div className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Sparkles className="size-3.5" />
+                  <span>{t("projects.model")}</span>
+                </div>
+                <span className="truncate font-medium">{appliedProviderLabel}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Network className="size-3.5" />
+                <span>{t("projects.overviewCodeGraphStatus")}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate({ tab: "code", view: "graph" })}
+                className="font-medium hover:text-brand hover:underline"
+              >
+                {graphAvailable
+                  ? t("projects.scanCodeGraphReady")
+                  : t("projects.scanCodeGraphMissing")}
+              </button>
+            </div>
+
+            <div className="space-y-1.5 rounded-md border border-border/70 px-3 py-2">
+              <div className="flex items-center justify-between gap-2 text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <FileCode2 className="size-3.5" />
+                  {t("projects.overviewRuleFiles")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onNavigate({ tab: "config", view: "rules" })}
+                  className="text-[11px] font-medium text-foreground hover:text-brand hover:underline"
                 >
                   {t("projects.overviewOpenConfig")}
-                </Button>
+                </button>
               </div>
-            )}
-          </section>
-        </div>
-
-        {/* Collapsible Right Properties & Context Sidebar */}
-        {sidebarOpen && (
-          <aside className="w-full shrink-0 space-y-4 lg:w-[340px] xl:w-[360px]">
-            <section className="rounded-lg border bg-card p-4 space-y-3">
-              <h2 className="text-sm font-semibold">
-                {t("projects.overviewProperties")}
-              </h2>
-
-              <div className="space-y-2.5 text-xs">
-                <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <GitBranch className="size-3.5" />
-                    <span>{t("projects.overviewGitBranch")}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {gitData?.isGitRepo ? (
-                      <button
-                        type="button"
-                        onClick={() => onSelectTab("git")}
-                        className="font-medium hover:underline"
-                      >
-                        {gitData.branch || "HEAD"} ·{" "}
-                        {gitData.changed.length === 0
-                          ? t("projects.gitClean")
-                          : t("projects.gitDirtyCount").replace("{count}", String(gitData.changed.length))}
-                      </button>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        {t("projects.scanNotGitRepo")}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Layers className="size-3.5" />
-                    <span>{t("projects.overviewConfigStatus")}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onSelectTab("config")}
-                    className="truncate font-medium hover:underline"
-                  >
-                    {templateName ?? t("projects.templateUnbound")}
-                    {overrideSkillCount > 0 ? ` · ${overrideSkillCount}` : ""}
-                  </button>
-                </div>
-
-                {appliedProviderLabel && (
-                  <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Sparkles className="size-3.5" />
-                      <span>{t("projects.model")}</span>
-                    </div>
-                    <span className="truncate font-medium">{appliedProviderLabel}</span>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Network className="size-3.5" />
-                    <span>{t("projects.overviewCodeGraphStatus")}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onSelectTab("graph")}
-                    className="font-medium hover:underline"
-                  >
-                    {graphAvailable
-                      ? t("projects.scanCodeGraphReady")
-                      : t("projects.scanCodeGraphMissing")}
-                  </button>
-                </div>
-
-                <div className="rounded-md border px-3 py-2 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 text-muted-foreground">
-                    <span className="flex items-center gap-1.5">
-                      <FolderGit2 className="size-3.5" />
-                      {t("projects.directoryPath")}
-                    </span>
+              {detectedRuleFiles.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {detectedRuleFiles.map((filePath) => (
                     <button
+                      key={filePath}
                       type="button"
-                      onClick={handleCopyPath}
-                      className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground hover:underline"
+                      onClick={() => onNavigate({ tab: "code", view: "files", file: filePath })}
+                      className="rounded border border-border/70 bg-muted/40 px-2 py-0.5 font-mono text-[11px] text-foreground transition-colors hover:border-brand/50 hover:text-brand"
                     >
-                      {copiedPath ? <Check className="size-3" /> : <Copy className="size-3" />}
-                      {t("projects.copyPath")}
+                      {filePath}
                     </button>
-                  </div>
-                  <p className="break-all font-mono text-[11px] text-foreground/90">
-                    {displayPath}
-                  </p>
+                  ))}
                 </div>
-              </div>
-            </section>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  {t("projects.scanNoInstructionFiles")}
+                </p>
+              )}
+            </div>
 
-            <WorkspaceContextPanel projectId={project.id} />
-          </aside>
-        )}
-      </div>
+            <div className="space-y-1.5 rounded-md border border-border/70 px-3 py-2">
+              <div className="flex items-center justify-between gap-2 text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <FolderGit2 className="size-3.5" />
+                  {t("projects.directoryPath")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleCopyPath()}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground hover:underline"
+                >
+                  {copiedPath ? <Check className="size-3" /> : <Copy className="size-3" />}
+                  {t("projects.copyPath")}
+                </button>
+              </div>
+              <p className="break-all font-mono text-[11px] text-foreground/90">{displayPath}</p>
+            </div>
+          </div>
+        </section>
+      </aside>
     </div>
   );
 }

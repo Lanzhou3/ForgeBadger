@@ -122,6 +122,12 @@ export function CopilotTeamPanel() {
     setDirty(true);
   };
 
+  const discard = () => {
+    setRoster(savedJson ? (JSON.parse(savedJson) as CopilotTeamRoster) : EMPTY_ROSTER);
+    setDirty(false);
+    setForm(null);
+  };
+
   const openCreate = () => {
     setForm({
       id: null,
@@ -142,18 +148,23 @@ export function CopilotTeamPanel() {
   const atMax = roster.members.length >= MAX_MEMBERS;
 
   return (
-    <Card className="forgebadger-animate-in" style={{ animationDelay: "210ms" }}>
+    <Card id="copilot-team" className="forgebadger-animate-in scroll-mt-6" style={{ animationDelay: "180ms" }}>
       <SettingsCardHeader
         icon={<Users className="size-4" />}
         title={copy.teamTitle}
         description={copy.teamDescription}
         action={
-          readonly ? (
-            <Badge variant="outline" className="gap-1">
-              <Lock className="size-3" />
-              {copy.autonomySourceEnv}
+          <div className="flex items-center gap-1.5">
+            {readonly && (
+              <Badge variant="outline" className="gap-1">
+                <Lock className="size-3" />
+                {copy.autonomySourceEnv}
+              </Badge>
+            )}
+            <Badge variant="secondary" className="tabular-nums">
+              {String(roster.members.length)}
             </Badge>
-          ) : null
+          </div>
         }
       />
       <CardContent className="space-y-3">
@@ -165,7 +176,10 @@ export function CopilotTeamPanel() {
             </Button>
           </div>
         ) : settings.isLoading ? (
-          <p className="text-xs text-muted-foreground">…</p>
+          <div className="space-y-2" aria-busy="true">
+            <div className="h-14 animate-pulse rounded-md border border-border/50 bg-muted/40" />
+            <div className="h-14 animate-pulse rounded-md border border-border/50 bg-muted/40" />
+          </div>
         ) : (
           <>
             {readonly && (
@@ -241,17 +255,28 @@ export function CopilotTeamPanel() {
                 onChange={(event) => update({ ...roster, maxParallelWriters: event.target.valueAsNumber })}
               />
             </div>
-            {/* Sticky footer matches the autonomy panel (Card py-6 padding). */}
-            <div className="sticky -bottom-6 z-10 -mx-6 flex justify-end border-t border-border/70 bg-card/95 px-6 py-2.5 backdrop-blur-sm">
-              <Button
-                size="sm"
-                className="h-8"
-                disabled={readonly || !dirty || !parallelValid || save.isPending}
-                onClick={() => save.mutate()}
-              >
-                {save.isPending ? copy.autonomySaving : t("common.save")}
-              </Button>
-            </div>
+            {dirty && (
+              <div className="forgebadger-animate-in flex items-center justify-end gap-2 rounded-md border border-brand/30 bg-brand/5 px-3 py-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8"
+                  disabled={readonly || save.isPending}
+                  onClick={discard}
+                >
+                  {copy.teamDiscard}
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8"
+                  disabled={readonly || !parallelValid || save.isPending}
+                  onClick={() => save.mutate()}
+                >
+                  {save.isPending ? copy.autonomySaving : t("common.save")}
+                </Button>
+              </div>
+            )}
           </>
         )}
       </CardContent>

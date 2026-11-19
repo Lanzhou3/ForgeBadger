@@ -28,7 +28,7 @@ export function MemberAvatar({ name, hue, busy, className }: { name: string; hue
     >
       {Array.from(name.trim())[0]?.toUpperCase() ?? "?"}
       {busy ? (
-        <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-brand-accent ring-2 ring-card motion-safe:animate-[forgebadger-pulse-dot_1.4s_ease-in-out_infinite]" />
+        <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-brand-accent ring-2 ring-card forgebadger-pulse-dot" />
       ) : null}
     </span>
   );

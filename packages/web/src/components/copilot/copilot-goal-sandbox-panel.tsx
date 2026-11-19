@@ -73,7 +73,7 @@ export function CopilotGoalSandboxPanel() {
             </Button>
           </div>
         ) : settings.isLoading ? (
-          <p className="text-xs text-muted-foreground">…</p>
+          <div className="h-16 animate-pulse rounded-md border border-border/50 bg-muted/40" />
         ) : (
           <>
             {readonly && (
