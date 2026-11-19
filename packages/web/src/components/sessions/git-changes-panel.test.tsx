@@ -4,12 +4,24 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GitChangesPanel } from "./git-changes-panel";
-import { getProjectGitChanges, getProjectGitFileDiff, type ProjectGitChanges } from "@/lib/api";
+import {
+  commitProjectGitChanges,
+  discardProjectGitFile,
+  getProjectGitChanges,
+  getProjectGitFileDiff,
+  stageProjectGitFiles,
+  unstageProjectGitFiles,
+  type ProjectGitChanges,
+} from "@/lib/api";
 import { LanguageProvider } from "@/hooks/use-language";
 
 vi.mock("@/lib/api", () => ({
   getProjectGitChanges: vi.fn(),
   getProjectGitFileDiff: vi.fn(),
+  stageProjectGitFiles: vi.fn(),
+  unstageProjectGitFiles: vi.fn(),
+  commitProjectGitChanges: vi.fn(),
+  discardProjectGitFile: vi.fn(),
 }));
 
 const clients: QueryClient[] = [];
@@ -42,7 +54,7 @@ function renderPanel(projectId = "project-one") {
 }
 
 function fileButtons() {
-  return within(screen.getByRole("list")).getAllByRole("button");
+  return within(screen.getByRole("list")).getAllByTestId("git-change-file-button");
 }
 
 beforeEach(() => {
@@ -146,5 +158,81 @@ describe("GitChangesPanel", () => {
     await act(async () => rejectRequest(new Error("git failed")));
     await waitFor(() => expect(screen.getByText("Failed to load git info")).toBeTruthy());
     expect(screen.queryByText("Working tree clean, nothing to commit")).toBeNull();
+  });
+
+  it("stages files, submits commits, and discards changes after confirmation", async () => {
+    vi.mocked(getProjectGitChanges).mockResolvedValue({
+      isGitRepo: true,
+      branch: "feat/vibe",
+      changed: [
+        { path: "src/unstaged.ts", status: " M", staged: false },
+        { path: "src/staged.ts", status: "M ", staged: true },
+      ],
+      commits: [],
+    });
+    vi.mocked(stageProjectGitFiles).mockResolvedValue({
+      git: {
+        isGitRepo: true,
+        branch: "feat/vibe",
+        changed: [
+          { path: "src/unstaged.ts", status: "M ", staged: true },
+          { path: "src/staged.ts", status: "M ", staged: true },
+        ],
+        commits: [],
+      },
+    });
+    vi.mocked(commitProjectGitChanges).mockResolvedValue({
+      hash: "abc1234",
+      branch: "feat/vibe",
+      git: { isGitRepo: true, branch: "feat/vibe", changed: [], commits: [] },
+    });
+    vi.mocked(discardProjectGitFile).mockResolvedValue({
+      git: {
+        isGitRepo: true,
+        branch: "feat/vibe",
+        changed: [{ path: "src/staged.ts", status: "M ", staged: true }],
+        commits: [],
+      },
+    });
+
+    renderPanel();
+    await screen.findByText("feat/vibe");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Stage: src/unstaged.ts" }));
+    await waitFor(() =>
+      expect(stageProjectGitFiles).toHaveBeenCalledWith("project-one", {
+        paths: ["src/unstaged.ts"],
+      }),
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Discard" })[0]!);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard" }));
+    await waitFor(() =>
+      expect(discardProjectGitFile).toHaveBeenCalledWith("project-one", "src/unstaged.ts", {
+        untracked: false,
+      }),
+    );
+
+    const commitInput = screen.getByPlaceholderText(/Commit message/);
+    fireEvent.change(commitInput, { target: { value: "feat: commit staged work" } });
+    fireEvent.submit(commitInput.closest("form")!);
+    await waitFor(() =>
+      expect(commitProjectGitChanges).toHaveBeenCalledWith("project-one", "feat: commit staged work"),
+    );
+  });
+
+  it("keeps Stage All enabled for partially staged (MM) files", async () => {
+    vi.mocked(getProjectGitChanges).mockResolvedValue({
+      isGitRepo: true,
+      branch: "feat/vibe",
+      changed: [{ path: "src/partial.ts", status: "MM", staged: true }],
+      commits: [],
+    });
+
+    renderPanel();
+    await screen.findByText("feat/vibe");
+    const stageAll = screen.getByRole("button", { name: "Stage all" }) as HTMLButtonElement;
+    expect(stageAll.disabled).toBe(false);
   });
 });

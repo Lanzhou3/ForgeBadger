@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, ChevronRight } from "lucide-react";
 
@@ -25,6 +26,30 @@ export function SessionSummaryPanel({ sessionId }: Props) {
     retry: false,
   });
 
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && detailsRef.current?.open) {
+        detailsRef.current.open = false;
+      }
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (detailsRef.current?.open && target instanceof Node && !detailsRef.current.contains(target)) {
+        detailsRef.current.open = false;
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [open]);
+
   const current = query.data?.summary;
   const result = query.data?.latestResult;
   const state = query.data?.workState;
@@ -40,8 +65,10 @@ export function SessionSummaryPanel({ sessionId }: Props) {
 
   return (
     <details
-      className="group shrink-0 border-b border-border/70 bg-card/45 text-xs"
+      ref={detailsRef}
+      className="group relative z-30 shrink-0 border-b border-border/70 bg-card/45 text-xs"
       data-testid="session-summary"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-muted-foreground transition-colors select-none hover:bg-muted/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset [&::-webkit-details-marker]:hidden">
         <span
@@ -79,7 +106,7 @@ export function SessionSummaryPanel({ sessionId }: Props) {
           className="ml-auto size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 group-open:rotate-90"
         />
       </summary>
-      <div className="max-h-64 space-y-2 overflow-y-auto border-t border-border/50 bg-muted/15 px-3 py-2.5 text-xs leading-relaxed">
+      <div className="absolute inset-x-0 top-full z-30 max-h-64 space-y-2 overflow-y-auto border-t border-b border-border/70 bg-popover/95 px-3 py-2.5 text-xs leading-relaxed shadow-lg backdrop-blur-md">
         {query.isPending && (
           <p role="status" className="text-muted-foreground">
             {pick("正在读取…", "正在讀取…", "Loading…")}

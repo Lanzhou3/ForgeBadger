@@ -1,11 +1,15 @@
 "use client";
 
 import {
+  cliQuotaRemainingPercent,
   formatQuotaAmount,
   quotaBarToneClass,
   quotaTextToneClass,
+  remainingBarToneClass,
+  remainingTextToneClass,
 } from "@/components/sessions/provider-quota";
 import { useUiLocale } from "@/hooks/use-language";
+import { useTrilingual } from "@/hooks/use-trilingual";
 import {
   type CliAccountAdapter,
   type CliQuotaEntry,
@@ -54,12 +58,22 @@ export function loginMethodLabel(method: string | undefined, t: Translate): stri
   }
 }
 
+export type QuotaDisplayMode = "used" | "remaining";
+
 /**
  * Plan label + one row per quota window for a native CLI login (claude/codex/
  * kimi). Unsupported quotas render the per-reason hint instead. Shared by the
  * Model Center status cards and the session page quota panel.
  */
-export function CliQuotaSummary({ quota, t }: { quota: CliQuotaResult | undefined; t: Translate }) {
+export function CliQuotaSummary({
+  quota,
+  t,
+  displayMode = "used",
+}: {
+  quota: CliQuotaResult | undefined;
+  t: Translate;
+  displayMode?: QuotaDisplayMode;
+}) {
   if (!quota) return null;
   if (quota.supported && quota.entries.length > 0) {
     return (
@@ -68,7 +82,12 @@ export function CliQuotaSummary({ quota, t }: { quota: CliQuotaResult | undefine
           <div className="truncate text-[10px] font-medium text-muted-foreground">{quota.planLabel}</div>
         ) : null}
         {quota.entries.map((entry) => (
-          <CliQuotaRow key={`${entry.label}-${entry.resetsAt ?? ""}`} entry={entry} t={t} />
+          <CliQuotaRow
+            key={`${entry.label}-${entry.resetsAt ?? ""}`}
+            entry={entry}
+            t={t}
+            displayMode={displayMode}
+          />
         ))}
       </div>
     );
@@ -79,41 +98,80 @@ export function CliQuotaSummary({ quota, t }: { quota: CliQuotaResult | undefine
   return null;
 }
 
-function CliQuotaRow({ entry, t }: { entry: CliQuotaEntry; t: Translate }) {
+function CliQuotaRow({
+  entry,
+  t,
+  displayMode,
+}: {
+  entry: CliQuotaEntry;
+  t: Translate;
+  displayMode: QuotaDisplayMode;
+}) {
   const locale = useUiLocale();
-  const percent = cliQuotaUsedPercent(entry);
+  const pick = useTrilingual();
+  const usedPercent = cliQuotaUsedPercent(entry);
+  const remainingPercent = cliQuotaRemainingPercent(entry);
+  const showRemaining = displayMode === "remaining";
+  const barPercent = showRemaining ? remainingPercent : usedPercent;
+  const barTone =
+    barPercent !== null
+      ? showRemaining
+        ? remainingBarToneClass(barPercent)
+        : quotaBarToneClass(barPercent)
+      : "";
+  const textTone =
+    barPercent !== null
+      ? showRemaining
+        ? remainingTextToneClass(barPercent)
+        : quotaTextToneClass(barPercent)
+      : "";
+  const percentTitle =
+    usedPercent !== null && remainingPercent !== null
+      ? showRemaining
+        ? `${t("sessions.providerQuotaRemaining")} ${remainingPercent}% · ${t("models.cliAccountQuotaUsed")} ${usedPercent}%`
+        : `${t("models.cliAccountQuotaUsed")} ${usedPercent}%`
+      : undefined;
+  const ariaLabel =
+    barPercent !== null
+      ? showRemaining
+        ? `${entry.label} ${t("sessions.providerQuotaRemaining")} ${barPercent}%`
+        : `${entry.label} ${t("models.cliAccountQuotaUsed")} ${barPercent}%`
+      : undefined;
+
   return (
     <div className="min-w-0">
       <div className="flex items-baseline justify-between gap-2">
         <span className="min-w-0 truncate text-[11px] text-muted-foreground">{entry.label}</span>
-        {percent !== null ? (
+        {barPercent !== null ? (
           <span
-            className={cn("shrink-0 text-[11px] font-semibold tabular-nums", quotaTextToneClass(percent))}
-            title={`${t("models.cliAccountQuotaUsed")} ${percent}%`}
+            className={cn("forgebadger-tabular-nums shrink-0 text-[11px] font-semibold", textTone)}
+            title={percentTitle}
           >
-            {percent}
-            <span className="text-[10px] font-normal">%</span>
+            {showRemaining ? pick(`剩 ${barPercent}`, `剩 ${barPercent}`, `${barPercent}`) : barPercent}
+            <span className="text-[10px] font-normal">
+              {showRemaining ? pick("%", "%", "% left") : "%"}
+            </span>
           </span>
         ) : entry.remaining !== undefined ? (
-          <span className="shrink-0 font-mono text-[11px] tabular-nums">
+          <span className="forgebadger-tabular-nums shrink-0 font-mono text-[11px]">
             {formatQuotaAmount(entry.remaining)}
             {entry.limit !== undefined ? ` / ${formatQuotaAmount(entry.limit)}` : ""}
           </span>
         ) : null}
       </div>
-      {percent !== null ? (
+      {barPercent !== null ? (
         <div
           className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted/60"
           role="progressbar"
-          aria-valuenow={percent}
+          aria-valuenow={barPercent}
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-label={`${entry.label} ${t("models.cliAccountQuotaUsed")} ${percent}%`}
-          title={`${t("models.cliAccountQuotaUsed")} ${percent}%`}
+          aria-label={ariaLabel}
+          title={percentTitle}
         >
           <div
-            className={cn("h-full rounded-full transition-[width] duration-700 ease-out", quotaBarToneClass(percent))}
-            style={{ width: `${percent}%` }}
+            className={cn("h-full rounded-full transition-[width] duration-700 ease-out", barTone)}
+            style={{ width: `${barPercent}%` }}
           />
         </div>
       ) : null}

@@ -46,7 +46,7 @@ import {
 import { GitChangesPanel } from "@/components/sessions/git-changes-panel";
 import { SessionInspectorPanel } from "@/components/sessions/session-inspector-panel";
 import { SessionSummaryPanel } from '@/components/sessions/SessionSummaryPanel';
-import { ProviderQuotaPanel, supportsProviderQuota } from "@/components/sessions/provider-quota-panel";
+import { SessionQuotaPill, SessionQuotaStrip, supportsProviderQuota } from "@/components/sessions/provider-quota-panel";
 import { SessionNotificationBell } from "@/components/sessions/session-notification-bell";
 import {
   auditSessionHandoffExportInput,
@@ -76,23 +76,34 @@ export default function TerminalPage() {
   // Starts closed so a compact viewport never auto-opens the overlay sheet; the
   // mount effect opens it on desktop unless the user collapsed it previously.
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [isDesktopInspector, setIsDesktopInspector] = useState(false);
   const [gitChangeCount, setGitChangeCount] = useState<number | null>(null);
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
 
   useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      // No media query support (e.g. a test/jsdom runtime): keep the explicit
+      // default rather than guessing a viewport.
+      return;
+    }
+    const mql = window.matchMedia("(min-width: 1024px)");
+    setIsDesktopInspector(mql.matches);
+
     let stored: string | null = null;
     try {
       stored = window.localStorage.getItem("forgebadger.session-inspector-open");
     } catch {
       // Storage access is optional.
     }
-    if (stored === "0") return;
-    if (typeof window.matchMedia !== "function") {
-      // No media query support (e.g. a test/jsdom runtime): keep the explicit
-      // default rather than guessing a viewport.
-      return;
+    if (mql.matches && stored !== "0") {
+      setInspectorOpen(true);
     }
-    if (window.matchMedia("(min-width: 1024px)").matches) setInspectorOpen(true);
+
+    const handleChange = (event: MediaQueryListEvent) => {
+      setIsDesktopInspector(event.matches);
+    };
+    mql.addEventListener?.("change", handleChange);
+    return () => mql.removeEventListener?.("change", handleChange);
   }, []);
 
   const toggleInspector = () => {
@@ -161,6 +172,10 @@ export default function TerminalPage() {
   const session = connectedSession ?? sessionQuery.data?.session;
   const attachToken =
     attachTokenOverride ?? connectedSession?.attachToken ?? sessionQuery.data?.session?.attachToken ?? "";
+
+  useEffect(() => {
+    setGitChangeCount(null);
+  }, [session?.projectId]);
 
   const { data: taskPacketData, error: taskPacketError, isFetching: isTaskPacketFetching } = useQuery({
     queryKey: ["project-manager", session?.projectId, "task-packets", { limit: 50, sessionId: id }],
@@ -370,6 +385,7 @@ export default function TerminalPage() {
           // Persisting the pane preference is optional.
         }
       }}
+      quotaStrip={supportsProviderQuota(session?.aiTool) ? <SessionQuotaStrip aiTool={session?.aiTool} /> : undefined}
       gitContent={
         session?.projectId ? (
           <GitChangesPanel
@@ -392,14 +408,6 @@ export default function TerminalPage() {
         />
       }
       taskAvailable={Boolean(sessionTaskPacket) || isTaskPacketFetching || Boolean(taskPacketError)}
-      quotaContent={
-        supportsProviderQuota(session?.aiTool) && session?.aiTool ? (
-          <ProviderQuotaPanel aiTool={session.aiTool} embedded />
-        ) : (
-          <p className="text-xs text-muted-foreground">{t("sessions.providerQuotaEmpty")}</p>
-        )
-      }
-      quotaAvailable={supportsProviderQuota(session?.aiTool)}
     />
   );
 
@@ -417,11 +425,14 @@ export default function TerminalPage() {
             <SessionNotificationBell />
             {view === "terminal" && (
               <>
+                {(!inspectorOpen || !isDesktopInspector || focusMode) && supportsProviderQuota(session?.aiTool) && (
+                  <SessionQuotaPill aiTool={session?.aiTool} />
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
                   className={cn(
-                    "size-8 text-muted-foreground hover:text-foreground",
+                    "relative size-8 text-muted-foreground hover:text-foreground",
                     focusMode && "hidden"
                   )}
                   onClick={toggleInspector}
@@ -432,7 +443,16 @@ export default function TerminalPage() {
                   {inspectorOpen ? (
                     <PanelRightClose className="size-4" aria-hidden="true" />
                   ) : (
-                    <PanelRightOpen className="size-4" aria-hidden="true" />
+                    <>
+                      <PanelRightOpen className="size-4" aria-hidden="true" />
+                      {gitChangeCount !== null && gitChangeCount > 0 && (
+                        <span
+                          data-testid="inspector-git-badge"
+                          aria-hidden="true"
+                          className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-primary ring-2 ring-background"
+                        />
+                      )}
+                    </>
                   )}
                 </Button>
                 <Button
@@ -483,7 +503,9 @@ export default function TerminalPage() {
         }}
       />
 
-      {session && (view !== "terminal" || !focusMode) && <SessionSummaryPanel sessionId={id} />}
+      {session && session.aiTool !== "terminal" && (view !== "terminal" || !focusMode) && (
+        <SessionSummaryPanel sessionId={id} />
+      )}
       {view === "terminal" ? (
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="min-w-0 flex-1 overflow-hidden">

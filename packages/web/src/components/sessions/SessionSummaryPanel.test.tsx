@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import {cleanup,render,screen} from '@testing-library/react';
+import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {LanguageProvider} from '@/hooks/use-language';
@@ -26,4 +26,15 @@ it('explains missing observations and shows read failures',async()=>{
   vi.mocked(getSessionSummary).mockResolvedValue({workState:'unknown',summary:null,latestResult:null});
   const view=mount();await screen.findByText(/尚未采集到观察记录/);view.unmount();client.clear();
   vi.mocked(getSessionSummary).mockRejectedValue(new Error('offline'));mount();await screen.findByRole('alert');
+});
+it('opens as a floating overlay and closes on Escape',async()=>{
+  vi.mocked(getSessionSummary).mockResolvedValue({workState:'working',summary,latestResult:null});
+  mount();await screen.findByText('当前请求：当前 B 请求');
+  const details=screen.getByTestId('session-summary') as HTMLDetailsElement;
+  const drawer=details.querySelector('div.absolute');
+  expect(drawer).toBeTruthy();
+  details.open=true;
+  fireEvent(details,new Event('toggle'));
+  fireEvent.keyDown(window,{key:'Escape'});
+  await waitFor(()=>expect(details.open).toBe(false));
 });

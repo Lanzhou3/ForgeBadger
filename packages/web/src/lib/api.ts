@@ -30,7 +30,7 @@ export interface Project {
   source?: string;
   aiTool?: string;
   templateId?: string | null;
-  description?: string;
+  description?: string | null;
   status?: string;
 }
 
@@ -1872,20 +1872,47 @@ export async function listProjects(): Promise<{ projects: Project[] }> {
   return fetchJson("/api/v1/projects") as Promise<{ projects: Project[] }>;
 }
 
+export interface ProjectGitSummary {
+  isGitRepo: boolean;
+  branch: string | null;
+  changedCount: number;
+}
+
+export async function getProjectGitSummaries(): Promise<{ summaries: Record<string, ProjectGitSummary> }> {
+  return fetchJson("/api/v1/projects/git-summaries") as Promise<{
+    summaries: Record<string, ProjectGitSummary>;
+  }>;
+}
+
 export async function createProject(data: {
   name: string;
   path: string;
   description?: string;
   templateId?: string;
-}): Promise<{ project: Project }> {
+  initGit?: boolean;
+}): Promise<{ project: Project; gitInitialized?: boolean; gitInitError?: string }> {
   return fetchJson("/api/v1/projects", {
     method: "POST",
     body: JSON.stringify(data),
-  }) as Promise<{ project: Project }>;
+  }) as Promise<{ project: Project; gitInitialized?: boolean; gitInitError?: string }>;
 }
 
 export async function getProject(id: string): Promise<{ project: Project }> {
   return fetchJson(`/api/v1/projects/${id}`) as Promise<{ project: Project }>;
+}
+
+export async function updateProjectMetadata(
+  projectId: string,
+  input: {
+    name?: string;
+    description?: string | null;
+    templateId?: string | null;
+  }
+): Promise<{ project: Project }> {
+  return fetchJson(`/api/v1/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  }) as Promise<{ project: Project }>;
 }
 
 /**
@@ -2330,6 +2357,28 @@ export async function putProjectWorkspaceFile(
   }) as Promise<WorkspaceFileSnapshot>;
 }
 
+export async function createProjectWorkspaceFile(
+  id: string,
+  filePath: string,
+  content = ""
+): Promise<WorkspaceFileSnapshot> {
+  return fetchJson(projectWorkspacePath(id, "/file"), {
+    method: "POST",
+    body: JSON.stringify({ path: filePath, content })
+  }) as Promise<WorkspaceFileSnapshot>;
+}
+
+export async function renameProjectWorkspaceEntry(
+  id: string,
+  fromPath: string,
+  toPath: string
+): Promise<{ fromPath: string; toPath: string }> {
+  return fetchJson(projectWorkspacePath(id, "/rename"), {
+    method: "POST",
+    body: JSON.stringify({ fromPath, toPath })
+  }) as Promise<{ fromPath: string; toPath: string }>;
+}
+
 // ---- Project graph (read-only CodeGraph index) ----
 
 export interface GraphDistributionEntry {
@@ -2570,6 +2619,47 @@ export async function checkoutProjectGitBranch(
   }) as Promise<ProjectGitCheckoutResult>;
 }
 
+export async function stageProjectGitFiles(
+  id: string,
+  input: { paths?: string[]; all?: boolean }
+): Promise<{ git: ProjectGitChanges }> {
+  return fetchJson(`/api/v1/projects/${encodeURIComponent(id)}/git-stage`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ git: ProjectGitChanges }>;
+}
+
+export async function unstageProjectGitFiles(
+  id: string,
+  input: { paths?: string[]; all?: boolean }
+): Promise<{ git: ProjectGitChanges }> {
+  return fetchJson(`/api/v1/projects/${encodeURIComponent(id)}/git-unstage`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }) as Promise<{ git: ProjectGitChanges }>;
+}
+
+export async function commitProjectGitChanges(
+  id: string,
+  message: string
+): Promise<{ hash: string | null; branch: string | null; git: ProjectGitChanges }> {
+  return fetchJson(`/api/v1/projects/${encodeURIComponent(id)}/git-commit`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  }) as Promise<{ hash: string | null; branch: string | null; git: ProjectGitChanges }>;
+}
+
+export async function discardProjectGitFile(
+  id: string,
+  filePath: string,
+  options: { untracked?: boolean } = {}
+): Promise<{ git: ProjectGitChanges }> {
+  return fetchJson(`/api/v1/projects/${encodeURIComponent(id)}/git-discard`, {
+    method: "POST",
+    body: JSON.stringify({ path: filePath, untracked: Boolean(options.untracked) }),
+  }) as Promise<{ git: ProjectGitChanges }>;
+}
+
 export async function updateProjectAiConfigFile(
   id: string,
   relativePath: string,
@@ -2761,6 +2851,55 @@ export async function startProjectManagerTaskPacket(
     method: "POST",
     body: JSON.stringify(data),
   }) as Promise<{ taskPacket: ProjectManagerTaskPacket; session: Session }>;
+}
+
+export async function executeProjectManagerTaskPacket(
+  projectId: string,
+  workItemId: string,
+  data: { aiTool?: RuntimeAdapterId } = {}
+): Promise<{
+  receipt: {
+    intentId: string;
+    outcome: "confirmed" | "no_effect" | "unknown";
+    result: {
+      executionStatus?: string;
+      taskPacket?: ProjectManagerTaskPacket;
+      session?: Session;
+      sessionId?: string;
+      error?: string;
+      nextAction?: string;
+    } | null;
+  };
+}> {
+  const { intent } = (await fetchJson("/api/v1/platform-actions/preview", {
+    method: "POST",
+    body: JSON.stringify({
+      commandId: "pm.task.execute",
+      input: {
+        projectId,
+        workItemId,
+        ...(data.aiTool ? { aiTool: data.aiTool } : {}),
+      },
+      idempotencyKey: crypto.randomUUID(),
+    }),
+  })) as { intent: { id: string } };
+  return fetchJson(`/api/v1/platform-actions/${encodeURIComponent(intent.id)}/execute`, {
+    method: "POST",
+    body: "{}",
+  }) as Promise<{
+    receipt: {
+      intentId: string;
+      outcome: "confirmed" | "no_effect" | "unknown";
+      result: {
+        executionStatus?: string;
+        taskPacket?: ProjectManagerTaskPacket;
+        session?: Session;
+        sessionId?: string;
+        error?: string;
+        nextAction?: string;
+      } | null;
+    };
+  }>;
 }
 
 export async function listProjectManagerLedger(
@@ -3138,6 +3277,10 @@ export interface ScanResult {
   exists: boolean;
   isDirectory: boolean;
   instructionFiles?: string[];
+  isGitRepo?: boolean;
+  gitBranch?: string | null;
+  gitChangedCount?: number;
+  hasCodeGraph?: boolean;
 }
 
 export async function scanProject(path: string): Promise<ScanResult> {

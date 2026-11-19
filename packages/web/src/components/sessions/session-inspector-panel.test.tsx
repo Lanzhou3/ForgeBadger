@@ -26,12 +26,11 @@ function renderPanel(
       <SessionInspectorPanel
         open
         onOpenChange={() => undefined}
+        quotaStrip={<div data-testid="quota-strip-stub">5h 剩 70%</div>}
         gitContent={<p>git body</p>}
         gitCount={4}
         taskContent={<p>task body</p>}
         taskAvailable
-        quotaContent={<p>quota body</p>}
-        quotaAvailable
         {...props}
       />
     </LanguageProvider>
@@ -49,9 +48,10 @@ afterEach(() => {
 });
 
 describe("SessionInspectorPanel", () => {
-  it("presents one tabbed surface with a change-count badge and switches panes", () => {
+  it("keeps the pinned quota strip visible while switching between Changes and Task packet", () => {
     renderPanel();
 
+    expect(screen.getByTestId("quota-strip-stub")).toBeTruthy();
     const changes = screen.getByRole("tab", { name: /Changes/ });
     const task = screen.getByRole("tab", { name: /Task packet/ });
     expect(changes.getAttribute("aria-selected")).toBe("true");
@@ -60,6 +60,7 @@ describe("SessionInspectorPanel", () => {
 
     fireEvent.click(task);
 
+    expect(screen.getByTestId("quota-strip-stub")).toBeTruthy();
     expect(task.getAttribute("aria-selected")).toBe("true");
     expect(changes.getAttribute("aria-selected")).toBe("false");
     expect(screen.getByText("task body").parentElement?.hasAttribute("hidden")).toBe(false);
@@ -68,13 +69,14 @@ describe("SessionInspectorPanel", () => {
     expect(window.localStorage.getItem("forgebadger.session-inspector-tab")).toBe("task");
   });
 
-  it("hides tabs the session cannot offer and falls back to an available one", () => {
+  it("drops the tab bar when no task packet exists and falls back to Changes", () => {
     window.localStorage.setItem("forgebadger.session-inspector-tab", "task");
-    renderPanel({ taskAvailable: false, quotaAvailable: false });
+    renderPanel({ taskAvailable: false });
 
-    expect(screen.queryByRole("tab", { name: /Task packet/ })).toBeNull();
-    expect(screen.queryByRole("tab", { name: /Quota/ })).toBeNull();
-    expect(screen.getByRole("tab", { name: /Changes/ }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.getByText("Changes")).toBeTruthy();
+    expect(screen.getByText("4")).toBeTruthy();
+    expect(screen.getByText("git body").parentElement?.hasAttribute("hidden")).toBe(false);
   });
 
   it("keeps the persisted width inside the readable bounds", () => {

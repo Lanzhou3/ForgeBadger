@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  cliQuotaRemainingPercent,
   formatQuotaAmount,
   quotaBarToneClass,
+  quotaRemainingPercent,
   quotaTextToneClass,
   quotaUsagePercent,
+  remainingBarToneClass,
+  remainingTextToneClass,
 } from "./provider-quota";
 
 describe("quotaUsagePercent", () => {
@@ -54,5 +58,26 @@ describe("formatQuotaAmount", () => {
     expect(formatQuotaAmount(42.5)).toBe("42.5");
     expect(formatQuotaAmount(42.5 + 0.25)).toBe("42.75");
     expect(formatQuotaAmount(0.1 + 0.2)).toBe("0.3");
+  });
+});
+
+describe("remaining quota helpers", () => {
+  it("computes clamped remaining percentage for provider balances and CLI windows", () => {
+    expect(quotaRemainingPercent({ remaining: 800, limit: 1000, unit: "count" })).toBe(80);
+    expect(quotaRemainingPercent({ remaining: 82.4, unit: "%" })).toBe(82);
+    expect(quotaRemainingPercent({ remaining: 42.5, unit: "CNY" })).toBeNull();
+
+    expect(cliQuotaRemainingPercent({ usedPercent: 30 })).toBe(70);
+    expect(cliQuotaRemainingPercent({ remaining: 800, limit: 1000 })).toBe(80);
+    expect(cliQuotaRemainingPercent({ remaining: 12 })).toBeNull();
+  });
+
+  it("maps remaining thresholds to warning and critical semantic tones", () => {
+    expect(remainingTextToneClass(70)).toBe("text-success");
+    expect(remainingTextToneClass(50)).toBe("text-warning");
+    expect(remainingTextToneClass(20)).toBe("text-destructive");
+    expect(remainingBarToneClass(70)).toBe("bg-success");
+    expect(remainingBarToneClass(35)).toBe("bg-warning");
+    expect(remainingBarToneClass(15)).toBe("bg-destructive");
   });
 });

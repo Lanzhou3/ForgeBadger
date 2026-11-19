@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ProviderQuotaPanel } from "./provider-quota-panel";
+import { ProviderQuotaPanel, SessionQuotaPill, SessionQuotaStrip } from "./provider-quota-panel";
 import {
   checkProviderBalance,
   getCliAccount,
@@ -121,13 +121,13 @@ describe("provider-quota-panel dual display (applied provider + native login)", 
     vi.mocked(refreshCliAccountQuota).mockResolvedValue({ overview: readyWithQuota() });
     renderPanel("claude");
 
-    // Provider block: balance rows under the provider name label.
+    // Provider block: balance rows under the provider name label (remaining-first).
     expect((await screen.findByRole("progressbar", { name: /Credits/ })).getAttribute("aria-valuenow")).toBe(
-      "20"
+      "80"
     );
-    // Native block: CLI quota rows under the native login label.
+    // Native block: CLI quota rows under the native login label (remaining-first).
     expect((await screen.findByRole("progressbar", { name: /5h window/ })).getAttribute("aria-valuenow")).toBe(
-      "30"
+      "70"
     );
     // Each source label appears twice: once in the header badge, once as its block label.
     expect(panelText().split("OpenAI").length - 1).toBe(2);
@@ -152,7 +152,7 @@ describe("provider-quota-panel dual display (applied provider + native login)", 
     renderPanel("claude");
 
     expect((await screen.findByRole("progressbar", { name: /Credits/ })).getAttribute("aria-valuenow")).toBe(
-      "20"
+      "80"
     );
     await waitFor(() => expect(getCliAccount).toHaveBeenCalled());
     expect(screen.queryByRole("progressbar", { name: /5h window/ })).toBeNull();
@@ -176,7 +176,7 @@ describe("provider-quota-panel native login fallback", () => {
     renderPanel("claude");
     await waitFor(() => expect(panelText()).toContain("sessions.providerQuotaNative"));
     expect((await screen.findByRole("progressbar", { name: /5h window/ })).getAttribute("aria-valuenow")).toBe(
-      "30"
+      "70"
     );
     expect(screen.getByRole("button", { name: "sessions.providerQuotaRefresh" })).toBeTruthy();
   });
@@ -202,5 +202,60 @@ describe("provider-quota-panel CLIs without a native account endpoint", () => {
     renderPanel("pi");
     await waitFor(() => expect(panelText()).toContain("sessions.providerQuotaEmpty"));
     expect(getCliAccount).not.toHaveBeenCalled();
+  });
+});
+
+describe("SessionQuotaStrip and SessionQuotaPill", () => {
+  function renderStrip(aiTool: string) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <SessionQuotaStrip aiTool={aiTool} />
+      </QueryClientProvider>
+    );
+  }
+
+  function renderPill(aiTool: string) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <SessionQuotaPill aiTool={aiTool} />
+      </QueryClientProvider>
+    );
+  }
+
+  it("shows remaining-first chips in SessionQuotaStrip and toggles details on click", async () => {
+    vi.mocked(getAppliedProviderForAdapter).mockResolvedValue({ appliedProvider: applied });
+    vi.mocked(checkProviderBalance).mockResolvedValue(balance);
+    vi.mocked(getCliAccount).mockResolvedValue({ overview: readyWithQuota() });
+    renderStrip("claude");
+
+    const strip = await screen.findByTestId("session-quota-strip");
+    await waitFor(() => {
+      expect(strip.textContent).toContain("Credits");
+      expect(strip.textContent).toContain("80%");
+      expect(strip.textContent).toContain("70%");
+    });
+    expect(screen.queryByTestId("provider-quota-panel")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /展开额度详情|额度/ }));
+    expect(await screen.findByTestId("provider-quota-panel")).toBeTruthy();
+  });
+
+  it("renders nothing in SessionQuotaStrip when the adapter has no quota signal", async () => {
+    const { container } = renderStrip("pi");
+    await waitFor(() => expect(getAppliedProviderForAdapter).toHaveBeenCalledWith("pi"));
+    expect(screen.queryByTestId("session-quota-strip")).toBeNull();
+    expect(container.textContent).toBe("");
+  });
+
+  it("opens full quota details from SessionQuotaPill popover trigger", async () => {
+    vi.mocked(getCliAccount).mockResolvedValue({ overview: readyWithQuota() });
+    renderPill("claude");
+
+    const trigger = await screen.findByTestId("session-quota-pill");
+    expect(trigger.textContent).toContain("70%");
+    fireEvent.click(trigger);
+    expect(await screen.findByTestId("provider-quota-panel")).toBeTruthy();
   });
 });

@@ -16,6 +16,9 @@ const {
   listTaskPacketsMock,
   getProjectGitChangesMock,
   getSessionWorkStatesMock,
+  getAppliedProviderForAdapterMock,
+  getCliAccountMock,
+  getSessionSummaryMock,
   pushMock,
   replaceMock,
 } = vi.hoisted(() => ({
@@ -26,6 +29,9 @@ const {
   listTaskPacketsMock: vi.fn(),
   getProjectGitChangesMock: vi.fn(),
   getSessionWorkStatesMock: vi.fn(),
+  getAppliedProviderForAdapterMock: vi.fn(),
+  getCliAccountMock: vi.fn(),
+  getSessionSummaryMock: vi.fn(),
   pushMock: vi.fn(),
   replaceMock: vi.fn(),
 }));
@@ -51,6 +57,10 @@ vi.mock("@/components/terminal-view", () => ({
   TerminalView: () => <div data-testid="terminal-view-stub" />,
 }));
 
+vi.mock("@/lib/session-summary-api", () => ({
+  getSessionSummary: getSessionSummaryMock,
+}));
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
@@ -62,6 +72,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
     listProjectManagerTaskPackets: listTaskPacketsMock,
     getProjectGitChanges: getProjectGitChangesMock,
     getSessionWorkStates: getSessionWorkStatesMock,
+    getAppliedProviderForAdapter: getAppliedProviderForAdapterMock,
+    getCliAccount: getCliAccountMock,
   };
 });
 
@@ -114,6 +126,9 @@ describe("TerminalPage lost session", () => {
     replaceMock.mockClear();
     listTaskPacketsMock.mockResolvedValue({ taskPackets: [] });
     getSessionWorkStatesMock.mockResolvedValue({ states: [], snapshotAt: 0 });
+    getAppliedProviderForAdapterMock.mockResolvedValue({ appliedProvider: null });
+    getCliAccountMock.mockResolvedValue({ overview: { login: { adapter: "claude", state: "not_authenticated" } } });
+    getSessionSummaryMock.mockResolvedValue({ workState: "unknown", summary: null, latestResult: null });
     connectSessionMock.mockResolvedValue({ session: makeSession({}), attachToken: "" });
     startSessionMock.mockResolvedValue({ session: makeSession({ status: "running" }) });
     stopSessionMock.mockResolvedValue({ session: makeSession({ status: "stopped" }) });
@@ -254,14 +269,16 @@ describe("TerminalPage lost session", () => {
     // touch focus mode (which also hides the app navigation).
     fireEvent.click(await screen.findByRole("button", { name: "显示侧栏" }));
     const inspector = await screen.findByRole("complementary", { name: "会话辅助面板" });
-    expect(within(inspector).getByRole("tab", { name: /变更/ })).toBeTruthy();
+    // Single-pane mode (no task packet): renders a plain header rather than a 1-item tablist.
+    expect(within(inspector).getByText("变更")).toBeTruthy();
+    expect(within(inspector).queryByRole("tab")).toBeNull();
     expect(document.body.hasAttribute("data-session-focus-mode")).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "隐藏侧栏" }));
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "会话辅助面板" })).toBeNull());
   });
 
-  it("omits the quota tab for plain shell terminal sessions while keeping it for CLI adapters", async () => {
+  it("pins quota above the inspector and omits summary and quota controls for plain shell sessions", async () => {
     getSessionMock.mockResolvedValue({ session: makeSession({ status: "running", aiTool: "terminal" }) });
     connectSessionMock.mockResolvedValue({
       session: makeSession({ status: "running", aiTool: "terminal" }),
@@ -269,20 +286,71 @@ describe("TerminalPage lost session", () => {
     });
     const view = renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "显示侧栏" }));
+    await screen.findByRole("button", { name: "显示侧栏" });
+    expect(screen.queryByTestId("session-summary")).toBeNull();
+    expect(screen.queryByTestId("session-quota-pill")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "显示侧栏" }));
     const inspector = await screen.findByRole("complementary", { name: "会话辅助面板" });
-    expect(within(inspector).getByRole("tab", { name: /变更/ })).toBeTruthy();
+    expect(within(inspector).getByText("变更")).toBeTruthy();
+    expect(within(inspector).queryByTestId("session-quota-strip")).toBeNull();
     expect(within(inspector).queryByRole("tab", { name: /额度/ })).toBeNull();
 
     view.unmount();
+
+    getCliAccountMock.mockResolvedValue({
+      overview: {
+        login: { adapter: "claude", state: "ready", method: "claude.ai" },
+        quota: {
+          supported: true,
+          planLabel: "Max",
+          entries: [{ label: "5h window", unit: "percent", usedPercent: 30 }],
+          fetchedAt: "2026-09-22T12:00:00Z",
+        },
+      },
+    });
+    listTaskPacketsMock.mockResolvedValue({
+      taskPackets: [
+        {
+          id: "tp-1",
+          projectId: "p1",
+          workItemId: "wi-1",
+          workItemStatus: "in_progress",
+          queueStatus: "dispatched",
+          title: "Task 1",
+          updatedAt: 1,
+          prompt: "Check session UI",
+          acceptanceCriteria: [],
+          expectedVerification: [],
+          evidenceRequirements: [],
+          runtime: { adapter: "claude", templateId: "default" },
+          sessionLink: { sessionId: "s1", status: "running", aiTool: "claude", href: "/sessions/s1" },
+          blockedReason: null,
+        },
+      ],
+    });
     getSessionMock.mockResolvedValue({ session: makeSession({ status: "running", aiTool: "claude" }) });
     connectSessionMock.mockResolvedValue({
       session: makeSession({ status: "running", aiTool: "claude" }),
       attachToken: "attach-2",
     });
+
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "显示侧栏" }));
+    expect(await screen.findByTestId("session-summary")).toBeTruthy();
+    const quotaPill = await screen.findByTestId("session-quota-pill");
+    expect(quotaPill.textContent).toContain("70%");
+
+    fireEvent.click(screen.getByRole("button", { name: "显示侧栏" }));
     const cliInspector = await screen.findByRole("complementary", { name: "会话辅助面板" });
-    expect(within(cliInspector).getByRole("tab", { name: /额度/ })).toBeTruthy();
+    const strip = await within(cliInspector).findByTestId("session-quota-strip");
+    expect(strip.textContent).toContain("70%");
+    expect(within(cliInspector).getByRole("tab", { name: /变更/ })).toBeTruthy();
+    expect(within(cliInspector).getByRole("tab", { name: /任务包/ })).toBeTruthy();
+    expect(within(cliInspector).queryByRole("tab", { name: /额度/ })).toBeNull();
+
+    // Closing the inspector after git changes loaded surfaces the pending-change dot on the toggle button.
+    await waitFor(() => expect(within(cliInspector).getByText("变更")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "隐藏侧栏" }));
+    expect(await screen.findByTestId("inspector-git-badge")).toBeTruthy();
   });
 });

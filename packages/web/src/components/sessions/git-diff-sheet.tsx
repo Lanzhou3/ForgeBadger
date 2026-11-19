@@ -1,7 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Check, Copy, ExternalLink, RotateCcw } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
@@ -11,21 +14,38 @@ import {
 } from "@/components/ui/sheet";
 import { useLanguage } from "@/hooks/use-language";
 import { getProjectGitFileDiff, type ProjectGitFileDiff } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 export interface GitDiffTarget {
   path: string;
   untracked: boolean;
+  staged?: boolean;
 }
 
 interface Props {
   projectId: string;
   target: GitDiffTarget | null;
   onClose: () => void;
+  onOpenInFiles?: (path: string) => void;
+  onToggleStage?: (target: GitDiffTarget) => void;
+  onDiscard?: (target: GitDiffTarget) => void;
+  actionBusy?: boolean;
 }
 
-export function GitDiffSheet({ projectId, target, onClose }: Props) {
+export function GitDiffSheet({
+  projectId,
+  target,
+  onClose,
+  onOpenInFiles,
+  onToggleStage,
+  onDiscard,
+  actionBusy = false,
+}: Props) {
   const { t } = useLanguage();
+  const [copiedPath, setCopiedPath] = useState(false);
+  const [copiedDiff, setCopiedDiff] = useState(false);
+
   const { data, error, isLoading } = useQuery({
     queryKey: ["project-git-diff", projectId, target?.path, target?.untracked],
     queryFn: () =>
@@ -33,6 +53,32 @@ export function GitDiffSheet({ projectId, target, onClose }: Props) {
     enabled: Boolean(target),
     retry: false,
   });
+
+  async function handleCopyPath() {
+    if (!target) return;
+    try {
+      await navigator.clipboard.writeText(target.path);
+      setCopiedPath(true);
+      toast.success(t("projects.pathCopied"));
+      setTimeout(() => setCopiedPath(false), 1600);
+    } catch {
+      // Clipboard unavailable.
+    }
+  }
+
+  async function handleCopyDiff() {
+    if (!data) return;
+    const text = data.kind === "untracked" ? (data.content ?? "") : (data.diff ?? "");
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedDiff(true);
+      toast.success(t("projects.gitDiffCopied"));
+      setTimeout(() => setCopiedDiff(false), 1600);
+    } catch {
+      // Clipboard unavailable.
+    }
+  }
 
   return (
     <Sheet
@@ -42,8 +88,77 @@ export function GitDiffSheet({ projectId, target, onClose }: Props) {
       }}
     >
       <SheetContent side="right" className="flex w-full flex-col sm:max-w-3xl">
-        <SheetHeader>
-          <SheetTitle className="truncate font-mono text-sm">{target?.path}</SheetTitle>
+        <SheetHeader className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 pr-6">
+            <SheetTitle className="truncate font-mono text-sm">{target?.path}</SheetTitle>
+            {target && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => void handleCopyPath()}
+                >
+                  {copiedPath ? <Check className="size-3" /> : <Copy className="size-3" />}
+                  {t("projects.copyPath")}
+                </Button>
+                {data && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => void handleCopyDiff()}
+                  >
+                    {copiedDiff ? <Check className="size-3" /> : <Copy className="size-3" />}
+                    {t("projects.gitCopyDiff")}
+                  </Button>
+                )}
+                {onOpenInFiles && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      const filePath = target.path;
+                      onClose();
+                      onOpenInFiles(filePath);
+                    }}
+                  >
+                    <ExternalLink className="size-3" />
+                    {t("projects.overviewOpenInFiles")}
+                  </Button>
+                )}
+                {onToggleStage && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-7 px-2 text-xs"
+                    disabled={actionBusy}
+                    onClick={() => onToggleStage(target)}
+                  >
+                    {target.staged ? t("projects.gitUnstageFile") : t("projects.gitStageFile")}
+                  </Button>
+                )}
+                {onDiscard && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                    disabled={actionBusy}
+                    onClick={() => onDiscard(target)}
+                  >
+                    <RotateCcw className="size-3" />
+                    {t("projects.gitDiscardFile")}
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
           <SheetDescription>
             {target?.untracked ? t("sessions.gitDiffUntracked") : t("sessions.gitDiffTitle")}
           </SheetDescription>
