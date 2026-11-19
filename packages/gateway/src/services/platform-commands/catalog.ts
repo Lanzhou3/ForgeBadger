@@ -4,7 +4,6 @@ import { PlatformNoEffectError } from './errors.js';
 import {mutateAssignedTask} from '../project-manager/tasks.js';
 import {assertLegacyTaskExecution} from '../project-manager/access.js';
 import { importProject, applyMcpConfig } from '../mcp/project-workflow.js';
-import { createDevelopmentCommands } from '../development/commands.js';
 import { createMcpLifecycleCommands } from '../mcp/lifecycle.js';
 import { getAdapterLaunchStatus } from '../adapter-discovery.js';
 import { createHash } from 'node:crypto';
@@ -382,6 +381,6 @@ export function createPlatformCommands(): Map<string, PlatformCommand> {
                 await closeCopilotShell(ctx.db, ctx.userId, manager, s);
                 return { projectId: s.projectId, sessionId: s.id, closed: true };
             } }),
-        ...createSessionCommands(), ...createManagementCommands(), ...createDevelopmentCommands());
+        ...createSessionCommands(), ...createManagementCommands());
     return new Map(commands.map(c => [c.id, c]));
 }

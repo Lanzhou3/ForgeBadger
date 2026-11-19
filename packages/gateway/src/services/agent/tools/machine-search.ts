@@ -1,6 +1,5 @@
 import { z } from 'zod';
-import { listSourceFiles, readSource } from '../../development/workspace.js';
-import { sourcePathSchema } from '../../development/contracts.js';
+import { listSourceFiles, readSource, sourcePathSchema } from '../project-source.js';
 import { redactAgentText } from '../redaction.js';
 import { CopilotMachineRootRepository } from '../../../db/repositories/copilot-machine-root-repository.js';
 import type { AgentTool } from '../tool-registry.js';

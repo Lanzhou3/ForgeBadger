@@ -1,6 +1,5 @@
 import { z } from 'zod';
-import { readSource } from '../../development/workspace.js';
-import { sourcePathSchema } from '../../development/contracts.js';
+import { readSource, sourcePathSchema } from '../project-source.js';
 import { redactAgentText } from '../redaction.js';
 import { CopilotMachineRootRepository } from '../../../db/repositories/copilot-machine-root-repository.js';
 import { GROUNDING_LEVELS, type GroundingLevel, verifyEvidence } from '../retrieval-grounding.js';

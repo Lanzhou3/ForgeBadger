@@ -7,7 +7,6 @@ import {TeamService} from '../services/teams/service.js';
 import {createDeliveryActionsRoutes} from './collaboration-delivery-actions.js';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { createTaskArtifactLinkRoutes } from './task-artifact-links.js';
 import { createCollaborationRoutes } from './collaboration.js';
 import { DeliveryService } from '../services/collaboration/delivery-service.js';
 import { createCopilotChannelRoutes } from "./copilot-channels.js";
@@ -74,7 +73,6 @@ export function mountRoutes(app: Express, deps: ServerDeps): void {
   app.locals.stopDelivery = async () => { clearInterval(deliverySweep); await delivery.shutdown(); };
   app.use('/api/v1/collaboration',createCollaborationRoutes(collaborationOptions,delivery));
   app.use('/api/v1/collaboration',createDeliveryActionsRoutes(delivery));
-  app.use('/api/v1/collaboration',createTaskArtifactLinkRoutes(deps.db));
   app.use('/api/v1/teams',createTeamRoutes(delivery));
   app.use('/api/v1/hub-console', createHubConsoleRoutes(deps.db));
   app.use('/api/v1/hub-console', createHubInsightRoutes(deps.db));

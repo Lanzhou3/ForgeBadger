@@ -15,7 +15,7 @@ import { clearGoalFailureCooldown } from './goal-driver.js';
 import { bindGoalCommand, resolveLocalCommandReply, type SlashCommandContext } from "./slash-commands.js";
 import { CopilotToolArtifactRepository } from '../../db/repositories/copilot-tool-artifact-repository.js';
 import { setTimeout as delay } from 'node:timers/promises';
-import { readSource } from "../development/workspace.js";
+import { readSource } from "./project-source.js";
 import { RunGovernance, type RunPhase } from "./run-governance.js";
 import { CopilotModelResponseRepository } from "../../db/repositories/copilot-model-response-repository.js";
 import type { LlmResult } from "./llm-response.js";

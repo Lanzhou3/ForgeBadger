@@ -126,14 +126,6 @@ export interface AppActionNotificationEvent {
   notificationCreatedAt?: Date | undefined;
 }
 
-export interface CopilotDevelopmentUpdatedEvent { type:"copilot_development_updated";userId:string;taskId:string;status:string;revision:number;eventId:string; }
-
-/**
- * Redacted progress stream for a long-running terminal command executed by
- * Copilot (terminal_run). `outputTail` is a redacted, length-capped tail of
- * the command output — never raw scrollback. Emitted ~every 2s while the
- * command runs and once more with a terminal status.
- */
 export interface TerminalCommandProgressEvent {
   type: "terminal_command_progress";
   userId: string;
@@ -152,7 +144,6 @@ export interface TerminalCommandProgressEvent {
 
 export type ForgeBadgerEvent =
   | SessionWorkStateChangedEvent
-  | CopilotDevelopmentUpdatedEvent
   | SessionStatusChangedEvent
   | SessionCreatedEvent
   | SessionDeletedEvent

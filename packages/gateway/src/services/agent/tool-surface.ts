@@ -41,7 +41,7 @@ export const FLEET_HIDDEN_GOAL_TOOLS: ReadonlySet<string> = new Set(['goal_ask_u
 /** Read-only project task catalog (research sub-runs). */
 export const PROJECT_READS = new Set(['get_project_git_status', 'read_project_diff', 'read_tool_result', 'get_project', 'list_project_files', 'read_project_file', 'search_project_files', 'machine_search', 'read_machine_file', 'machine_tree', 'list_machine_roots', 'verify_retrieval_evidence',
   'project_graph_search', 'project_graph_symbol_detail', 'project_graph_impact', 'project_graph_affected_paths',
-  'get_development_task', 'list_development_tasks', 'pm_get_task_progress']);
+  'pm_get_task_progress']);
 /**
  * Coding sub-run surface: the goal sandbox/self tools named by the delegate
  * contract, plus goal_delegate itself (a nested delegate attempt is refused
@@ -91,7 +91,7 @@ export interface ToolSurface {
   unavailableReason: (toolName: string) => string | null;
 }
 
-const NON_USER_HIDDEN_TOOLS = ['takeover_session', 'submit_development_task', 'cancel_development_task', 'accept_development_task'];
+const NON_USER_HIDDEN_TOOLS = ['takeover_session'];
 
 function exclusionReasons(input: ToolSurfaceInput, context: ToolSurfaceContext, name: string, risk: string | undefined): ToolExclusion[] {
   const scheduled = input.source === 'scheduled';

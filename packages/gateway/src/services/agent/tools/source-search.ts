@@ -1,7 +1,5 @@
 import { z } from 'zod';
-import { ownedProject } from '../../development/commands.js';
-import { listSourceFiles, readSource } from '../../development/workspace.js';
-import { sourcePathSchema } from '../../development/contracts.js';
+import { listSourceFiles, ownedProject, readSource, sourcePathSchema } from '../project-source.js';
 import { redactAgentText } from '../redaction.js';
 import type { AgentTool } from '../tool-registry.js';
 

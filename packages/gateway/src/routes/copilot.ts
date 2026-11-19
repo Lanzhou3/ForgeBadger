@@ -1,6 +1,5 @@
 import { CopilotFollowups } from "../services/agent/followups.js";
 import { publicModelResponse } from "../db/repositories/copilot-model-response-repository.js";
-import { createCopilotDevelopmentRoutes } from './copilot-development.js';
 import { provisionalText, clearProvisionalText } from '../services/agent/provisional-text.js';
 import { createCopilotSkillRoutes } from "./copilot-skills.js";
 import { createCopilotConnectionRoutes } from "./copilot-connections.js";
@@ -66,7 +65,6 @@ export type CopilotRouteDeps = AgentStackDeps;
 export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
   const router = Router();
   router.use(authenticate);
-  router.use(createCopilotDevelopmentRoutes(deps.db));
   router.use(createCopilotConnectionRoutes(deps.db, deps.masterKey));
   router.use(createCopilotMachineRootRoutes(deps.db));
 

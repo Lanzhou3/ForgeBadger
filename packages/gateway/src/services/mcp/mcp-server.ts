@@ -56,7 +56,7 @@ import { createMcpSessionTools } from "./session-tools.js";
 const MCP_CLI_TOOLS = new Set(["pm_execute_task_packet", "dispatch_task_to_session", "import_project", "apply_project_config", "list_templates", "preview_project_config", "create_session"]);
 const MCP_SCOPED_TOOLS = new Set([
   ...MCP_LIFECYCLE_WRITE_TOOLS, 'pm_get_plan', 'pm_get_handoff',
-  'get_project_git_status', 'read_project_diff', 'list_development_tasks', 'get_development_task',
+  'get_project_git_status', 'read_project_diff',
   "list_projects", "get_project", "list_sessions", "get_session", "get_session_output", "get_session_writer",
   "list_templates", "preview_project_config", "create_project", "import_project",
   "apply_project_config", "pm_create_work_item", "pm_update_work_item",
@@ -75,7 +75,7 @@ const MCP_SELECTED_PROJECT_EXCLUDED = new Set(["create_project", "import_project
 // Listing, execution lookup and discovery use this same explicit capability table.
 const MCP_ALLOWED_TOOLS = new Set([...MCP_SCOPED_TOOLS,
   'get_project_git_status', 'read_project_diff', 'research_project', 'search_project_files',
-  'list_development_tasks', 'get_development_task', 'pm_overview', 'list_playbooks',
+  'pm_overview', 'list_playbooks',
   'load_playbook', 'read_skill_resource', 'search_memory', 'list_memory', 'write_memory', 'get_usage_summary'
 ]);
 
@@ -420,8 +420,7 @@ const MCP_CLOSED_WORLD_TOOLS = new Set([
   // Reads confined to the project working tree / its code graph.
   "get_project_git_status", "read_project_diff", "list_project_files", "read_project_file",
   "search_project_files", "project_graph_search", "project_graph_symbol_detail",
-  "project_graph_impact", "project_graph_affected_paths", "list_development_tasks",
-  "get_development_task",
+  "project_graph_impact", "project_graph_affected_paths",
   // Writes confined to this Gateway's own records.
   "write_memory", "update_project", "pm_create_work_item", "pm_update_work_item",
   "pm_update_management", "create_project", "import_project", "apply_project_config",

@@ -7,8 +7,6 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { canonical } from '../src/services/platform-commands/actions.js';
-import { prepareSource,hashText } from '../src/services/development/workspace.js';
 import { randomBytes } from 'node:crypto';
 
 import { UserRepository } from '../src/db/repositories/user-repository.js';
@@ -417,39 +415,6 @@ it('retry exhaustion becomes failed and retains partial delivery receipts',async
 });
 
 import { createNativeTelegramRuntime } from '../src/services/channels/native-telegram-runtime.js';
-import { PlatformActionRepository } from '../src/db/repositories/platform-action-repository.js';
-import { DevelopmentTaskRepository } from '../src/db/repositories/development-task-repository.js';
-import { assertDevelopmentAuthority } from '../src/services/development/authority.js';
-
-it('deleting a route parent revokes a child development effect fence while cancellation remains available', t => {
-  const f = fixture();
-  try {
-    const directory=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'fb-channel-development-')));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
-    f.db.prepare('UPDATE projects SET path=? WHERE id=?').run(directory,f.project.id);f.project.path=directory;
-    fs.writeFileSync(path.join(directory,'file.ts'),'old');fs.writeFileSync(path.join(directory,'check.mjs'),'import assert from "node:assert/strict";assert.ok(true);');
-    const { peer, route, inbox } = bound(f);
-    inbox.receive({ ...peer, chatId: '-1001', chatType: 'group', mentionedBot: true }, { eventId: 'dev', messageId: 'dev', text: 'change' });
-    const adopted = inbox.adoptNext();
-    if (adopted.status !== 'adopted') return assert.fail('admission required');
-    const ledger = new CopilotRunLedger(f.db, f.user.id),claim=ledger.claim(adopted.runId, 'owner', 30000)!;assert.ok(claim);
-    const plan = { projectId: f.project.id, goal: 'change', sourceFiles: ['file.ts','check.mjs'],
-      changes: [{ path: 'file.ts', beforeSha256: hashText('old'), content: 'updated' }], checks: [{ path: 'check.mjs', sha256: hashText(fs.readFileSync(path.join(directory,'check.mjs'),'utf8')) }] };
-    const prepared=prepareSource(directory,plan),resources={projectIds:[f.project.id],rootPaths:[prepared.root],revision:hashText(JSON.stringify([prepared.root,prepared.sourceDigest,prepared.outputDigest,prepared.recipeDigest]))};
-    const step = ledger.addStep(adopted.runId, { kind: 'tool', toolName: 'submit_development_task', toolCallId: 'dev', inputJson: JSON.stringify(plan), effect: 'write' });ledger.startStep(claim,step);
-    const actions = new PlatformActionRepository(f.db, f.user.id);
-    const intent = actions.create({ actor_user_id: f.user.id, authority: 'owner_action', command_id: 'development.task.submit',
-      input_json: canonical(plan), digest:hashText(canonical({commandId:'development.task.submit',input:plan,resources,policyVersion:1})), resources_json: canonical(resources), policy_version: 1, expires_at: Date.now() + 60000,
-      idempotency_key: step.id, status: 'executing' }, { kind: 'copilot', runId: adopted.runId, stepId: step.id });
-    const tasks = new DevelopmentTaskRepository(f.db, f.user.id);
-    const task = tasks.create({ project_id: f.project.id, goal: plan.goal, plan_json: JSON.stringify(plan), recipe_digest: prepared.recipeDigest,
-      source_digest: prepared.sourceDigest, output_digest: prepared.outputDigest, intent_id: intent.id, origin_run_id: adopted.runId, origin_step_id: step.id, project_root: prepared.root });
-    actions.finish(intent.id, 'confirmed', { taskId: task.id, recipeDigest: prepared.recipeDigest });ledger.receipt(claim,step,'submitted');
-    assert.doesNotThrow(() => assertDevelopmentAuthority(f.db, task, false));
-    assert.equal(ledger.log.deleteConversation(route.conversationId), true);
-    assert.throws(() => assertDevelopmentAuthority(f.db, task, false), /CHANNEL_AUTHORITY_REJECTED/);
-    assert.equal(tasks.cancel(task.id, f.project.id).status, 'cancelled');
-  } finally { f.db.close(); }
-});
 import { TelegramConnectionSupervisor, type TelegramSupervisorAccount } from '../src/services/integrations/telegram-connection-supervisor.js';
 import type { TelegramPollingCallbacks } from '../src/services/integrations/telegram-polling-client.js';
 

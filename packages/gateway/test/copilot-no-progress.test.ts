@@ -28,7 +28,7 @@ for(const output of [{truncated:true,preview:'same'},{content:'same',nextOffset:
   it(`does not stop from incomplete or failed evidence ${JSON.stringify(output)}`,()=>assert.equal(check([read('a',output),read('a',output),read('a',output)]),false));
 it('writes, polling tools, unfinished reads and errors break the observation sequence',()=>{
   const a=read('a');
-  for(const barrier of [ {...a,effect:'write' as const}, {...a,tool_name:'get_development_task'},
+  for(const barrier of [ {...a,effect:'write' as const}, {...a,tool_name:'pm_get_task_progress'},
     {...a,status:'running' as const}, {...a,result_json:'Tool error: unavailable'}]) {
     assert.equal(check([a,barrier,a,a]),false);
   }

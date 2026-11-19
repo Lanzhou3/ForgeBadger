@@ -7,7 +7,7 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { ProjectRepository } from '../src/db/repositories/project-repository.js';
 import { ModelProviderRepository } from '../src/db/repositories/model-provider-repository.js';
@@ -19,7 +19,7 @@ import { createAgentToolRegistry } from '../src/services/agent/tool-registry.js'
 import { CopilotRunLedger } from '../src/services/agent/run-ledger.js';
 import { reportedTokens } from '../src/services/agent/llm-response.js';
 import { ForgeBadgerEventBus } from '../src/services/event-bus.js';
-import { runSandboxChecks, sandboxCapability } from '../src/services/development/sandbox.js';
+import { goalCheckSandboxCapability, prepareCheckSandbox } from '../src/services/agent/command-sandbox.js';
 import { redactAgentValue } from '../src/services/agent/redaction.js';
 
 const scenarios:Array<{id:string;goal:string;source:string;extraFiles?:Record<string,string>;checks:string}>=[
@@ -32,7 +32,36 @@ const scenarios:Array<{id:string;goal:string;source:string;extraFiles?:Record<st
 ];
 const out=resolve(process.argv[2]??'evaluations/latest.json'),masterKey=process.env.FORGEBADGER_MASTER_KEY;
 if(!masterKey)throw new Error('Evaluation requires configured Gateway master key');
-if(!sandboxCapability().available)throw new Error('Evaluation requires the real isolated development sandbox');
+if(!goalCheckSandboxCapability().available)throw new Error('Evaluation requires the macOS sandbox-exec isolated environment');
+
+async function runIsolatedEvalCheck(workspace: string, testFile: string, signal: AbortSignal, timeoutMs: number) {
+  const started = Date.now();
+  const plan = prepareCheckSandbox({
+    workspace,
+    command: `${JSON.stringify(process.execPath)} ${JSON.stringify(testFile)}`,
+    env: { PATH: '/usr/bin:/bin' }
+  });
+  return new Promise<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled: boolean; durationMs: number }>(resolve => {
+    let settled = false;
+    const child = spawn(plan.file, plan.args, { cwd: workspace, env: plan.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '', timedOut = false;
+    const onAbort = () => { child.kill('SIGKILL'); };
+    signal.addEventListener('abort', onAbort, { once: true });
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, timeoutMs);
+    const finish = (exitCode: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      plan.cleanup();
+      resolve({ exitCode, stdout: stdout.slice(0, 65536), stderr: stderr.slice(0, 65536), timedOut, cancelled: signal.aborted, durationMs: Date.now() - started });
+    };
+    child.stdout?.on('data', (chunk: Buffer) => { if (stdout.length < 65536) stdout += chunk.toString('utf8'); });
+    child.stderr?.on('data', (chunk: Buffer) => { if (stderr.length < 65536) stderr += chunk.toString('utf8'); });
+    child.once('error', error => { stderr += error.message; finish(null); });
+    child.once('close', finish);
+  });
+}
 const sourceDb=new Database(process.env.FORGEBADGER_DB_PATH??join(process.env.FORGEBADGER_STATE_DIR??join(homedir(),'.forgebadger'),'forgebadger.db'),{readonly:true});
 const temp=mkdtempSync(join(tmpdir(),'fb-live-eval-')),db=new Database(':memory:');
 try {
@@ -95,7 +124,7 @@ try {
    }
    // Hold-out assertions become visible only AFTER inference; the model cannot read them.
    writeFileSync(join(root,'subject.test.cjs'),scenario.checks);
-   const check=await runSandboxChecks({workspace:root,checks:['subject.test.cjs'],signal,timeoutMs:5000});
+   const check=await runIsolatedEvalCheck(root,'subject.test.cjs',signal,5000);
    results.push({fixture:scenario.id,arm,passed:check.exitCode===0,check,calls,reportedTokens:unknownUsageCalls?null:tokens,knownReportedTokens:tokens,unknownUsageCalls,durationMs:Date.now()-started,firstTextMs,response:text,
     outputHash:createHash('sha256').update(JSON.stringify(files)).digest('hex')});
   }catch(error){results.push({fixture:scenario.id,arm,passed:false,calls,reportedTokens:unknownUsageCalls?null:tokens,knownReportedTokens:tokens,unknownUsageCalls,durationMs:Date.now()-started,firstTextMs,response:text,error:error instanceof Error?error.message:'Evaluation failed'});}

@@ -188,16 +188,10 @@ export function assertChannelToolScope(context: AgentToolContext, name: string, 
     projects.add(session.projectId); roots.push(session.workingDir);
     if (input.projectId !== undefined) requireScope(input.projectId === session.projectId);
   }
-  for (const [field, table] of [['taskId', 'copilot_development_tasks'], ['workItemId', 'project_manager_work_items']] as const) {
-    if (name.startsWith('goal_') && field === 'taskId') continue;
-    if (typeof input[field] !== 'string') continue;
-    const query = table === 'copilot_development_tasks'
-      ? 'SELECT project_id,project_root FROM copilot_development_tasks WHERE user_id=? AND id=?'
-      : 'SELECT project_id,details_json FROM project_manager_work_items WHERE user_id=? AND id=?';
-    const row = context.db.prepare(query).get(context.userId, input[field]) as { project_id: string; project_root?: string; details_json?: string } | undefined;
+  if (typeof input.workItemId === 'string') {
+    const row = context.db.prepare('SELECT project_id,details_json FROM project_manager_work_items WHERE user_id=? AND id=?').get(context.userId, input.workItemId) as { project_id: string; details_json?: string } | undefined;
     requireScope(row); projects.add(row.project_id);
     if (input.projectId !== undefined) requireScope(input.projectId === row.project_id);
-    if (row.project_root) roots.push(row.project_root);
     if (row.details_json) {
       const details = JSON.parse(row.details_json) as { taskPacket?: { sessionId?: unknown } };
       if (typeof details.taskPacket?.sessionId === 'string') {

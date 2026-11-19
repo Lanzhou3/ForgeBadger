@@ -48,8 +48,8 @@ it('runs isolated research with inherited model, blocks forged writes, and rejec
       const restricted = !request.tools.some(tool => tool.name === 'research_project');
       if (restricted) {
         childCalls++;
-        assert.equal(request.tools.some(tool => tool.name === 'submit_development_task'), false);
-        if (childCalls === 1) request.onEvent({ type: 'tool_call', toolCall: { id: 'forged', name: 'submit_development_task', arguments: JSON.stringify({ projectId: f.project.id, path: 'evil.ts', content: 'bad' }) } });
+        assert.equal(request.tools.some(tool => tool.name === 'create_project'), false);
+        if (childCalls === 1) request.onEvent({ type: 'tool_call', toolCall: { id: 'forged', name: 'create_project', arguments: JSON.stringify({ name: 'evil', path: '/tmp/evil' }) } });
         return { message: 'Read-only findings', usage: { inputTokens: 10, outputTokens: 5 } };
       }
       if (++mainCalls === 1) request.onEvent({ type: 'tool_call', toolCall: { id: 'research', name: 'research_project', arguments: JSON.stringify({ projectId: f.project.id, goal: 'Inspect project' }) } });
@@ -61,7 +61,7 @@ it('runs isolated research with inherited model, blocks forged writes, and rejec
   assert.equal(jobs.length, 1); assert.equal(childCalls, 2); assert.equal(mainCalls, 2);
   const child = jobs[0]!.child_run_id;
   assert.notEqual(f.ledger.get(child)!.conversation_id, conversationId);
-  assert.match(f.ledger.steps(child).find(step => step.tool_name === 'submit_development_task')!.result_json!, /cannot execute/);
+  assert.match(f.ledger.steps(child).find(step => step.tool_name === 'create_project')!.result_json!, /cannot execute/);
   f.db.prepare("UPDATE copilot_runs SET status='cancelled' WHERE id=?").run(parent);
   assert.throws(() => f.ledger.validateScope(JSON.parse(f.ledger.get(child)!.input_json)), /origin is no longer valid/);
 });

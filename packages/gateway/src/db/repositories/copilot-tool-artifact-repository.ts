@@ -1,4 +1,4 @@
-import { assertGitRoot } from '../../services/development/project-diff.js';
+import { assertGitRoot } from '../../services/agent/project-diff.js';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { z } from 'zod';
@@ -7,7 +7,7 @@ import { encryptSecret, decryptSecret } from '../../crypto/secret-box.js';
 import { ProjectRepository } from './project-repository.js';
 import { CopilotMachineRootRepository } from './copilot-machine-root-repository.js';
 import type { ToolResultSource } from './copilot-tool-result-repository.js';
-import { sourcePath } from '../../services/development/workspace.js';
+import { sourcePath } from '../../services/agent/project-source.js';
 import { validateProjectRoot } from '../../lib/safe-resolve.js';
 import { redactAgentValue } from '../../services/agent/redaction.js';
 import { ARCHIVABLE_TOOLS, FILE_ARTIFACT_TOOLS, MAX_ARTIFACT_BYTES, MAX_RUN_ARTIFACT_BYTES, MAX_USER_ARTIFACT_BYTES, ARTIFACT_RETENTION_MS } from '../../services/agent/tool-artifact-policy.js';

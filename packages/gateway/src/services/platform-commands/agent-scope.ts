@@ -4,7 +4,7 @@ import { CopilotMachineRootRepository } from '../../db/repositories/copilot-mach
 import type { AgentToolContext } from '../agent/tool-registry.js';
 import { assertChannelToolScope } from '../channels/channel-run-scope.js';
 import { ChannelIdentityError } from '../channels/channel-identity-service.js';
-const INTERACTIVE_OWNER_TOOLS = new Set(['takeover_session', 'submit_development_task', 'cancel_development_task', 'accept_development_task']);
+const INTERACTIVE_OWNER_TOOLS = new Set(['takeover_session']);
 export function checkAgentScope(context: AgentToolContext, name: string, raw: unknown) {
     try {
         assertChannelToolScope(context, name, raw);

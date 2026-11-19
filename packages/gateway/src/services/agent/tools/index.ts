@@ -5,7 +5,7 @@ import { createSourceSearchTools } from "./source-search.js";
 import { createMachineSearchTools } from "./machine-search.js";
 import { createMachineRootTools, createMachineRootListTools } from "./machine-roots.js";
 import { createDeepResearchTools } from "./deep-research.js";
-import { createDevelopmentTools } from './development.js';
+import { createProjectFileTools } from './project-files.js';
 import { createPlatformCoverageTools } from "./platform-coverage.js";
 import { createToolResultTools } from "./tool-results.js";
 import { createPlatformManagementTools } from "./platform-management.js";
@@ -41,7 +41,7 @@ export function createPlatformTools(): AgentTool[] {
     ...createMachineRootTools(),
     ...createMachineRootListTools(),
     ...createDeepResearchTools(),
-    ...createDevelopmentTools(),
+    ...createProjectFileTools(),
     ...createPlatformCoverageTools(),
     ...createToolResultTools(),
     ...createPlatformManagementTools(),

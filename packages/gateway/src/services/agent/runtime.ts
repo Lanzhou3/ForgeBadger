@@ -2,7 +2,6 @@ import { recoverLegacyChannelRuns } from '../channels/channel-run-authority.js';
 import { MemorySearchIndex } from './memory-search-index.js';
 import { CopilotToolArtifactRepository } from '../../db/repositories/copilot-tool-artifact-repository.js';
 import { CopilotFollowups } from "./followups.js";
-import { startDevelopmentRuntime } from '../development/runtime.js';
 import { PlatformActionRepository } from "../../db/repositories/platform-action-repository.js";
 import { buildAgentStack, type AgentStackDeps } from "./agent-stack.js";
 import { executionControl } from "./execution-control.js";
@@ -13,11 +12,10 @@ import { attachGoalDriver, sweepStaleGoals } from './goal-driver.js';
 import { attachFleetWorker } from '../fleet/fleet-worker.js';
 /** Gateway-owned recovery pump. Scans users, then uses tenant repositories. */
 export function startCopilotRuntime(deps: AgentStackDeps) {
-    // Migration fencing precedes both development recovery and native run recovery.
+    // Migration fencing precedes native run recovery.
     for (const user of deps.db.prepare('SELECT id FROM users').all() as {id:string}[]) {
         recoverLegacyChannelRuns(deps.db,user.id);
     }
-    const development = startDevelopmentRuntime(deps);
     const taskTracking = attachDispatchSupervisor(deps);
     const goalDriver = attachGoalDriver(deps);
     // Fleet inbox worker: hooks, wake-ups and its own 5 s recovery pass (timers, dead members, claims).
@@ -69,7 +67,7 @@ export function startCopilotRuntime(deps: AgentStackDeps) {
     const sweep = () => isolated('sweep', '', recover);
     const timer = setInterval(sweep, 5000);
     timer.unref();
-    const ready = Promise.all([development.ready, Promise.resolve().then(sweep)]).then(() => undefined);
+    const ready = Promise.resolve().then(sweep);
     async function stop(): Promise<void> {
         control.stopped = true;
         clearAllProvisionalText(deps.db);
@@ -77,7 +75,6 @@ export function startCopilotRuntime(deps: AgentStackDeps) {
         taskTracking.stop();
         goalDriver.stop();
         fleetWorker.stop();
-        await development.stop();
         for (const { controller, stopLease } of control.active.values()) {
             stopLease();
             controller.abort();

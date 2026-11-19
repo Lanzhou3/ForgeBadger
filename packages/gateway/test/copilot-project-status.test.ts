@@ -10,7 +10,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { UserRepository } from '../src/db/repositories/user-repository.js';
 import { ProjectRepository } from '../src/db/repositories/project-repository.js';
-import { readProjectGitStatus, summarizeGitStatus } from '../src/services/development/project-git-status.js';
+import { readProjectGitStatus, summarizeGitStatus } from '../src/services/agent/project-git-status.js';
 import { createPlatformTools } from '../src/services/agent/tools/index.js';
 import { executeAgentTool, createAgentToolRegistry } from '../src/services/agent/tool-registry.js';
 
@@ -157,7 +157,7 @@ it('honors global normalization and exclusion settings, but refuses global execu
   t.after(() => rmSync(configDir, { recursive: true, force: true }));
   const globalConfig = join(configDir, 'gitconfig'), ignoreFile = join(configDir, 'ignore');
   const invoke = () => execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
-    `import {readProjectGitStatus} from ${JSON.stringify(new URL('../src/services/development/project-git-status.ts', import.meta.url).href)}; try { console.log(JSON.stringify(await readProjectGitStatus(process.argv[1]))); } catch(e) { console.log(e.message); }`, f.root],
+    `import {readProjectGitStatus} from ${JSON.stringify(new URL('../src/services/agent/project-git-status.ts', import.meta.url).href)}; try { console.log(JSON.stringify(await readProjectGitStatus(process.argv[1]))); } catch(e) { console.log(e.message); }`, f.root],
     { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: globalConfig, GIT_CONFIG_NOSYSTEM: '1' } });
   writeFileSync(ignoreFile, 'ignored-global\n');
   writeFileSync(globalConfig, `[core]\n autocrlf = true\n excludesFile = ${ignoreFile}\n`);

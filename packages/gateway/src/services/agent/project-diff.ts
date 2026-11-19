@@ -3,9 +3,9 @@ import { existsSync, lstatSync, opendirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
-import { permittedSourcePath, sourcePath, readSource, MAX_SOURCE_BYTES } from './workspace.js';
+import { permittedSourcePath, sourcePath, readSource, MAX_SOURCE_BYTES } from './project-source.js';
 import { validateProjectRoot } from '../../lib/safe-resolve.js';
-import { redactAgentText } from '../agent/redaction.js';
+import { redactAgentText } from './redaction.js';
 
 const exec = promisify(execFile);
 const REGULAR_MODES = new Set(['100644', '100755']);

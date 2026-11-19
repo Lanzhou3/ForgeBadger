@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AgentTool } from '../tool-registry.js';
-import { ownedProject } from '../../development/commands.js';
+import { ownedProject } from '../project-source.js';
 
 const inputSchema = z.object({ projectId: z.string().min(1).max(128), goal: z.string().trim().min(1).max(4000) }).strict();
 

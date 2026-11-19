@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync, existsSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPlatformTools } from '../src/services/agent/tools/index.js';
-import { readProjectDiff } from '../src/services/development/project-diff.js';
+import { readProjectDiff } from '../src/services/agent/project-diff.js';
 
 function repo(t: TestContext) {
  const root = mkdtempSync(join(tmpdir(), 'fb-diff-'));

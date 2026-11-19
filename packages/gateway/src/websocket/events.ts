@@ -201,8 +201,6 @@ function buildPayload(event: ForgeBadgerEvent): Record<string, unknown> {
         message: event.message,
         created_at: event.createdAt.toISOString()
       };
-    case "copilot_development_updated":
-      return {task_id:event.taskId,status:event.status,revision:event.revision,event_id:event.eventId};
     case "terminal_command_progress":
       return {
         project_id: event.projectId,
@@ -245,7 +243,6 @@ function buildNotificationMeta(event: ForgeBadgerEvent): Record<string, unknown>
   if (
     event.type === "activity_created"
     || event.type === "copilot_run_updated"
-    || event.type === "copilot_development_updated"
     || !event.notificationId
   ) {
     return {};

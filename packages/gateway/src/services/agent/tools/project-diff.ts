@@ -1,8 +1,8 @@
-import { readProjectGitStatus } from '../../development/project-git-status.js';
+import { readProjectGitStatus } from '../project-git-status.js';
 import { z } from 'zod';
 import type { AgentTool } from '../tool-registry.js';
-import { ownedProject } from '../../development/commands.js';
-import { readProjectDiff } from '../../development/project-diff.js';
+import { ownedProject } from '../project-source.js';
+import { readProjectDiff } from '../project-diff.js';
 const schema = z.object({ projectId: z.string().min(1).max(128), mode: z.enum(['working','staged']).default('working'),
   includeUntracked: z.boolean().default(false), offset: z.number().int().min(0).max(2000).default(0) }).strict();
 export function createProjectDiffTools(): AgentTool[] {
