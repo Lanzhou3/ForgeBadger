@@ -102,7 +102,7 @@ export class ProjectRepository {
       .get() as Project | undefined;
   }
 
-  updateMetadata(id: string, input: { name?: string | undefined; description?: string | undefined }): Project | undefined {
+  updateMetadata(id: string, input: { name?: string | undefined; description?: string | null | undefined }): Project | undefined {
     return this.drizzle.update(projects).set({ ...(input.name !== undefined ? { name: input.name } : {}), ...(input.description !== undefined ? { description: input.description } : {}) }).where(and(eq(projects.id, id), eq(projects.userId, this.userId))).returning().get() as Project | undefined;
   }
 

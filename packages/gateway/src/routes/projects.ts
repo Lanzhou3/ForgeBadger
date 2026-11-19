@@ -3,7 +3,7 @@ import { canUseProjectPath, hasDeliveryHistory } from '../db/repositories/manage
 import { randomUUID } from "node:crypto";
 import { PlatformActions } from "../services/platform-commands/actions.js";
 import { createPlatformCommands } from "../services/platform-commands/catalog.js";
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { existsSync } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
@@ -28,13 +28,27 @@ import type { ForgeBadgerEventBus } from "../services/event-bus.js";
 import type { RuntimeAuthorizationInvalidator } from "../services/runtime-authorization-invalidation.js";
 import type { CredentialMode, WriteResult } from "../config-generation/types.js";
 import { readGlobalAiConfig, readProjectAiConfig, writeProjectAiConfigFile } from "../services/project-ai-config.js";
-import { listWorkspaceTree, maxFileWriteBytes, readWorkspaceFile, writeWorkspaceFile } from "../services/workspace-context.js";
+import {
+  createWorkspaceFile,
+  listWorkspaceTree,
+  maxFileWriteBytes,
+  readWorkspaceFile,
+  renameWorkspaceEntry,
+  writeWorkspaceFile
+} from "../services/workspace-context.js";
 import {
   checkoutProjectGitBranch,
+  commitProjectGitChanges,
+  discardProjectGitFile,
   getProjectGitBranches,
   getProjectGitChangesCached,
   getProjectGitFileDiff,
-  ProjectGitError
+  initProjectGitRepo,
+  inspectDirectoryGitSummary,
+  inspectDirectoryGitSummaryCached,
+  ProjectGitError,
+  stageProjectGitFiles,
+  unstageProjectGitFiles
 } from "../services/project-git.js";
 import { recordActivity } from "../services/activity-events.js";
 import { buildConfigSyncSummary, buildProjectConfigRenderPlan } from "../services/project-config-render.js";
@@ -51,11 +65,14 @@ const createProjectSchema = z.object({
   path: z.string().min(1),
   description: z.string().optional(),
   techStack: z.string().optional(),
-  templateId: z.string().min(1).optional()
+  templateId: z.string().min(1).optional(),
+  initGit: z.boolean().optional()
 });
 
-const updateProjectTemplateSchema = z.object({
-  templateId: z.string().min(1).nullable().optional()
+const updateProjectSchema = z.object({
+  templateId: z.string().min(1).nullable().optional(),
+  name: z.string().trim().min(1).max(200).optional(),
+  description: z.string().max(2000).nullable().optional()
 });
 
 const extractTemplateSchema = z.object({
@@ -107,6 +124,16 @@ const workspaceFileWriteSchema = z.object({
   content: z.string().max(maxFileWriteBytes)
 }).strict();
 
+const workspaceFileCreateSchema = z.object({
+  path: z.string().min(1).max(512),
+  content: z.string().max(maxFileWriteBytes).optional().default("")
+}).strict();
+
+const workspaceRenameSchema = z.object({
+  fromPath: z.string().min(1).max(512),
+  toPath: z.string().min(1).max(512)
+}).strict();
+
 const gitDiffQuerySchema = z.object({
   path: z.string().min(1).max(512),
   untracked: z.enum(["0", "1"]).optional()
@@ -117,12 +144,29 @@ const gitCheckoutSchema = z.object({
   create: z.boolean().optional().default(false)
 }).strict();
 
+const gitStageSchema = z.object({
+  paths: z.array(z.string().min(1).max(512)).max(200).optional(),
+  all: z.boolean().optional()
+}).strict().refine((value) => value.all === true || (value.paths && value.paths.length > 0), {
+  message: "Either all=true or non-empty paths is required"
+});
+
+const gitCommitSchema = z.object({
+  message: z.string().trim().min(1).max(4000)
+}).strict();
+
+const gitDiscardSchema = z.object({
+  path: z.string().min(1).max(512),
+  untracked: z.boolean().optional().default(false)
+}).strict();
+
 function gitCheckoutErrorStatus(code: ProjectGitError["code"]): number {
   switch (code) {
     case "GIT_BRANCH_NOT_FOUND":
       return 404;
     case "GIT_WORKING_TREE_DIRTY":
     case "GIT_BRANCH_EXISTS":
+    case "GIT_NOTHING_STAGED":
       return 409;
     default:
       return 400;
@@ -174,10 +218,26 @@ export function createProjectRoutes(
     }
 
     try {
-      const project = await new PlatformActions({db,userId},createPlatformCommands()).executeOwner("project.create",parseResult.data,randomUUID());
+      const { initGit, ...createInput } = parseResult.data;
+      const project = await new PlatformActions({db,userId},createPlatformCommands()).executeOwner("project.create",createInput,randomUUID()) as { id: string; path: string };
+      let gitInitialized: boolean | undefined;
+      let gitInitError: string | undefined;
+      if (initGit) {
+        try {
+          const initResult = await initProjectGitRepo(project.path);
+          gitInitialized = initResult.initialized || initResult.alreadyRepo;
+        } catch (gitError) {
+          gitInitialized = false;
+          gitInitError = gitError instanceof Error ? gitError.message : "Failed to initialize git repository";
+        }
+      }
       res.status(201).json({
         code: 0,
-        data: { project },
+        data: {
+          project,
+          ...(gitInitialized !== undefined ? { gitInitialized } : {}),
+          ...(gitInitError ? { gitInitError } : {})
+        },
         message: ""
       });
     } catch (error) {
@@ -195,6 +255,24 @@ export function createProjectRoutes(
     res.json({
       code: 0,
       data: { projects },
+      message: ""
+    });
+  });
+
+  router.get("/git-summaries", async (req, res) => {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const projects = new ProjectRepository(db, userId).list();
+    const entries = await mapWithConcurrency(projects, 6, async (project) => {
+      try {
+        const summary = await inspectDirectoryGitSummaryCached(project.path);
+        return [project.id, summary] as const;
+      } catch {
+        return [project.id, { isGitRepo: false, branch: null, changedCount: 0 }] as const;
+      }
+    });
+    res.json({
+      code: 0,
+      data: { summaries: Object.fromEntries(entries) },
       message: ""
     });
   });
@@ -228,13 +306,23 @@ export function createProjectRoutes(
         res.status(400).json({ code: 1, message: "Path is not a directory" });
         return;
       }
+      const gitSummary = await inspectDirectoryGitSummary(resolved).catch(() => ({
+        isGitRepo: false,
+        branch: null,
+        changedCount: 0
+      }));
+      const hasCodeGraph = existsSync(resolve(resolved, ".codegraph", "codegraph.db"));
       res.json({
         code: 0,
         data: {
           path: resolved,
           exists: true,
           isDirectory: true,
-          instructionFiles: listRootInstructionFiles(resolved)
+          instructionFiles: listRootInstructionFiles(resolved),
+          isGitRepo: gitSummary.isGitRepo,
+          gitBranch: gitSummary.branch,
+          gitChangedCount: gitSummary.changedCount,
+          hasCodeGraph
         },
         message: ""
       });
@@ -345,29 +433,22 @@ export function createProjectRoutes(
 
   router.patch("/:id", async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
-    const parseResult = updateProjectTemplateSchema.safeParse(req.body ?? {});
+    const parseResult = updateProjectSchema.safeParse(req.body ?? {});
     if (!parseResult.success) {
       res.status(400).json({ code: 1, message: "Invalid input" });
       return;
     }
 
     const repo = new ProjectRepository(db, userId);
-    const project = repo.getById(req.params.id);
+    let project = repo.getById(req.params.id);
     if (!project) {
       res.status(404).json({ code: 1, message: "Project not found" });
       return;
     }
 
-    const { templateId } = parseResult.data;
+    const { templateId, name, description } = parseResult.data;
 
-    // 缺省:绑定关系保持不变
-    if (templateId === undefined) {
-      res.json({ code: 0, data: { project }, message: "" });
-      return;
-    }
-
-    // 切换模板:校验模板存在且属于当前用户
-    if (templateId !== null) {
+    if (templateId !== undefined && templateId !== null) {
       const template = new TemplateRepository(db, userId).getById(templateId);
       if (!template) {
         res.status(404).json({ code: 1, message: "Template not found" });
@@ -375,14 +456,34 @@ export function createProjectRoutes(
       }
     }
 
-    const updated = repo.updateTemplateId(project.id, templateId);
-    new AuditLogRepository(db, userId).create({
-      action: templateId === null ? "project.template.unbind" : "project.template.bind",
-      resourceType: "project",
-      resourceId: project.id,
-      details: { name: project.name, templateId }
-    });
-    res.json({ code: 0, data: { project: updated ?? project }, message: "" });
+    if (name !== undefined || description !== undefined) {
+      const normalizedDescription =
+        description === undefined ? undefined : description === null ? null : (description.trim() || null);
+      const updatedMeta = repo.updateMetadata(project.id, {
+        ...(name !== undefined ? { name } : {}),
+        ...(normalizedDescription !== undefined ? { description: normalizedDescription } : {})
+      });
+      if (updatedMeta) project = updatedMeta;
+      new AuditLogRepository(db, userId).create({
+        action: "project.metadata.update",
+        resourceType: "project",
+        resourceId: project.id,
+        details: { name: project.name }
+      });
+    }
+
+    if (templateId !== undefined) {
+      const updatedTemplate = repo.updateTemplateId(project.id, templateId);
+      if (updatedTemplate) project = updatedTemplate;
+      new AuditLogRepository(db, userId).create({
+        action: templateId === null ? "project.template.unbind" : "project.template.bind",
+        resourceType: "project",
+        resourceId: project.id,
+        details: { name: project.name, templateId }
+      });
+    }
+
+    res.json({ code: 0, data: { project }, message: "" });
   });
 
   router.post("/:id/templates", async (req, res) => {
@@ -1003,6 +1104,78 @@ export function createProjectRoutes(
     }
   });
 
+  router.post("/:id/workspace/file", async (req, res) => {
+    const parseResult = workspaceFileCreateSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const project = new ProjectRepository(db, userId).getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const file = await createWorkspaceFile(
+        project.path,
+        parseResult.data.path,
+        parseResult.data.content
+      );
+      res.status(201).json({
+        code: 0,
+        data: {
+          projectId: project.id,
+          ...file
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Workspace file create failed"
+      });
+    }
+  });
+
+  router.post("/:id/workspace/rename", async (req, res) => {
+    const parseResult = workspaceRenameSchema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const project = new ProjectRepository(db, userId).getById(req.params.id);
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const renamed = await renameWorkspaceEntry(
+        project.path,
+        parseResult.data.fromPath,
+        parseResult.data.toPath
+      );
+      res.json({
+        code: 0,
+        data: {
+          projectId: project.id,
+          ...renamed
+        },
+        message: ""
+      });
+    } catch (error) {
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : "Workspace rename failed"
+      });
+    }
+  });
+
   router.get("/:id/git-changes", async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const projectRepo = new ProjectRepository(db, userId);
@@ -1135,6 +1308,89 @@ export function createProjectRoutes(
       });
     }
   });
+
+  const handleGitMutation = <TInput>(
+    schema: z.ZodType<TInput>,
+    fallbackMessage: string,
+    execute: (project: { id: string; path: string }, input: TInput, userId: string) => Promise<Record<string, unknown>>
+  ) => async (req: Request, res: Response) => {
+    const parseResult = schema.safeParse(req.body ?? {});
+    if (!parseResult.success) {
+      res.status(400).json({ code: 1, message: "Invalid input" });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const project = new ProjectRepository(db, userId).getById(req.params.id ?? "");
+    if (!project) {
+      res.status(404).json({ code: 1, message: "Project not found" });
+      return;
+    }
+
+    try {
+      const data = await execute(project, parseResult.data, userId);
+      res.json({
+        code: 0,
+        data: { projectId: project.id, ...data },
+        message: ""
+      });
+    } catch (error) {
+      if (error instanceof ProjectGitError) {
+        res.status(gitCheckoutErrorStatus(error.code)).json({
+          code: 1,
+          message: error.message,
+          ...(error.details ? { details: error.details } : {})
+        });
+        return;
+      }
+      res.status(400).json({
+        code: 1,
+        message: error instanceof Error ? error.message : fallbackMessage
+      });
+    }
+  };
+
+  router.post("/:id/git-stage", handleGitMutation(
+    gitStageSchema,
+    "Git stage failed",
+    async (project, input) => ({ git: await stageProjectGitFiles(project.path, input) })
+  ));
+
+  router.post("/:id/git-unstage", handleGitMutation(
+    gitStageSchema,
+    "Git unstage failed",
+    async (project, input) => ({ git: await unstageProjectGitFiles(project.path, input) })
+  ));
+
+  router.post("/:id/git-commit", handleGitMutation(
+    gitCommitSchema,
+    "Git commit failed",
+    async (project, input, userId) => {
+      const result = await commitProjectGitChanges(project.path, input.message);
+      new AuditLogRepository(db, userId).create({
+        action: "project.git.commit",
+        resourceType: "project",
+        resourceId: project.id,
+        details: { hash: result.hash, branch: result.branch }
+      });
+      return result;
+    }
+  ));
+
+  router.post("/:id/git-discard", handleGitMutation(
+    gitDiscardSchema,
+    "Git discard failed",
+    async (project, input, userId) => {
+      const git = await discardProjectGitFile(project.path, input.path, { untracked: input.untracked });
+      new AuditLogRepository(db, userId).create({
+        action: "project.git.discard",
+        resourceType: "project",
+        resourceId: project.id,
+        details: { path: input.path, untracked: input.untracked }
+      });
+      return { git };
+    }
+  ));
 
   router.post("/:id/generate-config", async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
@@ -1283,4 +1539,26 @@ function buildConfigComplianceSummary(
       : "compliant",
     staleFiles: summary.modifiedFiles
   };
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= items.length) break;
+        results[index] = await mapper(items[index]!, index);
+      }
+    })
+  );
+  return results;
 }

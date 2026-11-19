@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
+import { lstat, unlink } from "node:fs/promises";
 
-import { validateProjectRoot } from "../lib/safe-resolve.js";
+import { safeResolve, validateProjectRoot } from "../lib/safe-resolve.js";
 import { readWorkspaceFile } from "./workspace-context.js";
 import { ProjectGitChangesCache } from "./project-git-cache.js";
 
@@ -232,7 +233,9 @@ export type ProjectGitErrorCode =
   | "GIT_BRANCH_EXISTS"
   | "GIT_WORKING_TREE_DIRTY"
   | "GIT_INVALID_BRANCH_NAME"
-  | "GIT_SWITCH_FAILED";
+  | "GIT_SWITCH_FAILED"
+  | "GIT_NOTHING_STAGED"
+  | "GIT_COMMIT_FAILED";
 
 export class ProjectGitError extends Error {
   constructor(
@@ -355,5 +358,286 @@ export async function checkoutProjectGitBranch(
     );
   }
   gitChangesCache.delete(root);
+  gitChangesCache.delete(projectPath);
+  gitSummaryCache.delete(root);
+  gitSummaryCache.delete(projectPath);
   return { current: name, created: options.create };
+}
+
+export interface DirectoryGitSummary {
+  isGitRepo: boolean;
+  branch: string | null;
+  changedCount: number;
+}
+
+const GIT_SUMMARY_TTL_MS = 5_000;
+const GIT_SUMMARY_MAX_ENTRIES = 128;
+const gitSummaryCache = new Map<string, { value: DirectoryGitSummary; expiresAt: number }>();
+const gitSummaryInFlight = new Map<string, Promise<DirectoryGitSummary>>();
+
+function setGitSummaryCache(key: string, value: DirectoryGitSummary): void {
+  if (gitSummaryCache.size >= GIT_SUMMARY_MAX_ENTRIES) {
+    const oldestKey = gitSummaryCache.keys().next().value;
+    if (oldestKey !== undefined) gitSummaryCache.delete(oldestKey);
+  }
+  gitSummaryCache.set(key, { value, expiresAt: Date.now() + GIT_SUMMARY_TTL_MS });
+}
+
+/** Lightweight status summary for directory scans and project-list badges. */
+export async function inspectDirectoryGitSummary(directoryPath: string): Promise<DirectoryGitSummary> {
+  const root = validateProjectRoot(directoryPath);
+  try {
+    await runGit(root, ["rev-parse", "--is-inside-work-tree"]);
+  } catch {
+    return { isGitRepo: false, branch: null, changedCount: 0 };
+  }
+
+  const [branch, statusOutput] = await Promise.all([
+    runGit(root, ["branch", "--show-current"]).catch(() => ""),
+    runGit(root, ["status", "--porcelain=v1", "-z", "-uall"]).catch(() => "")
+  ]);
+
+  const trimmedBranch = branch.trim();
+  const changed = parsePorcelain(statusOutput);
+  return {
+    isGitRepo: true,
+    branch: trimmedBranch || null,
+    changedCount: changed.length
+  };
+}
+
+/** Short-TTL cached + in-flight coalesced summary, reusing gitChangesCache when warm. */
+export function inspectDirectoryGitSummaryCached(directoryPath: string): Promise<DirectoryGitSummary> {
+  const root = validateProjectRoot(directoryPath);
+  const warmChanges = gitChangesCache.get(root) ?? gitChangesCache.get(directoryPath);
+  if (warmChanges) {
+    return Promise.resolve({
+      isGitRepo: warmChanges.isGitRepo,
+      branch: warmChanges.branch ?? null,
+      changedCount: warmChanges.changed.length
+    });
+  }
+  const cached = gitSummaryCache.get(root);
+  if (cached && cached.expiresAt > Date.now()) {
+    return Promise.resolve(cached.value);
+  }
+  if (cached) gitSummaryCache.delete(root);
+
+  const inFlight = gitSummaryInFlight.get(root);
+  if (inFlight) return inFlight;
+
+  const pending = inspectDirectoryGitSummary(root)
+    .then((summary) => {
+      setGitSummaryCache(root, summary);
+      return summary;
+    })
+    .finally(() => {
+      gitSummaryInFlight.delete(root);
+    });
+  gitSummaryInFlight.set(root, pending);
+  return pending;
+}
+
+/** Initializes a new git repository when the project root is not already inside one. */
+export async function initProjectGitRepo(projectPath: string): Promise<{ initialized: boolean; alreadyRepo: boolean }> {
+  const root = validateProjectRoot(projectPath);
+  try {
+    await runGit(root, ["rev-parse", "--is-inside-work-tree"]);
+    return { initialized: false, alreadyRepo: true };
+  } catch {
+    await runGit(root, ["init"]);
+    gitChangesCache.delete(root);
+    gitChangesCache.delete(projectPath);
+    gitSummaryCache.delete(root);
+    gitSummaryCache.delete(projectPath);
+    return { initialized: true, alreadyRepo: false };
+  }
+}
+
+function assertSafeGitMutationPath(root: string, relativePath: string): string {
+  const safePath = assertGitRelativePath(relativePath);
+  if (
+    safePath.startsWith("-") ||
+    safePath.split(/[\\/]+/u).some((segment) => segment.toLowerCase() === ".git")
+  ) {
+    throw new Error("Invalid file path");
+  }
+  safeResolve(root, safePath);
+  return safePath;
+}
+
+async function assertGitRepoRoot(projectPath: string): Promise<string> {
+  const root = validateProjectRoot(projectPath);
+  try {
+    await runGit(root, ["rev-parse", "--is-inside-work-tree"]);
+  } catch {
+    throw new ProjectGitError("GIT_NOT_REPO", "Project is not a git repository");
+  }
+  return root;
+}
+
+async function hasGitHead(root: string): Promise<boolean> {
+  try {
+    await runGit(root, ["rev-parse", "--verify", "HEAD"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function existsInGitHead(root: string, safePath: string): Promise<boolean> {
+  try {
+    await runGit(root, ["cat-file", "-e", `HEAD:${safePath}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function refreshGitChangesCache(root: string, originalPath?: string): Promise<ProjectGitChanges> {
+  gitChangesCache.delete(root);
+  gitSummaryCache.delete(root);
+  if (originalPath && originalPath !== root) {
+    gitChangesCache.delete(originalPath);
+    gitSummaryCache.delete(originalPath);
+  }
+  const fresh = await getProjectGitChanges(root);
+  gitChangesCache.set(root, fresh);
+  setGitSummaryCache(root, {
+    isGitRepo: fresh.isGitRepo,
+    branch: fresh.branch ?? null,
+    changedCount: fresh.changed.length
+  });
+  return fresh;
+}
+
+/** Stages selected files or all working-tree changes inside the approved project root. */
+export async function stageProjectGitFiles(
+  projectPath: string,
+  input: { paths?: string[] | undefined; all?: boolean | undefined }
+): Promise<ProjectGitChanges> {
+  const root = await assertGitRepoRoot(projectPath);
+  if (input.all) {
+    await runGit(root, ["add", "-A"]);
+  } else {
+    const safePaths = (input.paths ?? []).map((entry) => assertSafeGitMutationPath(root, entry));
+    if (safePaths.length === 0) {
+      throw new Error("At least one file path is required");
+    }
+    await runGit(root, ["add", "--", ...safePaths]);
+  }
+  return refreshGitChangesCache(root, projectPath);
+}
+
+/** Unstages selected files or all staged changes back to the working tree. */
+export async function unstageProjectGitFiles(
+  projectPath: string,
+  input: { paths?: string[] | undefined; all?: boolean | undefined }
+): Promise<ProjectGitChanges> {
+  const root = await assertGitRepoRoot(projectPath);
+  const headExists = await hasGitHead(root);
+  if (input.all) {
+    if (headExists) {
+      await runGit(root, ["reset", "HEAD"]);
+    } else {
+      await runGit(root, ["rm", "--cached", "-r", "--force", "--ignore-unmatch", "."]);
+    }
+  } else {
+    const safePaths = (input.paths ?? []).map((entry) => assertSafeGitMutationPath(root, entry));
+    if (safePaths.length === 0) {
+      throw new Error("At least one file path is required");
+    }
+    if (headExists) {
+      await runGit(root, ["reset", "HEAD", "--", ...safePaths]);
+    } else {
+      await runGit(root, ["rm", "--cached", "-r", "--force", "--ignore-unmatch", "--", ...safePaths]);
+    }
+  }
+  return refreshGitChangesCache(root, projectPath);
+}
+
+/** Commits currently staged changes with a non-empty operator commit message. */
+export async function commitProjectGitChanges(
+  projectPath: string,
+  message: string
+): Promise<{ hash: string | null; branch: string | null; git: ProjectGitChanges }> {
+  const root = await assertGitRepoRoot(projectPath);
+  const trimmed = message.trim();
+  if (!trimmed) {
+    throw new ProjectGitError("GIT_COMMIT_FAILED", "Commit message is required");
+  }
+  const statusOutput = await runGit(root, ["status", "--porcelain=v1", "-z", "-uall"]);
+  const entries = parsePorcelain(statusOutput);
+  if (!entries.some((entry) => entry.staged)) {
+    throw new ProjectGitError("GIT_NOTHING_STAGED", "No staged changes to commit");
+  }
+
+  try {
+    await runGit(root, ["commit", "-m", trimmed]);
+  } catch (error) {
+    throw new ProjectGitError(
+      "GIT_COMMIT_FAILED",
+      error instanceof Error ? error.message : "git commit failed"
+    );
+  }
+  const hash = (await runGit(root, ["rev-parse", "--short", "HEAD"]).catch(() => "")).trim() || null;
+  const git = await refreshGitChangesCache(root, projectPath);
+  return { hash, branch: git.branch ?? null, git };
+}
+
+/** Discards working-tree changes (or deletes an untracked file) for a single safe project path. */
+export async function discardProjectGitFile(
+  projectPath: string,
+  relativePath: string,
+  options: { untracked?: boolean | undefined } = {}
+): Promise<ProjectGitChanges> {
+  const root = await assertGitRepoRoot(projectPath);
+  const safePath = assertSafeGitMutationPath(root, relativePath);
+  const absolutePath = safeResolve(root, safePath);
+  const statusOutput = await runGit(root, ["status", "--porcelain=v1", "-z", "-uall", "--", safePath]).catch(() => "");
+  const entry = parsePorcelain(statusOutput).find((candidate) => candidate.path === safePath);
+  if (!entry) {
+    throw new Error("File has no uncommitted changes to discard");
+  }
+
+  // Truth comes from git status, never trusting a stale untracked hint to unlink a tracked file.
+  if (entry.status === "??") {
+    const fileStats = await lstat(absolutePath);
+    if (fileStats.isSymbolicLink() || !fileStats.isFile()) {
+      throw new Error("Only untracked regular files can be discarded");
+    }
+    await unlink(absolutePath);
+    return refreshGitChangesCache(root, projectPath);
+  }
+  if (options.untracked === true) {
+    throw new Error("File is tracked by git; refresh status before discarding");
+  }
+
+  const headExists = await hasGitHead(root);
+  const inHead = headExists ? await existsInGitHead(root, safePath) : false;
+
+  if (entry.staged) {
+    if (headExists) {
+      await runGit(root, ["reset", "HEAD", "--", safePath]);
+    } else {
+      await runGit(root, ["rm", "--cached", "--force", "--", safePath]);
+    }
+  }
+
+  if (inHead) {
+    await runGit(root, ["checkout", "--", safePath]);
+  } else if (entry.status[0] === "A" && entry.status[1] !== "D") {
+    try {
+      const fileStats = await lstat(absolutePath);
+      if (fileStats.isSymbolicLink() || !fileStats.isFile()) {
+        throw new Error("Only newly staged regular files can be discarded");
+      }
+      await unlink(absolutePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+  return refreshGitChangesCache(root, projectPath);
 }

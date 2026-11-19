@@ -1,4 +1,4 @@
-import { lstat, open, readdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { safeResolve, validateProjectRoot } from "../lib/safe-resolve.js";
@@ -154,6 +154,119 @@ export async function writeWorkspaceFile(
 
   await writeFile(absolutePath, content, "utf8");
   return readWorkspaceFile(rootPath, requestedPath);
+}
+
+/** Creates a new UTF-8 workspace file (including safe ancestor dirs) without overwriting existing files. */
+export async function createWorkspaceFile(
+  projectRoot: string,
+  userPath: string,
+  content = ""
+): Promise<WorkspaceFileSnapshot> {
+  const rootPath = validateProjectRoot(projectRoot);
+  const requestedPath = assertSafeWorkspaceMutationPath(userPath);
+  if (Buffer.byteLength(content, "utf8") > maxFileWriteBytes) {
+    throw new Error(`Workspace file content exceeds maximum size: ${maxFileWriteBytes} bytes`);
+  }
+  if (content.includes("\u0000")) {
+    throw new Error("Workspace file content must be UTF-8 text");
+  }
+
+  const absolutePath = safeResolve(rootPath, requestedPath);
+  await assertExistingAncestorsRealDirs(rootPath, path.dirname(absolutePath));
+  await mkdir(path.dirname(absolutePath), { recursive: true });
+  safeResolve(rootPath, requestedPath);
+
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    handle = await open(absolutePath, "wx");
+    await handle.writeFile(content, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "EEXIST") {
+      throw new Error("Workspace file already exists");
+    }
+    throw error;
+  } finally {
+    await handle?.close();
+  }
+  return readWorkspaceFile(rootPath, requestedPath);
+}
+
+/** Safely renames or moves a workspace file/directory inside the approved project root. */
+export async function renameWorkspaceEntry(
+  projectRoot: string,
+  fromPath: string,
+  toPath: string
+): Promise<{ fromPath: string; toPath: string }> {
+  const rootPath = validateProjectRoot(projectRoot);
+  const safeFrom = assertSafeWorkspaceMutationPath(fromPath);
+  const safeTo = assertSafeWorkspaceMutationPath(toPath);
+  if (safeFrom === safeTo) {
+    throw new Error("Source and destination paths must differ");
+  }
+
+  const fromAbs = safeResolve(rootPath, safeFrom);
+  const toAbs = safeResolve(rootPath, safeTo);
+  if (toAbs.startsWith(`${fromAbs}${path.sep}`)) {
+    throw new Error("Cannot move a directory inside itself");
+  }
+  await assertExistingAncestorsRealDirs(rootPath, path.dirname(fromAbs));
+  const fromStats = await lstat(fromAbs);
+  if (fromStats.isSymbolicLink()) {
+    throw new Error("Workspace path cannot be a symbolic link");
+  }
+  await assertExistingAncestorsRealDirs(rootPath, path.dirname(toAbs));
+  try {
+    await lstat(toAbs);
+    throw new Error("Destination path already exists");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+      throw error;
+    }
+  }
+  await mkdir(path.dirname(toAbs), { recursive: true });
+  safeResolve(rootPath, safeTo);
+  await rename(fromAbs, toAbs);
+  return {
+    fromPath: relativePathFor(rootPath, fromAbs),
+    toPath: relativePathFor(rootPath, toAbs)
+  };
+}
+
+function assertSafeWorkspaceMutationPath(userPath: string): string {
+  const requestedPath = normalizeUserPath(userPath);
+  if (!requestedPath) {
+    throw new Error("Workspace file path is required");
+  }
+  const segments = requestedPath.split(/[\\/]+/u);
+  if (
+    segments.some(
+      (segment) =>
+        segment.toLowerCase() === ".git" || segment === "" || segment === "." || segment === ".."
+    )
+  ) {
+    throw new Error("Invalid workspace file path");
+  }
+  return requestedPath;
+}
+
+async function assertExistingAncestorsRealDirs(rootPath: string, targetDir: string): Promise<void> {
+  const rel = path.relative(rootPath, targetDir);
+  if (!rel || rel === ".") return;
+  let current = rootPath;
+  for (const segment of rel.split(path.sep)) {
+    current = path.join(current, segment);
+    try {
+      const stats = await lstat(current);
+      if (stats.isSymbolicLink() || !stats.isDirectory()) {
+        throw new Error("Workspace ancestor path escapes or is not a directory");
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+        break;
+      }
+      throw error;
+    }
+  }
 }
 
 async function listDirectory(
