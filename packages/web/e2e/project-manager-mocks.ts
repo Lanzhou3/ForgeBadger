@@ -560,6 +560,38 @@ export async function mockProjectDetailApis(
       return;
     }
 
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/git-changes` && method === "GET") {
+      await route.fulfill({
+        json: envelope({ git: { isGitRepo: true, branch: "main", changed: [], commits: [] } }),
+      });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/graph/overview` && method === "GET") {
+      await route.fulfill({ json: envelope({ available: false, reason: "not_initialized" }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/goals" && method === "GET") {
+      await route.fulfill({ json: envelope({ goals: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/fleets" && method === "GET") {
+      await route.fulfill({ json: envelope({ fleets: [] }) });
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/v1/model-providers/applied/") && method === "GET") {
+      await route.fulfill({ json: envelope({ appliedProvider: null }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/activities" && method === "GET") {
+      await route.fulfill({ json: envelope({ activities: [] }) });
+      return;
+    }
+
     const unhandledRoute = `${method} ${url.pathname}${url.search}`;
     unhandledApiRoutes.push(unhandledRoute);
     await route.fulfill({

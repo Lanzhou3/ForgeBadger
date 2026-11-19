@@ -6,6 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { ProjectManagerGoal } from "@/lib/api";
 import type { GoalDraft, Translate } from "./types";
@@ -85,12 +92,22 @@ export function ProjectManagerGoalBanner({
           </div>
           <div className="space-y-2">
             <Label htmlFor="project-manager-goal-status">{t("projects.projectManagerGoalStatus")}</Label>
-            <Input
-              id="project-manager-goal-status"
-              value={draft.status}
+            <Select
+              value={draft.status || "active"}
               disabled={isSaving}
-              onChange={(event) => onDraftChange({ ...draft, status: event.target.value })}
-            />
+              onValueChange={(value) => onDraftChange({ ...draft, status: value })}
+            >
+              <SelectTrigger id="project-manager-goal-status" className="w-full sm:w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Array.from(new Set(["active", "paused", "blocked", "completed", ...(draft.status ? [draft.status] : [])])).map((statusValue) => (
+                  <SelectItem key={statusValue} value={statusValue}>
+                    {statusLabel(statusValue, t)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           {error && (
             <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">

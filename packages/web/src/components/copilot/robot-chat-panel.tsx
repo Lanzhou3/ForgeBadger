@@ -65,6 +65,8 @@ interface RobotChatPanelProps {
    * so it opens beside the pet instead of always bottom-right.
    */
   corner?: RobotCorner;
+  /** Pre-selected project context when opened from a project detail page. */
+  defaultProjectId?: string;
 }
 
 /**
@@ -82,7 +84,12 @@ interface RobotChatPanelProps {
  * (project context picker and the model/thinking pickers from
  * CopilotStatusBar).
  */
-export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" }: RobotChatPanelProps) {
+export function RobotChatPanel({
+  onClose,
+  onExpandFull,
+  corner = "bottom-right",
+  defaultProjectId,
+}: RobotChatPanelProps) {
   const { t } = useLanguage();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -94,7 +101,7 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(defaultProjectId ?? "");
   const projectMutationRef = useRef(0);
   const [projectPendingCount, setProjectPendingCount] = useState(0);
   const projectSaving = projectPendingCount > 0;
@@ -211,7 +218,7 @@ export function RobotChatPanel({ onClose, onExpandFull, corner = "bottom-right" 
       .then(([{ messages: next }, { conversation }]) => {
         if (!disposed && serial === controllerMessageSerialRef.current && projectSerial === projectMutationRef.current && epoch === controllerEpochRef.current && controller.conversationIdRef.current === stored) {
           setMessages(next);
-          setProjectId(conversation.project_id ?? "");
+          setProjectId(conversation.project_id || defaultProjectId || "");
           setLoadError(null);
         }
       })

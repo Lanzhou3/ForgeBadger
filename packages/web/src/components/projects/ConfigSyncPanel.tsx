@@ -19,7 +19,9 @@ import {
   type ConfigDecision,
   type CredentialMode,
 } from "@/lib/api";
+import { TemplateSelect } from "@/components/projects/template-select";
 import { useLanguage } from "@/hooks/use-language";
+import { toast } from "@/lib/toast";
 
 export interface ConfigSyncPanelHandle {
   preview: () => void;
@@ -57,9 +59,28 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
   const [configConflicts, setConfigConflicts] = useState<ConfigConflict[]>([]);
   const [configDecisions, setConfigDecisions] = useState<Record<string, ConfigDecision>>({});
   const [confirmUnbind, setConfirmUnbind] = useState(false);
+  const [bindTemplateId, setBindTemplateId] = useState("");
   const consumedPendingActionRef = useRef<string | null>(null);
 
   const isUntracked = templateId === null;
+
+  const bindTemplateMutation = useMutation({
+    mutationFn: () => {
+      if (!bindTemplateId) {
+        throw new Error("Template selection required");
+      }
+      return updateProjectTemplate(projectId, bindTemplateId);
+    },
+    onSuccess: () => {
+      toast.success(t("projects.templateBindSuccess"));
+      setBindTemplateId("");
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : t("projects.failedSaveConfig"));
+    },
+  });
 
   const previewConfigMutation = useMutation({
     mutationFn: () => {
@@ -152,11 +173,38 @@ export const ConfigSyncPanel = forwardRef<ConfigSyncPanelHandle, ConfigSyncPanel
 
   if (isUntracked) {
     return (
-      <p className="rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">{t("projects.untrackedConfigTitle")}</span>
-        {" · "}
-        {t("projects.untrackedConfigDescription")} {t("projects.untrackedConfigHint")}
-      </p>
+      <div className="space-y-3 rounded-md border border-border/70 bg-muted/30 p-3">
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">{t("projects.untrackedConfigTitle")}</span>
+          {" · "}
+          {t("projects.untrackedConfigDescription")} {t("projects.untrackedConfigHint")}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-[220px] flex-1">
+            <TemplateSelect
+              value={bindTemplateId}
+              onValueChange={setBindTemplateId}
+              ariaLabel={t("templates.selectTemplate")}
+            />
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!bindTemplateId || bindTemplateMutation.isPending}
+            onClick={() => bindTemplateMutation.mutate()}
+          >
+            {bindTemplateMutation.isPending ? t("common.saving") : t("projects.templateBindNow")}
+          </Button>
+        </div>
+        {bindTemplateMutation.isError && (
+          <p className="text-xs text-destructive">
+            {bindTemplateMutation.error instanceof Error
+              ? bindTemplateMutation.error.message
+              : t("projects.failedSaveConfig")}
+          </p>
+        )}
+      </div>
     );
   }
 

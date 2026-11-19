@@ -33,6 +33,13 @@ describe("NewProjectPage", () => {
     Element.prototype.hasPointerCapture = vi.fn(() => false);
     Element.prototype.releasePointerCapture = vi.fn();
     Element.prototype.scrollIntoView = vi.fn();
+    globalThis.ResizeObserver =
+      globalThis.ResizeObserver ??
+      (class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      } as unknown as typeof ResizeObserver);
     listTemplatesMock.mockResolvedValue({
       templates: [{ id: "tpl-1", name: "My Template" }],
     });
@@ -59,6 +66,7 @@ describe("NewProjectPage", () => {
         name: "My Project",
         path: "/tmp/my-project",
         description: "",
+        initGit: true,
       });
     });
   });
@@ -109,6 +117,7 @@ describe("NewProjectPage", () => {
         path: "/tmp/my-project",
         description: "",
         templateId: "tpl-1",
+        initGit: true,
       });
     });
   });

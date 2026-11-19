@@ -386,7 +386,7 @@ interface ProjectManagerViewPrefs {
   viewMode?: WorkItemViewMode;
 }
 
-const WORK_ITEM_VIEW_MODES: WorkItemViewMode[] = ["board", "table", "queue"];
+const WORK_ITEM_VIEW_MODES: WorkItemViewMode[] = ["board", "stages", "table", "queue"];
 
 export function projectManagerViewStorageKey(projectId: string) {
   return `forgebadger:pm-view:${projectId}`;

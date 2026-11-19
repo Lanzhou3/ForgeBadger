@@ -276,6 +276,7 @@ describe("ProjectManagerPanel stages and dependencies", () => {
 
   it("groups work items into stage lanes with dependency badges and session chips", async () => {
     renderPanel();
+    fireEvent.click((await screen.findAllByRole("button", { name: "阶段视图" }))[0]!);
 
     const stageLane = await screen.findByTestId("project-manager-stage-lane-stage-1");
     expect(stageLane.textContent).toContain("实现登录");
@@ -291,6 +292,7 @@ describe("ProjectManagerPanel stages and dependencies", () => {
 
   it("moves a work item to another stage from the lane card", async () => {
     renderPanel();
+    fireEvent.click((await screen.findAllByRole("button", { name: "阶段视图" }))[0]!);
 
     const stageLane = await screen.findByTestId("project-manager-stage-lane-stage-1");
     const select = stageLane.querySelector("select");
@@ -304,6 +306,7 @@ describe("ProjectManagerPanel stages and dependencies", () => {
 
   it("shows stage and dependency management in the work item detail sheet", async () => {
     renderPanel();
+    fireEvent.click((await screen.findAllByRole("button", { name: "阶段视图" }))[0]!);
 
     const stageLane = await screen.findByTestId("project-manager-stage-lane-stage-1");
     fireEvent.click(within(stageLane as HTMLElement).getByText("实现登录"));
@@ -395,7 +398,7 @@ describe("ProjectManagerPanel stages and dependencies", () => {
 it("keeps shared reviewers read-only and never requests legacy sessions, even on refresh", async () => {
   const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
   render(<QueryClientProvider client={client}><LanguageProvider><ProjectManagerPanel projectId="project-1" enabled authority={{canEdit: false, canManage: false, legacySessions: false}} /></LanguageProvider></QueryClientProvider>);
-  await screen.findByTestId("project-manager-stages-card");
+  await screen.findByTestId("project-manager-stage-strip");
   await waitFor(() => expect(listProjectManagerWorkItemsMock).toHaveBeenCalled());
   expect(listProjectManagerTaskPacketsMock).not.toHaveBeenCalled();
   const create = screen.getByRole("button", {name: "创建工作项"});

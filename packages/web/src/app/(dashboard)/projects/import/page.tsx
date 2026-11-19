@@ -5,7 +5,8 @@ import { useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, FolderOpen, LoaderCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, FileCode2, FolderOpen, GitBranch, LoaderCircle, Network } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -274,10 +275,52 @@ export default function ImportProjectPage() {
                 </span>
               </div>
 
-              <div className="rounded-md border border-border/70 bg-muted/50 p-3">
+              <div className="rounded-md border border-border/70 bg-muted/50 p-3 space-y-2">
                 <p className="break-all font-mono text-xs text-muted-foreground">
                   {scanResult.path}
                 </p>
+                {scanResult.exists && scanResult.isDirectory && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {scanResult.instructionFiles && scanResult.instructionFiles.length > 0 ? (
+                      <Badge variant="secondary" className="rounded-full text-[11px] font-normal">
+                        <FileCode2 className="mr-1 size-3" />
+                        {t("projects.scanInstructionFiles")}: {scanResult.instructionFiles.join(", ")}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="rounded-full text-[11px] font-normal text-muted-foreground">
+                        <FileCode2 className="mr-1 size-3" />
+                        {t("projects.scanNoInstructionFiles")}
+                      </Badge>
+                    )}
+
+                    {scanResult.isGitRepo ? (
+                      <Badge variant="secondary" className="rounded-full text-[11px] font-normal">
+                        <GitBranch className="mr-1 size-3" />
+                        {t("projects.scanGitRepo")
+                          .replace("{branch}", scanResult.gitBranch || "HEAD")
+                          .replace("{count}", String(scanResult.gitChangedCount ?? 0))}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="rounded-full text-[11px] font-normal text-muted-foreground">
+                        <GitBranch className="mr-1 size-3" />
+                        {t("projects.scanNotGitRepo")}
+                      </Badge>
+                    )}
+
+                    <Badge
+                      variant={scanResult.hasCodeGraph ? "secondary" : "outline"}
+                      className={cn(
+                        "rounded-full text-[11px] font-normal",
+                        !scanResult.hasCodeGraph && "text-muted-foreground",
+                      )}
+                    >
+                      <Network className="mr-1 size-3" />
+                      {scanResult.hasCodeGraph
+                        ? t("projects.scanCodeGraphReady")
+                        : t("projects.scanCodeGraphMissing")}
+                    </Badge>
+                  </div>
+                )}
               </div>
 
               {!scanResult.exists || !scanResult.isDirectory ? (

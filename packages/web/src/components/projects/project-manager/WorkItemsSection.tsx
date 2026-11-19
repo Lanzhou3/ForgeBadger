@@ -1,7 +1,8 @@
 "use client";
 import { useTaskAuthority } from "./TaskAuthority";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useFlip } from "@/hooks/use-flip";
 import {
   DndContext,
   DragOverlay,
@@ -21,6 +22,8 @@ import {
   ExternalLink,
   Eye,
   Flag,
+  GripVertical,
+  Kanban,
   LayoutDashboard,
   ListChecks,
   Pencil,
@@ -58,8 +61,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type {
+  ProjectManagerStage,
   ProjectManagerTaskPacket,
   ProjectManagerWorkItem,
+  ProjectManagerWorkItemLink,
   ProjectManagerWorkItemStatus,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -87,10 +92,20 @@ import {
   taskPacketQueueStatusLabel,
 } from "./utils";
 import { EmptyState, LedgerDatum } from "./shared";
+import { ProjectManagerPipelineBoard } from "./PipelineBoard";
 
 function matchesSearch(item: ProjectManagerWorkItem, query: string) {
   if (!query) return true;
-  return item.title.toLowerCase().includes(query);
+  return (
+    item.title.toLowerCase().includes(query) ||
+    (item.description?.toLowerCase().includes(query) ?? false)
+  );
+}
+
+function matchesStageFilter(item: ProjectManagerWorkItem, activeStageFilter: string | null) {
+  if (!activeStageFilter) return true;
+  if (activeStageFilter === "__backlog__") return !item.stageId;
+  return item.stageId === activeStageFilter;
 }
 
 const BOARD_COLUMN_DROPPABLE_PREFIX = "board-column:";
@@ -108,12 +123,15 @@ function boardColumnStatusFromDroppableId(id: unknown): ProjectManagerWorkItemSt
 }
 
 export function ProjectManagerWorkItemsSection({
+  activeStageFilter = null,
   batchStatusError,
   batchStatusPending,
   batchTargetOptions,
   batchTargetStatus,
+  goalTaskLinksByWorkItemId,
   highlightedWorkItemId,
   isFetching,
+  links = [],
   onBatchStatusSubmit,
   onBatchTargetStatusChange,
   onClearSelection,
@@ -126,9 +144,12 @@ export function ProjectManagerWorkItemsSection({
   onToggleSelection,
   onViewDetails,
   onViewModeChange,
+  projectId,
   quickStartError,
   quickStartPendingWorkItemId,
   selectedWorkItemIds,
+  stages = [],
+  stagesFetching = false,
   statusError,
   statusFilter,
   statusMutationPending,
@@ -140,12 +161,15 @@ export function ProjectManagerWorkItemsSection({
   workItems,
   t,
 }: {
+  activeStageFilter?: string | null;
   batchStatusError: string | null;
   batchStatusPending: boolean;
   batchTargetOptions: ProjectManagerWorkItemStatus[];
   batchTargetStatus: ProjectManagerWorkItemStatus | "";
+  goalTaskLinksByWorkItemId?: Map<string, { goalId: string; goalTitle: string; taskStatus: string }>;
   highlightedWorkItemId?: string | null;
   isFetching: boolean;
+  links?: ProjectManagerWorkItemLink[];
   onBatchStatusSubmit: () => void;
   onBatchTargetStatusChange: (status: ProjectManagerWorkItemStatus | "") => void;
   onClearSelection: () => void;
@@ -158,9 +182,12 @@ export function ProjectManagerWorkItemsSection({
   onToggleSelection: (item: ProjectManagerWorkItem, selected: boolean) => void;
   onViewDetails: (item: ProjectManagerWorkItem) => void;
   onViewModeChange: (mode: WorkItemViewMode) => void;
+  projectId: string;
   quickStartError: string | null;
   quickStartPendingWorkItemId: string | null;
   selectedWorkItemIds: string[];
+  stages?: ProjectManagerStage[];
+  stagesFetching?: boolean;
   statusError: string | null;
   statusFilter: WorkItemStatusFilter;
   statusMutationPending: boolean;
@@ -175,36 +202,92 @@ export function ProjectManagerWorkItemsSection({
   const { canEdit, legacySessions } = useTaskAuthority();
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [showCompleted, setShowCompleted] = useState(false);
   const normalizedQuery = searchQuery.trim().toLowerCase();
+
   const visibleWorkItems = useMemo(
-    () => workItems.filter((item) => matchesSearch(item, normalizedQuery)),
-    [workItems, normalizedQuery]
+    () =>
+      (statusFilter === "all" ? workItems : tableWorkItems).filter(
+        (item) =>
+          matchesSearch(item, normalizedQuery) &&
+          matchesStageFilter(item, activeStageFilter),
+      ),
+    [activeStageFilter, normalizedQuery, statusFilter, tableWorkItems, workItems],
   );
+
   const visibleTableWorkItems = useMemo(
-    () => tableWorkItems.filter((item) => matchesSearch(item, normalizedQuery)),
-    [tableWorkItems, normalizedQuery]
+    () =>
+      tableWorkItems.filter(
+        (item) =>
+          matchesSearch(item, normalizedQuery) &&
+          matchesStageFilter(item, activeStageFilter),
+      ),
+    [activeStageFilter, normalizedQuery, tableWorkItems],
   );
+
+  const visibleTaskPackets = useMemo(() => {
+    const allowedIds = new Set(visibleWorkItems.map((item) => item.id));
+    return taskPackets.filter((packet) => allowedIds.has(packet.workItemId));
+  }, [taskPackets, visibleWorkItems]);
+
+  const stageNameById = useMemo(
+    () => new Map(stages.map((stage) => [stage.id, stage.name])),
+    [stages],
+  );
+
+  const completedCount = useMemo(
+    () =>
+      visibleWorkItems.filter(
+        (item) => item.status === "done" || item.status === "cancelled",
+      ).length,
+    [visibleWorkItems],
+  );
+
+  const effectiveShowCompleted =
+    showCompleted || statusFilter === "done" || statusFilter === "cancelled";
+
   const taskPacketByWorkItemId = useMemo(
     () => new Map(taskPackets.map((packet) => [packet.workItemId, packet])),
-    [taskPackets]
+    [taskPackets],
   );
-  const isFilterEmpty = (statusFilter !== "all" || normalizedQuery.length > 0) && visibleTableWorkItems.length === 0;
+
+  const isFilterEmpty =
+    (statusFilter !== "all" || normalizedQuery.length > 0 || activeStageFilter !== null) &&
+    visibleTableWorkItems.length === 0;
+
   const selectedWorkItemCount = selectedWorkItemIds.filter((id) =>
-    workItems.some((item) => item.id === id)
+    workItems.some((item) => item.id === id),
   ).length;
 
   return (
     <Card>
       <CardHeader className="space-y-3">
-        <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-          <ClipboardList className="size-4 text-brand" />
-          {t("projects.projectManagerWorkItems")}
-          <span className="rounded border border-border/70 bg-muted/20 px-1.5 py-0.5 font-mono text-xs text-muted-foreground tabular-nums">
-            {workItems.length}
-          </span>
-        </CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+            <ClipboardList className="size-4 text-brand" />
+            {t("projects.projectManagerWorkItems")}
+            <span className="rounded border border-border/70 bg-muted/20 px-1.5 py-0.5 font-mono text-xs text-muted-foreground tabular-nums">
+              {workItems.length}
+            </span>
+          </CardTitle>
+
+          {viewMode === "board" && completedCount > 0 && statusFilter === "all" && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2.5 text-xs text-muted-foreground"
+              onClick={() => setShowCompleted((prev) => !prev)}
+            >
+              {effectiveShowCompleted
+                ? t("projects.projectManagerHideCompleted").replace("{count}", String(completedCount))
+                : t("projects.projectManagerShowCompleted").replace("{count}", String(completedCount))}
+            </Button>
+          )}
+        </div>
+
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-          <div className="inline-flex w-fit rounded-md border border-border/70 bg-muted/20 p-1">
+          <div className="inline-flex w-fit flex-wrap rounded-md border border-border/70 bg-muted/20 p-1">
             <Button
               size="sm"
               variant={viewMode === "board" ? "brand" : "ghost"}
@@ -213,6 +296,15 @@ export function ProjectManagerWorkItemsSection({
             >
               <LayoutDashboard className="mr-2 size-4" />
               {t("projects.projectManagerBoard")}
+            </Button>
+            <Button
+              size="sm"
+              variant={viewMode === "stages" ? "brand" : "ghost"}
+              aria-pressed={viewMode === "stages"}
+              onClick={() => onViewModeChange("stages")}
+            >
+              <Kanban className="mr-2 size-4" />
+              {t("projects.projectManagerViewStages")}
             </Button>
             <Button
               size="sm"
@@ -266,7 +358,8 @@ export function ProjectManagerWorkItemsSection({
           <Button
             size="sm"
             variant="brand"
-            disabled={!canEdit} onClick={onCreate}
+            disabled={!canEdit}
+            onClick={onCreate}
           >
             <Plus className="mr-2 size-4" />
             {t("projects.projectManagerCreateWorkItem")}
@@ -291,31 +384,58 @@ export function ProjectManagerWorkItemsSection({
         )}
         {workItems.length === 0 ? (
           <EmptyState
-            title={isFilterEmpty
-              ? t("projects.projectManagerFilterEmptyTitle")
-              : t("projects.projectManagerNoWorkItemsTitle")}
-            body={isFilterEmpty
-              ? t("projects.projectManagerFilterEmptyBody")
-              : t("projects.projectManagerNoWorkItemsBody")}
+            title={
+              isFilterEmpty
+                ? t("projects.projectManagerFilterEmptyTitle")
+                : t("projects.projectManagerNoWorkItemsTitle")
+            }
+            body={
+              isFilterEmpty
+                ? t("projects.projectManagerFilterEmptyBody")
+                : t("projects.projectManagerNoWorkItemsBody")
+            }
             icon={ClipboardList}
           />
-        ) : viewMode === "board" ? (
-          <ProjectManagerWorkItemBoard
-            batchStatusPending={batchStatusPending}
-            highlightedWorkItemId={highlightedWorkItemId}
-            onDelete={onDelete}
-            onEdit={onEdit}
-            onQuickStart={onQuickStart}
-            onStatusChange={onStatusChange}
-            onToggleSelection={onToggleSelection}
+        ) : viewMode === "stages" ? (
+          <ProjectManagerPipelineBoard
+            isFetching={stagesFetching || isFetching}
+            links={links}
             onViewDetails={onViewDetails}
-            quickStartPendingWorkItemId={quickStartPendingWorkItemId}
-            selectedWorkItemIds={selectedWorkItemIds}
-            statusMutationPending={statusMutationPending}
+            projectId={projectId}
+            stages={stages}
             t={t}
-            taskPacketByWorkItemId={taskPacketByWorkItemId}
+            taskPackets={taskPackets}
             workItems={visibleWorkItems}
           />
+        ) : viewMode === "board" ? (
+          visibleWorkItems.length === 0 && isFilterEmpty ? (
+            <EmptyState
+              title={t("projects.projectManagerFilterEmptyTitle")}
+              body={t("projects.projectManagerFilterEmptyBody")}
+              icon={ClipboardList}
+            />
+          ) : (
+            <ProjectManagerWorkItemBoard
+              batchStatusPending={batchStatusPending}
+              goalTaskLinksByWorkItemId={goalTaskLinksByWorkItemId}
+              highlightedWorkItemId={highlightedWorkItemId}
+              onDelete={onDelete}
+              onEdit={onEdit}
+              onQuickStart={onQuickStart}
+              onStatusChange={onStatusChange}
+              onToggleSelection={onToggleSelection}
+              onViewDetails={onViewDetails}
+              quickStartPendingWorkItemId={quickStartPendingWorkItemId}
+              selectedWorkItemIds={selectedWorkItemIds}
+              showCompleted={effectiveShowCompleted}
+              stageNameById={stageNameById}
+              statusFilter={statusFilter}
+              statusMutationPending={statusMutationPending}
+              t={t}
+              taskPacketByWorkItemId={taskPacketByWorkItemId}
+              workItems={visibleWorkItems}
+            />
+          )
         ) : viewMode === "table" ? (
           visibleTableWorkItems.length === 0 ? (
             <EmptyState
@@ -328,8 +448,10 @@ export function ProjectManagerWorkItemsSection({
               highlightedWorkItemId={highlightedWorkItemId}
               onQuickStart={onQuickStart}
               onStatusChange={onStatusChange}
+              onToggleSelection={onToggleSelection}
               onViewDetails={onViewDetails}
               quickStartPendingWorkItemId={quickStartPendingWorkItemId}
+              selectedWorkItemIds={selectedWorkItemIds}
               statusMutationPending={statusMutationPending}
               t={t}
               taskPacketByWorkItemId={taskPacketByWorkItemId}
@@ -338,7 +460,9 @@ export function ProjectManagerWorkItemsSection({
           )
         ) : (
           <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">{t("projects.projectManagerTaskQueueDescription")}</p>
+            <p className="text-xs text-muted-foreground">
+              {t("projects.projectManagerTaskQueueDescription")}
+            </p>
             <ProjectManagerTaskQueue
               error={taskPacketsError}
               highlightedWorkItemId={highlightedWorkItemId}
@@ -347,15 +471,15 @@ export function ProjectManagerWorkItemsSection({
               onViewDetails={onViewDetails}
               quickStartPendingWorkItemId={quickStartPendingWorkItemId}
               t={t}
-              taskPackets={taskPackets}
-              workItems={workItems}
+              taskPackets={visibleTaskPackets}
+              workItems={visibleWorkItems}
             />
           </div>
         )}
       </CardContent>
       {selectedWorkItemCount > 0 && (
         <div
-          className="forgebadger-slide-up-toolbar fixed bottom-6 left-1/2 z-40 flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-lg"
+          className="sticky bottom-4 z-30 mx-auto mb-4 flex w-fit max-w-[calc(100%-2rem)] flex-wrap items-center gap-3 rounded-lg border border-border bg-card/95 px-4 py-2.5 shadow-lg backdrop-blur"
           data-testid="project-manager-batch-toolbar"
         >
           <span className="text-sm font-medium">
@@ -408,6 +532,7 @@ export function ProjectManagerWorkItemsSection({
 
 function ProjectManagerWorkItemBoard({
   batchStatusPending,
+  goalTaskLinksByWorkItemId,
   highlightedWorkItemId,
   onDelete,
   onEdit,
@@ -417,12 +542,16 @@ function ProjectManagerWorkItemBoard({
   onViewDetails,
   quickStartPendingWorkItemId,
   selectedWorkItemIds,
+  showCompleted = false,
+  stageNameById,
+  statusFilter = "all",
   statusMutationPending,
   t,
   taskPacketByWorkItemId,
   workItems,
 }: {
   batchStatusPending: boolean;
+  goalTaskLinksByWorkItemId?: Map<string, { goalId: string; goalTitle: string; taskStatus: string }>;
   highlightedWorkItemId?: string | null;
   onDelete: (item: ProjectManagerWorkItem) => void;
   onEdit: (item: ProjectManagerWorkItem) => void;
@@ -432,11 +561,17 @@ function ProjectManagerWorkItemBoard({
   onViewDetails: (item: ProjectManagerWorkItem) => void;
   quickStartPendingWorkItemId: string | null;
   selectedWorkItemIds: string[];
+  showCompleted?: boolean;
+  stageNameById?: Map<string, string>;
+  statusFilter?: WorkItemStatusFilter;
   statusMutationPending: boolean;
   t: Translate;
   taskPacketByWorkItemId: Map<string, ProjectManagerTaskPacket>;
   workItems: ProjectManagerWorkItem[];
 }) {
+  const boardRootRef = useRef<HTMLDivElement>(null);
+  useFlip(boardRootRef);
+
   const [activeDragWorkItemId, setActiveDragWorkItemId] = useState<string | null>(null);
   const [dragOverStatus, setDragOverStatus] = useState<ProjectManagerWorkItemStatus | null>(null);
   const dragSensors = useSensors(
@@ -480,6 +615,12 @@ function ProjectManagerWorkItemBoard({
     onStatusChange(item, targetStatus);
   };
 
+  const visibleStatuses = useMemo(() => {
+    if (statusFilter !== "all") return [statusFilter];
+    if (showCompleted) return WORK_ITEM_STATUSES;
+    return WORK_ITEM_STATUSES.filter((status) => status !== "done" && status !== "cancelled");
+  }, [showCompleted, statusFilter]);
+
   return (
     <div className="space-y-3" data-testid="project-manager-board">
       <DndContext
@@ -489,8 +630,11 @@ function ProjectManagerWorkItemBoard({
         onDragEnd={handleDragEnd}
         onDragCancel={resetDragState}
       >
-        <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-          {WORK_ITEM_STATUSES.map((status) => {
+        <div
+          ref={boardRootRef}
+          className="grid grid-flow-col auto-cols-[minmax(275px,1fr)] gap-3 overflow-x-auto pb-2 [scrollbar-width:thin]"
+        >
+          {visibleStatuses.map((status) => {
             const columnItems = workItems.filter((item) => item.status === status);
             return (
               <ProjectManagerBoardColumn
@@ -505,11 +649,11 @@ function ProjectManagerWorkItemBoard({
                     {t("projects.projectManagerBoardEmptyColumn")}
                   </div>
                 ) : (
-                  columnItems.map((item, index) => (
+                  columnItems.map((item) => (
                     <ProjectManagerBoardCard
                       key={item.id}
+                      goalLink={goalTaskLinksByWorkItemId?.get(item.id) ?? null}
                       highlighted={item.id === highlightedWorkItemId}
-                      index={index}
                       isStarting={quickStartPendingWorkItemId === item.id}
                       item={item}
                       onDelete={onDelete}
@@ -519,6 +663,7 @@ function ProjectManagerWorkItemBoard({
                       onToggleSelection={onToggleSelection}
                       onViewDetails={onViewDetails}
                       selected={selectedWorkItemIds.includes(item.id)}
+                      stageName={item.stageId ? (stageNameById?.get(item.stageId) ?? null) : null}
                       statusMutationPending={statusMutationPending || batchStatusPending}
                       t={t}
                       taskPacket={taskPacketByWorkItemId.get(item.id) ?? null}
@@ -580,8 +725,8 @@ function ProjectManagerBoardColumn({
 }
 
 function ProjectManagerBoardCard({
+  goalLink,
   highlighted,
-  index,
   isStarting,
   item,
   onDelete,
@@ -591,12 +736,13 @@ function ProjectManagerBoardCard({
   onToggleSelection,
   onViewDetails,
   selected,
+  stageName,
   statusMutationPending,
   t,
   taskPacket,
 }: {
+  goalLink?: { goalId: string; goalTitle: string; taskStatus: string } | null;
   highlighted: boolean;
-  index: number;
   isStarting: boolean;
   item: ProjectManagerWorkItem;
   onDelete: (item: ProjectManagerWorkItem) => void;
@@ -606,11 +752,12 @@ function ProjectManagerBoardCard({
   onToggleSelection: (item: ProjectManagerWorkItem, selected: boolean) => void;
   onViewDetails: (item: ProjectManagerWorkItem) => void;
   selected: boolean;
+  stageName?: string | null;
   statusMutationPending: boolean;
   t: Translate;
   taskPacket: ProjectManagerTaskPacket | null;
 }) {
-  const { canEdit, legacySessions } = useTaskAuthority();
+  const { canEdit } = useTaskAuthority();
 
   const level = priorityLevel(item.priority);
   const {
@@ -623,26 +770,33 @@ function ProjectManagerBoardCard({
   return (
     <article
       ref={setDragNodeRef}
+      data-flip-id={item.id}
+      data-flip-column={item.status}
+      aria-disabled={!canEdit ? true : undefined}
       className={cn(
-        "forgebadger-animate-in rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs transition-colors hover:border-border",
+        "group rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs transition-colors hover:border-border",
         highlighted && "border-brand/50 bg-brand/5",
         selected && "ring-2 ring-brand/40",
         isDragging && "opacity-40"
       )}
-      style={{ animationDelay: `${index * 40}ms` }}
       data-testid={`project-manager-board-card-${item.id}`}
-      {...dragAttributes}
-      {...dragListeners}
     >
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-1.5">
         <Checkbox
           className="mt-1"
-          disabled={!canEdit} checked={selected}
+          disabled={!canEdit}
+          checked={selected}
           aria-label={t("projects.projectManagerSelectWorkItem")}
           onCheckedChange={(checked) => onToggleSelection(item, checked === true)}
         />
         <div className="min-w-0 flex-1">
-          <div className="break-words text-sm font-medium leading-5">{item.title}</div>
+          <button
+            type="button"
+            onClick={() => onViewDetails(item)}
+            className="break-words text-left text-sm font-medium leading-5 hover:underline"
+          >
+            {item.title}
+          </button>
           {item.description && (
             <p className="mt-1 line-clamp-2 break-words text-xs leading-5 text-muted-foreground">
               {item.description}
@@ -656,38 +810,87 @@ function ProjectManagerBoardCard({
           <Flag className="size-3.5" />
           <span className="font-mono tabular-nums">{item.priority}</span>
         </span>
+        {canEdit && (
+          <button
+            type="button"
+            className="mt-0.5 shrink-0 cursor-grab rounded p-0.5 text-muted-foreground/60 hover:bg-muted hover:text-foreground active:cursor-grabbing"
+            aria-label={t("projects.projectManagerWorkItems")}
+            {...dragAttributes}
+            {...dragListeners}
+          >
+            <GripVertical className="size-3.5" />
+          </button>
+        )}
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Badge variant="outline">{t("projects.projectManagerEvidenceRefs")}: {item.evidenceRefCount}</Badge>
+
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+        {stageName && (
+          <Badge variant="secondary" className="rounded-full text-[10px] font-normal">
+            {stageName}
+          </Badge>
+        )}
+        {goalLink && (
+          <Badge variant="outline" className="rounded-full text-[10px] font-normal">
+            {t("projects.projectManagerGoalLinkedBadge")}
+          </Badge>
+        )}
+        <Badge variant="outline" className="text-[10px]">
+          {t("projects.projectManagerEvidenceRefs")}: {item.evidenceRefCount}
+        </Badge>
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <WorkItemSessionActions
-          isStarting={isStarting}
-          item={item}
-          onQuickStart={onQuickStart}
-          size="xs"
-          t={t}
-          taskPacket={taskPacket}
-        />
-        <Button size="xs" variant="outline" onClick={() => onViewDetails(item)}>
-          <Eye className="mr-1 size-3" />
-          {t("projects.projectManagerViewDetails")}
-        </Button>
-        <Button size="xs" variant="outline" disabled={!canEdit} onClick={() => onEdit(item)}>
-          <Pencil className="mr-1 size-3" />
-          {t("projects.projectManagerEditWorkItem")}
-        </Button>
-        <Button size="xs" variant="destructive" disabled={!canEdit} onClick={() => onDelete(item)}>
-          <Trash2 className="mr-1 size-3" />
-          {t("projects.projectManagerDeleteWorkItem")}
-        </Button>
-        <ProjectManagerStatusActions
-          disabled={statusMutationPending}
-          item={item}
-          onStatusChange={onStatusChange}
-          t={t}
-          size="xs"
-        />
+
+      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <WorkItemSessionActions
+            isStarting={isStarting}
+            item={item}
+            onQuickStart={onQuickStart}
+            size="xs"
+            t={t}
+            taskPacket={taskPacket}
+          />
+          <ProjectManagerStatusActions
+            disabled={statusMutationPending}
+            item={item}
+            onStatusChange={onStatusChange}
+            t={t}
+            size="xs"
+          />
+        </div>
+        <div className="flex items-center gap-0.5">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7 text-muted-foreground hover:text-foreground"
+            aria-label={t("projects.projectManagerViewDetails")}
+            title={t("projects.projectManagerViewDetails")}
+            onClick={() => onViewDetails(item)}
+          >
+            <Eye className="size-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7 text-muted-foreground hover:text-foreground"
+            disabled={!canEdit}
+            aria-label={t("projects.projectManagerEditWorkItem")}
+            title={t("projects.projectManagerEditWorkItem")}
+            onClick={() => onEdit(item)}
+          >
+            <Pencil className="size-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7 text-muted-foreground hover:text-destructive"
+            disabled={!canEdit}
+            aria-label={t("projects.projectManagerDeleteWorkItem")}
+            title={t("projects.projectManagerDeleteWorkItem")}
+            onClick={() => onDelete(item)}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
       </div>
     </article>
   );
@@ -725,8 +928,10 @@ function ProjectManagerWorkItemTable({
   highlightedWorkItemId,
   onQuickStart,
   onStatusChange,
+  onToggleSelection,
   onViewDetails,
   quickStartPendingWorkItemId,
+  selectedWorkItemIds,
   statusMutationPending,
   taskPacketByWorkItemId,
   workItems,
@@ -735,13 +940,17 @@ function ProjectManagerWorkItemTable({
   highlightedWorkItemId?: string | null;
   onQuickStart: (item: ProjectManagerWorkItem) => void;
   onStatusChange: (item: ProjectManagerWorkItem, nextStatus: ProjectManagerWorkItemStatus) => void;
+  onToggleSelection: (item: ProjectManagerWorkItem, selected: boolean) => void;
   onViewDetails: (item: ProjectManagerWorkItem) => void;
   quickStartPendingWorkItemId: string | null;
+  selectedWorkItemIds: string[];
   statusMutationPending: boolean;
   taskPacketByWorkItemId: Map<string, ProjectManagerTaskPacket>;
   workItems: ProjectManagerWorkItem[];
   t: Translate;
 }) {
+  const { canEdit } = useTaskAuthority();
+
   return (
     <Table>
       <TableHeader>
@@ -762,8 +971,23 @@ function ProjectManagerWorkItemTable({
               item.id === highlightedWorkItemId && "border-brand/50 bg-brand/5"
             )}
           >
-            <TableCell className="max-w-[240px] whitespace-normal break-words font-medium">
-              {item.title}
+            <TableCell className="max-w-[260px] whitespace-normal break-words font-medium">
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  className="mt-0.5"
+                  disabled={!canEdit}
+                  checked={selectedWorkItemIds.includes(item.id)}
+                  aria-label={t("projects.projectManagerSelectWorkItem")}
+                  onCheckedChange={(checked) => onToggleSelection(item, checked === true)}
+                />
+                <button
+                  type="button"
+                  onClick={() => onViewDetails(item)}
+                  className="text-left hover:underline"
+                >
+                  {item.title}
+                </button>
+              </div>
             </TableCell>
             <TableCell>
               <Badge variant={statusBadgeVariant(item.status)} className={statusBadgeClassName(item.status)}>
@@ -864,7 +1088,7 @@ function ProjectManagerTaskQueue({
       {isFetching && (
         <p className="text-xs text-muted-foreground">{t("projects.projectManagerTaskQueueLoading")}</p>
       )}
-      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+      <div className="grid grid-flow-col auto-cols-[minmax(280px,1fr)] gap-3 overflow-x-auto pb-2 [scrollbar-width:thin]">
         {TASK_PACKET_QUEUE_STATUSES.map((queueStatus) => {
           const columnPackets = groupedTaskPackets[queueStatus];
           return (

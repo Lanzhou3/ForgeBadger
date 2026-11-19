@@ -1,7 +1,10 @@
 "use client";
-import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useParams, useSearchParams } from "next/navigation";
+import { ArrowLeft, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
 import { getProjectTaskContext } from "@/lib/project-task-api";
@@ -63,18 +66,65 @@ export default function ProjectPage() {
   if (context.data.privateDetailAllowed)
     return <PrivateProjectPage key={`${user?.id}:${id}`} taskAuthority={authority} />;
   return (
-    <div className="mx-auto max-w-[1500px] space-y-5 p-4 md:p-6">
-      <Link href="/projects" className="text-sm text-muted-foreground hover:text-foreground">
-        ← {t("projects.back")}
-      </Link>
-      <h1 className="text-xl font-semibold">{context.data.project.name}</h1>
-        <ProjectManagerPanel
-          key={`${user?.id}:${id}`}
-          projectId={id}
-          enabled
-          selectedWorkItemId={search.get("workItemId") ?? search.get("task")}
-          authority={authority}
-        />
+    <div className="mx-auto max-w-7xl space-y-5 p-6">
+      <div className="space-y-2 border-b pb-4">
+        <Link
+          href="/projects"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-3.5" />
+          {t("projects.back")}
+        </Link>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-semibold tracking-tight">
+                {context.data.project.name}
+              </h1>
+              <Badge variant="outline" className="rounded-full text-xs font-normal">
+                {t("projects.sharedRoleBadge").replace("{role}", context.data.access.role)}
+              </Badge>
+              <Badge variant="secondary" className="rounded-full text-xs font-normal">
+                <Users className="mr-1 size-3" />
+                {t("projects.sharedMembersCount").replace("{count}", String(detail.data.members.length))}
+              </Badge>
+            </div>
+            {context.data.project.description && (
+              <p className="max-w-3xl text-sm text-muted-foreground">
+                {context.data.project.description}
+              </p>
+            )}
+            {context.data.access.capabilities.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {context.data.access.capabilities.map((cap) => (
+                  <Badge
+                    key={cap}
+                    variant="secondary"
+                    className="rounded-full font-mono text-[10px] font-normal"
+                  >
+                    {cap}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+          {context.data.access.teamId && (
+            <Button asChild variant="outline" size="sm">
+              <Link href="/teams">
+                <Users className="size-3.5" />
+                {t("projects.sharedManageTeam")}
+              </Link>
+            </Button>
+          )}
+        </div>
+      </div>
+      <ProjectManagerPanel
+        key={`${user?.id}:${id}`}
+        projectId={id}
+        enabled
+        selectedWorkItemId={search.get("workItemId") ?? search.get("task")}
+        authority={authority}
+      />
     </div>
   );
 }

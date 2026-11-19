@@ -6,10 +6,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Boxes,
+  Check,
+  Copy,
   FileCode,
   GitCompare,
   GitFork,
   Network,
+  RefreshCw,
   TerminalSquare
 } from "lucide-react";
 
@@ -27,6 +30,7 @@ import {
   getProjectGraphSymbolDetail,
   type GraphSymbolRef
 } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { WorkspaceFileViewer } from "@/components/projects/workspace/WorkspaceFileViewer";
 
@@ -36,6 +40,7 @@ import { SymbolSearchBox } from "./SymbolSearchBox";
 export interface ProjectGraphPanelProps {
   projectId: string;
   enabled: boolean;
+  onOpenInFiles?: (path: string) => void;
 }
 
 interface SourceViewerRequest {
@@ -47,7 +52,11 @@ const FILE_GRAPH_LIMIT = 120;
 
 type PanelMode = "files" | "affected";
 
-export function ProjectGraphPanel({ projectId, enabled }: ProjectGraphPanelProps) {
+export function ProjectGraphPanel({
+  projectId,
+  enabled,
+  onOpenInFiles,
+}: ProjectGraphPanelProps) {
   const { t } = useLanguage();
   const [mode, setMode] = useState<PanelMode>("files");
   const [selectedSymbol, setSelectedSymbol] = useState<GraphSymbolRef | null>(null);
@@ -97,7 +106,11 @@ export function ProjectGraphPanel({ projectId, enabled }: ProjectGraphPanelProps
   const overview = overviewQuery.data;
   if (!overview?.available) {
     return (
-      <SetupGuidanceCard reason={overview && !overview.available ? overview.reason : "error"} />
+      <SetupGuidanceCard
+        reason={overview && !overview.available ? overview.reason : "error"}
+        rechecking={overviewQuery.isFetching}
+        onRecheck={() => void overviewQuery.refetch()}
+      />
     );
   }
 
@@ -179,6 +192,10 @@ export function ProjectGraphPanel({ projectId, enabled }: ProjectGraphPanelProps
               path={sourceViewer.path}
               enabled
               focusLine={sourceViewer.line ?? null}
+              onOpenInFiles={(filePath) => {
+                setSourceViewer(null);
+                onOpenInFiles?.(filePath);
+              }}
               onClose={() => setSourceViewer(null)}
               className="h-full flex-1 rounded-none border-0"
             />
@@ -241,8 +258,29 @@ function UnavailableCard({ message }: { message: string }) {
   );
 }
 
-function SetupGuidanceCard({ reason }: { reason: string }) {
+function SetupGuidanceCard({
+  reason,
+  rechecking = false,
+  onRecheck,
+}: {
+  reason: string;
+  rechecking?: boolean;
+  onRecheck?: () => void;
+}) {
   const { t } = useLanguage();
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopyCommand() {
+    try {
+      await navigator.clipboard.writeText("codegraph init .");
+      setCopied(true);
+      toast.success(t("projects.graphSetupCopied"));
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard unavailable.
+    }
+  }
+
   return (
     <Card className="border-dashed py-0">
       <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
@@ -260,7 +298,30 @@ function SetupGuidanceCard({ reason }: { reason: string }) {
         <div className="flex w-full max-w-sm items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
           <code className="flex-1 truncate text-left font-mono text-xs">codegraph init .</code>
           <Badge variant="outline" className="shrink-0 font-mono text-[10px]">CLI</Badge>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-6 shrink-0"
+            aria-label={t("projects.graphCopySetup")}
+            title={t("projects.graphCopySetup")}
+            onClick={() => void handleCopyCommand()}
+          >
+            {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
+          </Button>
         </div>
+        {onRecheck && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={rechecking}
+            onClick={onRecheck}
+          >
+            <RefreshCw className={cn("size-3.5", rechecking && "animate-spin")} />
+            {t("projects.graphRecheck")}
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

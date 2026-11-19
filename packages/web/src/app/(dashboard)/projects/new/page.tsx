@@ -19,8 +19,12 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DirectoryPathInput } from "@/components/projects/DirectoryPathInput";
 import { TemplateSelect } from "@/components/projects/template-select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { createProject } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { useLanguage } from "@/hooks/use-language";
 
 interface FormValues {
@@ -33,6 +37,7 @@ export default function NewProjectPage() {
   const router = useRouter();
   const { t } = useLanguage();
   const [templateId, setTemplateId] = useState("");
+  const [initGit, setInitGit] = useState(true);
 
   const formSchema = useMemo(
     () =>
@@ -55,8 +60,15 @@ export default function NewProjectPage() {
 
   const mutation = useMutation({
     mutationFn: (values: FormValues) =>
-      createProject(templateId ? { ...values, templateId } : values),
+      createProject(
+        templateId
+          ? { ...values, templateId, initGit }
+          : { ...values, initGit },
+      ),
     onSuccess: (result) => {
+      if (result.gitInitError) {
+        toast.warning(result.gitInitError);
+      }
       router.push(`/projects/${result.project.id}`);
     },
   });
@@ -108,7 +120,11 @@ export default function NewProjectPage() {
                   <FormItem>
                     <FormLabel>{t("common.path")}</FormLabel>
                     <FormControl>
-                      <Input placeholder="/path/to/project" {...field} />
+                      <DirectoryPathInput
+                        value={field.value}
+                        onChange={field.onChange}
+                        placeholder="/path/to/project"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -140,6 +156,23 @@ export default function NewProjectPage() {
                   />
                 </FormControl>
               </FormItem>
+
+              <div className="flex items-start gap-2.5 rounded-md border border-border/70 bg-muted/30 p-3">
+                <Checkbox
+                  id="init-git"
+                  checked={initGit}
+                  onCheckedChange={(checked) => setInitGit(checked === true)}
+                  className="mt-0.5"
+                />
+                <div className="space-y-0.5">
+                  <Label htmlFor="init-git" className="cursor-pointer text-sm font-medium">
+                    {t("projects.initGit")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("projects.initGitHint")}
+                  </p>
+                </div>
+              </div>
 
               {mutation.isError && (
                 <p className="text-sm text-destructive">

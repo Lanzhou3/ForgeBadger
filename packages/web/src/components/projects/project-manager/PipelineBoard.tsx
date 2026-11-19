@@ -647,10 +647,9 @@ function ProjectManagerStageItemCard({
     <article
       ref={setDragNodeRef}
       className={cn(
-        "forgebadger-animate-in rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs transition-colors hover:border-border",
+        "rounded-md border border-border/70 bg-muted/10 p-3 shadow-xs transition-colors hover:border-border",
         isDragging && "opacity-40"
       )}
-      style={{ animationDelay: `${index * 40}ms` }}
       data-testid={`project-manager-stage-item-${item.id}`}
       {...dragAttributes}
       {...dragListeners}

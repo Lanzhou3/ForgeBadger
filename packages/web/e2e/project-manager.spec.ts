@@ -45,6 +45,7 @@ test("opens Project Manager from deep link and renders Copilot trace markers", a
   const sheet = page.getByRole("dialog", { name: "Trace Copilot approval chain" });
   await expect(sheet).toBeVisible();
   await expect(sheet.getByText("Done").first()).toBeVisible();
+  await sheet.getByRole("tab", { name: /Evidence & Notes/ }).click();
   await expect(sheet.getByText("Copilot trace")).toBeVisible();
   await expect(sheet.getByText("Run", { exact: true })).toBeVisible();
   await expect(sheet.getByText("run-done-1", { exact: true })).toBeVisible();
@@ -262,6 +263,7 @@ test("attaches workspace evidence references from work item details", async ({ p
 
   const sheet = page.getByRole("dialog", { name: "Review external evidence" });
   await expect(sheet).toBeVisible();
+  await sheet.getByRole("tab", { name: /Evidence & Notes/ }).click();
 
   await sheet.getByLabel("Reference type").selectOption("file_path");
   await sheet.getByLabel("Path").fill("packages/web/src/components/projects/WorkspaceContextPanel.tsx");
@@ -296,6 +298,7 @@ test("blocks raw terminal text in workspace evidence references", async ({ page 
 
   const sheet = page.getByRole("dialog", { name: "Review external evidence" });
   await expect(sheet).toBeVisible();
+  await sheet.getByRole("tab", { name: /Evidence & Notes/ }).click();
   await sheet.getByLabel("Reference type").selectOption("terminal_snapshot");
   await sheet.getByLabel("Session ID").fill("session-trace-1");
   await sheet.getByRole("textbox", { name: "Reference" }).fill("$ claude --dangerously-skip-permissions\nstdout: secret output");
@@ -319,6 +322,7 @@ test("keeps safe evidence draft values visible after attach failure", async ({ p
 
   const sheet = page.getByRole("dialog", { name: "Review external evidence" });
   await expect(sheet).toBeVisible();
+  await sheet.getByRole("tab", { name: /Evidence & Notes/ }).click();
   await sheet.getByLabel("Kind").fill("report");
   await sheet.getByLabel("Label").fill("Phase 11 evidence");
   await sheet.getByRole("textbox", { name: "Reference" }).fill("PMEV-01");
@@ -348,6 +352,7 @@ test("completes the v1.2 Project Manager workflow under strict route mocks", asy
   await workItemRow.getByRole("button", { name: "View details" }).click();
 
   const sheet = page.getByRole("dialog", { name: "Review external evidence" });
+  await sheet.getByRole("tab", { name: /Evidence & Notes/ }).click();
   await sheet.getByLabel("Kind").fill("report");
   await sheet.getByLabel("Label").fill("Phase 11 evidence");
   await sheet.getByRole("textbox", { name: "Reference" }).fill("PMEV-01");

@@ -216,6 +216,67 @@ async function mockWorkspaceApis(page: Page) {
       return;
     }
 
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/context` && method === "GET") {
+      await route.fulfill({
+        json: envelope({
+          project: { id: PROJECT_ID, name: "ForgeBadger E2E", description: null, status: "active" },
+          access: { role: "owner", capabilities: ["develop", "manage"], teamId: null, logicalOwnerId: "user-e2e" },
+          managedExecution: { supported: false, reason: null },
+          shared: false,
+          privateDetailAllowed: true,
+          revisionRequired: false,
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/collaboration/projects/${PROJECT_ID}` && method === "GET") {
+      await route.fulfill({
+        json: envelope({
+          project: { id: PROJECT_ID, name: "ForgeBadger E2E", role: "owner", memberCount: 1, revision: 1, verificationRevision: 1, executionEnabled: false, verification: null },
+          members: [],
+          tasks: [],
+          events: [],
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/goal` && method === "GET") {
+      await route.fulfill({ json: envelope({ goal: null }) });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/project-manager/work-items` && method === "GET") {
+      await route.fulfill({ json: envelope({ workItems: [] }) });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/git-changes` && method === "GET") {
+      await route.fulfill({ json: envelope({ git: { isGitRepo: true, branch: "main", changed: [], commits: [] } }) });
+      return;
+    }
+
+    if (url.pathname === `/api/v1/projects/${PROJECT_ID}/graph/overview` && method === "GET") {
+      await route.fulfill({ json: envelope({ available: false, reason: "not_initialized" }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/copilot/goals" && method === "GET") {
+      await route.fulfill({ json: envelope({ goals: [] }) });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/fleets" && method === "GET") {
+      await route.fulfill({ json: envelope({ fleets: [] }) });
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/v1/model-providers/applied/") && method === "GET") {
+      await route.fulfill({ json: envelope({ appliedProvider: null }) });
+      return;
+    }
+
     unhandledApiRoutes.push(`${method} ${url.pathname}`);
     await route.fulfill({
       status: 500,

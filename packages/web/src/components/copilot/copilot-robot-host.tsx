@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 
@@ -16,6 +16,15 @@ const RobotChatPanel = dynamic(
   { ssr: false }
 );
 
+function extractProjectIdFromPathname(pathname: string | null): string | undefined {
+  if (!pathname) return undefined;
+  const match = pathname.match(/^\/projects\/([^/?#]+)/);
+  if (!match?.[1]) return undefined;
+  const segment = match[1];
+  if (segment === "new" || segment === "import") return undefined;
+  return decodeURIComponent(segment);
+}
+
 /**
  * Dashboard-mounted pre-rendered robot. Clicking toggles a floating quick-chat panel
  * (the robot stays quiet while it is open, same as on the Copilot page); the
@@ -27,11 +36,30 @@ export function CopilotRobotHost() {
   const pathname = usePathname();
   const petId = usePetPreference();
   const [chatOpen, setChatOpen] = useState(false);
+  const [overrideProjectId, setOverrideProjectId] = useState<string | undefined>(undefined);
   // The panel anchors to the same viewport corner as the robot so it opens
   // beside the pet wherever it was dragged, not always bottom-right.
   const [panelCorner, setPanelCorner] = useState<RobotCorner>("bottom-right");
 
+  const routeProjectId = useMemo(
+    () => extractProjectIdFromPathname(pathname),
+    [pathname],
+  );
+
+  useEffect(() => {
+    const onOpenCopilot = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string }>).detail;
+      if (detail?.projectId) {
+        setOverrideProjectId(detail.projectId);
+      }
+      setChatOpen(true);
+    };
+    window.addEventListener("forgebadger:open-copilot", onOpenCopilot);
+    return () => window.removeEventListener("forgebadger:open-copilot", onOpenCopilot);
+  }, []);
+
   const onActivate = useCallback(() => {
+    setOverrideProjectId(undefined);
     setChatOpen((current) => !current);
   }, []);
 
@@ -57,7 +85,15 @@ export function CopilotRobotHost() {
         onCornerChange={setPanelCorner}
       />
       {chatOpen && (
-        <RobotChatPanel corner={panelCorner} onClose={() => setChatOpen(false)} onExpandFull={onExpandFull} />
+        <RobotChatPanel
+          corner={panelCorner}
+          defaultProjectId={overrideProjectId ?? routeProjectId}
+          onClose={() => {
+            setChatOpen(false);
+            setOverrideProjectId(undefined);
+          }}
+          onExpandFull={onExpandFull}
+        />
       )}
     </div>
   );

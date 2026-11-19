@@ -68,6 +68,28 @@ export function CreateWorkItemDialog({
                 disabled={isSaving}
                 onChange={(event) => onDraftChange({ ...draft, priority: event.target.value })}
               />
+              <div className="flex flex-wrap gap-1">
+                {(
+                  [
+                    ["2", t("projects.projectManagerPriorityLow")],
+                    ["5", t("projects.projectManagerPriorityMedium")],
+                    ["7", t("projects.projectManagerPriorityHigh")],
+                    ["9", t("projects.projectManagerPriorityUrgent")],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    variant={draft.priority.trim() === value ? "secondary" : "ghost"}
+                    className="h-6 px-2 text-[11px]"
+                    disabled={isSaving}
+                    onClick={() => onDraftChange({ ...draft, priority: value })}
+                  >
+                    {label} ({value})
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
           <div className="space-y-2">
@@ -169,6 +191,28 @@ export function EditWorkItemDialog({
                 disabled={isSaving}
                 onChange={(event) => onDraftChange({ ...draft, priority: event.target.value })}
               />
+              <div className="flex flex-wrap gap-1">
+                {(
+                  [
+                    ["2", t("projects.projectManagerPriorityLow")],
+                    ["5", t("projects.projectManagerPriorityMedium")],
+                    ["7", t("projects.projectManagerPriorityHigh")],
+                    ["9", t("projects.projectManagerPriorityUrgent")],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    variant={draft.priority.trim() === value ? "secondary" : "ghost"}
+                    className="h-6 px-2 text-[11px]"
+                    disabled={isSaving}
+                    onClick={() => onDraftChange({ ...draft, priority: value })}
+                  >
+                    {label} ({value})
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
           <div className="space-y-2">
@@ -301,6 +345,25 @@ export function DoneReasonDialog({
         </DialogHeader>
         <div className="space-y-2">
           <Label htmlFor="project-manager-done-reason">{t("projects.projectManagerDoneReasonLabel")}</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              t("projects.projectManagerDoneReasonChipTests"),
+              t("projects.projectManagerDoneReasonChipReviewed"),
+              t("projects.projectManagerDoneReasonChipVerified"),
+            ].map((chip) => (
+              <Button
+                key={chip}
+                type="button"
+                size="sm"
+                variant={reason === chip ? "secondary" : "outline"}
+                className="h-6 px-2 text-[11px]"
+                disabled={isSaving}
+                onClick={() => setReason(chip)}
+              >
+                {chip}
+              </Button>
+            ))}
+          </div>
           <Textarea
             id="project-manager-done-reason"
             ref={reasonRef}
@@ -309,6 +372,9 @@ export function DoneReasonDialog({
             disabled={isSaving}
             onChange={(event) => setReason(event.target.value)}
           />
+          <p className="text-[11px] text-muted-foreground">
+            {t("projects.projectManagerDoneReasonOptionalHint")}
+          </p>
           {workItemTitle && <p className="text-xs text-muted-foreground">{workItemTitle}</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>

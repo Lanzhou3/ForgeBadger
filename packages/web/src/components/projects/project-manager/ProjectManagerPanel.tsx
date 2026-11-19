@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 
@@ -37,11 +37,12 @@ import {
   type RuntimeAdapterId,
   type Session,
 } from "@/lib/api";
+import { getGoal, listGoals } from "@/lib/copilot-api";
 import { TaskAuthorityContext, useTaskAuthority, type TaskAuthority } from "./TaskAuthority";
 import { cn } from "@/lib/utils";
 import { taskPacketSelectableSessions } from "../project-manager-task-packet";
 import { ProjectManagerGoalBanner } from "./GoalBanner";
-import { ProjectManagerPipelineBoard } from "./PipelineBoard";
+import { ProjectManagerStageStrip } from "./StageStrip";
 import { ProjectManagerWorkItemsSection } from "./WorkItemsSection";
 import { ProjectManagerWorkItemDetailSheet } from "./WorkItemDetailSheet";
 import { QuickStartSessionDialog } from "./QuickStartSessionDialog";
@@ -93,6 +94,7 @@ interface ProjectManagerPanelProps {
    * the title is not duplicated visually while heading semantics stay.
    */
   embedded?: boolean;
+  onNavigateToSession?: (href: string) => void;
 }
 
 export function ProjectManagerPanel(props: ProjectManagerPanelProps) {
@@ -104,6 +106,7 @@ function ProjectManagerPanelContent({
   enabled,
   selectedWorkItemId: requestedWorkItemId = null,
   embedded = false,
+  onNavigateToSession,
 }: ProjectManagerPanelProps) {
   const { t } = useLanguage();
   const {canEdit, canManage, legacySessions, actorId} = useTaskAuthority();
@@ -142,12 +145,50 @@ function ProjectManagerPanelContent({
   const [ledgerFilter, setLedgerFilter] = useState<LedgerFilter>("all");
   const [ledgerLimit, setLedgerLimit] = useState(LEDGER_PAGE_SIZE);
   const [statusMutationError, setStatusMutationError] = useState<string | null>(null);
+  const [hasConflict, setHasConflict] = useState(false);
+  const [activeStageFilter, setActiveStageFilter] = useState<string | null>(null);
   const [pendingDoneItems, setPendingDoneItems] = useState<ProjectManagerWorkItem[] | null>(null);
   const [pendingDoneIsBatch, setPendingDoneIsBatch] = useState(false);
   const [doneReason, setDoneReason] = useState("");
   const [doneReasonError, setDoneReasonError] = useState<string | null>(null);
   const doneReasonRef = useRef<HTMLTextAreaElement | null>(null);
   const appliedRequestedWorkItemIdRef = useRef<string | null>(null);
+
+  const copilotGoalsQuery = useQuery({
+    queryKey: ["copilot-goals"],
+    queryFn: () => listGoals(),
+    enabled: canLoad && legacySessions,
+    retry: false,
+    staleTime: 30_000,
+  });
+
+  const activeProjectGoal = (copilotGoalsQuery.data?.goals ?? []).find(
+    (g) => g.projectId === projectId && (g.status === "active" || g.status === "blocked"),
+  );
+
+  const activeGoalDetailQuery = useQuery({
+    queryKey: ["copilot-goal", activeProjectGoal?.id],
+    queryFn: () => getGoal(activeProjectGoal!.id),
+    enabled: canLoad && legacySessions && Boolean(activeProjectGoal?.id),
+    retry: false,
+    staleTime: 30_000,
+  });
+
+  const goalTaskLinksByWorkItemId = useMemo(() => {
+    const map = new Map<string, { goalId: string; goalTitle: string; taskStatus: string }>();
+    const goalDetail = activeGoalDetailQuery.data;
+    if (!goalDetail) return map;
+    for (const task of goalDetail.tasks ?? []) {
+      if (task.workItemId) {
+        map.set(task.workItemId, {
+          goalId: goalDetail.goal.id,
+          goalTitle: goalDetail.goal.title,
+          taskStatus: task.status,
+        });
+      }
+    }
+    return map;
+  }, [activeGoalDetailQuery.data]);
 
   const goalQuery = useQuery({
     queryKey: ["project-manager", projectId, "goal", actorId],
@@ -319,6 +360,7 @@ function ProjectManagerPanelContent({
     mutationFn: (input: { updates: Array<{ workItemId: string; status: ProjectManagerWorkItemStatus; expectedRevision?: number; manualCompletionReason?: string }> }) =>
       batchUpdateProjectManagerWorkItemStatuses(projectId, input),
     onSuccess: async ({ workItems: updatedWorkItems }) => {
+      setHasConflict(false);
       setBatchStatusError(null);
       setBatchTargetStatus("");
       setSelectedBoardWorkItemIds([]);
@@ -336,6 +378,9 @@ function ProjectManagerPanelContent({
       ]);
     },
     onError: (error) => {
+      if (error instanceof GatewayApiError && error.status === 409) {
+        setHasConflict(true);
+      }
       const message = projectManagerMutationMessage(error, t("projects.projectManagerBatchStatusError"));
       setBatchStatusError(message);
       if (pendingDoneItems) setDoneReasonError(message);
@@ -346,6 +391,7 @@ function ProjectManagerPanelContent({
     mutationFn: ({ input, workItemId }: { input: ProjectManagerWorkItemStatusInput; workItemId: string }) =>
       updateProjectManagerWorkItemStatus(projectId, workItemId, input),
     onSuccess: async () => {
+      setHasConflict(false);
       setStatusMutationError(null);
       setPendingDoneItems(null);
       setDoneReason("");
@@ -359,6 +405,9 @@ function ProjectManagerPanelContent({
       ]);
     },
     onError: (error) => {
+      if (error instanceof GatewayApiError && error.status === 409) {
+        setHasConflict(true);
+      }
       setStatusMutationError(projectManagerMutationMessage(error, t("projects.projectManagerStatusMutationError")));
     },
   });
@@ -765,6 +814,22 @@ function ProjectManagerPanelContent({
         </Card>
       ) : (
         <>
+          {hasConflict && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm">
+              <span>{t("projects.projectManagerConflictBanner")}</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setHasConflict(false);
+                  void invalidateProjectManagerQueries();
+                }}
+              >
+                {t("projects.projectManagerConflictRefresh")}
+              </Button>
+            </div>
+          )}
           <ProjectManagerGoalBanner
             goal={goal}
             t={t}
@@ -777,22 +842,25 @@ function ProjectManagerPanelContent({
             onEdit={startGoalEdit}
             onSave={saveGoal}
           />
-          <ProjectManagerPipelineBoard
-            isFetching={stagesQuery.isFetching || workItemsQuery.isFetching}
-            links={workItemLinks}
-            onViewDetails={(item) => setSelectedWorkItemId(item.id)}
+          <ProjectManagerStageStrip
             projectId={projectId}
             stages={stages}
-            t={t}
-            taskPackets={taskPackets}
             workItems={workItems}
+            activeStageId={activeStageFilter}
+            onSelectStageId={setActiveStageFilter}
+            onOpenStagesView={() => setWorkItemViewMode("stages")}
+            canEdit={canEdit}
+            t={t}
           />
           <ProjectManagerWorkItemsSection
+            activeStageFilter={activeStageFilter}
             batchStatusError={batchStatusError}
             batchStatusPending={batchStatusMutation.isPending}
             batchTargetOptions={batchTargetOptions}
             batchTargetStatus={effectiveBatchTargetStatus}
+            goalTaskLinksByWorkItemId={goalTaskLinksByWorkItemId}
             isFetching={workItemsQuery.isFetching}
+            links={workItemLinks}
             onBatchStatusSubmit={submitBatchStatusChange}
             onBatchTargetStatusChange={setBatchTargetStatus}
             onClearSelection={() => {
@@ -808,9 +876,12 @@ function ProjectManagerPanelContent({
             onStatusChange={requestStatusChange}
             onToggleSelection={toggleBoardWorkItemSelection}
             onViewDetails={(item) => setSelectedWorkItemId(item.id)}
+            projectId={projectId}
             quickStartError={quickStartError}
             quickStartPendingWorkItemId={quickStartPendingId}
             selectedWorkItemIds={selectedBoardWorkItemIds}
+            stages={stages}
+            stagesFetching={stagesQuery.isFetching}
             statusError={statusMutationError}
             statusFilter={workItemStatusFilter}
             statusMutationPending={!canEdit || statusMutation.isPending}
@@ -843,6 +914,7 @@ function ProjectManagerPanelContent({
       <ProjectManagerWorkItemDetailSheet
         evidenceDraft={evidenceDraft}
         evidenceError={evidenceAttachError}
+        goalLink={selectedWorkItem ? (goalTaskLinksByWorkItemId.get(selectedWorkItem.id) ?? null) : null}
         isEvidenceSaving={evidenceMutation.isPending}
         isTaskPacketLinking={taskPacketLinkMutation.isPending}
         isTaskPacketLoading={taskPacketQuery.isLoading || sessionsQuery.isLoading}
@@ -852,6 +924,7 @@ function ProjectManagerPanelContent({
         links={workItemLinks}
         onAttachEvidence={attachEvidence}
         onEvidenceDraftChange={setEvidenceDraft}
+        onNavigateToSession={onNavigateToSession}
         onOpenChange={(open) => {
           if (!open) setSelectedWorkItemId(null);
         }}

@@ -1,13 +1,12 @@
 "use client";
 
 import type { TaskAuthority } from "./project-manager/TaskAuthority";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { UIEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, Eye, FileCode2, FileText, Globe2, Link2, MoreHorizontal, Package, Pencil, Plus, Save, TerminalSquare, Trash2, Wrench } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, Check, Copy, Eye, FileCode2, FileText, Globe2, Link2, MoreHorizontal, Package, Pencil, Plus, Save, Terminal, TerminalSquare, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,12 +17,16 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { AdapterSelect, ADAPTER_DISCOVERY_QUERY_KEY } from "@/components/adapter-select";
 import { CliBrandChip } from "@/components/cli-brand-chip";
 import { ConfigSyncPanel, type ConfigSyncPanelHandle } from "@/components/projects/ConfigSyncPanel";
 import { ExtractTemplateDialog } from "@/components/projects/ExtractTemplateDialog";
+import { ProjectEditMetadataDialog } from "@/components/projects/ProjectEditMetadataDialog";
+import { ProjectOverviewPanel } from "@/components/projects/ProjectOverviewPanel";
+import { buildEdgeFadeMask } from "@/components/sessions/SessionBoard";
 import { RuntimeSetupCommands } from "@/components/runtime-setup-commands";
 import { WorkspaceContextPanel } from "@/components/projects/WorkspaceContextPanel";
 import { WorkspaceExplorer } from "@/components/projects/workspace";
@@ -35,10 +38,12 @@ import {
   getProject,
   getGlobalAiConfig,
   getProjectAiConfig,
+  getAppliedProviderForAdapter,
   getDependencies,
   discoverAdapters,
   listSessions,
   listActivities,
+  listTemplates,
   createSession,
   deleteProject,
   listProjectSkills,
@@ -54,12 +59,14 @@ import {
   type ProjectManagerTaskPacket,
   type SessionActivity,
 } from "@/lib/api";
+import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
+import type { GatewayEvent } from "@/lib/notifications";
 import { findSessionTaskPacket, sessionTaskPacketProjectManagerHref } from "@/components/sessions/session-task-packet";
 import { formatSessionRelativeTime } from "@/components/sessions/session-board-utils";
 import { activityTypeLabel, projectStatusLabel, useProjectCopy } from "@/components/projects/project-copy";
 import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import { normalizeSessionStatus } from "@/lib/session-status";
-import { highlightCode, supportsSyntaxHighlighting } from "@/lib/syntax-highlight";
+import { highlightWorkspaceCode, tokenFontStyle } from "@/components/projects/workspace/highlight";
 import { getTerminalRuntimeSetupGuidance } from "@/lib/terminal-runtime";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/projects/markdown-renderer";
@@ -79,6 +86,7 @@ const ProjectManagerPanel = dynamic(
 );
 
 const PROJECT_DETAIL_TABS = [
+  "overview",
   "sessions",
   "git",
   "files",
@@ -107,15 +115,31 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
     return () => window.clearInterval(timer);
   }, []);
   const id = params.id as string;
-  const [activeTab, setActiveTab] = useState<ProjectDetailTab>(() =>
-    readProjectDetailTab(searchParams.get("tab") === "collaboration-settings" ? "project-manager" : searchParams.get("tab")) ?? "project-manager"
-  );
+  const urlTabParam = searchParams.get("tab");
+  const initialWorkItemParam = normalizeSearchParam(searchParams.get("workItemId") ?? searchParams.get("task"));
+  const [activeTab, setActiveTab] = useState<ProjectDetailTab>(() => {
+    if (urlTabParam === "collaboration-settings") return "project-manager";
+    const parsed = readProjectDetailTab(urlTabParam);
+    if (parsed) return parsed;
+    return initialWorkItemParam ? "project-manager" : "overview";
+  });
   const [selectedRuntimeAdapter, setSelectedRuntimeAdapter] = useState<RuntimeAdapterId | "">("");
   const [selectedConfigPath, setSelectedConfigPath] = useState("");
   const [configDraft, setConfigDraft] = useState("");
+  const [configSavedFlash, setConfigSavedFlash] = useState(false);
+  const [pendingConfigSwitch, setPendingConfigSwitch] = useState<
+    | { kind: "file"; path: string }
+    | { kind: "adapter"; adapter: RuntimeAdapterId }
+    | null
+  >(null);
   const [pendingConfigAction, setPendingConfigAction] = useState<"preview" | null>(null);
   const [extractDialogOpen, setExtractDialogOpen] = useState(false);
+  const [editMetadataOpen, setEditMetadataOpen] = useState(false);
+  const [overviewSidebarOpen, setOverviewSidebarOpen] = useState(true);
+  const [copiedPath, setCopiedPath] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [tabFade, setTabFade] = useState({ left: false, right: false });
+  const tabsScrollRef = useRef<HTMLDivElement>(null);
   const configSyncRef = useRef<ConfigSyncPanelHandle>(null);
 
   const { data: projectData, isLoading: projectLoading } = useQuery({
@@ -190,8 +214,34 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
     },
   });
 
+  const { data: appliedProviderData } = useQuery({
+    queryKey: ["model-providers-applied", selectedRuntimeAdapter],
+    queryFn: () => getAppliedProviderForAdapter(selectedRuntimeAdapter as RuntimeAdapterId),
+    enabled: Boolean(selectedRuntimeAdapter),
+    retry: false,
+    staleTime: 60_000,
+  });
+
+  const { data: templatesData } = useQuery({
+    queryKey: ["templates"],
+    queryFn: listTemplates,
+    staleTime: 60_000,
+    retry: false,
+  });
+
   const createSessionMutation = useMutation({
     mutationFn: () => createSession({ projectId: id, aiTool: selectedRuntimeAdapter as RuntimeAdapterId }),
+    onSuccess: ({ session }) => {
+      queryClient.invalidateQueries({ queryKey: ["sessions", { projectId: id }] });
+      router.push(`/sessions/${session.id}`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : t("projects.failedCreateSession"));
+    },
+  });
+
+  const createShellSessionMutation = useMutation({
+    mutationFn: () => createSession({ projectId: id, aiTool: "terminal" }),
     onSuccess: ({ session }) => {
       queryClient.invalidateQueries({ queryKey: ["sessions", { projectId: id }] });
       router.push(`/sessions/${session.id}`);
@@ -206,6 +256,10 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
       setProjectSkill(id, skillId, enabled),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-skills", id] });
+      toast.success(t("projects.skillOverrideSaved"));
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : t("projects.failedSaveConfig"));
     },
   });
 
@@ -215,6 +269,11 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
     onSuccess: (snapshot) => {
       queryClient.setQueryData(["project-ai-config", id, selectedRuntimeAdapter], snapshot);
       queryClient.invalidateQueries({ queryKey: ["activities"] });
+      setConfigSavedFlash(true);
+      toast.success(t("projects.workspaceFileSaved"));
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : t("projects.failedSaveConfig"));
     },
   });
 
@@ -264,51 +323,246 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
   const enabledSkillCount = enabledSkillIds.size;
 
   useEffect(() => {
-    const nextTab = readProjectDetailTab(searchParams.get("tab") === "collaboration-settings" ? "project-manager" : searchParams.get("tab"));
-    if (nextTab && nextTab !== activeTab) {
-      setActiveTab(nextTab);
+    const rawTab = searchParams.get("tab");
+    const nextTab = readProjectDetailTab(
+      rawTab === "collaboration-settings" ? "project-manager" : rawTab,
+    );
+    if (nextTab) {
+      setActiveTab((current) => (current === nextTab ? current : nextTab));
+      return;
     }
-  }, [activeTab, searchParams]);
+    if (!rawTab) {
+      const fallbackTab: ProjectDetailTab =
+        searchParams.get("workItemId") || searchParams.get("task")
+          ? "project-manager"
+          : "overview";
+      setActiveTab((current) => (current === fallbackTab ? current : fallbackTab));
+    }
+  }, [searchParams]);
 
-  const handleTabChange = (value: string) => {
-    const nextTab = readProjectDetailTab(value);
-    if (!nextTab) return;
-    setActiveTab(nextTab);
-    const nextSearchParams = new URLSearchParams(searchParams.toString());
-    if (nextTab === "sessions") {
-      nextSearchParams.delete("tab");
-    } else {
-      nextSearchParams.set("tab", nextTab);
-    }
-    if (nextTab !== "project-manager") {
+  const handleTabChange = useCallback(
+    (value: string) => {
+      const nextTab = readProjectDetailTab(value);
+      if (!nextTab) return;
+      setActiveTab(nextTab);
+      const nextSearchParams = new URLSearchParams(searchParams.toString());
+      if (nextTab === "overview") {
+        nextSearchParams.delete("tab");
+      } else {
+        nextSearchParams.set("tab", nextTab);
+      }
+      if (nextTab !== "project-manager") {
+        nextSearchParams.delete("workItemId");
+      }
+      if (nextTab !== "files") {
+        nextSearchParams.delete("file");
+      }
+      const query = nextSearchParams.toString();
+      router.replace(
+        query
+          ? `/projects/${encodeURIComponent(id)}?${query}`
+          : `/projects/${encodeURIComponent(id)}`,
+        { scroll: false },
+      );
+    },
+    [id, router, searchParams],
+  );
+
+  const selectedWorkspaceFile = normalizeSearchParam(searchParams.get("file"));
+
+  const handleWorkspaceFileChange = useCallback(
+    (filePath: string | null) => {
+      const nextSearchParams = new URLSearchParams(searchParams.toString());
+      nextSearchParams.set("tab", "files");
+      if (filePath) {
+        nextSearchParams.set("file", filePath);
+      } else {
+        nextSearchParams.delete("file");
+      }
+      const query = nextSearchParams.toString();
+      router.replace(`/projects/${encodeURIComponent(id)}?${query}`, { scroll: false });
+    },
+    [id, router, searchParams],
+  );
+
+  const handleOpenFileInFiles = useCallback(
+    (filePath: string) => {
+      setActiveTab("files");
+      const nextSearchParams = new URLSearchParams(searchParams.toString());
+      nextSearchParams.set("tab", "files");
+      nextSearchParams.set("file", filePath);
       nextSearchParams.delete("workItemId");
-    }
-    const query = nextSearchParams.toString();
-    router.replace(query ? `/projects/${encodeURIComponent(id)}?${query}` : `/projects/${encodeURIComponent(id)}`, {
-      scroll: false,
-    });
-  };
+      router.replace(
+        `/projects/${encodeURIComponent(id)}?${nextSearchParams.toString()}`,
+        { scroll: false },
+      );
+    },
+    [id, router, searchParams],
+  );
 
   useEffect(() => {
     if (!adapterDiscoveryData?.adapters) return;
-    const nextAdapter = chooseDefaultRuntimeAdapter(adapterDiscoveryData.adapters, selectedRuntimeAdapter);
-    setSelectedRuntimeAdapter((current) => current === (nextAdapter ?? "") ? current : (nextAdapter ?? ""));
+    const nextAdapter = chooseDefaultRuntimeAdapter(
+      adapterDiscoveryData.adapters,
+      selectedRuntimeAdapter,
+    );
+    setSelectedRuntimeAdapter((current) =>
+      current === (nextAdapter ?? "") ? current : (nextAdapter ?? ""),
+    );
   }, [adapterDiscoveryData?.adapters, selectedRuntimeAdapter]);
 
   useEffect(() => {
     const files = projectAiConfig?.files ?? [];
     if (files.length === 0) return;
-    const preferred = files.find((file) => file.exists && file.role === "instructions") ?? files[0];
+    const preferred =
+      files.find((file) => file.exists && file.role === "instructions") ?? files[0];
     if (!selectedConfigPath || !files.some((file) => file.relativePath === selectedConfigPath)) {
       const nextPath = preferred?.relativePath ?? "";
-      setSelectedConfigPath((current) => current === nextPath ? current : nextPath);
+      setSelectedConfigPath((current) => (current === nextPath ? current : nextPath));
     }
   }, [projectAiConfig?.files, selectedConfigPath]);
 
   useEffect(() => {
     const nextDraft = selectedConfigFile?.content ?? "";
-    setConfigDraft((current) => current === nextDraft ? current : nextDraft);
+    setConfigDraft((current) => (current === nextDraft ? current : nextDraft));
   }, [selectedConfigFile?.content, selectedConfigFile?.relativePath]);
+
+  useEffect(() => {
+    if (!configSavedFlash) return;
+    const timer = window.setTimeout(() => setConfigSavedFlash(false), 2200);
+    return () => window.clearTimeout(timer);
+  }, [configSavedFlash]);
+
+  const configDirty =
+    Boolean(selectedConfigFile) && configDraft !== (selectedConfigFile?.content ?? "");
+
+  const requestConfigPathChange = (nextPath: string) => {
+    if (nextPath === selectedConfigPath) return;
+    if (configDirty) {
+      setPendingConfigSwitch({ kind: "file", path: nextPath });
+      return;
+    }
+    setSelectedConfigPath(nextPath);
+  };
+
+  const requestConfigAdapterChange = (nextAdapter: string) => {
+    const adapter = nextAdapter as RuntimeAdapterId;
+    if (!adapter || adapter === selectedRuntimeAdapter) return;
+    if (configDirty) {
+      setPendingConfigSwitch({ kind: "adapter", adapter });
+      return;
+    }
+    setSelectedRuntimeAdapter(adapter);
+  };
+
+  const boundTemplateName = useMemo(() => {
+    if (!resolvedTemplateId) return null;
+    return (
+      templatesData?.templates.find((tpl) => tpl.id === resolvedTemplateId)?.name ??
+      resolvedTemplateId
+    );
+  }, [resolvedTemplateId, templatesData?.templates]);
+
+  const overrideSkillCount = useMemo(
+    () =>
+      projectSkills.filter(
+        (skill) =>
+          skill.selectionState === "project_enabled" || skill.selectionState === "project_disabled",
+      ).length,
+    [projectSkills],
+  );
+
+  const appliedProviderLabel = useMemo(() => {
+    const info = appliedProviderData?.appliedProvider;
+    if (!info) return null;
+    return info.modelProfileId
+      ? `${info.providerName} · ${info.modelProfileId}`
+      : info.providerName;
+  }, [appliedProviderData?.appliedProvider]);
+
+  useEffect(() => {
+    if (!id) return;
+    const onGatewayEvent = (event: Event) => {
+      const detail = (event as CustomEvent<GatewayEvent>).detail;
+      if (!detail || typeof detail !== "object") return;
+      const type = detail.type ?? "";
+      const payload = (detail.payload ?? {}) as Record<string, unknown>;
+      const eventProjectId =
+        typeof payload.projectId === "string"
+          ? payload.projectId
+          : typeof payload.project_id === "string"
+            ? payload.project_id
+            : null;
+      if (eventProjectId && eventProjectId !== id) return;
+      if (type.startsWith("session")) {
+        void queryClient.invalidateQueries({ queryKey: ["sessions", { projectId: id }] });
+        void queryClient.invalidateQueries({ queryKey: ["project-git-changes", id] });
+        void queryClient.invalidateQueries({ queryKey: ["activities", { projectId: id }] });
+      } else if (type.includes("project_manager") || type.includes("work_item")) {
+        void queryClient.invalidateQueries({ queryKey: ["project-manager", id] });
+      } else if (type.includes("goal")) {
+        void queryClient.invalidateQueries({ queryKey: ["copilot-goals"] });
+        void queryClient.invalidateQueries({ queryKey: ["project-manager", id] });
+      } else if (type.includes("fleet")) {
+        void queryClient.invalidateQueries({ queryKey: ["fleets"] });
+      }
+    };
+    window.addEventListener(FORGEBADGER_GATEWAY_EVENT, onGatewayEvent);
+    return () => window.removeEventListener(FORGEBADGER_GATEWAY_EVENT, onGatewayEvent);
+  }, [id, queryClient]);
+
+  useEffect(() => {
+    const updateFade = () => {
+      const el = tabsScrollRef.current;
+      if (!el) return;
+      const left = el.scrollLeft > 4;
+      const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 4;
+      setTabFade((prev) =>
+        prev.left === left && prev.right === right ? prev : { left, right },
+      );
+    };
+    updateFade();
+    const el = tabsScrollRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", updateFade, { passive: true });
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(updateFade);
+      observer.observe(el);
+    }
+    return () => {
+      el.removeEventListener("scroll", updateFade);
+      observer?.disconnect();
+    };
+  }, [project?.id]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) {
+        return;
+      }
+      const digit = Number.parseInt(event.key, 10);
+      if (digit >= 1 && digit <= PROJECT_DETAIL_TABS.length) {
+        const nextTab = PROJECT_DETAIL_TABS[digit - 1];
+        if (nextTab) {
+          handleTabChange(nextTab);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleTabChange]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-4 p-6">
@@ -345,6 +599,30 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
               >
                 {project.path ?? project.rootPath}
               </span>
+              {(project.path ?? project.rootPath) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="hidden size-7 shrink-0 text-muted-foreground hover:text-foreground sm:inline-flex"
+                  aria-label={t("projects.copyPath")}
+                  title={t("projects.copyPath")}
+                  onClick={async () => {
+                    const targetPath = project.path ?? project.rootPath;
+                    if (!targetPath) return;
+                    try {
+                      await navigator.clipboard.writeText(targetPath);
+                      setCopiedPath(true);
+                      toast.success(t("projects.pathCopied"));
+                      window.setTimeout(() => setCopiedPath(false), 1800);
+                    } catch {
+                      // Clipboard unavailable.
+                    }
+                  }}
+                >
+                  {copiedPath ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
+                </Button>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <AdapterSelect
@@ -361,6 +639,20 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                     : t("projects.selectRuntimeCli")
                 }
               />
+              {appliedProviderLabel && (
+                <Badge variant="secondary" className="hidden h-7 rounded-full px-2.5 text-[11px] font-normal lg:inline-flex">
+                  {t("projects.appliedModelBadge").replace("{provider}", appliedProviderLabel)}
+                </Badge>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => createShellSessionMutation.mutate()}
+                disabled={createShellSessionMutation.isPending}
+              >
+                <Terminal className="size-4" />
+                {t("projects.startShell")}
+              </Button>
               <Button
                 size="sm"
                 variant="brand"
@@ -382,6 +674,11 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => setEditMetadataOpen(true)}>
+                    <Pencil className="size-4" />
+                    {t("projects.editMetadata")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     variant="destructive"
                     disabled={deleteMutation.isPending}
@@ -468,8 +765,18 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
           />
 
           <Tabs value={activeTab} onValueChange={handleTabChange}>
-            <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:thin]">
+            <div
+              ref={tabsScrollRef}
+              className="-mx-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              style={(() => {
+                const mask = buildEdgeFadeMask(tabFade.left, tabFade.right);
+                return mask ? { WebkitMaskImage: mask, maskImage: mask } : undefined;
+              })()}
+            >
             <TabsList className="min-w-max">
+              <TabsTrigger value="overview">
+                {t("projects.tabOverview")}
+              </TabsTrigger>
               <TabsTrigger value="sessions">
                 {t("nav.sessions")}
                 {projectSessions.length > 0 && (
@@ -494,6 +801,23 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
               <TabsTrigger value="activity">{t("sessions.activity")}</TabsTrigger>
             </TabsList>
             </div>
+
+            <TabsContent value="overview" className="mt-4">
+              <ProjectOverviewPanel
+                project={project}
+                sessions={projectSessions}
+                actorId={taskAuthority.actorId}
+                templateName={boundTemplateName}
+                overrideSkillCount={overrideSkillCount}
+                appliedProviderLabel={appliedProviderLabel}
+                sidebarOpen={overviewSidebarOpen}
+                onToggleSidebar={() => setOverviewSidebarOpen((prev) => !prev)}
+                onSelectTab={(tab) => handleTabChange(tab)}
+                onOpenFileInFiles={handleOpenFileInFiles}
+                onEditMetadata={() => setEditMetadataOpen(true)}
+                onStartSession={cannotCreateSession ? undefined : () => createSessionMutation.mutate()}
+              />
+            </TabsContent>
 
             <TabsContent value="sessions" className="mt-4">
               <p className="mb-3 text-xs text-muted-foreground">
@@ -558,16 +882,25 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
             <TabsContent value="git" className="mt-4">
               <div className="grid gap-4 xl:grid-cols-2">
                 <GitBranchesPanel projectId={id} enabled={activeTab === "git"} />
-                <GitChangesPanel projectId={id} />
+                <GitChangesPanel projectId={id} onOpenInFiles={handleOpenFileInFiles} />
               </div>
             </TabsContent>
 
             <TabsContent value="files" className="mt-4">
-              <WorkspaceExplorer projectId={id} enabled={activeTab === "files"} />
+              <WorkspaceExplorer
+                projectId={id}
+                enabled={activeTab === "files"}
+                selectedPath={selectedWorkspaceFile}
+                onSelectPath={handleWorkspaceFileChange}
+              />
             </TabsContent>
 
             <TabsContent value="graph" className="mt-4">
-              <ProjectGraphPanel projectId={id} enabled={activeTab === "graph"} />
+              <ProjectGraphPanel
+                projectId={id}
+                enabled={activeTab === "graph"}
+                onOpenInFiles={handleOpenFileInFiles}
+              />
             </TabsContent>
 
             <TabsContent value="project-manager" className="mt-4 space-y-4">
@@ -578,6 +911,7 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                 enabled={activeTab === "project-manager"}
                 selectedWorkItemId={projectManagerWorkItemId}
                 embedded
+                onNavigateToSession={(href) => router.push(href)}
               />
             </TabsContent>
 
@@ -636,7 +970,31 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
             </TabsContent>
 
             <TabsContent value="config" className="mt-4 space-y-4">
-              <div className="flex justify-end">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-2.5">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {t("projects.configEditorCliLabel")}
+                  </span>
+                  <AdapterSelect
+                    id="config-tab-adapter"
+                    ariaLabel={t("projects.configEditorCliLabel")}
+                    value={selectedRuntimeAdapter || ""}
+                    onValueChange={requestConfigAdapterChange}
+                    disabled={adapterDiscoveryLoading || runtimeAdapters.length === 0}
+                    size="sm"
+                    className="h-8 w-52"
+                    placeholder={
+                      adapterDiscoveryLoading
+                        ? t("projects.loadingRuntimeCli")
+                        : t("projects.selectRuntimeCli")
+                    }
+                  />
+                  {appliedProviderLabel && (
+                    <Badge variant="secondary" className="rounded-full text-[11px] font-normal">
+                      {t("projects.appliedModelBadge").replace("{provider}", appliedProviderLabel)}
+                    </Badge>
+                  )}
+                </div>
                 <Button variant="outline" size="sm" onClick={() => setExtractDialogOpen(true)}>
                   <Package className="mr-2 size-4" />
                   {t("templates.extract")}
@@ -655,11 +1013,13 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
                 globalConfig={globalAiConfig}
                 selectedPath={selectedConfigPath}
                 draft={configDraft}
+                dirty={configDirty}
+                savedFlash={configSavedFlash}
                 projectLoading={projectAiConfigLoading}
                 globalLoading={globalAiConfigLoading}
                 isSaving={updateAiConfigMutation.isPending}
                 error={updateAiConfigMutation.error}
-                onSelectedPathChange={setSelectedConfigPath}
+                onSelectedPathChange={requestConfigPathChange}
                 onDraftChange={setConfigDraft}
                 onSave={() => updateAiConfigMutation.mutate()}
               />
@@ -671,6 +1031,33 @@ export default function ProjectDetailPage({taskAuthority}: {taskAuthority: TaskA
           </Tabs>
         </>
       )}
+      {project && (
+        <ProjectEditMetadataDialog
+          open={editMetadataOpen}
+          onOpenChange={setEditMetadataOpen}
+          project={project}
+        />
+      )}
+      <ConfirmDialog
+        open={pendingConfigSwitch !== null}
+        destructive
+        title={t("cliConfig.unsavedChangesTitle")}
+        description={t("cliConfig.unsavedChangesDescription")}
+        confirmLabel={t("common.confirm")}
+        onOpenChange={(open) => {
+          if (!open) setPendingConfigSwitch(null);
+        }}
+        onConfirm={() => {
+          const target = pendingConfigSwitch;
+          setPendingConfigSwitch(null);
+          if (!target) return;
+          if (target.kind === "file") {
+            setSelectedConfigPath(target.path);
+          } else {
+            setSelectedRuntimeAdapter(target.adapter);
+          }
+        }}
+      />
       <ExtractTemplateDialog
         projectId={id}
         open={extractDialogOpen}
@@ -771,6 +1158,8 @@ function ProjectConfigPanel({
   globalConfig,
   selectedPath,
   draft,
+  dirty,
+  savedFlash,
   projectLoading,
   globalLoading,
   isSaving,
@@ -783,6 +1172,8 @@ function ProjectConfigPanel({
   globalConfig?: AiConfigSnapshot;
   selectedPath: string;
   draft: string;
+  dirty: boolean;
+  savedFlash: boolean;
   projectLoading: boolean;
   globalLoading: boolean;
   isSaving: boolean;
@@ -796,11 +1187,11 @@ function ProjectConfigPanel({
   const globalFiles = globalConfig?.files ?? [];
   const selectedFile = projectFiles.find((file) => file.relativePath === selectedPath);
   const isMarkdown = selectedFile?.fileType === "markdown";
-  const [editingMarkdown, setEditingMarkdown] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
-    setEditingMarkdown(false);
-  }, [selectedPath, isMarkdown]);
+    setEditing(false);
+  }, [selectedPath]);
 
   if (projectLoading) {
     return (
@@ -849,57 +1240,84 @@ function ProjectConfigPanel({
 
       <Card className="forgebadger-animate-in" style={{ animationDelay: "50ms" }}>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pb-3">
-          <CardTitle className="min-w-0 truncate font-mono text-sm font-semibold">
-            {selectedFile?.relativePath ?? t("projects.selectConfigFile")}
-          </CardTitle>
-          {selectedFile && isMarkdown && !editingMarkdown ? (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setEditingMarkdown(true)}
-              disabled={!selectedFile}
-            >
-              <Pencil className="size-4" />
-              {t("projects.editFile")}
-            </Button>
-          ) : (
-            <div className="flex items-center gap-2">
-              {selectedFile && isMarkdown && editingMarkdown && (
+          <div className="flex min-w-0 items-center gap-2">
+            <CardTitle className="min-w-0 truncate font-mono text-sm font-semibold">
+              {selectedFile?.relativePath ?? t("projects.selectConfigFile")}
+            </CardTitle>
+            {savedFlash && !dirty && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                <Check className="size-3" />
+                {t("projects.workspaceFileSaved")}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {selectedFile && !editing && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setEditing(true)}
+                disabled={!selectedFile}
+              >
+                <Pencil className="size-4" />
+                {t("projects.editFile")}
+              </Button>
+            )}
+            {selectedFile && editing && (
+              <>
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => setEditingMarkdown(false)}
-                  disabled={!selectedFile}
+                  onClick={() => setEditing(false)}
+                  disabled={isSaving}
                 >
                   <Eye className="size-4" />
                   {t("projects.previewFile")}
                 </Button>
-              )}
-              <Button
-                size="sm"
-                variant="brand"
-                onClick={onSave}
-                disabled={!selectedFile || isSaving}
-              >
-                <Save className="size-4" />
-                {isSaving ? t("projects.savingConfig") : t("common.save")}
-              </Button>
-            </div>
-          )}
+                <span className="hidden text-[11px] text-muted-foreground sm:inline">
+                  {t("projects.configEditorShortcutHint")}
+                </span>
+                <Button
+                  size="sm"
+                  variant="brand"
+                  onClick={onSave}
+                  disabled={!selectedFile || !dirty || isSaving}
+                >
+                  <Save className="size-4" />
+                  {isSaving ? t("projects.savingConfig") : t("common.save")}
+                </Button>
+              </>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          {selectedFile && isMarkdown && !editingMarkdown ? (
-            <MarkdownRenderer
-              content={draft}
-              className="max-h-[560px] min-h-[200px] space-y-3 overflow-y-auto rounded-md border border-border/70 bg-background p-4 text-sm leading-relaxed text-foreground/90"
-            />
+          {selectedFile && !editing ? (
+            isMarkdown ? (
+              <MarkdownRenderer
+                content={draft}
+                className="max-h-[560px] min-h-[200px] space-y-3 overflow-y-auto rounded-md border border-border/70 bg-background p-4 text-sm leading-relaxed text-foreground/90"
+              />
+            ) : (
+              <SyntaxHighlightedEditor
+                content={draft}
+                fileType={selectedFile.fileType ?? "text"}
+                relativePath={selectedFile.relativePath}
+                disabled
+                readOnly
+                ariaLabel={selectedFile.relativePath}
+              />
+            )
           ) : (
             <SyntaxHighlightedEditor
               content={draft}
               fileType={selectedFile?.fileType ?? "text"}
-              disabled={!selectedFile}
+              relativePath={selectedFile?.relativePath}
+              disabled={!selectedFile || isSaving}
               ariaLabel={selectedFile?.relativePath ?? t("projects.selectConfigFile")}
               onChange={onDraftChange}
+              onSave={() => {
+                if (dirty && !isSaving) onSave();
+              }}
             />
           )}
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -947,59 +1365,57 @@ function ProjectConfigPanel({
 function SyntaxHighlightedEditor({
   content,
   fileType,
+  relativePath,
   disabled,
   ariaLabel,
   onChange,
+  onSave,
   readOnly = false,
   minHeightClassName = "min-h-[560px]"
 }: {
   content: string;
   fileType: string;
+  relativePath?: string;
   disabled: boolean;
   ariaLabel: string;
   onChange?: (content: string) => void;
+  onSave?: () => void;
   readOnly?: boolean;
   minHeightClassName?: string;
 }) {
-  const previewRef = useRef<HTMLPreElement | null>(null);
   const gutterRef = useRef<HTMLDivElement | null>(null);
-  const hasHighlighting = supportsSyntaxHighlighting(fileType);
-  const highlightedParts = useMemo(
-    () => hasHighlighting ? highlightCode(content, fileType) : [{ text: content }],
-    [content, fileType, hasHighlighting]
-  );
+  const lines = useMemo(() => content.split("\n"), [content]);
   const lineNumbers = useMemo(
-    () => Array.from({ length: Math.max(content.split("\n").length, 1) }, (_, index) => index + 1),
-    [content]
+    () => Array.from({ length: Math.max(lines.length, 1) }, (_, index) => index + 1),
+    [lines.length]
   );
+  const [tokenLines, setTokenLines] = useState<Awaited<ReturnType<typeof highlightWorkspaceCode>>>(null);
 
-  function syncPreviewScroll(event: UIEvent<HTMLTextAreaElement>) {
-    const preview = previewRef.current;
-    const gutter = gutterRef.current;
-    if (preview) {
-      preview.scrollTop = event.currentTarget.scrollTop;
-      preview.scrollLeft = event.currentTarget.scrollLeft;
+  useEffect(() => {
+    if (!readOnly) {
+      setTokenLines(null);
+      return;
     }
-    if (gutter) {
-      gutter.scrollTop = event.currentTarget.scrollTop;
-    }
-  }
-
-  function syncGutterScroll(event: UIEvent<HTMLPreElement>) {
-    const gutter = gutterRef.current;
-    if (gutter) {
-      gutter.scrollTop = event.currentTarget.scrollTop;
-    }
-  }
+    let cancelled = false;
+    const hintName = relativePath || `config.${fileType === "markdown" ? "md" : fileType || "txt"}`;
+    void highlightWorkspaceCode(content, hintName).then((result) => {
+      if (!cancelled) {
+        setTokenLines(result);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [content, fileType, readOnly, relativePath]);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-input bg-muted shadow-inner shadow-black/30">
+    <div className="overflow-hidden rounded-lg border border-input bg-muted/40 shadow-inner shadow-black/20">
       <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/60 px-3 py-2">
         <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-          {readOnly ? "Readonly config" : "Live syntax editor"}
+          {readOnly ? "Readonly preview" : "Editor"}
         </span>
         <Badge variant="outline" className="border-border bg-background text-[10px] text-muted-foreground">
-          {hasHighlighting ? fileType : "plain"}
+          {fileType || "plain"}
         </Badge>
       </div>
       <div className={cn("grid grid-cols-[3.5rem_minmax(0,1fr)]", minHeightClassName)}>
@@ -1012,30 +1428,55 @@ function SyntaxHighlightedEditor({
             <div key={lineNumber}>{lineNumber}</div>
           ))}
         </div>
-        <div className="relative min-w-0">
-          <pre
-            ref={previewRef}
-            aria-hidden={!readOnly}
-            onScroll={readOnly ? syncGutterScroll : undefined}
-            className={cn(
-              "inset-0 whitespace-pre p-4 font-mono text-[13px] leading-6 text-foreground/90",
-              readOnly
-                ? "h-full max-h-[420px] overflow-auto"
-                : "pointer-events-none absolute overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            )}
-          >
-            {highlightedParts.map((part, index) => (
-              <span key={`${index}-${part.text}`} className={part.className}>
-                {part.text}
-              </span>
-            ))}
-          </pre>
-          {!readOnly && (
+        <div className="min-w-0">
+          {readOnly ? (
+            <pre
+              onScroll={(event) => {
+                if (gutterRef.current) {
+                  gutterRef.current.scrollTop = event.currentTarget.scrollTop;
+                }
+              }}
+              className="h-full max-h-[560px] overflow-auto whitespace-pre p-4 font-mono text-[13px] leading-6 text-foreground/95"
+            >
+              {tokenLines
+                ? tokenLines.map((line, lineIdx) => (
+                    <div key={lineIdx}>
+                      {line.length === 0 ? "\u200B" : line.map((token, tokenIdx) => {
+                        const styleFlags = tokenFontStyle(token.fontStyle);
+                        return (
+                          <span
+                            key={tokenIdx}
+                            style={token.color ? { color: token.color } : undefined}
+                            className={cn(
+                              styleFlags.italic && "italic",
+                              styleFlags.bold && "font-semibold",
+                              styleFlags.underline && "underline",
+                            )}
+                          >
+                            {token.content}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  ))
+                : content}
+            </pre>
+          ) : (
             <textarea
-              className="absolute inset-0 h-full w-full resize-none overflow-auto border-0 bg-transparent p-4 font-mono text-[13px] leading-6 text-transparent caret-sky-300 outline-none selection:bg-sky-500/30 focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
+              className="h-full min-h-[520px] w-full resize-none overflow-auto border-0 bg-background/60 p-4 font-mono text-[13px] leading-6 text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
               value={content}
               onChange={(event) => onChange?.(event.target.value)}
-              onScroll={syncPreviewScroll}
+              onScroll={(event) => {
+                if (gutterRef.current) {
+                  gutterRef.current.scrollTop = event.currentTarget.scrollTop;
+                }
+              }}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+                  event.preventDefault();
+                  onSave?.();
+                }
+              }}
               spellCheck={false}
               disabled={disabled}
               aria-label={ariaLabel}
@@ -1063,6 +1504,7 @@ function GlobalConfigPreview({ file }: { file: AiConfigFile }) {
           <SyntaxHighlightedEditor
             content={file.content}
             fileType={file.fileType}
+            relativePath={file.relativePath}
             disabled
             readOnly
             ariaLabel={file.relativePath}

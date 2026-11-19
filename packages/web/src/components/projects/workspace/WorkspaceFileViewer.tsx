@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, FileText, Loader2, Pencil, X } from "lucide-react";
+import { AlertTriangle, Check, Copy, ExternalLink, FileText, Loader2, Pencil, X } from "lucide-react";
 import type { ThemedToken } from "shiki";
 
 import { Button } from "@/components/ui/button";
 import { getProjectWorkspaceFile, putProjectWorkspaceFile } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useLanguage, useUiLocale } from "@/hooks/use-language";
 import { highlightWorkspaceCode, tokenFontStyle } from "./highlight";
@@ -18,6 +19,8 @@ interface WorkspaceFileViewerProps {
   enabled?: boolean;
   variant?: "panel" | "sheet";
   onClose?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  onOpenInFiles?: (path: string) => void;
   /** 1-based source line to highlight and scroll to once the file loads. */
   focusLine?: number | null;
   className?: string;
@@ -29,6 +32,8 @@ export function WorkspaceFileViewer({
   enabled = true,
   variant = "panel",
   onClose,
+  onDirtyChange,
+  onOpenInFiles,
   focusLine,
   className,
 }: WorkspaceFileViewerProps) {
@@ -65,6 +70,12 @@ export function WorkspaceFileViewer({
 
   const canEdit = Boolean(file && !file.binary && !file.truncated);
   const dirty = editing && draft !== (file?.content ?? "");
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => {
+      onDirtyChange?.(false);
+    };
+  }, [dirty, onDirtyChange]);
   const saveMutation = useMutation({
     mutationFn: () => putProjectWorkspaceFile(projectId, path ?? "", draft),
     onSuccess: () => {
@@ -169,18 +180,56 @@ export function WorkspaceFileViewer({
                 </Button>
               </>
             ) : file ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 px-2 text-xs"
-                onClick={startEdit}
-                disabled={!canEdit}
-                title={file.truncated ? t("projects.workspaceFileTooLargeToEdit") : t("projects.workspaceEditFile")}
-                aria-label={t("projects.workspaceEditFile")}
-              >
-                <Pencil className="size-3.5" />
-                {t("projects.workspaceEditFile")}
-              </Button>
+              <>
+                {path ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-xs"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(`@${path}`);
+                        toast.success(t("projects.workspaceRefCopied"));
+                      } catch {
+                        // Clipboard unavailable.
+                      }
+                    }}
+                    title={t("projects.workspaceCopyRef")}
+                    aria-label={t("projects.workspaceCopyRef")}
+                  >
+                    <Copy className="size-3.5" />
+                    {t("projects.workspaceCopyRef")}
+                  </Button>
+                ) : null}
+                {variant === "sheet" && onOpenInFiles && path ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-xs"
+                    onClick={() => {
+                      onClose?.();
+                      onOpenInFiles(path);
+                    }}
+                  >
+                    <ExternalLink className="size-3.5" />
+                    {t("projects.overviewOpenInFiles")}
+                  </Button>
+                ) : null}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-xs"
+                  onClick={startEdit}
+                  disabled={!canEdit}
+                  title={file.truncated ? t("projects.workspaceFileTooLargeToEdit") : t("projects.workspaceEditFile")}
+                  aria-label={t("projects.workspaceEditFile")}
+                >
+                  <Pencil className="size-3.5" />
+                  {t("projects.workspaceEditFile")}
+                </Button>
+              </>
             ) : null}
             {variant === "sheet" && onClose ? (
               <Button

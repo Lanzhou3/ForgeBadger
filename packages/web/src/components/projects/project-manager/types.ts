@@ -14,7 +14,7 @@ export interface GoalDraft {
 }
 
 export type WorkItemStatusFilter = ProjectManagerWorkItemStatus | "all";
-export type WorkItemViewMode = "board" | "table" | "queue";
+export type WorkItemViewMode = "board" | "stages" | "table" | "queue";
 export type EvidenceReferenceType = "custom" | "file_path" | "terminal_snapshot" | "session";
 
 export interface WorkItemDraft {

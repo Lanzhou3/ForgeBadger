@@ -1,8 +1,21 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { ArrowRight, PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import {
+  ArrowRight,
+  FileCode2,
+  FolderGit2,
+  GitBranch,
+  LayoutDashboard,
+  ListChecks,
+  Network,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
+  Terminal,
+} from "lucide-react";
 
 import {
   Dialog,
@@ -16,12 +29,29 @@ import { Input } from "@/components/ui/input";
 import { navItems } from "@/components/layout/sidebar";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguage } from "@/hooks/use-language";
+import { listProjects } from "@/lib/api";
 
 interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
+}
+
+interface PaletteCommand {
+  id: string;
+  label: string;
+  group: string;
+  icon: typeof ArrowRight;
+  action: () => void;
+}
+
+function activeProjectIdFromPath(pathname: string | null): string | null {
+  if (!pathname) return null;
+  const match = pathname.match(/^\/projects\/([^/?#]+)/);
+  if (!match?.[1]) return null;
+  if (match[1] === "new" || match[1] === "import") return null;
+  return decodeURIComponent(match[1]);
 }
 
 export function CommandPalette({
@@ -31,14 +61,25 @@ export function CommandPalette({
   onToggleSidebar,
 }: CommandPaletteProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const { t } = useLanguage();
   const { user } = useAuth();
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  const commands = useMemo(() => {
+  const projectsQuery = useQuery({
+    queryKey: ["projects", user?.id],
+    queryFn: listProjects,
+    enabled: open && Boolean(user),
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  const currentProjectId = useMemo(() => activeProjectIdFromPath(pathname), [pathname]);
+
+  const commands = useMemo<PaletteCommand[]>(() => {
     const visibleNavItems = navItems.filter((item) => !item.adminOnly || user?.role === "admin");
-    return [
+    const list: PaletteCommand[] = [
       {
         id: "toggle-sidebar",
         label: sidebarCollapsed ? t("commandPalette.showSidebar") : t("commandPalette.hideSidebar"),
@@ -49,7 +90,36 @@ export function CommandPalette({
           onOpenChange(false);
         },
       },
-      ...visibleNavItems.map((item) => ({
+    ];
+
+    if (currentProjectId) {
+      const projectGroup = t("projects.commandInProjectGroup");
+      const basePath = `/projects/${encodeURIComponent(currentProjectId)}`;
+      const projectActions: Array<{ id: string; label: string; tab?: string; icon: typeof ArrowRight }> = [
+        { id: "overview", label: t("projects.tabOverview"), icon: LayoutDashboard },
+        { id: "sessions", label: t("nav.sessions"), tab: "sessions", icon: Terminal },
+        { id: "git", label: t("projects.gitTab"), tab: "git", icon: GitBranch },
+        { id: "files", label: t("projects.filesTab"), tab: "files", icon: FolderGit2 },
+        { id: "graph", label: t("projects.graphTab"), tab: "graph", icon: Network },
+        { id: "project-manager", label: t("projects.devTasks"), tab: "project-manager", icon: ListChecks },
+        { id: "config", label: t("projects.aiConfig"), tab: "config", icon: FileCode2 },
+      ];
+      for (const act of projectActions) {
+        list.push({
+          id: `project-tab:${act.id}`,
+          label: act.label,
+          group: projectGroup,
+          icon: act.icon,
+          action: () => {
+            router.push(act.tab ? `${basePath}?tab=${act.tab}` : basePath);
+            onOpenChange(false);
+          },
+        });
+      }
+    }
+
+    for (const item of visibleNavItems) {
+      list.push({
         id: `nav:${item.href}`,
         label: t(item.labelKey),
         group: t("commandPalette.navigation"),
@@ -58,13 +128,41 @@ export function CommandPalette({
           router.push(item.href);
           onOpenChange(false);
         },
-      })),
-    ];
-  }, [onOpenChange, onToggleSidebar, router, sidebarCollapsed, t, user?.role]);
+      });
+    }
+
+    for (const project of projectsQuery.data?.projects ?? []) {
+      list.push({
+        id: `project:${project.id}`,
+        label: `${project.name} — ${project.rootPath ?? project.path}`,
+        group: t("projects.commandSearchGroup"),
+        icon: FolderGit2,
+        action: () => {
+          router.push(`/projects/${encodeURIComponent(project.id)}`);
+          onOpenChange(false);
+        },
+      });
+    }
+
+    return list;
+  }, [
+    currentProjectId,
+    onOpenChange,
+    onToggleSidebar,
+    projectsQuery.data?.projects,
+    router,
+    sidebarCollapsed,
+    t,
+    user?.role,
+  ]);
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredCommands = normalizedQuery
-    ? commands.filter((command) => command.label.toLowerCase().includes(normalizedQuery))
+    ? commands.filter(
+        (command) =>
+          command.label.toLowerCase().includes(normalizedQuery) ||
+          command.group.toLowerCase().includes(normalizedQuery),
+      )
     : commands;
   const activeIndex = filteredCommands.length > 0 ? Math.min(selectedIndex, filteredCommands.length - 1) : -1;
 

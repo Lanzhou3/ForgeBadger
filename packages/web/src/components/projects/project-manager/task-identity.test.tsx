@@ -21,7 +21,9 @@ it("resets execution selection, comment and artifact consent when the open sheet
  vi.spyOn(taskArtifactsApi,"list").mockResolvedValue({artifacts:[],candidates:[{developmentTaskId:"candidate",artifactDigest:"digest",status:"checks_passed",filesCount:1,checksCount:1,passedChecks:1}]});
  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
  function view(id:string){return <QueryClientProvider client={client}><TaskAuthorityContext.Provider value={{canEdit:true,canManage:true,legacySessions:false,collaboration:{...project,project:{...project.project,executionEnabled:id === "a"}},actorId:"actor"}}><ProjectManagerWorkItemDetailSheet {...props} item={{...item,id,title:id}} /></TaskAuthorityContext.Provider></QueryClientProvider>;}
- const mounted=render(view("a"));await screen.findByLabelText("Add a comment");
+ const mounted=render(view("a"));
+ fireEvent.mouseDown(screen.getByRole("tab",{name:"Dispatch & AI"}),{button:0,ctrlKey:false});
+ await screen.findByLabelText("Add a comment");
  fireEvent.change(screen.getByLabelText("Add a comment"),{target:{value:"Task A private draft"}});
  fireEvent.change(screen.getByLabelText("Your completed Copilot artifact"),{target:{value:"candidate"}});fireEvent.click(screen.getByLabelText("I agree to share this artifact summary with project members"));
  fireEvent.click(screen.getByRole("button",{name:"Prepare isolated attempt"}));await screen.findByText("Selected run: run-a");
