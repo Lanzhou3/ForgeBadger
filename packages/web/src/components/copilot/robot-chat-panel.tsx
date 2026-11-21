@@ -24,6 +24,8 @@ import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun } from "@/hooks/use-copilot";
 import { useTerminalCommandProgress } from "@/hooks/use-terminal-command-progress";
 import { useCopilotChatController } from "@/hooks/use-copilot-chat-controller";
+import { useCopilotConversationMode, useEnterPlanModeSync } from "@/hooks/use-copilot-conversation-mode";
+import { useCopilotPlanModel } from "@/hooks/use-copilot-plan-model";
 import { useCopilotFollowups } from "@/hooks/use-copilot-followups";
 import { copilotPhaseLabel } from "@/lib/copilot-phase";
 import { GatewayApiError, listProjects, type Project } from "@/lib/api";
@@ -34,6 +36,7 @@ import {
   listMessages,
   renameConversation,
   updateConversationProject,
+  type CopilotChatMode,
   type CopilotConversation,
   type CopilotMessage,
 } from "@/lib/copilot-api";
@@ -69,7 +72,7 @@ const PANEL_ORIGIN_BY_CORNER: Record<RobotCorner, string> = {
 interface RobotChatPanelProps {
   onClose: () => void;
   /** Expand to the full Copilot console, carrying the current conversation. */
-  onExpandFull: (conversationId: string | null) => void;
+  onExpandFull: (conversationId: string | null, mode?: CopilotChatMode) => void;
   /**
    * Viewport corner the robot is pinned to. The panel anchors to the same
    * corner — above the robot for bottom corners, below it for top corners —
@@ -84,6 +87,8 @@ interface RobotChatPanelProps {
   defaultProjectId?: string;
   /** Incremented to force a clean new-chat draft while open or opening. */
   newChatNonce?: number;
+  requestedMode?: CopilotChatMode;
+  modeRequestNonce?: number;
 }
 
 /**
@@ -102,6 +107,8 @@ export function RobotChatPanel({
   routeProjectId,
   defaultProjectId,
   newChatNonce = 0,
+  requestedMode,
+  modeRequestNonce,
 }: RobotChatPanelProps) {
   const { t } = useLanguage();
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -118,6 +125,14 @@ export function RobotChatPanel({
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState(initialProjectId);
+  const [serverMode, setServerMode] = useState<CopilotChatMode | undefined>(undefined);
+  const { mode, setMode, setLocalMode, modeSaving } = useCopilotConversationMode({
+    conversationId,
+    serverMode,
+    onPersisted: (conversation) => {
+      if (controllerConversationIdRef.current === conversation.id) setServerMode(conversation.mode);
+    },
+  });
   const projectMutationRef = useRef(0);
   const [projectPendingCount, setProjectPendingCount] = useState(0);
   const projectSaving = projectPendingCount > 0;
@@ -200,11 +215,15 @@ export function RobotChatPanel({
 
   const refreshConversations = useCallback(async () => undefined, []);
 
+  const { effectiveModelId, pickedModelId, planModelOverrideId, markModelPicked } = useCopilotPlanModel(mode, modelId, conversationId);
+  useEnterPlanModeSync(conversationId, messages, () => setLocalMode("plan"));
+
   const controller = useCopilotChatController({
     conversationId,
     projectId,
-    modelId,
-    savingPreferences: savingPreferences || projectSaving,
+    modelId: effectiveModelId,
+    mode,
+    savingPreferences: savingPreferences || projectSaving || modeSaving,
     conversations: [],
     messages,
     active,
@@ -232,7 +251,9 @@ export function RobotChatPanel({
       untitledRef.current = null;
       currentConversationProjectRef.current = null;
       clearActive();
+      setLocalMode("execute", null);
       setConversationId(null);
+      setServerMode(undefined);
       setMessages([]);
       setLoadError(null);
       setRestoring(false);
@@ -241,7 +262,7 @@ export function RobotChatPanel({
       controller.setInput("");
       if (clearStorage) writeLastCopilotConversation(null);
     },
-    [clearActive, controller],
+    [clearActive, controller, setLocalMode],
   );
 
   // Restore the previous conversation on mount unless a fresh draft was
@@ -277,6 +298,7 @@ export function RobotChatPanel({
           return;
         }
         currentConversationProjectRef.current = conversation.project_id ?? null;
+        setServerMode(conversation.mode);
         setMessages(next);
         setProjectId(targetExplicit ?? conversation.project_id ?? passiveProjectId ?? "");
         setLoadError(null);
@@ -326,6 +348,20 @@ export function RobotChatPanel({
     }
   }, [newChatNonce, explicitProjectId, startFreshDraft]);
 
+  const appliedModeRequest = useRef<{ mode: CopilotChatMode; nonce: number | undefined } | undefined>(undefined);
+  useEffect(() => {
+    if (!requestedMode) {
+      appliedModeRequest.current = undefined;
+      return;
+    }
+    if (restoring || controllerConversationIdRef.current !== conversationId) return;
+    if (explicitProjectId && projectId !== explicitProjectId) return;
+    const previous = appliedModeRequest.current;
+    if (previous?.mode === requestedMode && previous.nonce === modeRequestNonce) return;
+    appliedModeRequest.current = { mode: requestedMode, nonce: modeRequestNonce };
+    setMode(requestedMode);
+  }, [controllerConversationIdRef, conversationId, explicitProjectId, modeRequestNonce, projectId, requestedMode, restoring, setMode]);
+
   useEffect(() => {
     let cancelled = false;
     void listProjects()
@@ -349,6 +385,7 @@ export function RobotChatPanel({
             controller.conversationIdRef.current = conversation.id;
             untitledRef.current = conversation.id;
             currentConversationProjectRef.current = conversation.project_id ?? (projectId || null);
+            setLocalMode(mode, conversation.id);
             setConversationId(conversation.id);
             writeLastCopilotConversation(conversation.id);
           });
@@ -363,7 +400,7 @@ export function RobotChatPanel({
         });
     }
     return creatingRef.current;
-  }, [controller, projectId, t]);
+  }, [controller, mode, projectId, setLocalMode, t]);
 
   const changeProject = useCallback(async (next: string) => {
     const serial = ++projectMutationRef.current;
@@ -388,7 +425,7 @@ export function RobotChatPanel({
   }, [conversationId, projectId, t]);
 
   const send = useCallback(async (textOverride?: string, retry = false) => {
-    if (projectSaving) return;
+    if (projectSaving || modeSaving) return;
     if (retry) {
       await controller.send(undefined, true);
       return;
@@ -409,7 +446,7 @@ export function RobotChatPanel({
     const id = await ensureConversation();
     if (!id) return;
     await controller.send(textOverride, false);
-  }, [controller, ensureConversation, conversationId, projectSaving, t]);
+  }, [controller, ensureConversation, conversationId, modeSaving, projectSaving, t]);
 
   const newChat = useCallback(() => {
     startFreshDraft("", true);
@@ -425,6 +462,7 @@ export function RobotChatPanel({
       currentConversationProjectRef.current = conv.project_id ?? null;
       clearActive();
       setConversationId(conv.id);
+      setServerMode(conv.mode);
       writeLastCopilotConversation(conv.id);
       setLoadError(null);
       controller.resetInteractionState();
@@ -466,7 +504,8 @@ export function RobotChatPanel({
 
   const followups = useCopilotFollowups({
     conversationId,
-    ...(modelId ? { modelId } : {}),
+    ...(effectiveModelId ? { modelId: effectiveModelId } : {}),
+    mode,
     active: isBusy,
   });
   const enqueueRef = useRef(followups.enqueue);
@@ -580,7 +619,7 @@ export function RobotChatPanel({
             className="size-7 text-muted-foreground hover:text-foreground"
             aria-label={t("copilot.robotExpand")}
             title={t("copilot.robotExpand")}
-            onClick={() => onExpandFull(conversationId)}
+            onClick={() => mode === "plan" ? onExpandFull(conversationId, mode) : onExpandFull(conversationId)}
           >
             <Maximize2 className="size-4" />
           </Button>
@@ -631,11 +670,32 @@ export function RobotChatPanel({
           {messages.length > 0 && (
             <CopilotMessageStream
               messages={messages}
+              planActions={{
+                currentProjectId: projectId || null,
+                modelId,
+                busy: isBusy || controller.sending || controller.editSubmitting || projectSaving || savingPreferences || modeSaving,
+                onConfirmation: (receipt) => {
+                  if (conversationId && controller.refreshConfirmedPlan(conversationId, projectId, receipt) && receipt && receipt.action !== "save") {
+                    // The server already left Plan Mode on confirmation; mirror it without a second PATCH.
+                    setLocalMode("execute");
+                  }
+                },
+                onModeReceipt: (receipt) => {
+                  if (!conversationId) return;
+                  if (controller.refreshConfirmedPlan(conversationId, projectId, receipt?.decision === "accept" ? receipt : undefined)
+                    && receipt?.decision === "accept" && receipt.target === "execute") setLocalMode("execute");
+                },
+                onRequestChanges: (feedback) => {
+                  const text = `${t("copilot.planRevisePrefix")}${feedback}`;
+                  setLocalMode("plan");
+                  void controller.send(text, false, undefined, { mode: "plan", modelId: pickedModelId });
+                },
+              }}
               isEditing={(message) => controller.editingMessageId === message.id}
               editDraft={controller.editDraft}
               editError={null}
               editSubmitting={controller.editSubmitting || savingPreferences}
-              canEdit={!isBusy && !savingPreferences && !controller.sending && controller.editingMessageId === null}
+              canEdit={!isBusy && !modeSaving && !savingPreferences && !controller.sending && controller.editingMessageId === null}
               onBeginEdit={controller.beginEditMessage}
               onChangeDraft={controller.setEditDraft}
               onSubmitEdit={() => void controller.submitEditMessage()}
@@ -675,6 +735,8 @@ export function RobotChatPanel({
           compact
           textareaRef={inputRef}
           input={controller.input}
+          mode={mode}
+          onModeChange={setMode}
           onInputChange={controller.setInput}
           onSubmit={() => void send()}
           onStop={() => void controller.stopRun()}
@@ -682,13 +744,15 @@ export function RobotChatPanel({
           isRunning={isRunning}
           isBusy={isBusy}
           sendDisabled={
-            controller.sending || savingPreferences || projectSaving || followups.enqueuing || !controller.input.trim()
+            controller.sending || savingPreferences || modeSaving || projectSaving || followups.enqueuing || !controller.input.trim()
           }
           projects={projects}
           projectId={projectId}
           conversationId={conversationId}
           onProjectChange={(next) => void changeProject(next)}
           onModelChange={setModelId}
+          onModelPicked={markModelPicked}
+          modelOverrideId={planModelOverrideId}
           onSavingChange={setSavingPreferences}
           toolbarDisabled={isBusy || controller.sending || projectSaving}
           followups={followups.items}

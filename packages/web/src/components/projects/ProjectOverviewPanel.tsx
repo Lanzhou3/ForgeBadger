@@ -26,6 +26,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CliBrandChip } from "@/components/cli-brand-chip";
+import { ProjectGoalEditor } from "@/components/projects/project-manager/ProjectGoalEditor";
 import { WORK_ITEM_LIMIT } from "@/components/projects/project-manager/types";
 import { findSessionTaskPacket } from "@/components/sessions/session-task-packet";
 import { formatSessionRelativeTime } from "@/components/sessions/session-board-utils";
@@ -57,6 +58,7 @@ interface ProjectOverviewPanelProps {
   taskPackets?: ProjectManagerTaskPacket[];
   now?: number | null;
   actorId?: string | null;
+  canManageGoal?: boolean;
   templateName?: string | null;
   overrideSkillCount?: number;
   appliedProviderLabel?: string | null;
@@ -93,6 +95,7 @@ export function ProjectOverviewPanel({
   taskPackets = [],
   now = null,
   actorId = null,
+  canManageGoal = true,
   templateName = null,
   overrideSkillCount = 0,
   appliedProviderLabel = null,
@@ -226,7 +229,7 @@ export function ProjectOverviewPanel({
     }
     window.dispatchEvent(
       new CustomEvent("forgebadger:open-copilot", {
-        detail: { projectId: project.id },
+        detail: { projectId: project.id, mode: "plan" },
       }),
     );
   }
@@ -247,46 +250,50 @@ export function ProjectOverviewPanel({
       <div className="min-w-0 flex-1 space-y-4">
         {/* 1. Project Goal & Context */}
         <section className="space-y-3 rounded-lg border bg-card p-5 shadow-card">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Target className="size-4 text-brand" />
-              <h2 className="text-sm font-semibold">{t("projects.overviewGoalTitle")}</h2>
-              {goal?.status && (
-                <Badge variant="outline" className="rounded-full text-[11px]">
-                  {goal.status}
-                </Badge>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Button type="button" variant="ghost" size="sm" onClick={onEditMetadata}>
-                <Pencil className="size-3.5" />
-                {t("projects.editMetadata")}
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={handleAskCopilot}>
-                <Sparkles className="size-3.5 text-brand" />
-                {t("projects.overviewAskCopilot")}
-              </Button>
-            </div>
-          </div>
-
-          {goal?.summary ? (
-            <div className="space-y-1.5">
-              <p className="text-sm leading-relaxed">{goal.summary}</p>
-              {project.description && (
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  {project.description}
-                </p>
-              )}
-            </div>
-          ) : project.description ? (
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              {project.description}
-            </p>
-          ) : (
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              {t("projects.overviewNoGoal")}
-            </p>
-          )}
+          <ProjectGoalEditor
+            key={project.id}
+            projectId={project.id}
+            goal={goal}
+            canManage={canManageGoal && goalQuery.isSuccess}
+            heading={
+              <div className="flex items-center gap-2">
+                <Target className="size-4 text-brand" />
+                <h2 className="text-sm font-semibold">{t("projects.overviewGoalTitle")}</h2>
+                {goal?.status && (
+                  <Badge variant="outline" className="rounded-full text-[11px]">
+                    {goal.status}
+                  </Badge>
+                )}
+              </div>
+            }
+            actions={
+              <>
+                <Button type="button" variant="ghost" size="sm" onClick={onEditMetadata}>
+                  <Pencil className="size-3.5" />
+                  {t("projects.editMetadata")}
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={handleAskCopilot}>
+                  <Sparkles className="size-3.5 text-brand" />
+                  {t("projects.overviewAskCopilot")}
+                </Button>
+              </>
+            }
+          >
+            {goal?.summary ? (
+              <div className="space-y-1.5">
+                <p className="text-sm leading-relaxed">{goal.summary}</p>
+                {project.description && (
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {project.description}
+                  </p>
+                )}
+              </div>
+            ) : project.description ? (
+              <p className="text-sm leading-relaxed text-muted-foreground">{project.description}</p>
+            ) : (
+              <p className="text-sm leading-relaxed text-muted-foreground">{t("projects.overviewNoGoal")}</p>
+            )}
+          </ProjectGoalEditor>
         </section>
 
         {/* 2. Project AI CLI & Shell Sessions */}

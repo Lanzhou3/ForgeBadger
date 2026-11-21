@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 
-import { MessageRow, AssistantRail, indexToolResults } from "@/components/copilot/copilot-message-primitives";
+import { MessageRow, AssistantRail, indexToolResults, toolReceiptKey } from "@/components/copilot/copilot-message-primitives";
 import { toolStatusOf } from "@/components/copilot/copilot-tool-call-row";
+import { CopilotPlanCard, parseSubmittedPlan, type CopilotPlanActions, type SubmittedPlan } from "@/components/copilot/CopilotPlanCard";
+import { CopilotModeProposalCard, EnteredPlanModeRow, parseEnterPlanMode, parseModeProposal } from "@/components/copilot/CopilotModeProposalCard";
 import { useLanguage } from "@/hooks/use-language";
 import { cn } from "@/lib/utils";
 import type { CopilotMessage } from "@/lib/copilot-api";
@@ -19,9 +21,7 @@ import type { CopilotMessage } from "@/lib/copilot-api";
  * rows), keeps the rest as ordinary messages, and owns the assistant rail
  * avatar so it appears once per assistant turn instead of once per block.
  *
- * Pairing rules are unchanged from the message primitives: a tool_result whose
- * toolCallId has a matching tool_call is folded into that call's row and is not
- * rendered on its own.
+ * A result with a matching runtime step is folded into its tool call row.
  */
 
 export interface CopilotMessageStreamEntryRow {
@@ -40,24 +40,25 @@ function isToolKind(message: CopilotMessage): boolean {
 /** Group consecutive tool rows; mark which entries open an assistant turn. */
 export function buildCopilotStream(messages: CopilotMessage[]): CopilotStreamEntry[] {
   const results = indexToolResults(messages);
-  const callIds = new Set(
+  const callKeys = new Set(
     messages
-      .filter((message) => message.kind === "tool_call" && message.toolCallId)
-      .map((message) => message.toolCallId as string)
+      .filter((message) => message.kind === "tool_call")
+      .map(toolReceiptKey)
   );
   const entries: CopilotStreamEntry[] = [];
   let group: Extract<CopilotStreamEntry, { kind: "tools" }> | null = null;
 
   for (const message of messages) {
-    const pairedResult = message.kind === "tool_call" && message.toolCallId
-      ? results.get(message.toolCallId) ?? null
+    const receiptKey = toolReceiptKey(message);
+    const pairedResult = message.kind === "tool_call" && receiptKey
+      ? results.get(receiptKey) ?? null
       : null;
 
     // A tool_result that answers a recorded call is shown inside that call's
     // row; rendering it twice is what made transcripts read as duplication.
     // A result whose call is not in the loaded window stays visible on its own
     // — dropping it would silently lose the only record of what ran.
-    if (message.kind === "tool_result" && message.toolCallId && callIds.has(message.toolCallId)) {
+    if (message.kind === "tool_result" && receiptKey && callKeys.has(receiptKey)) {
       continue;
     }
 
@@ -89,7 +90,7 @@ export function buildCopilotStream(messages: CopilotMessage[]): CopilotStreamEnt
 /** Dull runs fold away; anything failed, denied, or still pending stays visible. */
 function shouldStartOpen(rows: CopilotMessageStreamEntryRow[]): boolean {
   if (rows.length < 2) return true;
-  return rows.some((row) => toolStatusOf(row) !== "ok");
+  return rows.some((row) => row.message.toolName === "submit_plan" || row.message.toolName === "propose_mode_switch" || toolStatusOf(row) !== "ok");
 }
 
 function ToolProcessGroup({
@@ -104,9 +105,13 @@ function ToolProcessGroup({
   onChangeDraft,
   onSubmitEdit,
   onCancelEdit,
+  planActions,
+  previousPlans,
 }: {
   rows: CopilotMessageStreamEntryRow[];
   showAvatar: boolean;
+  planActions?: CopilotPlanActions;
+  previousPlans?: Map<string, SubmittedPlan>;
 } & EditProps) {
   const { t } = useLanguage();
   const [open, setOpen] = useState(() => shouldStartOpen(rows));
@@ -156,9 +161,37 @@ function ToolProcessGroup({
           ) : null}
         </button>
       )}
-      {(!collapsible || open) && (
-        <div className="flex flex-col">
-          {rows.map((row) => (
+      <div className="flex flex-col">
+        {rows.map((row) => {
+          const receipt = row.pairedResult ?? row.message;
+          const plan = parseSubmittedPlan(receipt);
+          if (plan && receipt.planProposal && receipt.stepId) return (
+            <CopilotPlanCard
+              key={receipt.id}
+              plan={plan}
+              stepId={receipt.stepId}
+              conversationId={receipt.conversationId}
+              proposal={receipt.planProposal}
+              previousPlan={receipt.planProposal.previousStepId ? previousPlans?.get(receipt.planProposal.previousStepId) ?? null : null}
+              {...planActions}
+            />
+          );
+          const modeProposal = parseModeProposal(receipt);
+          if (modeProposal && receipt.modeProposal && receipt.stepId) return (
+            <CopilotModeProposalCard
+              key={receipt.id}
+              proposal={modeProposal}
+              stored={receipt.modeProposal}
+              stepId={receipt.stepId}
+              conversationId={receipt.conversationId}
+              busy={planActions?.busy}
+              onReceipt={planActions?.onModeReceipt}
+            />
+          );
+          const enteredPlanReason = parseEnterPlanMode(receipt);
+          if (enteredPlanReason) return <EnteredPlanModeRow key={receipt.id} reason={enteredPlanReason} />;
+          if (collapsible && !open) return null;
+          return (
             <MessageRow
               key={row.message.id}
               message={row.message}
@@ -174,9 +207,9 @@ function ToolProcessGroup({
               onSubmitEdit={onSubmitEdit}
               onCancelEdit={onCancelEdit}
             />
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </AssistantRail>
   );
 }
@@ -195,6 +228,7 @@ interface EditProps {
 
 export interface CopilotMessageStreamProps extends EditProps {
   messages: CopilotMessage[];
+  planActions?: CopilotPlanActions;
 }
 
 /**
@@ -213,8 +247,17 @@ export function CopilotMessageStream({
   onChangeDraft,
   onSubmitEdit,
   onCancelEdit,
+  planActions,
 }: CopilotMessageStreamProps) {
   const entries = useMemo(() => buildCopilotStream(messages), [messages]);
+  const previousPlans = useMemo(() => {
+    const plans = new Map<string, SubmittedPlan>();
+    for (const message of messages) {
+      const plan = parseSubmittedPlan(message);
+      if (plan && message.stepId) plans.set(message.stepId, plan);
+    }
+    return plans;
+  }, [messages]);
   return (
     <div className="flex flex-col gap-5">
       {entries.map((entry) =>
@@ -223,6 +266,8 @@ export function CopilotMessageStream({
             key={entry.id}
             rows={entry.rows}
             showAvatar={entry.showAvatar}
+            planActions={planActions}
+            previousPlans={previousPlans}
             isEditing={isEditing}
             editDraft={editDraft}
             editError={editError}

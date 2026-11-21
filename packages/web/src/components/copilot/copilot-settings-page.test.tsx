@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CopilotSettingsPage } from "./copilot-settings-page";
 import { LanguageProvider } from "@/hooks/use-language";
 import { listModelProviders } from "@/lib/api";
-import { getCopilotPreferences } from "@/lib/copilot-api";
+import { getCopilotPreferences, updateCopilotPreferences } from "@/lib/copilot-api";
 
 const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
@@ -86,6 +86,23 @@ it("removes duplicate summary entry cards while keeping direct model & reasoning
   expect(await screen.findByTestId("copilot-status-bar")).toBeTruthy();
   expect(screen.getByRole("combobox", { name: "当前模型" })).toBeTruthy();
   expect(screen.getByRole("combobox", { name: "思考强度" })).toBeTruthy();
+});
+
+it("offers plan and sub-agent model selects defaulting to the Copilot model and saves a choice", async () => {
+  vi.mocked(listModelProviders).mockResolvedValue({
+    providers: [], credentials: [],
+    models: [{ id: "m1", name: "Fast", providerName: "Provider", isDefault: true, status: "active", providerProfileId: "p", providerKey: "openai", baseUrl: null, modelId: "m1", capabilities: [], contextWindow: null, supportEfforts: [], defaultEffort: null }],
+  });
+  vi.mocked(getCopilotPreferences).mockResolvedValue({ modelId: null, thinkingEffort: "medium", planModelId: null, subagentModelId: null });
+  vi.mocked(updateCopilotPreferences).mockResolvedValue({ modelId: null, thinkingEffort: "medium", planModelId: "m1", subagentModelId: null });
+  mount();
+  const plan = await screen.findByRole("combobox", { name: "计划模型" });
+  expect(plan.textContent).toContain("与 Copilot 模型相同");
+  expect(screen.getByRole("combobox", { name: "子代理模型" }).textContent).toContain("与 Copilot 模型相同");
+  await waitFor(() => expect(plan).toHaveProperty("disabled", false));
+  fireEvent.keyDown(plan, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("option", { name: "Provider / Fast" }));
+  await waitFor(() => expect(vi.mocked(updateCopilotPreferences).mock.calls[0]?.[0]).toEqual({ planModelId: "m1" }));
 });
 
 it("returns to Copilot chat", () => {

@@ -904,6 +904,7 @@ export default function ProjectDetailPage({
                 taskPackets={taskPacketsData?.taskPackets ?? []}
                 now={now}
                 actorId={taskAuthority.actorId}
+                canManageGoal={taskAuthority.canManage === true}
                 templateName={boundTemplateName}
                 overrideSkillCount={overrideSkillCount}
                 appliedProviderLabel={appliedProviderLabel}

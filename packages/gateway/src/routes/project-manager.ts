@@ -212,7 +212,7 @@ export function createProjectManagerRoutes(
       const actor=userIdFor(req),context=projectManagerAccess(db,actor,req.params.projectId!);
       res.locals.projectManagerContext=context;
       if(req.method!=='GET') {
-        assertProjectManagerWrite(db,actor,req.params.projectId!,/^\/(goal|stages)(\/|$)/.test(req.path)||req.path.includes('/dependencies'));
+        assertProjectManagerWrite(db,actor,req.params.projectId!,/^\/stages(\/|$)/i.test(req.path)||/\/dependencies/i.test(req.path));
         if(/\/task-packet(?:\/|$)/.test(req.path))assertLegacyTaskExecution(db,req.params.projectId!);
         if(context.revisionRequired) {
           const updates=req.path==='/work-items/batch/status'?req.body?.updates: /^\/work-items\/[^/]+/.test(req.path)?[req.body]:[];
@@ -247,16 +247,26 @@ export function createProjectManagerRoutes(
   });
 
   router.put("/:projectId/project-manager/goal", (req, res) => {
-    const parse = goalBodySchema.safeParse(req.body ?? {});
-    if (!parse.success) return sendInvalidInput(res);
     const userId = userIdFor(req);
-    const project = requireProject(db, userId, req.params.projectId);
-    if (!project) return sendProjectNotFound(res);
     try {
-      const goal = pmRepository(db, userId, project.id).upsertGoal(project.id, parse.data);
+      const { project, access } = assertProjectManagerWrite(db, userId, req.params.projectId, true);
+      const parse = goalBodySchema.safeParse(req.body ?? {});
+      if (!parse.success) return sendInvalidInput(res);
+      const goal = new ProjectManagerRepository(db, access.userId, userId).upsertGoal(project.id, parse.data);
       res.json({ code: 0, data: { goal: toGoalDto(goal) }, message: "" });
     } catch (error) {
       sendMutationError(res, error, "Goal update failed");
+    }
+  });
+
+  router.delete("/:projectId/project-manager/goal", (req, res) => {
+    const userId = userIdFor(req);
+    try {
+      const { project, access } = assertProjectManagerWrite(db, userId, req.params.projectId, true);
+      const deleted = new ProjectManagerRepository(db, access.userId, userId).deleteGoal(project.id);
+      res.json({ code: 0, data: { deleted }, message: "" });
+    } catch (error) {
+      sendMutationError(res, error, "Goal deletion failed");
     }
   });
 

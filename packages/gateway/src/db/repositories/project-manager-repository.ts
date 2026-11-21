@@ -34,6 +34,7 @@ export const PROJECT_MANAGER_LEDGER_EVENT_TYPES = [
 ] as const;
 
 export const PROJECT_MANAGER_STAGE_STATUSES = ["active", "completed", "archived"] as const;
+export const PROJECT_MANAGER_WORK_ITEM_DESCRIPTION_MAX = 4_000;
 
 export const PROJECT_MANAGER_STAGE_TEMPLATE = [
   "需求分析",
@@ -314,6 +315,18 @@ export class ProjectManagerRepository {
     return row ? toGoal(row) : undefined;
   }
 
+  deleteGoal(projectId: string): boolean {
+    return this.db.transaction(() => {
+      const existing = this.getGoal(projectId);
+      if (!existing) return false;
+      this.db.prepare("DELETE FROM project_manager_goals WHERE user_id = ? AND project_id = ?")
+        .run(this.userId, projectId);
+      this.insertLedgerEvent(projectId, null, "goal_updated", null, [], { cleared: true }, Date.now());
+      this.writeAudit("project_manager.goal.delete", "project_manager_goal", existing.id, { projectId });
+      return true;
+    }).immediate();
+  }
+
   /** Full planning identity, independent of display pagination. */
   planningState(projectId: string): unknown {
     return {
@@ -509,7 +522,7 @@ export class ProjectManagerRepository {
       : normalizeRequiredText(input.title, "work item title", 256);
     const nextDescription = input.description === undefined
       ? existing.description
-      : normalizeOptionalText(input.description, 4_000);
+      : normalizeOptionalText(input.description, PROJECT_MANAGER_WORK_ITEM_DESCRIPTION_MAX);
     const nextPriority = input.priority === undefined ? existing.priority : normalizePriority(input.priority);
     const nextAcceptanceCriteria = input.acceptanceCriteria === undefined
       ? existing.acceptanceCriteria
@@ -1227,7 +1240,7 @@ export class ProjectManagerRepository {
 function normalizeWorkItemInput(input: CreateProjectManagerWorkItemInput) {
   return {
     title: normalizeRequiredText(input.title, "work item title", 256),
-    description: normalizeOptionalText(input.description, 4_000),
+    description: normalizeOptionalText(input.description, PROJECT_MANAGER_WORK_ITEM_DESCRIPTION_MAX),
     priority: normalizePriority(input.priority),
     acceptanceCriteria: normalizeTextList(input.acceptanceCriteria ?? []),
     evidenceRefs: normalizeEvidenceRefs(input.evidenceRefs ?? []),

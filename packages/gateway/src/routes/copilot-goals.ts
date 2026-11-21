@@ -48,6 +48,7 @@ function goalDto(row: GoalRow) {
     blockedReason: row.blocked_reason,
     pendingQuestion: row.pending_question,
     grants: parseGoalGrants(row.grants_json),
+    autoContinue: row.auto_continue !== 0,
     // Filesystem paths stay server-side; the branch/base identify the work.
     workspace: row.workspace_kind
       ? { kind: row.workspace_kind, branch: row.workspace_branch, baseCommit: row.workspace_base_commit, targetBranch: row.workspace_target_branch }
@@ -66,6 +67,7 @@ function goalListItemDto(row: GoalListRow) {
     projectId: row.project_id,
     conversationId: row.conversation_id,
     grants: parseGoalGrants(row.grants_json),
+    autoContinue: row.auto_continue !== 0,
     createdAt: row.created_at,
     taskTotal: row.task_total,
     taskPasses: row.task_passes
@@ -133,7 +135,12 @@ export function createCopilotGoalRoutes(deps: AgentStackDeps): Router {
     let goal = store.getGoal(id);
     if (!goal) return notFound(res);
     // Owner board decisions show up even while the goal is paused/blocked.
-    if (syncGoalFromBoard(deps.db, userId(req), goal)) goal = store.getGoal(id)!;
+    if (goal.status === "paused" && goal.auto_continue === 0) {
+      evaluateGoalContinuation(deps, userId(req), id);
+      goal = store.getGoal(id)!;
+    } else if (syncGoalFromBoard(deps.db, userId(req), goal)) {
+      goal = store.getGoal(id)!;
+    }
     res.json(ok({
       goal: goalDto(goal),
       tasks: store.listTasks(id).map(task => taskDto(task, boardStatusOf(deps.db, userId(req), goal!, task))),
@@ -197,8 +204,12 @@ export function createCopilotGoalRoutes(deps: AgentStackDeps): Router {
     try {
       const actingUser = userId(req);
       const store = new CopilotGoalStore(deps.db, actingUser);
-      const goal = store.getGoal(id);
+      let goal = store.getGoal(id);
       if (!goal) return notFound(res);
+      if (goal.status === "paused" && goal.auto_continue === 0) {
+        evaluateGoalContinuation(deps, actingUser, id);
+        goal = store.getGoal(id)!;
+      }
       if (!goal.project_id) throw new AgentError('COPILOT_GOAL_SANDBOX_MISSING', 'Goal has no project; nothing to merge');
       const project = new ProjectRepository(deps.db, actingUser).getById(goal.project_id);
       if (!project) return notFound(res);

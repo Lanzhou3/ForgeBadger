@@ -58,7 +58,7 @@ it("persists and validates the copilot model + thinking preference", async () =>
     let body = (await res.json()) as { code: number; data: { modelId: string | null; thinkingEffort: string }; message: string };
     assert.equal(res.status, 200);
     assert.equal(body.code, 0);
-    assert.deepEqual(body.data, { modelId: null, thinkingEffort: "off" });
+    assert.deepEqual(body.data, { modelId: null, thinkingEffort: "off", planModelId: null, subagentModelId: null });
 
     // Partial update: effort only, model untouched.
     res = await fetch(base, { method: "PUT", headers, body: JSON.stringify({ thinkingEffort: "high" }) });
@@ -93,6 +93,22 @@ it("persists and validates the copilot model + thinking preference", async () =>
     assert.equal(rejected.code, 1);
     assert.equal(rejected.message, "Copilot operation rejected");
     assert.equal(rejected.details.code, "COPILOT_MODEL_INVALID");
+
+    // Role models: set, partial updates keep siblings, null clears, unknown profiles are rejected.
+    res = await fetch(base, { method: "PUT", headers, body: JSON.stringify({ planModelId: profile.id, subagentModelId: profile.id }) });
+    body = (await res.json()) as typeof body;
+    assert.equal(res.status, 200);
+    assert.deepEqual(body.data, { modelId: null, thinkingEffort: "high", planModelId: profile.id, subagentModelId: profile.id });
+    res = await fetch(base, { method: "PUT", headers, body: JSON.stringify({ planModelId: null }) });
+    body = (await res.json()) as typeof body;
+    assert.deepEqual(body.data, { modelId: null, thinkingEffort: "high", planModelId: null, subagentModelId: profile.id });
+    for (const field of ["planModelId", "subagentModelId"]) {
+      res = await fetch(base, { method: "PUT", headers, body: JSON.stringify({ [field]: "no-such-profile" }) });
+      assert.equal(res.status, 400);
+      assert.equal(((await res.json()) as { details: { code: string } }).details.code, "COPILOT_MODEL_INVALID");
+    }
+    res = await fetch(base, { headers });
+    assert.equal(((await res.json()) as typeof body).data.subagentModelId, profile.id);
 
     // Invalid effort: schema rejection.
     res = await fetch(base, { method: "PUT", headers, body: JSON.stringify({ thinkingEffort: "ultra" }) });

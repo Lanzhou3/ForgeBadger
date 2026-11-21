@@ -3,6 +3,11 @@ import type { AgentToolContext } from './tool-registry.js';
 
 /** Execution-time enforcement also covers forged calls and recovered steps. */
 export function assertRestrictedTool(context: AgentToolContext, name: string, raw: unknown): void {
+  if (name === 'submit_research_report') {
+    if (context.executionMode !== 'research' || !context.projectId)
+      throw new Error('COPILOT_RESTRICTED_TOOL: research run required');
+    return;
+  }
   if (!context.executionMode) return;
   // Coding sub-runs: the delegate contract surface (sandbox tools + reads).
   // Sandbox tools address the goal sandbox, not the raw project, so the

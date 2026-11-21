@@ -4,12 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "@/lib/toast";
 import { useLanguage } from "@/hooks/use-language";
 import { useCopilotRun, type ActiveCopilotRun } from "@/hooks/use-copilot";
-import { cancelRun, type CopilotConversation, type CopilotMessage } from "@/lib/copilot-api";
+import { cancelRun, type CopilotChatMode, type CopilotConversation, type CopilotMessage, type CopilotPlanConfirmation } from "@/lib/copilot-api";
 
 export interface CopilotChatControllerOptions {
   conversationId: string | null;
   projectId: string;
   modelId: string | null;
+  mode?: CopilotChatMode;
   savingPreferences: boolean;
   conversations: CopilotConversation[];
   /** Current transcript; the follow-bottom effect reacts to it. */
@@ -31,6 +32,11 @@ export interface CopilotChatControllerOptions {
   appendUserMessage: (text: string) => void;
 }
 
+interface SendModelOptions {
+  mode: CopilotChatMode;
+  modelId: string | null;
+}
+
 export interface CopilotChatController {
   input: string;
   setInput: (value: string) => void;
@@ -38,7 +44,8 @@ export interface CopilotChatController {
   sending: boolean;
   /** True when the last submission failed; keeps the inline retry action alive. */
   sendFailed: boolean;
-  send: (textOverride?: string, retry?: boolean, onStarted?: () => void) => Promise<void>;
+  send: (textOverride?: string, retry?: boolean, onStarted?: () => void, modelOptions?: SendModelOptions) => Promise<void>;
+  refreshConfirmedPlan: (conversationId: string, projectId: string, confirmation?: Pick<CopilotPlanConfirmation, "runId">) => boolean;
   stopRun: () => Promise<void>;
   editingMessageId: string | null;
   editDraft: string;
@@ -94,7 +101,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const lastSentRef = useRef<{ conversationId: string; text: string; modelId?: string; clientRequestId: string } | null>(null);
+  const lastSentRef = useRef<{ conversationId: string; text: string; modelId?: string; mode?: CopilotChatMode; clientRequestId: string } | null>(null);
   const lastEditRef = useRef<{ signature: string; clientRequestId: string } | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   const selectionEpochRef = useRef(0);
@@ -138,18 +145,24 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
 
   const advanceSelectionEpoch = useCallback(() => ++selectionEpochRef.current, []);
 
-  const send = useCallback(async (textOverride?: string, retry = false, onStarted?: () => void) => {
+  const send = useCallback(async (textOverride?: string, retry = false, onStarted?: () => void, modelOptions?: SendModelOptions) => {
     const opts = optionsRef.current;
     const prior = retry ? lastSentRef.current : null;
     const text = (prior?.text ?? textOverride ?? inputRef.current).trim();
     const id = opts.conversationId;
-    if (!text || !id || sendingRef.current || opts.savingPreferences || (opts.active && ["pending", "running", "awaiting_approval"].includes(opts.active.status))) return;
+    if (!text || !id || sendingRef.current || editSubmittingRef.current || opts.savingPreferences || (opts.active && ["pending", "running", "awaiting_approval"].includes(opts.active.status))) return;
     if (retry && (!prior || prior.conversationId !== id)) return;
     const epoch = selectionEpochRef.current;
     messageSerialRef.current++;
-    const request = prior ?? { conversationId: id, text, ...(opts.modelId ? { modelId: opts.modelId } : {}), clientRequestId: crypto.randomUUID() };
+    const modelId = modelOptions ? modelOptions.modelId : opts.modelId;
+    const mode = modelOptions?.mode ?? opts.mode;
+    const request = prior ?? {
+      conversationId: id, text, clientRequestId: crypto.randomUUID(),
+      ...(modelId ? { modelId } : {}),
+      ...(mode ? { mode } : {}),
+    };
     lastSentRef.current = request;
-    if (!retry) opts.appendUserMessage(text);
+    if (!prior) opts.appendUserMessage(text);
     if (!textOverride) setInputState("");
     sendingRef.current = true;
     setSending(true);
@@ -160,7 +173,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     opts.markPending(id);
     onStarted?.();
     try {
-      await opts.startRun(id, text, request.modelId, { clientRequestId: request.clientRequestId });
+      await opts.startRun(id, text, request.modelId, { clientRequestId: request.clientRequestId, ...(request.mode ? { mode: request.mode } : {}) });
       if (epoch !== selectionEpochRef.current) return;
       const wasUntitled = !opts.conversations.find((item) => item.id === id)?.title;
       if (wasUntitled) await opts.autoTitleIfUntitled(id, text.slice(0, AUTO_TITLE_MAX_CHARS));
@@ -179,6 +192,18 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
         setSending(false);
       }
     }
+  }, [t]);
+
+  const refreshConfirmedPlan = useCallback((id: string, projectId: string, confirmation?: Pick<CopilotPlanConfirmation, "runId">) => {
+    const opts = optionsRef.current;
+    if (conversationIdRef.current !== id || opts.conversationId !== id || opts.projectId !== projectId) return false;
+    const epoch = selectionEpochRef.current;
+    messageSerialRef.current++;
+    if (confirmation?.runId) void opts.reconcile();
+    void opts.reloadActiveConversation(id).catch(() => {
+      if (selectionEpochRef.current === epoch) toast.error(t("copilot.loadError"));
+    });
+    return true;
   }, [t]);
 
   const stopRun = useCallback(async () => {
@@ -212,14 +237,18 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     if (!id || !targetId || !content || editSubmittingRef.current || opts.savingPreferences || sendingRef.current) return;
     const epoch = selectionEpochRef.current;
     messageSerialRef.current++;
-    const signature = JSON.stringify([id, targetId, content, opts.modelId]);
+    const signature = JSON.stringify([id, targetId, content, opts.modelId, opts.mode]);
     const request = lastEditRef.current?.signature === signature ? lastEditRef.current : { signature, clientRequestId: crypto.randomUUID() };
     lastEditRef.current = request;
     editSubmittingRef.current = true;
     setEditSubmitting(true);
     opts.clearActive();
     try {
-      await opts.startEditedRun(id, targetId, content, { clientRequestId: request.clientRequestId, ...(opts.modelId ? { modelId: opts.modelId } : {}) });
+      await opts.startEditedRun(id, targetId, content, {
+        clientRequestId: request.clientRequestId,
+        ...(opts.modelId ? { modelId: opts.modelId } : {}),
+        ...(opts.mode ? { mode: opts.mode } : {}),
+      });
       if (epoch !== selectionEpochRef.current) return;
       setEditingMessageId(null);
       setEditDraft("");
@@ -266,6 +295,7 @@ export function useCopilotChatController(options: CopilotChatControllerOptions):
     sending,
     sendFailed,
     send,
+    refreshConfirmedPlan,
     stopRun,
     editingMessageId,
     editDraft,

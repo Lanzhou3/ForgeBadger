@@ -53,6 +53,8 @@ export function CopilotStatusBar({
   onModelChange,
   controlsDisabled,
   onSavingChange,
+  onModelPicked,
+  modelOverrideId,
   showLabels = false,
 }: {
   /** When provided, the model label becomes a picker. */
@@ -60,6 +62,10 @@ export function CopilotStatusBar({
   /** Disables both pickers, e.g. while a run is in flight. */
   controlsDisabled?: boolean;
   onSavingChange?: (saving: boolean) => void;
+  /** Fired only when the user explicitly picks a model (not on preference sync). */
+  onModelPicked?: (modelId: string | null) => void;
+  /** Model shown in place of the stored preference, e.g. the plan model in Plan Mode. */
+  modelOverrideId?: string | null;
   /** Render labelled form controls (Settings page) instead of compact composer pills. */
   showLabels?: boolean;
 }) {
@@ -78,7 +84,10 @@ export function CopilotStatusBar({
   const preferencesReady = preferences.isSuccess;
   const defaultModel = models.find((model) => model.isDefault) ?? models[0];
   const storedModelId = preferences.data?.modelId ?? null;
-  const storedModel = storedModelId ? models.find((model) => model.id === storedModelId) : undefined;
+  const shownModelId = models.some(model => model.id === modelOverrideId && model.status === "active")
+    ? modelOverrideId
+    : storedModelId;
+  const storedModel = shownModelId ? models.find((model) => model.id === shownModelId) : undefined;
   const effectiveModel = storedModel ?? defaultModel;
   const modelLabel = effectiveModel
     ? `${effectiveModel.providerName} / ${effectiveModel.name}`
@@ -132,10 +141,11 @@ export function CopilotStatusBar({
 
   const modelPicker = onModelChange ? (
     <Select
-      value={storedModelId ?? DEFAULT_MODEL_VALUE}
+      value={shownModelId ?? DEFAULT_MODEL_VALUE}
       disabled={!preferencesReady || preferencesMutation.isPending || controlsDisabled}
       onValueChange={(next) => {
-        void preferencesMutation.mutate({ modelId: next === DEFAULT_MODEL_VALUE ? null : next });
+        const picked = next === DEFAULT_MODEL_VALUE ? null : next;
+        preferencesMutation.mutate({ modelId: picked }, { onSuccess: () => onModelPicked?.(picked) });
       }}
     >
       <SelectTrigger
@@ -227,6 +237,35 @@ export function CopilotStatusBar({
             </Label>
             {thinkingPicker}
           </div>
+          {([
+            ["planModelId", "copilot-plan-model", "copilot.planModel", "copilot.planModelHint"],
+            ["subagentModelId", "copilot-subagent-model", "copilot.subagentModel", "copilot.subagentModelHint"],
+          ] as const).map(([field, id, label, hint]) => (
+            <div key={field} className="space-y-1.5">
+              <Label htmlFor={id} className="text-xs font-medium text-muted-foreground">{t(label)}</Label>
+              <Select
+                value={preferences.data?.[field] ?? DEFAULT_MODEL_VALUE}
+                disabled={!preferencesReady || preferencesMutation.isPending || controlsDisabled}
+                onValueChange={(next) => {
+                  void preferencesMutation.mutate({ [field]: next === DEFAULT_MODEL_VALUE ? null : next });
+                }}
+              >
+                <SelectTrigger id={id} aria-label={t(label)} size="sm" className="h-9 w-full text-xs">
+                  <Cpu aria-hidden="true" className="size-3.5 text-muted-foreground" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent side="bottom" align="start">
+                  <SelectGroup>
+                    <SelectItem value={DEFAULT_MODEL_VALUE}>{t("copilot.sameAsCopilotModel")}</SelectItem>
+                    {models.map((model) => (
+                      <SelectItem key={model.id} value={model.id}>{model.providerName} / {model.name}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">{t(hint)}</p>
+            </div>
+          ))}
         </>
       ) : (
         <>

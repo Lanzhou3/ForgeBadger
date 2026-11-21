@@ -8,6 +8,8 @@ import { ProjectManagerPanel } from "./ProjectManagerPanel";
 
 const {
   getProjectManagerGoalMock,
+  updateProjectManagerGoalMock,
+  deleteProjectManagerGoalMock,
   discoverAdaptersMock,
   listProjectManagerWorkItemsMock,
   listProjectManagerTaskPacketsMock,
@@ -24,6 +26,8 @@ const {
   getGoalMock,
 } = vi.hoisted(() => ({
   getProjectManagerGoalMock: vi.fn(),
+  updateProjectManagerGoalMock: vi.fn(),
+  deleteProjectManagerGoalMock: vi.fn(),
   discoverAdaptersMock: vi.fn(),
   listProjectManagerWorkItemsMock: vi.fn(),
   listProjectManagerTaskPacketsMock: vi.fn(),
@@ -45,6 +49,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
   return {
     ...actual,
     getProjectManagerGoal: getProjectManagerGoalMock,
+    updateProjectManagerGoal: updateProjectManagerGoalMock,
+    deleteProjectManagerGoal: deleteProjectManagerGoalMock,
     discoverAdapters: discoverAdaptersMock,
     listProjectManagerWorkItems: listProjectManagerWorkItemsMock,
     listProjectManagerTaskPackets: listProjectManagerTaskPacketsMock,
@@ -283,6 +289,44 @@ describe("ProjectManagerPanel Copilot-first supervision view", () => {
         aiTool: "claude",
       },
     });
+  });
+
+  it("edits the project goal inline and clears it only after confirmation", async () => {
+    const goal = {
+      id: "g-1", projectId: "project-1", summary: "Original goal", status: "active",
+      constraints: ["Keep the API stable"], acceptanceCriteria: ["Existing tests pass"],
+      createdAt: 1, updatedAt: 1,
+    };
+    getProjectManagerGoalMock.mockResolvedValue({ goal });
+    updateProjectManagerGoalMock.mockImplementation(async (_id, input) => {
+      const updated = { ...goal, ...input };
+      getProjectManagerGoalMock.mockResolvedValue({ goal: updated });
+      return { goal: updated };
+    });
+    deleteProjectManagerGoalMock.mockImplementation(async () => {
+      getProjectManagerGoalMock.mockResolvedValue({ goal: null });
+      return { deleted: true };
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "编辑项目目标" }));
+    const summary = screen.getByRole("textbox", { name: "摘要" });
+    expect(summary).toHaveProperty("value", goal.summary);
+    fireEvent.change(summary, { target: { value: " Reworded goal " } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await screen.findByText("Reworded goal");
+    expect(updateProjectManagerGoalMock).toHaveBeenCalledWith("project-1", {
+      summary: "Reworded goal", constraints: goal.constraints, acceptanceCriteria: goal.acceptanceCriteria, status: goal.status,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "清除项目目标" }));
+    const confirmation = await screen.findByRole("dialog", { name: "清除项目目标" });
+    expect(deleteProjectManagerGoalMock).not.toHaveBeenCalled();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "删除" }));
+    await waitFor(() => expect(screen.queryByText("Reworded goal")).toBeNull());
+    expect(screen.queryByRole("button", { name: "清除项目目标" })).toBeNull();
+    expect(deleteProjectManagerGoalMock).toHaveBeenCalledWith("project-1");
+    expect(await screen.findByTestId("project-manager-item-item-1")).toBeTruthy();
   });
 
   it("renders status-grouped tasks with stage/blocker badges, collapses done items in active view, and supports quick-add", async () => {

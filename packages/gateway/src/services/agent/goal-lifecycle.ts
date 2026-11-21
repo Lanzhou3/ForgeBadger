@@ -8,6 +8,6 @@ export function applyGoalTransition(store: CopilotGoalStore, goal: GoalRow, acti
     : current === 'active' || current === 'paused' || current === 'blocked' || current === 'cancelled';
   if (!allowed) throw new AgentError('COPILOT_GOAL_STATE', `Cannot ${action} a goal in status '${current}'`);
   if (action === 'cancel' && current === 'cancelled') return goal;
-  const next = action === 'pause' ? 'paused' : action === 'resume' ? 'active' : 'cancelled';
-  return store.setStatus(goal.id, next)!;
+  if (action === 'resume') return store.resume(goal.id)!;
+  return store.setStatus(goal.id, action === 'pause' ? 'paused' : 'cancelled')!;
 }

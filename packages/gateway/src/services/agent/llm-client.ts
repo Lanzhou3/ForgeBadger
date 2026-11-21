@@ -462,6 +462,11 @@ const SYSTEM_PROMPT = [
   "Read the requested task's current screen, use its exact target.observationId and taskTitle, and let the owner verify the server-bound target in approval.",
   "If titles are ambiguous or absent, ask which session; do not guess. A target mismatch/stale error requires fresh evidence and a new approval.",
   "A terminal/process-group stop does not prove detached or shared background work stopped. Report the returned scope; never stop a shared Codex daemon to clear a thread lock.",
+  "Mode routing: stay in Execute for small, well-scoped asks. Call enter_plan_mode first when the work spans many files or has",
+  "large impact, requirements or acceptance criteria are ambiguous, an operation is irreversible, or the user asks for a design, refactor or approach.",
+  "In Plan Mode inspect read-only, then submit_plan. For long-running multi-task work call propose_mode_switch with target goal;",
+  "after any propose_mode_switch end your turn. Use research_project for independent read-only investigations (several may run in parallel).",
+  "Any upgrade of authority (Execute, goal) always needs the owner's confirmation.",
   "Never claim a write happened until",
   "the tool result confirms it."
 ].join("\n");

@@ -27,6 +27,10 @@ export interface GoalRow {
   title: string; spec: string; status: GoalStatus;
   blocked_reason: string | null; pending_question: string | null;
   grants_json: string;
+  /** 0 = single-run plan execution: the driver pauses instead of enqueueing a continuation. */
+  auto_continue: number;
+  /** One owner-authorized continuation awaiting durable admission. */
+  single_run_request_id: string | null;
   workspace_kind: GoalWorkspaceKind | null; workspace_path: string | null; workspace_branch: string | null;
   workspace_base_commit: string | null; workspace_target_branch: string | null;
   created_at: number; updated_at: number; completed_at: number | null;
@@ -52,6 +56,7 @@ const TERMINAL_STATUSES: readonly GoalStatus[] = ['completed', 'blocked', 'cance
 const MAX_TASKS_PER_CALL = 50;
 const MAX_TASK_DESCRIPTION = 500;
 const MAX_VERIFY_COMMAND = 1024;
+const OWNER_ANSWER_PREFIX = 'Owner answer: ';
 
 /** Accepts the M1 plain-string form and the M2 {description, verifyCommand} form. */
 export function normalizeTaskInputs(tasks: ReadonlyArray<string | GoalTaskInput>): GoalTaskInput[] {
@@ -70,7 +75,7 @@ export function normalizeTaskInputs(tasks: ReadonlyArray<string | GoalTaskInput>
 export class CopilotGoalStore {
   constructor(private db: Database, private userId: string) {}
 
-  createGoal(input: { id?: string; conversationId: string; projectId?: string | null; title: string; spec: string; grants?: readonly string[] | undefined }): GoalRow {
+  createGoal(input: { id?: string; conversationId: string; projectId?: string | null; title: string; spec: string; grants?: readonly string[] | undefined; autoContinue?: boolean | undefined }): GoalRow {
     const conversation = this.db.prepare("SELECT id,project_id FROM copilot_conversations WHERE user_id=? AND id=?").get(this.userId, input.conversationId) as { id: string; project_id: string | null } | undefined;
     if (!conversation) throw new AgentError('COPILOT_NOT_FOUND', 'Conversation not found');
     const projectId = input.projectId === undefined ? conversation.project_id : input.projectId;
@@ -81,10 +86,10 @@ export class CopilotGoalStore {
     const grants = parseGoalGrants(JSON.stringify(input.grants ?? []));
     const id = input.id ?? randomUUID();
     const now = Date.now();
-    this.db.prepare(`INSERT INTO copilot_goals(id,user_id,conversation_id,project_id,title,spec,status,grants_json,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,'active',?,?,?)`)
+    this.db.prepare(`INSERT INTO copilot_goals(id,user_id,conversation_id,project_id,title,spec,status,grants_json,auto_continue,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,'active',?,?,?,?)`)
       .run(id, this.userId, input.conversationId, projectId, input.title, input.spec,
-        JSON.stringify(grants), now, now);
+        JSON.stringify(grants), input.autoContinue === false ? 0 : 1, now, now);
     return this.getGoal(id)!;
   }
 
@@ -108,10 +113,33 @@ export class CopilotGoalStore {
   setStatus(id: string, status: GoalStatus, blockedReason?: string): GoalRow | undefined {
     if (!GOAL_STATUSES.includes(status)) throw new AgentError('COPILOT_GOAL_STATE', `Unknown goal status: ${status}`);
     const now = Date.now();
-    this.db.prepare(`UPDATE copilot_goals SET status=?, blocked_reason=?, completed_at=CASE WHEN ? THEN ? ELSE completed_at END, updated_at=?
+    this.db.prepare(`UPDATE copilot_goals SET status=?, blocked_reason=?, single_run_request_id=NULL, completed_at=CASE WHEN ? THEN ? ELSE completed_at END, updated_at=?
       WHERE user_id=? AND id=?`)
       .run(status, blockedReason ?? null, TERMINAL_STATUSES.includes(status) ? 1 : 0, now, now, this.userId, id);
     return this.getGoal(id);
+  }
+
+  /** Single-run goals keep the owner's request until the driver can admit it. */
+  resume(id: string, requestId: string = randomUUID()): GoalRow | undefined {
+    this.db.prepare(`UPDATE copilot_goals SET status='active', blocked_reason=NULL,
+      single_run_request_id=CASE WHEN auto_continue=0 THEN ? ELSE NULL END, updated_at=?
+      WHERE user_id=? AND id=? AND status IN ('paused','blocked')`)
+      .run(requestId, Date.now(), this.userId, id);
+    return this.getGoal(id);
+  }
+
+  /** For an answer-triggered continuation the request ID identifies the journal entry. */
+  singleRunAnswer(id: string, requestId: string): string | undefined {
+    const row = this.db.prepare('SELECT note FROM copilot_goal_journal WHERE user_id=? AND goal_id=? AND id=?')
+      .get(this.userId, id, requestId) as { note: string } | undefined;
+    return row?.note.startsWith(OWNER_ANSWER_PREFIX) ? row.note.slice(OWNER_ANSWER_PREFIX.length) : undefined;
+  }
+
+  /** Consumed in the same transaction as admission so a busy retry or crash retains the request. */
+  consumeSingleRunRequest(id: string, requestId: string): boolean {
+    return this.db.prepare(`UPDATE copilot_goals SET single_run_request_id=NULL
+      WHERE user_id=? AND id=? AND status='active' AND single_run_request_id=?`)
+      .run(this.userId, id, requestId).changes > 0;
   }
 
   addTasks(goalId: string, tasks: ReadonlyArray<string | GoalTaskInput>): GoalTaskRow[] {
@@ -188,9 +216,9 @@ export class CopilotGoalStore {
     return this.db.transaction(() => {
       const goal = this.getGoal(id);
       if (!goal) throw new AgentError('COPILOT_NOT_FOUND', 'Goal not found');
-      this.appendJournal(id, runId, `Owner answer: ${answer}`);
+      const entry = this.appendJournal(id, runId, OWNER_ANSWER_PREFIX + answer);
       this.setPendingQuestion(id, null);
-      return this.setStatus(id, 'active')!;
+      return this.resume(id, entry.id)!;
     }).immediate();
   }
 

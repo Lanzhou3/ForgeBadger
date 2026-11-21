@@ -5,6 +5,8 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import express from "express";
 import http from "node:http";
+import { mkdtempSync, rmdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -129,6 +131,49 @@ describe("project-manager routes", () => {
     assert.equal(repo.listWorkItems(projectId).length, workItemCount);
     assert.equal(repo.listLedgerEvents(projectId).length, ledgerCount);
     assert.equal(auditRepo.list({ action: "project_manager.work_item.create" }).length, auditCount);
+  });
+
+  it("clears an existing goal once, preserves the board tasks, and records the clear", async () => {
+    const route = `/api/v1/projects/${projectId}/project-manager/goal`;
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const goal = repo.upsertGoal(projectId, { summary: "Ship this milestone" });
+    const item = repo.createWorkItem(projectId, { title: "Keep the work item" });
+    const otherToken = signJwt({ userId: other.id, email: other.email }, secret);
+
+    const denied = await makeRequest(app, "DELETE", route, undefined, { Authorization: `Bearer ${otherToken}` });
+    assert.equal(denied.status, 404);
+    assert.equal(repo.getGoal(projectId)?.id, goal.id);
+
+    const deleted = await request("DELETE", route);
+    assert.deepEqual(deleted, { status: 200, body: { code: 0, data: { deleted: true }, message: "" } });
+    assert.equal((await request("GET", route)).body.data.goal, null);
+    assert.deepEqual((await request("DELETE", route)).body.data, { deleted: false });
+    assert.equal(repo.getWorkItem(projectId, item.id)?.id, item.id);
+
+    const events = repo.listLedgerEvents(projectId).filter(event => event.details.cleared === true);
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.eventType, "goal_updated");
+    const audit = new AuditLogRepository(db, owner.id).list({ action: "project_manager.goal.delete" });
+    assert.equal(audit.length, 1);
+    assert.equal(audit[0]?.resourceId, goal.id);
+  });
+
+  it("reserves goal management for members with manage access", async (context) => {
+    const directory = mkdtempSync(path.join(tmpdir(), "pm-goal-access-"));
+    context.after(() => rmdirSync(directory));
+    db.prepare("UPDATE projects SET path=? WHERE id=?").run(directory, projectId);
+    db.prepare("INSERT INTO collaboration_members(project_id,user_id,member_id,role) VALUES(?,?,?,'developer')")
+      .run(projectId, owner.id, other.id);
+    const repo = new ProjectManagerRepository(db, owner.id);
+    const goal = repo.upsertGoal(projectId, { summary: "Owner's milestone" });
+    const headers = { Authorization: `Bearer ${signJwt({ userId: other.id, email: other.email }, secret)}` };
+    const route = `/api/v1/projects/${projectId}/project-manager/goal`;
+
+    assert.equal((await makeRequest(app, "GET", route, undefined, headers)).status, 200);
+    assert.equal((await makeRequest(app, "PUT", route, { summary: "New milestone" }, headers)).status, 403);
+    assert.equal((await makeRequest(app, "DELETE", route, undefined, headers)).status, 403);
+    assert.equal(repo.getGoal(projectId)?.id, goal.id);
+    assert.equal((await request("DELETE", route)).body.data.deleted, true);
   });
 
   it("returns a bounded task packet derived from a work item without raw details", async () => {

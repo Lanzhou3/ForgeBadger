@@ -7,7 +7,7 @@ import { useLanguage } from "@/hooks/use-language";
 import type { TranslationKey } from "@/lib/i18n";
 import { agentErrorTranslationKey } from "@/lib/agent-error";
 import { editMessage, getRun, listConversationRuns, sendMessage,
-  type CopilotPendingAction, type CopilotRunStatus } from "@/lib/copilot-api";
+  type CopilotMessageOptions, type CopilotPendingAction, type CopilotRunStatus } from "@/lib/copilot-api";
 
 export interface ActiveCopilotRun {
   phase?: string;
@@ -266,7 +266,7 @@ export function useCopilotRun(options?: UseCopilotRunOptions) {
       throw error;
     }
   }, [markPending, update, reconcile, clearActive]);
-  const startRun = useCallback((id: string, text: string, modelId?: string, options?: import("@/lib/copilot-api").CopilotMessageOptions) =>
+  const startRun = useCallback((id: string, text: string, modelId?: string, options?: CopilotMessageOptions) =>
     submit(id, () => options ? sendMessage(id, text, modelId, options) : sendMessage(id, text, modelId)), [submit]);
   const startEditedRun = useCallback((id: string, messageId: string, text: string, options?: Parameters<typeof editMessage>[3]) =>
     submit(id, () => options ? editMessage(id, messageId, text, options) : editMessage(id, messageId, text)), [submit]);

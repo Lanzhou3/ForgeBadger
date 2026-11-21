@@ -11,7 +11,7 @@ import { CopilotFollowupChips } from "@/components/copilot/CopilotFollowupChips"
 import { useAutoGrowTextarea } from "@/hooks/use-auto-grow-textarea";
 import { useLanguage } from "@/hooks/use-language";
 import type { Project } from "@/lib/api";
-import type { CopilotFollowup } from "@/lib/copilot-api";
+import type { CopilotChatMode, CopilotFollowup } from "@/lib/copilot-api";
 import { cn } from "@/lib/utils";
 
 interface CopilotComposerProps {
@@ -31,9 +31,14 @@ interface CopilotComposerProps {
   onProjectChange: (id: string) => void;
   onModelChange: (id: string | null) => void;
   onSavingChange: (saving: boolean) => void;
+  onModelPicked?: (modelId: string | null) => void;
+  /** Plan model shown in place of the stored preference while in Plan Mode. */
+  modelOverrideId?: string | null;
   toolbarDisabled: boolean;
   followups: CopilotFollowup[];
   onCancelFollowup: (id: string) => void;
+  mode?: CopilotChatMode;
+  onModeChange?: (mode: CopilotChatMode) => void;
   compact?: boolean;
 }
 
@@ -60,9 +65,13 @@ export function CopilotComposer({
   onProjectChange,
   onModelChange,
   onSavingChange,
+  onModelPicked,
+  modelOverrideId,
   toolbarDisabled,
   followups,
   onCancelFollowup,
+  mode = "execute",
+  onModeChange,
   compact = false,
 }: CopilotComposerProps) {
   const { t } = useLanguage();
@@ -97,13 +106,23 @@ export function CopilotComposer({
 
         <div
           data-testid={testId}
-          className="rounded-xl border border-border/75 bg-card shadow-raised transition-[border-color,box-shadow] duration-150 focus-within:border-brand/55 focus-within:ring-2 focus-within:ring-brand/15"
+          className={cn(
+            "rounded-xl border bg-card shadow-raised motion-safe:transition-[border-color,box-shadow] motion-safe:duration-150 focus-within:ring-2",
+            mode === "plan"
+              ? "border-amber-500/45 focus-within:border-amber-500/70 focus-within:ring-amber-500/15"
+              : "border-border/75 focus-within:border-brand/55 focus-within:ring-brand/15",
+          )}
         >
           <Textarea
             ref={textareaRef}
             value={input}
             onChange={(event) => onInputChange(event.target.value)}
             onKeyDown={(event) => {
+              if (onModeChange && event.key === "Tab" && event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                if (!event.repeat) onModeChange(mode === "plan" ? "execute" : "plan");
+                return;
+              }
               if (palette.handleTextareaKeyDown(event)) return;
               if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
@@ -119,7 +138,8 @@ export function CopilotComposer({
                 : undefined
             }
             aria-autocomplete="list"
-            placeholder={isRunning ? t("copilot.followups.placeholder") : t("copilot.placeholder")}
+            aria-keyshortcuts={onModeChange ? "Shift+Tab" : undefined}
+            placeholder={isRunning ? t("copilot.followups.placeholder") : mode === "plan" ? t("copilot.planPlaceholder") : t("copilot.placeholder")}
             aria-label={t("copilot.placeholder")}
             className={cn(
               "w-full flex-1 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-3.5 pb-1.5 pt-3 shadow-none focus-visible:ring-0 dark:bg-transparent",
@@ -137,6 +157,8 @@ export function CopilotComposer({
                 onProjectChange={onProjectChange}
                 onModelChange={onModelChange}
                 onSavingChange={onSavingChange}
+                {...(onModelPicked ? { onModelPicked } : {})}
+                {...(modelOverrideId ? { modelOverrideId } : {})}
                 disabled={toolbarDisabled}
               />
               <Button
@@ -150,6 +172,33 @@ export function CopilotComposer({
               >
                 <Slash className="size-3" aria-hidden="true" />
               </Button>
+              {onModeChange && (
+                <div
+                  role="group"
+                  aria-label={t("copilot.chatMode")}
+                  title={t("copilot.modeShortcut")}
+                  data-testid="copilot-mode-toggle"
+                  className="inline-flex shrink-0 items-center rounded-md border border-border/65 bg-muted/35 p-0.5"
+                >
+                  {(["plan", "execute"] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      aria-pressed={mode === option}
+                      onClick={() => onModeChange(option)}
+                      className={cn(
+                        "min-h-6 rounded px-2 text-[11px] font-medium leading-none motion-safe:transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                        mode !== option && "text-muted-foreground hover:text-foreground",
+                        mode === option && (option === "plan"
+                          ? "bg-amber-500/15 text-amber-800 dark:text-amber-300"
+                          : "bg-background text-foreground shadow-sm"),
+                      )}
+                    >
+                      {t(option === "plan" ? "copilot.modePlan" : "copilot.modeExecute")}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex shrink-0 items-center gap-2">

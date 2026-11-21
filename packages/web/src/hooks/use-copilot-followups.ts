@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { cancelFollowup, listFollowups, queueFollowup, type CopilotFollowup, type CopilotMessageOptions } from "@/lib/copilot-api";
+import { cancelFollowup, listFollowups, queueFollowup, type CopilotChatMode, type CopilotFollowup, type CopilotMessageOptions } from "@/lib/copilot-api";
 import { useLanguage } from "@/hooks/use-language";
 import { toast } from "@/lib/toast";
 
@@ -11,6 +11,7 @@ export interface UseCopilotFollowupsOptions {
   conversationId: string | null;
   projectId?: string;
   modelId?: string;
+  mode?: CopilotChatMode;
   /** Poll while a run is in flight so items leave the queue as they drain. */
   active: boolean;
 }
@@ -30,7 +31,7 @@ export interface CopilotFollowupsController {
  * ambiguous response is deduplicated by the server instead of creating a
  * second turn.
  */
-export function useCopilotFollowups({ conversationId, projectId, modelId, active }: UseCopilotFollowupsOptions): CopilotFollowupsController {
+export function useCopilotFollowups({ conversationId, projectId, modelId, mode, active }: UseCopilotFollowupsOptions): CopilotFollowupsController {
   const { t } = useLanguage();
   const client = useQueryClient();
   const queryKey = ["copilot-followups", conversationId];
@@ -67,10 +68,11 @@ export function useCopilotFollowups({ conversationId, projectId, modelId, active
     const content = raw.trim();
     if (!content || enqueuing || !conversationId) return false;
     const generation = epoch.current;
-    if (request.current?.content !== content) request.current = { content, options: {
+    if (request.current?.content !== content || request.current.options.mode !== mode) request.current = { content, options: {
       clientRequestId: crypto.randomUUID(),
       ...(projectId ? { projectId } : {}),
       ...(modelId ? { modelId } : {}),
+      ...(mode ? { mode } : {}),
     } };
     const submitted = request.current;
     setEnqueuing(true);
@@ -88,7 +90,7 @@ export function useCopilotFollowups({ conversationId, projectId, modelId, active
     } finally {
       if (epoch.current === generation) setEnqueuing(false);
     }
-  }, [conversationId, enqueuing, modelId, projectId, query, t]);
+  }, [conversationId, enqueuing, modelId, mode, projectId, query, t]);
 
   const cancel = useCallback(async (id: string) => {
     if (!conversationId) return;

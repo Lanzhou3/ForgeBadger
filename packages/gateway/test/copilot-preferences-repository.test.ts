@@ -42,7 +42,7 @@ describe("copilot preferences repository", () => {
     try {
       const user = new UserRepository(db).create("repo-defaults@example.com", "hash");
       const prefs = new CopilotPreferencesRepository(db, user.id);
-      assert.deepEqual(prefs.get(), { modelId: null, thinkingEffort: "off" });
+      assert.deepEqual(prefs.get(), { modelId: null, thinkingEffort: "off", planModelId: null, subagentModelId: null });
     } finally {
       db.close();
     }
@@ -61,7 +61,7 @@ describe("copilot preferences repository", () => {
       assert.equal(loaded.modelId, profile.id);
       assert.equal(loaded.thinkingEffort, "medium");
       prefs.set({ modelId: null });
-      assert.deepEqual(prefs.get(), { modelId: null, thinkingEffort: "medium" });
+      assert.deepEqual(prefs.get(), { modelId: null, thinkingEffort: "medium", planModelId: null, subagentModelId: null });
     } finally {
       db.close();
     }
@@ -73,7 +73,7 @@ describe("copilot preferences repository", () => {
       const user = new UserRepository(db).create("repo-noop@example.com", "hash");
       const prefs = new CopilotPreferencesRepository(db, user.id);
       prefs.set({ thinkingEffort: "low" });
-      assert.deepEqual(prefs.set({}), { modelId: null, thinkingEffort: "low" });
+      assert.deepEqual(prefs.set({}), { modelId: null, thinkingEffort: "low", planModelId: null, subagentModelId: null });
     } finally {
       db.close();
     }

@@ -2689,6 +2689,10 @@ export async function updateProjectManagerGoal(
   }) as Promise<{ goal: ProjectManagerGoal }>;
 }
 
+export function deleteProjectManagerGoal(projectId: string): Promise<{ deleted: boolean }> {
+  return fetchJson(projectManagerPath(projectId, "/goal"), { method: "DELETE" }) as Promise<{ deleted: boolean }>;
+}
+
 export async function listProjectManagerWorkItems(
   projectId: string,
   params: { status?: ProjectManagerWorkItemStatus; limit?: number } = {}

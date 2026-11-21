@@ -11,7 +11,7 @@ import { LanguageProvider } from "@/hooks/use-language";
 import { CopilotChat } from "@/components/copilot/copilot-chat";
 import { LAST_COPILOT_CONVERSATION_KEY } from "@/lib/copilot-conversation-storage";
 import { FORGEBADGER_GATEWAY_EVENT } from "@/lib/gateway-events";
-import type { CopilotPreferences } from "@/lib/copilot-api";
+import type { CopilotModeReceipt, CopilotPreferences } from "@/lib/copilot-api";
 import { GatewayApiError } from "@/lib/api";
 
 const {
@@ -23,9 +23,12 @@ const {
   createConversationMock,
   renameConversationMock,
   updateConversationProjectMock,
+  updateConversationModeMock,
   deleteConversationMock,
   cancelRunMock,
   sendMessageMock,
+  confirmCopilotPlanMock,
+  confirmCopilotModeProposalMock,
   editMessageMock,
   getCopilotCapabilitiesMock,
   listModelProvidersMock,
@@ -45,9 +48,12 @@ const {
   createConversationMock: vi.fn(),
   renameConversationMock: vi.fn(),
   updateConversationProjectMock: vi.fn(),
+  updateConversationModeMock: vi.fn(),
   deleteConversationMock: vi.fn(),
   cancelRunMock: vi.fn(),
   sendMessageMock: vi.fn(),
+  confirmCopilotPlanMock: vi.fn(),
+  confirmCopilotModeProposalMock: vi.fn(),
   editMessageMock: vi.fn(),
   getCopilotCapabilitiesMock: vi.fn(),
   listModelProvidersMock: vi.fn(),
@@ -80,9 +86,12 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     createConversation: createConversationMock,
     renameConversation: renameConversationMock,
     updateConversationProject: updateConversationProjectMock,
+    updateConversationMode: updateConversationModeMock,
     deleteConversation: deleteConversationMock,
     cancelRun: cancelRunMock,
     sendMessage: sendMessageMock,
+    confirmCopilotPlan: confirmCopilotPlanMock,
+    confirmCopilotModeProposal: confirmCopilotModeProposalMock,
     editMessage: editMessageMock,
     getCopilotCapabilities: getCopilotCapabilitiesMock,
     getRun: getRunMock,
@@ -344,7 +353,7 @@ describe("CopilotChat console layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "重试" })).toBeTruthy());
     const options = sendMessageMock.mock.calls[0]![3];
-    expect(options).toEqual({ clientRequestId: expect.any(String) });
+    expect(options).toEqual({ clientRequestId: expect.any(String), mode: "execute" });
     await pickOption("项目上下文", "未指定项目");
     await waitFor(() => expect(screen.getByRole("combobox", { name: "项目上下文" })).toHaveProperty("disabled", false));
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
@@ -352,11 +361,107 @@ describe("CopilotChat console layout", () => {
     expect(sendMessageMock.mock.calls[1]).toEqual(["conv-1", "inspect", undefined, options]);
   });
 
+  it("loads the stored conversation mode and persists toggles with the PATCH", async () => {
+    listConversationsMock.mockResolvedValue({ conversations: [{ ...baseConversation, mode: "plan" }] });
+    renderChat();
+    await waitForConversationLoaded();
+    await waitFor(() => expect(screen.getByRole("button", { name: "计划" }).getAttribute("aria-pressed")).toBe("true"));
+    fireEvent.click(screen.getByRole("button", { name: "执行" }));
+    expect(screen.getByRole("button", { name: "执行" }).getAttribute("aria-pressed")).toBe("true");
+    await waitFor(() => expect(updateConversationModeMock).toHaveBeenCalledWith("conv-1", "execute"));
+  });
+
+  it("keeps the new conversation in Plan Mode when a prior Execute confirmation returns late", async () => {
+    const source = { ...baseConversation, mode: "plan" as const };
+    const other = { ...source, id: "conv-2", title: "目标对话" };
+    const confirmation = deferred<{ receipt: CopilotModeReceipt }>();
+    listConversationsMock.mockResolvedValue({ conversations: [source, other] });
+    listMessagesMock.mockImplementation(async (id: string) => ({
+      messages: id === source.id ? [{
+        ...baseUserMessage, role: "tool", kind: "tool_result", toolName: "propose_mode_switch", stepId: "proposal",
+        content: JSON.stringify({ status: "mode_switch_proposed", target: "execute", reason: "Ready" }),
+        modeProposal: { target: "execute" },
+      }] : [{ ...baseUserMessage, conversationId: id, content: "第二条消息" }],
+    }));
+    confirmCopilotModeProposalMock.mockReturnValueOnce(confirmation.promise);
+    renderChat();
+
+    fireEvent.click(await screen.findByRole("button", { name: "接受" }));
+    await waitFor(() => expect(confirmCopilotModeProposalMock).toHaveBeenCalledWith(source.id, "proposal", "accept"));
+    fireEvent.click(screen.getByRole("button", { name: /目标对话/ }));
+    await screen.findByText("第二条消息");
+    await act(async () => confirmation.resolve({ receipt: { decision: "accept", target: "execute" } }));
+    expect(screen.getByRole("button", { name: "计划" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("rolls the toggle back and toasts when persisting the mode fails", async () => {
+    updateConversationModeMock.mockRejectedValueOnce(new Error("offline"));
+    listConversationsMock.mockResolvedValue({ conversations: [{ ...baseConversation, mode: "execute" }] });
+    renderChat();
+    await waitForConversationLoaded();
+    fireEvent.click(screen.getByRole("button", { name: "计划" }));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("无法保存对话模式，已还原。"));
+    expect(screen.getByRole("button", { name: "执行" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("renders an inline status row when the model switched to Plan Mode", async () => {
+    listConversationsMock.mockResolvedValue({ conversations: [{ ...baseConversation, mode: "plan" }] });
+    listMessagesMock.mockResolvedValue({ messages: [
+      baseUserMessage,
+      { ...baseUserMessage, id: "epm", role: "tool", kind: "tool_result", toolName: "enter_plan_mode", stepId: "s1", toolCallId: "c1", content: JSON.stringify({ status: "mode_changed", mode: "plan", reason: "Large refactor" }) },
+    ] });
+    renderChat();
+    const row = await screen.findByTestId("copilot-entered-plan-mode");
+    expect(row.textContent).toContain("Large refactor");
+  });
+
+  it("keeps Plan Mode on rejection and switches after the Gateway admits execution", async () => {
+    let persistedMode: "plan" | "execute" = "execute";
+    listConversationsMock.mockImplementation(async () => ({ conversations: [{ ...baseConversation, mode: persistedMode }] }));
+    updateConversationModeMock.mockImplementation(async (id: string, mode: "plan" | "execute") => {
+      persistedMode = mode;
+      return { conversation: { ...baseConversation, id, mode } };
+    });
+    const proposal = {
+      title: "Refresh setup documentation",
+      summary: "Update the examples.",
+      todos: [{ title: "Update README", verifyCommand: "pnpm test" }, { title: "Rewrite the tutorial" }],
+    };
+    listMessagesMock.mockResolvedValue({ messages: [
+      baseUserMessage,
+      { ...baseUserMessage, id: "plan-call", role: "assistant", kind: "tool_call", content: "submit_plan", toolName: "submit_plan", toolCallId: "plan", runId: "plan-run", stepId: "plan-step" },
+      { ...baseUserMessage, id: "plan-result", role: "tool", kind: "tool_result", toolName: "submit_plan", toolCallId: "plan", runId: "plan-run", stepId: "plan-step", planProposal: { projectId: null }, content: JSON.stringify({ status: "plan_proposed", plan: proposal }) },
+    ] });
+    confirmCopilotPlanMock.mockRejectedValueOnce(new Error("Conversation is busy"));
+    confirmCopilotPlanMock.mockImplementationOnce(async () => {
+      persistedMode = "execute";
+      return { confirmation: { action: "execute", todoIndexes: [0], runId: "execute-run" } };
+    });
+    renderChat();
+    await screen.findByTestId("copilot-plan-card");
+
+    fireEvent.click(screen.getByRole("button", { name: "计划" }));
+    expect(screen.getByPlaceholderText("描述你想规划的工作…")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Rewrite the tutorial" }));
+    const button = screen.getByRole("button", { name: "确认并开始执行" });
+    await waitFor(() => expect(button).toHaveProperty("disabled", false));
+    fireEvent.click(button);
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("操作未完成，请重试。"));
+    expect(screen.getByRole("button", { name: "计划" }).getAttribute("aria-pressed")).toBe("true");
+    await waitFor(() => expect(button).toHaveProperty("disabled", false));
+    fireEvent.click(button);
+    await screen.findByText("已开始执行计划");
+    expect(confirmCopilotPlanMock.mock.calls).toEqual(Array.from({ length: 2 }, () => ["conv-1", "plan-step", { action: "execute", todoIndexes: [0] }]));
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "执行" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
     stubRadixSelectEnvironment();
     preferencesState = { modelId: null, thinkingEffort: "medium" };
+    updateConversationModeMock.mockImplementation(async (id: string, mode: string) => ({ conversation: { ...baseConversation, id, mode } }));
     getCopilotPreferencesMock.mockImplementation(async () => preferencesState);
     updateCopilotPreferencesMock.mockImplementation(
       async (patch: { modelId?: string | null; thinkingEffort?: CopilotPreferences["thinkingEffort"] }) => {
@@ -731,6 +836,32 @@ describe("CopilotChat console layout", () => {
     expect(window.localStorage.getItem(LAST_COPILOT_CONVERSATION_KEY)).toBe("conv-2");
   });
 
+  it("applies the linked mode only to the requested conversation", async () => {
+    const other = { ...baseConversation, id: "conv-2", title: "目标对话" };
+    listConversationsMock.mockResolvedValue({ conversations: [baseConversation, other] });
+    listMessagesMock.mockImplementation(async (id: string) => ({ messages: [{ ...baseUserMessage, conversationId: id, content: id === "conv-1" ? "你好" : "第二条消息" }] }));
+    const rendered = renderChat();
+    await waitForConversationLoaded();
+    window.history.replaceState({}, "", "/copilot?c=conv-2&mode=plan");
+    rendered.rerender(<LanguageProvider><QueryClientProvider client={createQueryClient()}><CopilotChat /></QueryClientProvider></LanguageProvider>);
+    await screen.findByText("第二条消息");
+
+    await waitFor(() => expect(updateConversationModeMock.mock.calls).toEqual([["conv-2", "plan"]]));
+    expect(screen.getByRole("button", { name: "计划" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("opens an expanded Plan draft without repurposing the last conversation", async () => {
+    window.localStorage.setItem(LAST_COPILOT_CONVERSATION_KEY, "conv-1");
+    window.history.replaceState({}, "", "/copilot?mode=plan");
+    renderChat();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: new RegExp(baseConversation.title ?? "") })).toBeTruthy());
+    expect(screen.getByRole("button", { name: "计划" }).getAttribute("aria-pressed")).toBe("true");
+    expect(listMessagesMock).not.toHaveBeenCalled();
+    expect(updateConversationModeMock).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("");
+  });
+
   it("keeps the new conversation's run when an old send fails late", async () => {
     const oldSend = deferred<{ runId: string }>();
     sendMessageMock.mockReturnValueOnce(oldSend.promise);
@@ -760,7 +891,7 @@ describe("CopilotChat console layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存并重新运行" }));
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("编辑失败，请重试。"));
     const first = editMessageMock.mock.calls[0]!;
-    expect(first[3]).toEqual({ clientRequestId: expect.any(String) });
+    expect(first[3]).toEqual({ clientRequestId: expect.any(String), mode: "execute" });
     fireEvent.click(screen.getByRole("button", { name: "保存并重新运行" }));
     await waitFor(() => expect(editMessageMock).toHaveBeenCalledTimes(2));
     expect(editMessageMock.mock.calls[1]).toEqual(first);

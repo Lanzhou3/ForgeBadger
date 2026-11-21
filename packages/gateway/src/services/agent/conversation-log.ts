@@ -24,6 +24,7 @@ interface ConversationRow {
   project_id: string | null;
   title: string | null;
   status: string;
+  mode: "plan" | "execute";
   summary: string | null;
   summary_covered_sequence: number | null;
   last_summary_at: number | null;
@@ -87,7 +88,7 @@ export class CopilotConversationLog {
     this.userId = userId;
   }
 
-  createConversation(title?: string, projectId: string | null = null): { id: string; title: string | null; project_id: string | null } {
+  createConversation(title?: string, projectId: string | null = null): { id: string; title: string | null; project_id: string | null; mode: "execute" } {
     if (projectId) this.assertProject(projectId);
     const id = randomUUID();
     const now = Date.now();
@@ -98,7 +99,7 @@ export class CopilotConversationLog {
       this.db.prepare(`INSERT INTO copilot_conversations (id, user_id, title, status, created_at, updated_at)
         VALUES (?, ?, ?, 'active', ?, ?)`).run(id, this.userId, title ?? null, now, now);
     }
-    return { id, title: title ?? null, project_id: projectId };
+    return { id, title: title ?? null, project_id: projectId, mode: "execute" };
   }
 
   setConversationProject(id: string, projectId: string | null): boolean {
@@ -113,6 +114,22 @@ export class CopilotConversationLog {
         .run(projectId, Date.now(), id, this.userId);
       return result.changes > 0;
     }).immediate();
+  }
+
+  /**
+   * Owner mode edit. Allowed while a run is active: the mode only steers future
+   * admissions (each run carries its own mode in its input facts), so toggling
+   * the composer mid-run or right after a plan confirmation never conflicts.
+   */
+  setConversationMode(id: string, mode: "plan" | "execute"): boolean {
+    if (!this.getConversation(id)) return false;
+    return this.writeConversationMode(id, mode);
+  }
+
+  /** Raw mode write for callers that already hold the run/transaction authority (admission, enter_plan_mode). */
+  writeConversationMode(id: string, mode: "plan" | "execute"): boolean {
+    return this.db.prepare("UPDATE copilot_conversations SET mode=?,updated_at=? WHERE id=? AND user_id=? AND status!='deleted'")
+      .run(mode, Date.now(), id, this.userId).changes > 0;
   }
 
   private assertProject(projectId: string): void {

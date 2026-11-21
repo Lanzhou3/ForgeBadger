@@ -16,6 +16,8 @@ interface Props {
   onProjectChange: (id: string) => void;
   onModelChange: (id: string | null) => void;
   onSavingChange: (saving: boolean) => void;
+  onModelPicked?: (modelId: string | null) => void;
+  modelOverrideId?: string | null;
   disabled: boolean;
   className?: string;
 }
@@ -27,6 +29,8 @@ export function CopilotComposerToolbar({
   onProjectChange,
   onModelChange,
   onSavingChange,
+  onModelPicked,
+  modelOverrideId,
   disabled,
   className,
 }: Props) {
@@ -67,6 +71,8 @@ export function CopilotComposerToolbar({
       <CopilotStatusBar
         onModelChange={onModelChange}
         onSavingChange={onSavingChange}
+        {...(onModelPicked ? { onModelPicked } : {})}
+        {...(modelOverrideId ? { modelOverrideId } : {})}
         controlsDisabled={disabled}
       />
     </div>

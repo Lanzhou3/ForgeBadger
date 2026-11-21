@@ -20,6 +20,7 @@ const {
   listMessagesMock,
   getConversationMock,
   updateConversationProjectMock,
+  updateConversationModeMock,
   renameConversationMock,
   sendMessageMock,
   editMessageMock,
@@ -38,6 +39,7 @@ const {
   listMessagesMock: vi.fn(),
   getConversationMock: vi.fn(),
   updateConversationProjectMock: vi.fn(),
+  updateConversationModeMock: vi.fn(),
   renameConversationMock: vi.fn(),
   sendMessageMock: vi.fn(),
   editMessageMock: vi.fn(),
@@ -61,6 +63,7 @@ vi.mock("@/lib/copilot-api", async (importOriginal) => {
     listMessages: listMessagesMock,
     getConversation: getConversationMock,
     updateConversationProject: updateConversationProjectMock,
+    updateConversationMode: updateConversationModeMock,
     renameConversation: renameConversationMock,
     sendMessage: sendMessageMock,
     editMessage: editMessageMock,
@@ -157,23 +160,21 @@ function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-function renderPanel(overrides: { onClose?: () => void; onExpandFull?: (id: string | null) => void; corner?: RobotCorner; explicitProjectId?: string; routeProjectId?: string } = {}) {
+type PanelOverrides = Partial<React.ComponentProps<typeof RobotChatPanel>>;
+
+function renderPanel(overrides: PanelOverrides = {}) {
   const onClose = overrides.onClose ?? vi.fn();
   const onExpandFull = overrides.onExpandFull ?? vi.fn();
-  const result = render(
+  const client = createQueryClient();
+  const panel = (props: PanelOverrides) => (
     <LanguageProvider>
-      <QueryClientProvider client={createQueryClient()}>
-        <RobotChatPanel
-          onClose={onClose}
-          onExpandFull={onExpandFull}
-          corner={overrides.corner ?? "bottom-right"}
-          explicitProjectId={overrides.explicitProjectId}
-          routeProjectId={overrides.routeProjectId}
-        />
+      <QueryClientProvider client={client}>
+        <RobotChatPanel onClose={onClose} onExpandFull={onExpandFull} {...overrides} {...props} />
       </QueryClientProvider>
     </LanguageProvider>
   );
-  return { onClose, onExpandFull, ...result };
+  const result = render(panel({}));
+  return { onClose, onExpandFull, ...result, rerenderPanel: (props: PanelOverrides) => result.rerender(panel(props)) };
 }
 
 function dispatchRunUpdated(payload: Record<string, unknown>) {
@@ -251,6 +252,7 @@ describe("RobotChatPanel", () => {
     getConversationMock.mockImplementation(async (id: string) => ({ conversation: { ...newConversation, id, project_id: null } }));
     updateConversationProjectMock.mockImplementation(async (id: string, projectId: string) => ({ conversation: { ...newConversation, id, project_id: projectId || null } }));
     renameConversationMock.mockResolvedValue({ conversation: newConversation });
+    updateConversationModeMock.mockImplementation(async (id: string, mode: string) => ({ conversation: { ...newConversation, id, mode } }));
     sendMessageMock.mockResolvedValue({ runId: "run-1" });
     editMessageMock.mockResolvedValue({ runId: "run-2" });
     cancelRunMock.mockResolvedValue({ cancelled: true, runId: "run-1" });
@@ -286,7 +288,7 @@ describe("RobotChatPanel", () => {
     // Console-aligned failure surface: a toast plus the inline retry action.
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("发送失败，请检查 Gateway 服务。"));
     const options = sendMessageMock.mock.calls[0]![3];
-    expect(options).toEqual({ clientRequestId: expect.any(String) });
+    expect(options).toEqual({ clientRequestId: expect.any(String), mode: "execute" });
     sendMessageMock.mockReturnValueOnce(new Promise(() => {}));
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(2));
@@ -400,7 +402,7 @@ describe("RobotChatPanel", () => {
     // Optimistic user bubble appears immediately.
     expect(screen.getByText("帮我看看进度")).toBeTruthy();
     await waitFor(() => expect(createConversationMock).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "帮我看看进度", undefined, { clientRequestId: expect.any(String) }));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "帮我看看进度", undefined, { clientRequestId: expect.any(String), mode: "execute" }));
     expect(window.localStorage.getItem(ROBOT_CONVERSATION_STORAGE_KEY)).toBe("conv-new");
     // The new conversation gets an auto title from the first message.
     await waitFor(() => expect(renameConversationMock).toHaveBeenCalledWith("conv-new", "帮我看看进度"));
@@ -426,7 +428,7 @@ describe("RobotChatPanel", () => {
 
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
     expect(createConversationMock).toHaveBeenCalledTimes(1);
-    expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "双击发送", undefined, { clientRequestId: expect.any(String) });
+    expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "双击发送", undefined, { clientRequestId: expect.any(String), mode: "execute" });
     // A single optimistic bubble, not two. (The send POST stays in flight so
     // the post-send refresh cannot replace the transcript before we assert.)
     expect(screen.getAllByText("双击发送")).toHaveLength(1);
@@ -533,6 +535,54 @@ describe("RobotChatPanel", () => {
     expect(onExpandFull).toHaveBeenCalledWith("conv-stored");
   });
 
+  it("restores the stored conversation mode and persists toggles", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    getConversationMock.mockResolvedValue({ conversation: { ...newConversation, id: "conv-stored", project_id: null, mode: "plan" } });
+    listMessagesMock.mockResolvedValue({ messages: [storedMessage] });
+    renderPanel();
+    await waitFor(() => expect(screen.getByRole("button", { name: "计划" }).getAttribute("aria-pressed")).toBe("true"));
+    fireEvent.click(screen.getByRole("button", { name: "执行" }));
+    await waitFor(() => expect(updateConversationModeMock).toHaveBeenCalledWith("conv-stored", "execute"));
+  });
+
+  it("applies a requested mode after restoring the matching project", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    getConversationMock.mockResolvedValue({ conversation: { ...newConversation, id: "conv-stored", project_id: "project-a", mode: "execute" } });
+    listMessagesMock.mockResolvedValue({ messages: [storedMessage] });
+    renderPanel({ explicitProjectId: "project-a", requestedMode: "plan", modeRequestNonce: 1 });
+
+    await screen.findByText("上次的问题");
+    await waitFor(() => expect(updateConversationModeMock).toHaveBeenCalledWith("conv-stored", "plan"));
+    expect(screen.getByRole("button", { name: "计划" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("does not patch the previous conversation when a new project requests Plan Mode", async () => {
+    window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-stored");
+    getConversationMock.mockResolvedValue({ conversation: { ...newConversation, id: "conv-stored", project_id: "project-a", mode: "execute" } });
+    listMessagesMock.mockResolvedValue({ messages: [storedMessage] });
+    const { rerenderPanel } = renderPanel();
+    await screen.findByText("上次的问题");
+
+    rerenderPanel({ explicitProjectId: "project-b", requestedMode: "plan", modeRequestNonce: 1 });
+    await waitFor(() => expect(screen.queryByText("上次的问题")).toBeNull());
+    expect(updateConversationModeMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "计划" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("lets Gateway resolve the Plan model when the user did not pick one", async () => {
+    preferencesState = { modelId: null, thinkingEffort: "medium", planModelId: "model-plan", subagentModelId: null } as typeof preferencesState;
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "计划" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "输入消息…" }), { target: { value: "plan it" } });
+    await waitFor(() => expect(getCopilotPreferencesMock).toHaveBeenCalled());
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送" })).toHaveProperty("disabled", false));
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
+    expect(sendMessageMock.mock.calls[0]![2]).toBeUndefined();
+    expect(sendMessageMock.mock.calls[0]![3]).toMatchObject({ mode: "plan" });
+  });
+
   it("drops a stale persisted conversation id when the server no longer has it", async () => {
     window.localStorage.setItem(ROBOT_CONVERSATION_STORAGE_KEY, "conv-gone");
     listMessagesMock.mockRejectedValue(new GatewayApiError("not found", 404));
@@ -609,7 +659,7 @@ describe("RobotChatPanel", () => {
 
     await waitFor(() => expect(createConversationMock).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "项目整体进展如何？", undefined, { clientRequestId: expect.any(String) })
+      expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "项目整体进展如何？", undefined, { clientRequestId: expect.any(String), mode: "execute" })
     );
     // The empty state is replaced by the conversation.
     expect(screen.queryByRole("button", { name: "现在有哪些会话在运行？" })).toBeNull();
@@ -654,6 +704,7 @@ describe("RobotChatPanel", () => {
     await waitFor(() => expect(createConversationMock).toHaveBeenCalledWith(undefined, "project-1"));
     expect(sendMessageMock).toHaveBeenCalledWith("conv-new", "检查这个项目", undefined, {
       clientRequestId: expect.any(String),
+      mode: "execute",
     });
   });
 
@@ -674,7 +725,7 @@ describe("RobotChatPanel", () => {
     await act(async () => pending.resolve({ conversation: { ...newConversation, id: "conv-stored", project_id: "project-1" } }));
     await waitFor(() => expect(screen.getByRole("button", { name: "发送" })).toHaveProperty("disabled", false));
     fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Enter" });
-    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-stored", "检查这个项目", undefined, { clientRequestId: expect.any(String) }));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-stored", "检查这个项目", undefined, { clientRequestId: expect.any(String), mode: "execute" }));
   });
 
   it("edits a persisted user message and reruns it through the shared controller", async () => {
@@ -689,6 +740,7 @@ describe("RobotChatPanel", () => {
     await waitFor(() =>
       expect(editMessageMock).toHaveBeenCalledWith("conv-stored", "msg-stored-1", "上次的问题", {
         clientRequestId: expect.any(String),
+        mode: "execute",
       })
     );
   });

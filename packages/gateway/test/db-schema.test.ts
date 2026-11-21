@@ -95,6 +95,7 @@ describe("db schema", () => {
       "copilot_messages",
       "copilot_operation_log",
       "copilot_pending_actions",
+      "copilot_plan_confirmations",
       "copilot_research_jobs",
       "copilot_run_steps",
       "copilot_run_trace",

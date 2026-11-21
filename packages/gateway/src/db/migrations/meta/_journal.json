@@ -1079,6 +1079,27 @@
       "when": 1794300000000,
       "tag": "0154_fleet",
       "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1794400000000,
+      "tag": "0155_copilot_plan_confirmations",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1794500000000,
+      "tag": "0156_copilot_modes",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 1794600000000,
+      "tag": "0157_copilot_single_run_requests",
+      "breakpoints": true
     }
   ]
 }

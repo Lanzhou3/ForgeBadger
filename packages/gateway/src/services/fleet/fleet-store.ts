@@ -112,7 +112,7 @@ function toGoalRow(fleet: FleetRow): GoalRow {
   return {
     id: fleet.id, user_id: fleet.user_id, conversation_id: fleet.conversation_id, project_id: fleet.project_id,
     title: fleet.title, spec: fleet.instructions, status: fleet.status,
-    blocked_reason: null, pending_question: null, grants_json: fleet.grants_json,
+    blocked_reason: null, pending_question: null, grants_json: fleet.grants_json, auto_continue: 1, single_run_request_id: null,
     workspace_kind: fleet.workspace_kind, workspace_path: fleet.workspace_path, workspace_branch: fleet.workspace_branch,
     workspace_base_commit: fleet.workspace_base_commit, workspace_target_branch: fleet.workspace_target_branch,
     created_at: fleet.created_at, updated_at: fleet.updated_at, completed_at: null

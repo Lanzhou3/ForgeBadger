@@ -22,6 +22,8 @@ export interface CopilotConversation {
   title: string | null;
   status: string;
   project_id: string | null;
+  /** Persisted conversation mode; absent on older Gateways (treated as execute). */
+  mode?: CopilotChatMode;
   created_at: number;
   updated_at: number;
 }
@@ -35,8 +37,19 @@ export interface CopilotMessage {
   content: string;
   toolName?: string;
   toolInputJson?: string;
-  /** Provider-assigned tool call id; pairs tool_call with tool_result. */
+  /** Provider-assigned tool call id for historical messages without step IDs. */
   toolCallId?: string;
+  runId?: string;
+  stepId?: string;
+  planProposal?: {
+    projectId: string | null;
+    confirmation?: CopilotPlanConfirmation;
+    /** Step id of the prior successful submit_plan in this conversation. */
+    previousStepId?: string;
+    /** Step id of a later plan that replaced this unconfirmed one. */
+    supersededBy?: string;
+  };
+  modeProposal?: { target: CopilotModeTarget; receipt?: CopilotModeReceipt; stale?: boolean };
   sequence: number;
   createdAt: string;
 }
@@ -155,6 +168,13 @@ export function updateConversationProject(conversationId: string, projectId: str
   );
 }
 
+export function updateConversationMode(conversationId: string, mode: CopilotChatMode) {
+  return fetchJson<{ conversation: CopilotConversation }>(
+    `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}`,
+    { method: "PATCH", body: JSON.stringify({ mode }) }
+  );
+}
+
 export function renameConversation(conversationId: string, title: string) {
   return fetchJson<{ conversation: CopilotConversation }>(
     `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}`,
@@ -176,9 +196,52 @@ export function listMessages(conversationId: string) {
 }
 
 /** Run a turn; returns the run id. Streaming deltas arrive via /ws/events. */
+export type CopilotChatMode = "plan" | "execute";
+export interface CopilotOpenDetail {
+  projectId?: string;
+  newChat?: boolean;
+  mode?: CopilotChatMode;
+}
+
 export interface CopilotMessageOptions {
   projectId?: string;
   clientRequestId?: string;
+  mode?: CopilotChatMode;
+}
+
+export type CopilotPlanAction = "execute" | "goal" | "save";
+
+export interface CopilotPlanConfirmation {
+  action: CopilotPlanAction;
+  todoIndexes: number[];
+  runId?: string;
+  goalId?: string;
+}
+
+export function confirmCopilotPlan(conversationId: string, stepId: string,
+  input: { action: CopilotPlanAction; todoIndexes: number[]; modelId?: string }) {
+  return fetchJson<{ confirmation: CopilotPlanConfirmation }>(
+    `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/plans/${encodeURIComponent(stepId)}/confirm`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export type CopilotModeTarget = "execute" | "goal";
+export type CopilotModeDecision = "accept" | "dismiss";
+
+export interface CopilotModeReceipt {
+  decision: CopilotModeDecision;
+  target: CopilotModeTarget;
+  mode?: CopilotChatMode;
+  goalId?: string;
+  runId?: string;
+}
+
+export function confirmCopilotModeProposal(conversationId: string, stepId: string, decision: CopilotModeDecision) {
+  return fetchJson<{ receipt: CopilotModeReceipt }>(
+    `/api/v1/copilot/conversations/${encodeURIComponent(conversationId)}/mode-proposals/${encodeURIComponent(stepId)}/confirm`,
+    { method: "POST", body: JSON.stringify({ decision }) },
+  );
 }
 
 export function sendMessage(conversationId: string, content: string, modelId?: string, options?: CopilotMessageOptions) {
@@ -280,6 +343,10 @@ export interface CopilotPreferences {
   /** Preferred model profile id; null follows the platform default. */
   modelId: string | null;
   thinkingEffort: CopilotThinkingEffort;
+  /** Model used for Plan Mode runs; null follows the Copilot model. */
+  planModelId?: string | null;
+  /** Model used for research/coding sub-agents; null follows the Copilot model. */
+  subagentModelId?: string | null;
 }
 
 export function getCopilotPreferences() {
@@ -289,6 +356,8 @@ export function getCopilotPreferences() {
 export function updateCopilotPreferences(patch: {
   modelId?: string | null;
   thinkingEffort?: CopilotThinkingEffort;
+  planModelId?: string | null;
+  subagentModelId?: string | null;
 }) {
   return fetchJson<CopilotPreferences>("/api/v1/copilot/preferences", {
     method: "PUT",

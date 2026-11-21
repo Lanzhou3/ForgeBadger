@@ -48,6 +48,7 @@ import { cn } from "@/lib/utils";
 import { TaskAuthorityContext, useTaskAuthority, type TaskAuthority } from "./TaskAuthority";
 import { ProjectManagerWorkItemDetailSheet } from "./WorkItemDetailSheet";
 import { QuickStartSessionDialog } from "./QuickStartSessionDialog";
+import { ProjectGoalEditor } from "./ProjectGoalEditor";
 import { EmptyState } from "./shared";
 import {
   LEDGER_PAGE_SIZE,
@@ -95,7 +96,7 @@ function ProjectManagerPanelContent({
   onOpenFile,
 }: ProjectManagerPanelProps) {
   const { t } = useLanguage();
-  const { canEdit, legacySessions, collaboration, actorId } = useTaskAuthority();
+  const { canEdit, canManage, legacySessions, collaboration, actorId } = useTaskAuthority();
   const queryClient = useQueryClient();
   const canLoad = enabled && projectId.length > 0;
 
@@ -383,7 +384,7 @@ function ProjectManagerPanelContent({
   function openCopilotPlanner() {
     window.dispatchEvent(
       new CustomEvent("forgebadger:open-copilot", {
-        detail: { projectId },
+        detail: { projectId, mode: "plan" },
       }),
     );
   }
@@ -675,18 +676,24 @@ function ProjectManagerPanelContent({
             </p>
           )}
 
-          {/* Read-only Copilot Goal Plan Strip */}
           <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border/80 bg-card px-4 py-3">
-            <div className="min-w-0 flex-1 space-y-1">
-              <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                <Target className="size-3.5 text-brand" />
-                <span>{t("projects.projectManagerGoal")}</span>
-                {goal?.status && (
-                  <Badge variant="outline" className="rounded-full text-[10px] font-normal">
-                    {statusLabel(goal.status, t)}
-                  </Badge>
-                )}
-              </div>
+            <ProjectGoalEditor
+              key={projectId}
+              projectId={projectId}
+              goal={goal}
+              canManage={canManage === true && goalQuery.isSuccess}
+              heading={
+                <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <Target className="size-3.5 text-brand" />
+                  <span>{t("projects.projectManagerGoal")}</span>
+                  {goal?.status && (
+                    <Badge variant="outline" className="rounded-full text-[10px] font-normal">
+                      {statusLabel(goal.status, t)}
+                    </Badge>
+                  )}
+                </div>
+              }
+            >
               {goal?.summary ? (
                 <p className="text-sm leading-relaxed text-foreground">{goal.summary}</p>
               ) : (
@@ -707,7 +714,7 @@ function ProjectManagerPanelContent({
                   )}
                 </div>
               )}
-            </div>
+            </ProjectGoalEditor>
           </div>
 
           {/* Minimal 1-line Quick-Add + Search & Status Filter */}

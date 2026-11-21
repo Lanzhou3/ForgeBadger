@@ -999,6 +999,10 @@ export const userSettings = sqliteTable("user_settings", {
   // Copilot agent thinking strength preference (off|low|medium|high); null
   // means "off". modelId above is the user's preferred Copilot model.
   copilotThinkingEffort: text("copilot_thinking_effort"),
+  // Per-role Copilot models (migration 0156); null falls back to modelId. No FK:
+  // a deleted/inactive profile is ignored at resolution time.
+  copilotPlanModelId: text("copilot_plan_model_id"),
+  copilotSubagentModelId: text("copilot_subagent_model_id"),
   // JSON array of canonical adapter ids in the user's preferred display order
   // (settings drag-sort); null means "no preference, use discovery order".
   adapterOrder: text("adapter_order"),
@@ -1520,6 +1524,8 @@ export const copilotConversations = sqliteTable("copilot_conversations", {
   projectId: text("project_id"),
   title: text("title"),
   status: text("status").notNull().default("active"),
+  // Copilot interaction mode (migration 0156): plan = read-only planning, execute = default.
+  mode: text("mode", { enum: ["plan", "execute"] }).notNull().default("execute"),
   // Rolling context-compression summary (see migration 0042): accumulated digest
   // of messages up to summaryCoveredSequence, used to keep long chats in context.
   summary: text("summary"),
@@ -1530,7 +1536,8 @@ export const copilotConversations = sqliteTable("copilot_conversations", {
 }, (table) => ({
   userLookup: index("idx_copilot_conversations_user_updated").on(table.userId, table.updatedAt),
   tenant: uniqueIndex("idx_copilot_conversation_tenant").on(table.userId,table.id),
-  projectLookup: index("idx_copilot_conversation_project").on(table.userId,table.projectId)
+  projectLookup: index("idx_copilot_conversation_project").on(table.userId,table.projectId),
+  modeCheck: check("copilot_conversations_mode_check", sql`${table.mode} IN ('plan', 'execute')`)
 }));
 
 export const copilotMessages = sqliteTable("copilot_messages", {
@@ -1603,10 +1610,17 @@ export const copilotGoals = sqliteTable("copilot_goals", {
   workspaceBranch: text("workspace_branch"),
   workspaceBaseCommit: text("workspace_base_commit"),
   workspaceTargetBranch: text("workspace_target_branch"),
+  // 0 = single-run plan execution goal: pauses after each settled run instead of auto-continuing (migration 0156).
+  autoContinue: integer("auto_continue").notNull().default(1),
+  singleRunRequestId: text("single_run_request_id"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()).$onUpdateFn(() => new Date()),
   completedAt: integer("completed_at", { mode: "timestamp" })
-}, (table) => ({ tenant: uniqueIndex("idx_copilot_goal_tenant").on(table.userId, table.id), conversationLookup: index("idx_copilot_goals_conversation").on(table.userId, table.conversationId) }));
+}, (table) => ({
+  tenant: uniqueIndex("idx_copilot_goal_tenant").on(table.userId, table.id),
+  conversationLookup: index("idx_copilot_goals_conversation").on(table.userId, table.conversationId),
+  autoContinueCheck: check("copilot_goals_auto_continue_check", sql`${table.autoContinue} IN (0, 1)`)
+}));
 
 export const copilotGoalTasks = sqliteTable("copilot_goal_tasks", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -1948,6 +1962,18 @@ export const copilotRunSteps = sqliteTable("copilot_run_steps", {
  identity: uniqueIndex("idx_copilot_step_identity").on(table.userId,table.runId,table.id),
  ordinal: uniqueIndex("idx_copilot_step_ordinal").on(table.userId,table.runId,table.ordinal),
  call: uniqueIndex("idx_copilot_step_call").on(table.userId,table.runId,table.toolCallId)
+}));
+
+export const copilotPlanConfirmations = sqliteTable("copilot_plan_confirmations", {
+  stepId: text("step_id").primaryKey(),
+  userId: text("user_id").notNull(),
+  runId: text("run_id").notNull(),
+  receiptJson: text("receipt_json").notNull(),
+}, table => ({
+  step: foreignKey({
+    columns: [table.userId, table.runId, table.stepId],
+    foreignColumns: [copilotRunSteps.userId, copilotRunSteps.runId, copilotRunSteps.id],
+  }).onDelete("cascade"),
 }));
 
 export const platformActionIntents = sqliteTable('platform_action_intents', {

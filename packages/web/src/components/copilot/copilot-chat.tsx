@@ -25,6 +25,8 @@ import { useCopilotRun } from "@/hooks/use-copilot";
 import { useTerminalCommandProgress } from "@/hooks/use-terminal-command-progress";
 import { useCopilotChatController } from "@/hooks/use-copilot-chat-controller";
 import { useCopilotFollowups } from "@/hooks/use-copilot-followups";
+import { useCopilotConversationMode, useEnterPlanModeSync } from "@/hooks/use-copilot-conversation-mode";
+import { useCopilotPlanModel } from "@/hooks/use-copilot-plan-model";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -36,10 +38,12 @@ import {
   listMessages,
   renameConversation,
   updateConversationProject,
+  type CopilotChatMode,
   type CopilotConversation,
   type CopilotGoalListItem,
   type CopilotGoalStatus,
   type CopilotMessage,
+  type CopilotOpenDetail,
 } from "@/lib/copilot-api";
 
 const GOAL_BADGE_TONE: Record<CopilotGoalStatus, CopilotStatusTone> = {
@@ -67,11 +71,30 @@ export function CopilotChat() {
   // Deep link: /copilot?c=<conversationId> (e.g. "expand to full console" from
   // the robot chat panel) selects that conversation.
   const requestedConversationId = searchParams.get("c");
+  const queryMode = searchParams.get("mode");
+  const requestedMode = queryMode === "plan" || queryMode === "execute" ? queryMode : null;
+  // Expanding an unsent Robot draft has a mode and no conversation ID.
+  const keepDraftRef = useRef(Boolean(requestedMode && !requestedConversationId));
 
   const [conversations, setConversations] = useState<CopilotConversation[]>([]);
   const conversationsRef = useRef<CopilotConversation[]>([]);
   conversationsRef.current = conversations;
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const { mode, setMode, setLocalMode, modeSaving } = useCopilotConversationMode({
+    conversationId,
+    serverMode: conversations.find((item) => item.id === conversationId)?.mode,
+    onPersisted: (conversation) => setConversations((current) =>
+      current.map((item) => (item.id === conversation.id ? { ...item, mode: conversation.mode } : item))),
+  });
+  useEffect(() => {
+    const open = (event: Event) => {
+      const detail = (event as CustomEvent<CopilotOpenDetail>).detail;
+      if (detail?.projectId && detail.projectId !== projectIdRef.current) return;
+      if (detail?.mode === "plan" || detail?.mode === "execute") setMode(detail.mode);
+    };
+    window.addEventListener("forgebadger:open-copilot", open);
+    return () => window.removeEventListener("forgebadger:open-copilot", open);
+  }, [setMode]);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
@@ -145,7 +168,7 @@ export function CopilotChat() {
       setConversations(merged);
       const current = merged.find(item => item.id === currentId);
       if (current && !deepLinkPendingRef.current && projectSerial === projectMutationRef.current) setProjectId(current.project_id ?? "");
-      if (!controllerConversationIdRef.current || deepLinkPendingRef.current) {
+      if (deepLinkPendingRef.current || (!controllerConversationIdRef.current && !keepDraftRef.current)) {
         const requested = deepLinkPendingRef.current ? requestedConversationRef.current : readLastCopilotConversation();
         const target = (requested ? next.find((item) => item.id === requested) : undefined) ?? next[0];
         if (target) void selectConversation(target.id);
@@ -234,11 +257,15 @@ export function CopilotChat() {
     await Promise.all([readMessages(id), refreshConversations()]);
   }, [readMessages, refreshConversations]);
 
+  const { effectiveModelId, pickedModelId, planModelOverrideId, markModelPicked } = useCopilotPlanModel(mode, modelId, conversationId);
+  useEnterPlanModeSync(conversationId, messages, () => setLocalMode("plan"));
+
   const controller = useCopilotChatController({
     conversationId,
     projectId,
-    modelId,
-    savingPreferences: savingPreferences || projectSaving,
+    modelId: effectiveModelId,
+    mode,
+    savingPreferences: savingPreferences || projectSaving || modeSaving,
     conversations,
     messages,
     active,
@@ -257,6 +284,35 @@ export function CopilotChat() {
   const controllerMessageSerialRef = controller.messageSerialRef;
   const controllerConversationIdRef = controller.conversationIdRef;
 
+  useEffect(() => {
+    if (!requestedMode) return;
+    if (requestedConversationId && (loadingConversations || requestedConversationId !== conversationId)) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("mode") !== requestedMode) return;
+    if (requestedConversationId) setMode(requestedMode);
+    else {
+      keepDraftRef.current = true;
+      if (controllerConversationIdRef.current) {
+        controller.advanceSelectionEpoch();
+        controllerMessageSerialRef.current++;
+        controllerConversationIdRef.current = null;
+        clearActive();
+        setConversationId(null);
+        setProjectId("");
+        setMessages([]);
+        setLoadingMessages(false);
+        setLoadError(null);
+        controller.resetInteractionState();
+        controller.setInput("");
+      }
+      setLocalMode(requestedMode, null);
+    }
+    // Consume navigation intent once so a reload uses the persisted mode.
+    url.searchParams.delete("mode");
+    window.history.replaceState(null, "", url);
+  }, [clearActive, controller, controllerConversationIdRef, controllerMessageSerialRef, conversationId, loadingConversations,
+    requestedConversationId, requestedMode, setLocalMode, setMode]);
+
   const ensureConversation = useCallback((): Promise<string | null> => {
     if (controller.conversationIdRef.current) return Promise.resolve(controller.conversationIdRef.current);
     if (!creatingRef.current) {
@@ -266,7 +322,9 @@ export function CopilotChat() {
           if (epoch !== controllerEpochRef.current) return null;
           flushSync(() => {
             controller.conversationIdRef.current = conversation.id;
+            keepDraftRef.current = false;
             untitledRef.current = conversation.id;
+            setLocalMode(mode, conversation.id);
             setConversationId(conversation.id);
             writeLastCopilotConversation(conversation.id);
           });
@@ -282,9 +340,10 @@ export function CopilotChat() {
         });
     }
     return creatingRef.current;
-  }, [controller, projectId, refreshConversations, t]);
+  }, [controller, mode, projectId, refreshConversations, setLocalMode, t]);
 
   const selectConversation = useCallback(async (id: string) => {
+    keepDraftRef.current = false;
     projectMutationRef.current++;
     const epoch = controller.advanceSelectionEpoch();
     controller.conversationIdRef.current = id;
@@ -365,13 +424,14 @@ export function CopilotChat() {
       controller.messageSerialRef.current++;
       controller.conversationIdRef.current = null;
       clearActive();
+      setLocalMode("execute", null);
       setConversationId(null);
       setMessages([]);
       controller.resetInteractionState();
       writeLastCopilotConversation(null);
     }
     await refreshConversations();
-  }, [clearActive, controller, refreshConversations, t]);
+  }, [clearActive, controller, refreshConversations, setLocalMode, t]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarOpen((prev) => !prev);
@@ -419,7 +479,8 @@ export function CopilotChat() {
 
   const followups = useCopilotFollowups({
     conversationId,
-    ...(modelId ? { modelId } : {}),
+    ...(effectiveModelId ? { modelId: effectiveModelId } : {}),
+    mode,
     active: isBusy,
   });
   const enqueueRef = useRef(followups.enqueue);
@@ -428,7 +489,7 @@ export function CopilotChat() {
   runningRef.current = isRunning;
 
   const submit = useCallback(async (textOverride?: string) => {
-    if (projectSaving) return;
+    if (projectSaving || modeSaving) return;
     if (creatingRef.current) {
       toast.info(t("copilot.creatingConversation"));
       return;
@@ -450,7 +511,7 @@ export function CopilotChat() {
       return;
     }
     await controller.send(textOverride, false);
-  }, [controller, conversationId, ensureConversation, projectSaving, t]);
+  }, [controller, conversationId, ensureConversation, modeSaving, projectSaving, t]);
   const inputRef = useRef(controller.input);
   inputRef.current = controller.input;
 
@@ -629,11 +690,32 @@ export function CopilotChat() {
               {messages.length > 0 && (
                 <CopilotMessageStream
                   messages={messages}
+                  planActions={{
+                    currentProjectId: projectId || null,
+                    modelId,
+                    busy: isBusy || controller.sending || controller.editSubmitting || projectSaving || savingPreferences || modeSaving,
+                    onConfirmation: (receipt) => {
+                      if (conversationId && controller.refreshConfirmedPlan(conversationId, projectId, receipt) && receipt && receipt.action !== "save") {
+                        // The server already left Plan Mode on confirmation; mirror it without a second PATCH.
+                        setLocalMode("execute");
+                      }
+                    },
+                    onModeReceipt: (receipt) => {
+                      if (!conversationId) return;
+                      if (controller.refreshConfirmedPlan(conversationId, projectId, receipt?.decision === "accept" ? receipt : undefined)
+                        && receipt?.decision === "accept" && receipt.target === "execute") setLocalMode("execute");
+                    },
+                    onRequestChanges: (feedback) => {
+                      const text = `${t("copilot.planRevisePrefix")}${feedback}`;
+                      setLocalMode("plan");
+                      void controller.send(text, false, undefined, { mode: "plan", modelId: pickedModelId });
+                    },
+                  }}
                   isEditing={(message) => controller.editingMessageId === message.id}
                   editDraft={controller.editDraft}
                   editError={null}
                   editSubmitting={controller.editSubmitting || savingPreferences}
-                  canEdit={!isBusy && !savingPreferences && !controller.sending && controller.editingMessageId === null}
+                  canEdit={!isBusy && !modeSaving && !savingPreferences && !controller.sending && controller.editingMessageId === null}
                   onBeginEdit={controller.beginEditMessage}
                   onChangeDraft={controller.setEditDraft}
                   onSubmitEdit={() => void controller.submitEditMessage()}
@@ -674,6 +756,8 @@ export function CopilotChat() {
               testId="copilot-composer"
               textareaRef={composerRef}
               input={controller.input}
+              mode={mode}
+              onModeChange={setMode}
               onInputChange={controller.setInput}
               onSubmit={() => void submit()}
               onStop={() => void controller.stopRun()}
@@ -681,7 +765,7 @@ export function CopilotChat() {
               isRunning={isRunning}
               isBusy={isBusy}
               sendDisabled={
-                controller.sending || savingPreferences || projectSaving || followups.enqueuing || !controller.input.trim()
+                controller.sending || savingPreferences || modeSaving || projectSaving || followups.enqueuing || !controller.input.trim()
               }
               projects={projects}
               projectId={projectId}
@@ -689,6 +773,8 @@ export function CopilotChat() {
               onProjectChange={(next) => void changeProject(next)}
               onModelChange={onModelChange}
               onSavingChange={setSavingPreferences}
+              onModelPicked={markModelPicked}
+              modelOverrideId={planModelOverrideId}
               toolbarDisabled={isBusy || controller.sending || projectSaving}
               followups={followups.items}
               onCancelFollowup={(id) => void followups.cancel(id)}

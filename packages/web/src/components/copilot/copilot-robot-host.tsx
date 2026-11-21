@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 
 import { RobotWidget } from "@/components/copilot/robot-widget";
 import { usePetPreference, usePetVisiblePreference } from "@/hooks/use-pet-preference";
+import type { CopilotChatMode, CopilotOpenDetail } from "@/lib/copilot-api";
 import type { RobotCorner } from "@/lib/pixel-robot";
 
 // Lazy-loaded so the chat panel's heavy dependencies (react-markdown,
@@ -40,6 +41,7 @@ export function CopilotRobotHost() {
   const [chatOpen, setChatOpen] = useState(false);
   const [overrideProjectId, setOverrideProjectId] = useState<string | undefined>(undefined);
   const [newChatNonce, setNewChatNonce] = useState(0);
+  const [modeRequest, setModeRequest] = useState<{ mode?: CopilotChatMode; nonce: number }>({ nonce: 0 });
   // The panel anchors to the same viewport corner as the robot so it opens
   // beside the pet wherever it was dragged, not always bottom-right.
   const [panelCorner, setPanelCorner] = useState<RobotCorner>("bottom-right");
@@ -54,7 +56,7 @@ export function CopilotRobotHost() {
 
   useEffect(() => {
     const onOpenCopilot = (event: Event) => {
-      const detail = (event as CustomEvent<{ projectId?: string; newChat?: boolean }>).detail;
+      const detail = (event as CustomEvent<CopilotOpenDetail>).detail;
       if (detail?.projectId) {
         setOverrideProjectId(detail.projectId);
       } else if (detail?.newChat) {
@@ -63,10 +65,15 @@ export function CopilotRobotHost() {
       if (detail?.newChat) {
         setNewChatNonce((current) => current + 1);
       }
+      const requestedMode = detail?.mode;
+      if (requestedMode === "plan" || requestedMode === "execute") {
+        setModeRequest(current => ({ mode: requestedMode, nonce: current.nonce + 1 }));
+      }
       setChatOpen(true);
     };
     const onToggleCopilot = () => {
       setOverrideProjectId(undefined);
+      setModeRequest({ nonce: 0 });
       setChatOpen((current) => !current);
     };
     window.addEventListener("forgebadger:open-copilot", onOpenCopilot);
@@ -92,13 +99,18 @@ export function CopilotRobotHost() {
 
   const onActivate = useCallback(() => {
     setOverrideProjectId(undefined);
+    setModeRequest({ nonce: 0 });
     setChatOpen((current) => !current);
   }, []);
 
   const onExpandFull = useCallback(
-    (conversationId: string | null) => {
+    (conversationId: string | null, mode?: CopilotChatMode) => {
       setChatOpen(false);
-      router.push(conversationId ? `/copilot?c=${encodeURIComponent(conversationId)}` : "/copilot");
+      setModeRequest({ nonce: 0 });
+      const params = new URLSearchParams();
+      if (conversationId) params.set("c", conversationId);
+      if (mode) params.set("mode", mode);
+      router.push(params.size ? `/copilot?${params}` : "/copilot");
     },
     [router]
   );
@@ -124,9 +136,12 @@ export function CopilotRobotHost() {
           explicitProjectId={overrideProjectId}
           routeProjectId={routeProjectId}
           newChatNonce={newChatNonce}
+          {...(modeRequest.mode ? { requestedMode: modeRequest.mode } : {})}
+          modeRequestNonce={modeRequest.nonce}
           onClose={() => {
             setChatOpen(false);
             setOverrideProjectId(undefined);
+            setModeRequest({ nonce: 0 });
           }}
           onExpandFull={onExpandFull}
         />

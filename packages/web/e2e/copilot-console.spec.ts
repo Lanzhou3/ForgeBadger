@@ -115,10 +115,13 @@ async function mockCopilotApis(page: Page) {
     }
 
     const emptyReads: Record<string, unknown> = {
-      "/api/v1/copilot/preferences": { modelId: null, thinkingEffort: "medium" },
+      "/api/v1/copilot/preferences": { modelId: "model-1", thinkingEffort: "medium" },
       "/api/v1/projects": { projects: [] },
       "/api/v1/copilot/skills": { skills: [] },
       "/api/v1/copilot/connections": { connections: [] },
+      "/api/v1/copilot/machine-roots": { roots: [] },
+      "/api/v1/copilot/goals": { goals: [] },
+      "/api/v1/copilot/commands": { commands: [] },
       "/api/v1/copilot/memory/entries": { entries: [] },
       "/api/v1/runtime-settings": { readonly: true, settings: [] },
       "/api/v1/adapters/discovery": { adapters: [] },
@@ -162,8 +165,7 @@ test("keeps Copilot as the sole assistant workspace", async ({ page }) => {
   await expect(page.getByText("How is the release doing?")).toBeVisible();
   await expect(page.getByText("All milestones are on track.")).toBeVisible();
   const status = page.getByTestId("copilot-status-bar");
-  await expect(status).toContainText("OpenAI / gpt-5");
-  await expect(status).toContainText("Gateway native");
+  await expect(status.getByRole("combobox", { name: "Model" })).toHaveText("gpt-5");
   await expect(page).toHaveURL(/\/copilot$/u);
 });
 
@@ -171,11 +173,10 @@ test("shows only Gateway-native Copilot settings and tool capabilities", async (
   await page.goto("/copilot/settings");
 
   await expect(page.getByRole("heading", { name: "Copilot Settings" })).toBeVisible();
-  await expect(page.getByText("Gateway native")).toBeVisible();
-  await expect(page.getByText(/no external Harness service/u)).toBeVisible();
+  await expect(page.getByText("Default model & reasoning")).toBeVisible();
+  await expect(page.getByText(/Choose the default model/u)).toBeVisible();
   await page.goto("/copilot/extensions");
-  await page.getByRole("tab", { name: "Connections", exact: true }).click();
-  await page.getByRole("button", { name: "Manage tools", exact: true }).click();
+  await page.getByRole("tab", { name: "Built-in tools", exact: true }).click();
   await expect(page.getByTestId("tool-row-list_projects")).toBeVisible();
 });
 

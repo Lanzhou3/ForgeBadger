@@ -34,18 +34,26 @@ import { CopilotToolPreferenceRepository } from "../db/repositories/copilot-tool
 import { CopilotPreferencesRepository } from "../db/repositories/copilot-preferences-repository.js";
 import { domainError, idSchema, invalid, notFound, ok, parseId, userId, withBody, withQuery } from "./copilot-helpers.js";
 import { listSlashCommands } from "../services/agent/slash-commands.js";
+import { attachPlanProposals, confirmPlan, confirmPlanSchema } from "../services/agent/plan-confirmation.js";
+import { attachModeProposals, confirmModeProposal, confirmModeProposalSchema } from "../services/agent/mode-proposal.js";
+import { CollaborationError } from "../services/collaboration/types.js";
 
 const titleSchema = z.string().trim().min(1).max(200).optional();
-const updateConversationSchema = z.object({ title: titleSchema, projectId: idSchema.nullable().optional() }).strict()
-  .refine(value => value.title !== undefined || value.projectId !== undefined);
+const modeSchema = z.enum(["plan", "execute"]);
+const updateConversationSchema = z.object({ title: titleSchema, projectId: idSchema.nullable().optional(), mode: modeSchema.optional() }).strict()
+  .refine(value => value.title !== undefined || value.projectId !== undefined || value.mode !== undefined);
 const modelIdSchema = z.string().trim().min(1).max(128).optional();
-const preferencesSchema = z.object({ modelId: z.string().trim().min(1).max(128).nullish(), thinkingEffort: z.enum(["off", "low", "medium", "high"]).optional() }).strict();
+const preferencesSchema = z.object({
+  modelId: z.string().trim().min(1).max(128).nullish(), thinkingEffort: z.enum(["off", "low", "medium", "high"]).optional(),
+  planModelId: z.string().trim().min(1).max(128).nullish(), subagentModelId: z.string().trim().min(1).max(128).nullish()
+}).strict();
 const createConversationSchema = z.object({ title: titleSchema, projectId: idSchema.optional() }).strict();
 const sendMessageSchema = z.object({
   content: z.string().trim().min(1).max(32 * 1024),
   modelId: modelIdSchema,
   projectId: idSchema.optional(),
   clientRequestId: idSchema.optional(),
+  mode: z.enum(["plan", "execute"]).optional(),
 }).strict();
 const memoryScopeSchema = z.enum(["global", "project", "session"]);
 const writeMemorySchema = z.object({
@@ -126,7 +134,9 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     const repository = new CopilotPreferencesRepository(deps.db, userId(req), deps.masterKey);
     res.json(ok(repository.set({
       ...(value.modelId !== undefined ? { modelId: value.modelId } : {}),
-      ...(value.thinkingEffort !== undefined ? { thinkingEffort: value.thinkingEffort } : {})
+      ...(value.thinkingEffort !== undefined ? { thinkingEffort: value.thinkingEffort } : {}),
+      ...(value.planModelId !== undefined ? { planModelId: value.planModelId } : {}),
+      ...(value.subagentModelId !== undefined ? { subagentModelId: value.subagentModelId } : {})
     })));
   }));
 
@@ -155,7 +165,39 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
     const { log } = buildAgentStack(deps, userId(req));
     const conversation = log.getConversation(id);
     if (!conversation) return notFound(res);
-    res.json(ok({ messages: log.listMessages(id) }));
+    res.json(ok({ messages: attachModeProposals(deps.db, userId(req), id, attachPlanProposals(deps.db, userId(req), id, log.listMessages(id))) }));
+  });
+
+  router.post("/conversations/:id/plans/:stepId/confirm", (req, res) => {
+    const id = parseId(req.params.id, res); if (!id) return;
+    const stepId = parseId(req.params.stepId, res); if (!stepId) return;
+    withBody(req.body, confirmPlanSchema, res, value => {
+      const actor = userId(req);
+      try {
+        const confirmation = confirmPlan(deps.db, actor, id, stepId, value, buildAgentStack(deps, actor).orchestrator.enqueue);
+        res.json(ok({ confirmation }));
+      } catch (error) {
+        if (error instanceof CollaborationError) {
+          res.status(error.status).json({ code: 1, message: "Project task write rejected", details: { code: error.code } });
+        } else domainError(res, error);
+      }
+    });
+  });
+
+  router.post("/conversations/:id/mode-proposals/:stepId/confirm", (req, res) => {
+    const id = parseId(req.params.id, res); if (!id) return;
+    const stepId = parseId(req.params.stepId, res); if (!stepId) return;
+    withBody(req.body, confirmModeProposalSchema, res, value => {
+      const actor = userId(req);
+      try {
+        const receipt = confirmModeProposal(deps.db, actor, id, stepId, value.decision, buildAgentStack(deps, actor).orchestrator.enqueue);
+        res.json(ok({ receipt }));
+      } catch (error) {
+        if (error instanceof CollaborationError) {
+          res.status(error.status).json({ code: 1, message: "Project write rejected", details: { code: error.code } });
+        } else domainError(res, error);
+      }
+    });
   });
 
   router.patch("/conversations/:id", (req, res) => {
@@ -167,6 +209,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
           if (!log.getConversation(id)) return false;
           if (value.title !== undefined && !log.renameConversation(id, value.title)) return false;
           if (value.projectId !== undefined && !log.setConversationProject(id, value.projectId ?? null)) return false;
+          if (value.mode !== undefined && !log.setConversationMode(id, value.mode)) return false;
           return true;
         }).immediate();
         if (!updated) return notFound(res);
@@ -203,6 +246,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
           ...(value.clientRequestId ? { clientRequestId: value.clientRequestId } : {}),
           ...(value.projectId ? { projectId: value.projectId } : {}),
           ...(value.modelId ? { modelId: value.modelId } : {}),
+          ...(value.mode ? { mode: value.mode } : {}),
         };
         const runId = deps.db.transaction(() => {
           const existing = new CopilotRunLedger(deps.db, userId(req)).findRequest(input);
@@ -230,6 +274,7 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
           conversationId: id,
           userText: value.content,
           ...(value.modelId !== undefined ? { modelId: value.modelId } : {}),
+          ...(value.mode ? { mode: value.mode } : {}),
           ...(value.projectId ? {projectId:value.projectId}: {}),
           ...(value.clientRequestId ? { clientRequestId: value.clientRequestId } : {}),
         });
@@ -246,7 +291,8 @@ export function createCopilotRoutes(deps: CopilotRouteDeps): Router {
       const queue = new CopilotFollowups(deps.db, userId(req));
       const item = queue.enqueue({ userId: userId(req), conversationId: id, userText: value.content,
         clientRequestId: value.clientRequestId, ...(value.modelId ? { modelId: value.modelId } : {}),
-        ...(value.projectId ? { projectId: value.projectId } : {}), });
+        ...(value.projectId ? { projectId: value.projectId } : {}),
+        ...(value.mode ? { mode: value.mode } : {}) });
       res.status(201).json(ok({ followup: { id: item.id, status: item.status, runId: item.run_id } }));
     });
   });

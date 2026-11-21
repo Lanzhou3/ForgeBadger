@@ -58,7 +58,8 @@ export function evaluateGoalContinuation(
   const store = new CopilotGoalStore(deps.db, userId);
   const goal = store.getGoal(goalId);
   if (!goal) return { action: 'inactive' };
-  if (goal.status !== 'active') {
+  const pausedSingleRun = goal.status === 'paused' && goal.auto_continue === 0;
+  if (goal.status !== 'active' && !pausedSingleRun) {
     // A paused or blocked goal lets its reviewer finish (and time out); a finished one stops paying for it.
     try { awaitingReviews(deps.db, deps, userId, goalId, now, { abandon: goal.status === 'cancelled' || goal.status === 'completed' }); }
     catch (error) { logGoalDriverError('review-sweep', userId, error); }
@@ -70,12 +71,18 @@ export function evaluateGoalContinuation(
     catch (error) { logGoalDriverError('board-integration', userId, error); }
   });
   const tasks = store.listTasks(goalId);
-  if (tasks.length > 0 && tasks.every(task => RESOLVED_TASK_STATUSES.includes(task.status))) {
+  if (tasks.length > 0 && tasks.every(task => RESOLVED_TASK_STATUSES.includes(task.status))
+    && (!pausedSingleRun || !store.hasActiveGoalRun(goalId))) {
     failureCooldowns.delete(goalId);
     store.setStatus(goalId, 'completed');
     store.appendJournal(goalId, null, 'All tasks passed; goal completed.');
     notifyGoalStatus(deps.db, userId, store.getGoal(goalId)!);
     return { action: 'completed' };
+  }
+  if (pausedSingleRun) {
+    try { awaitingReviews(deps.db, deps, userId, goalId, now); }
+    catch (error) { logGoalDriverError('review-sweep', userId, error); }
+    return { action: 'inactive' };
   }
   // The owner accepted a task on the board and its worktree is being integrated: settle first, then continue.
   if (boardIntegrationInFlight(goalId)) return { action: 'busy', reason: 'integrating_task' };
@@ -88,11 +95,20 @@ export function evaluateGoalContinuation(
   if (awaitingDispatchedCli(deps.db, store, userId, goalId, now)) return { action: 'busy', reason: 'awaiting_cli' };
   // Same for a reviewer CLI: its findings are what the next run acts on.
   if (awaitingReviews(deps.db, deps, userId, goalId, now)) return { action: 'busy', reason: 'awaiting_review' };
+  const lastSettled = store.latestSettledRun(goalId);
+  // Single-run plan execution: after its run settles with unresolved tasks the
+  // goal waits for the owner; only an owner resume/answer starts another run.
+  const requestId = goal.single_run_request_id;
+  if (goal.auto_continue === 0 && lastSettled && !requestId) {
+    failureCooldowns.delete(goalId);
+    store.setStatus(goalId, 'paused');
+    store.appendJournal(goalId, null, 'Single-run plan execution finished; resume to continue.');
+    return { action: 'inactive', reason: 'single_run_finished' };
+  }
   // Failure classification of the most recent settled run: unrecoverable
   // codes block immediately; repeated failures cool down exponentially
   // instead of spinning a retry loop.
-  const lastSettled = store.latestSettledRun(goalId);
-  if (lastSettled?.status === 'failed') {
+  if (!requestId && lastSettled?.status === 'failed') {
     const code = lastSettled.stop_reason ?? 'COPILOT_FAILED';
     if (NON_RETRYABLE_RUN_ERRORS.has(code)) {
       failureCooldowns.delete(goalId);
@@ -109,10 +125,10 @@ export function evaluateGoalContinuation(
     const retryAt = now + Math.min(FAILURE_COOLDOWN_MAX_MS, FAILURE_COOLDOWN_INITIAL_MS * 2 ** (count - 1));
     failureCooldowns.set(goalId, { code, count, retryAt });
     store.appendJournal(goalId, null, `Run failed (${code}); failure cooldown #${count}, retry at ${new Date(retryAt).toISOString()}.`);
-  } else if (lastSettled?.status === 'completed') {
+  } else if (requestId || lastSettled?.status === 'completed') {
     failureCooldowns.delete(goalId);
   }
-  if (store.countRunsWithoutTaskChange(goalId) >= STAGNATION_RUN_LIMIT) {
+  if (!requestId && store.countRunsWithoutTaskChange(goalId) >= STAGNATION_RUN_LIMIT) {
     failureCooldowns.delete(goalId);
     store.setStatus(goalId, 'blocked', 'no_task_progress');
     store.appendJournal(goalId, null, `Blocked: ${STAGNATION_RUN_LIMIT} consecutive completed runs without a task status change.`);
@@ -120,17 +136,24 @@ export function evaluateGoalContinuation(
     return { action: 'blocked', reason: 'no_task_progress' };
   }
   const enqueueRun = enqueue ?? ((input: TurnInput) => buildAgentStack(deps, userId).orchestrator.enqueue(input));
-  const runId = enqueueRun({
+  const answer = requestId ? store.singleRunAnswer(goalId, requestId) : undefined;
+  const ownerText = options?.userText ?? (answer !== undefined ? `[Goal 用户答复] ${answer}` : undefined);
+  const input: TurnInput = {
     userId,
     conversationId: goal.conversation_id,
     goalId,
     source: 'user',
     // An owner-authored text (answer/resume note) keeps the full transcript;
     // an automatic continuation restarts from the checklist and journal.
-    ...(options?.userText === undefined ? { goalContinuation: true } : {}),
-    userText: options?.userText ?? goalContinuationText(goal),
-    clientRequestId: randomUUID()
-  });
+    ...(ownerText === undefined ? { goalContinuation: true } : {}),
+    userText: ownerText ?? goalContinuationText(goal),
+    clientRequestId: requestId ?? randomUUID()
+  };
+  const runId = requestId ? deps.db.transaction(() => {
+    if (!store.consumeSingleRunRequest(goalId, requestId)) return undefined;
+    return enqueueRun(input);
+  }).immediate() : enqueueRun(input);
+  if (!runId) return { action: 'inactive' };
   return { action: 'enqueued', runId };
 }
 
@@ -176,12 +199,13 @@ export function settleGoalDispatchFromHook(db: Database, event: ForgeBadgerEvent
   return settled;
 }
 
-/** Active goals whose conversation has no active run (restart-gap recovery). Idempotent. */
+/** Recover idle active goals and settle owner board decisions on paused single-run goals. */
 export function sweepStaleGoals(deps: AgentStackDeps, enqueue?: (userId: string, input: TurnInput) => string): void {
   if (!deps.db.open) return;
   const users = deps.db.prepare('SELECT id FROM users').all() as { id: string }[];
   for (const user of users) {
-    const goals = deps.db.prepare(`SELECT g.id FROM copilot_goals g WHERE g.user_id=? AND g.status='active'
+    const goals = deps.db.prepare(`SELECT g.id FROM copilot_goals g WHERE g.user_id=?
+      AND (g.status='active' OR (g.status='paused' AND g.auto_continue=0 AND g.project_id IS NOT NULL))
       AND NOT EXISTS (SELECT 1 FROM copilot_runs r WHERE r.user_id=g.user_id AND r.goal_id=g.id
         AND r.status IN ('pending','running','awaiting_approval'))`).all(user.id) as { id: string }[];
     for (const goal of goals) {

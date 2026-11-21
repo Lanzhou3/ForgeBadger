@@ -62,6 +62,8 @@ export type ToolSurfaceLayer = (typeof TOOL_SURFACE_LAYERS)[number];
 
 export interface ToolSurfaceInput {
   source?: TurnInput['source']; executionMode?: TurnInput['executionMode']; channelScope?: TurnInput['channelScope']; goalId?: TurnInput['goalId'];
+  mode?: TurnInput['mode'];
+  projectId?: TurnInput['projectId'];
   /** The run's scope id (goalId) is a fleet. Computed by the caller (scopeKind) wherever goalId is known; absent means a goal or no scope. */
   fleet?: boolean;
 }
@@ -92,6 +94,19 @@ export interface ToolSurface {
 }
 
 const NON_USER_HIDDEN_TOOLS = ['takeover_session'];
+/** Model-initiated mode tools: only owner-driven top-level runs (no goal/fleet/sub-run scope) may use them. */
+export const MODE_TOOLS: ReadonlySet<string> = new Set(['enter_plan_mode', 'propose_mode_switch']);
+
+function modeToolAvailable(input: ToolSurfaceInput, name: string): boolean {
+  if ((input.source ?? 'user') !== 'user' || input.channelScope || input.executionMode || input.goalId || input.fleet) return false;
+  if (name === 'enter_plan_mode') return input.mode !== 'plan';
+  // target "execute" is for plan mode; target "goal" needs a selected project in execute mode.
+  return input.mode === 'plan' || !!input.projectId;
+}
+const PLAN_BOARD_READS = new Set(['pm_get_plan', 'pm_get_handoff']);
+const PLAN_BLOCKED_TOOLS = new Set(['write_memory', 'register_machine_root', 'unregister_machine_root',
+  ...SESSION_RUNTIME_TOOLS, ...GOAL_TOOLS, ...FLEET_TOOLS,
+  ...[...BOARD_PLANNING_TOOLS].filter(name => !PLAN_BOARD_READS.has(name))]);
 
 function exclusionReasons(input: ToolSurfaceInput, context: ToolSurfaceContext, name: string, risk: string | undefined): ToolExclusion[] {
   const scheduled = input.source === 'scheduled';
@@ -102,15 +117,25 @@ function exclusionReasons(input: ToolSurfaceInput, context: ToolSurfaceContext, 
   if (scheduled && risk !== 'read') verdicts.push({ layer: 'scheduled-readonly', reason: 'SCHEDULED_READ_ONLY' });
   if (input.channelScope && LOCAL_MACHINE_ROOT_TOOLS.has(name))
     verdicts.push({ layer: 'restricted-mode', reason: 'CHANNEL_LOCAL_MACHINE_ROOTS_CLOSED' });
+  if (input.mode === 'plan' && (risk !== 'read' || PLAN_BLOCKED_TOOLS.has(name)))
+    verdicts.push({ layer: 'restricted-mode', reason: 'PLAN_MODE_READ_ONLY' });
+  if (MODE_TOOLS.has(name) && !modeToolAvailable(input, name))
+    verdicts.push({ layer: 'restricted-mode', reason: 'MODE_TOOL_UNAVAILABLE' });
+  if (name === 'submit_plan' && input.mode !== 'plan')
+    verdicts.push({ layer: 'restricted-mode', reason: 'PLAN_MODE_REQUIRED' });
+  if (name === 'submit_research_report' && input.executionMode !== 'research')
+    verdicts.push({ layer: 'restricted-mode', reason: 'RESEARCH_RUN_REQUIRED' });
   const codingOperate = input.executionMode === 'coding' && CODING_OPERATES.has(name);
-  if (input.executionMode && (!(input.executionMode === 'coding' ? CODING_READS : PROJECT_READS).has(name) || (risk !== 'read' && !codingOperate))) verdicts.push({ layer: 'restricted-mode', reason: 'RESTRICTED_MODE' });
+  const researchReport = input.executionMode === 'research' && name === 'submit_research_report';
+  if (input.executionMode && ((!researchReport && !(input.executionMode === 'coding' ? CODING_READS : PROJECT_READS).has(name)) || (risk !== 'read' && !codingOperate))) verdicts.push({ layer: 'restricted-mode', reason: 'RESTRICTED_MODE' });
   if (SESSION_RUNTIME_TOOLS.has(name) && !context.hasSessionManager) verdicts.push({ layer: 'session-runtime', reason: 'SESSION_RUNTIME_UNAVAILABLE' });
   if (name.startsWith('mcp_') && input.source && input.source !== 'user') verdicts.push({ layer: 'mcp-source', reason: 'MCP_SOURCE_AUTHORITY' });
   // An event-woken flagship keeps source 'user' (grants depend on it) but never gets owner-only or external tools.
   if (input.fleet && (name.startsWith('mcp_') || NON_USER_HIDDEN_TOOLS.includes(name))) verdicts.push({ layer: 'fleet-authority', reason: 'FLEET_AUTHORITY' });
   if (context.isToolDisabled?.(name)) verdicts.push({ layer: 'owner-disabled', reason: 'OWNER_DISABLED' });
   if (GOAL_TOOLS.has(name) && !input.goalId && input.executionMode !== 'coding') verdicts.push({ layer: 'goal-catalog', reason: 'GOAL_CATALOG' });
-  if (BOARD_PLANNING_TOOLS.has(name) && !input.goalId) verdicts.push({ layer: 'goal-catalog', reason: 'GOAL_CATALOG' });
+  if (BOARD_PLANNING_TOOLS.has(name) && !input.goalId && !(input.mode === 'plan' && name === 'pm_get_plan'))
+    verdicts.push({ layer: 'goal-catalog', reason: 'GOAL_CATALOG' });
   if (FLEET_TOOLS.has(name) && !(input.goalId && input.fleet)) verdicts.push({ layer: 'goal-catalog', reason: 'FLEET_CATALOG' });
   if (FLEET_HIDDEN_GOAL_TOOLS.has(name) && input.fleet) verdicts.push({ layer: 'goal-catalog', reason: 'FLEET_CATALOG' });
   if (context.hasMachineRoots === false && MACHINE_ROOT_DEPENDENT_TOOLS.has(name)) verdicts.push({ layer: 'context-catalog', reason: 'NO_MACHINE_ROOT' });

@@ -7,13 +7,21 @@ export type ThinkingEffort = "off" | "low" | "medium" | "high";
 export interface CopilotPreferences {
   modelId: string | null;
   thinkingEffort: ThinkingEffort;
+  /** Default model for Plan Mode runs that carry no explicit modelId; null = modelId. */
+  planModelId: string | null;
+  /** Default model for delegated sub-runs (research/coding); null = the parent run's model. */
+  subagentModelId: string | null;
 }
+
+export type CopilotRoleModel = "plan" | "subagent";
 
 const THINKING_EFFORTS: ReadonlySet<string> = new Set<ThinkingEffort>(["off", "low", "medium", "high"]);
 
 interface PreferencesRow {
   model_id: string | null;
   copilot_thinking_effort: string | null;
+  copilot_plan_model_id: string | null;
+  copilot_subagent_model_id: string | null;
 }
 
 /**
@@ -38,14 +46,28 @@ export class CopilotPreferencesRepository {
 
   get(): CopilotPreferences {
     const row = this.db.prepare(`
-      SELECT model_id, copilot_thinking_effort
+      SELECT model_id, copilot_thinking_effort, copilot_plan_model_id, copilot_subagent_model_id
       FROM user_settings
       WHERE user_id = ?
     `).get(this.userId) as PreferencesRow | undefined;
     return {
       modelId: row?.model_id ?? null,
-      thinkingEffort: normalizeThinkingEffort(row?.copilot_thinking_effort)
+      thinkingEffort: normalizeThinkingEffort(row?.copilot_thinking_effort),
+      planModelId: row?.copilot_plan_model_id ?? null,
+      subagentModelId: row?.copilot_subagent_model_id ?? null
     };
+  }
+
+  /**
+   * The configured role model when it is still an active profile of this
+   * user; undefined otherwise (callers then keep their normal fallback).
+   */
+  roleModel(role: CopilotRoleModel): string | undefined {
+    const preferences = this.get();
+    const modelId = role === "plan" ? preferences.planModelId : preferences.subagentModelId;
+    if (!modelId) return undefined;
+    const profile = new ModelProviderRepository(this.db, this.userId, this.masterKey).getModelProfile(modelId);
+    return profile && profile.status === "active" ? modelId : undefined;
   }
 
   /**
@@ -53,21 +75,26 @@ export class CopilotPreferencesRepository {
    * be one of the user's active model profiles. Returns the full updated
    * preference.
    */
-  set(patch: { modelId?: string | null; thinkingEffort?: ThinkingEffort }): CopilotPreferences {
-    if (patch.modelId === undefined && patch.thinkingEffort === undefined) return this.get();
-    if (patch.modelId !== undefined && patch.modelId !== null) this.assertActiveModelProfile(patch.modelId);
+  set(patch: {
+    modelId?: string | null; thinkingEffort?: ThinkingEffort; planModelId?: string | null; subagentModelId?: string | null;
+  }): CopilotPreferences {
+    if (Object.values(patch).every(value => value === undefined)) return this.get();
+    for (const value of [patch.modelId, patch.planModelId, patch.subagentModelId])
+      if (value !== undefined && value !== null) this.assertActiveModelProfile(value);
     const current = this.get();
-    const modelId = patch.modelId !== undefined ? patch.modelId : current.modelId;
-    const thinkingEffort = patch.thinkingEffort !== undefined ? patch.thinkingEffort : current.thinkingEffort;
+    const pick = <T>(next: T | undefined, previous: T): T => next !== undefined ? next : previous;
     const now = Date.now();
     this.db.prepare(`
-      INSERT INTO user_settings (user_id, model_id, copilot_thinking_effort, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO user_settings (user_id, model_id, copilot_thinking_effort, copilot_plan_model_id, copilot_subagent_model_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id) DO UPDATE SET
         model_id = excluded.model_id,
         copilot_thinking_effort = excluded.copilot_thinking_effort,
+        copilot_plan_model_id = excluded.copilot_plan_model_id,
+        copilot_subagent_model_id = excluded.copilot_subagent_model_id,
         updated_at = excluded.updated_at
-    `).run(this.userId, modelId, thinkingEffort, now, now);
+    `).run(this.userId, pick(patch.modelId, current.modelId), pick(patch.thinkingEffort, current.thinkingEffort),
+      pick(patch.planModelId, current.planModelId), pick(patch.subagentModelId, current.subagentModelId), now, now);
     return this.get();
   }
 

@@ -10,11 +10,15 @@ import { runDuration, settleApprovalWait } from './approval-clock.js';
 import { traceRunEvent } from './run-trace.js';
 import { PARENT_CHAIN_MAX_DEPTH, parseRunInput } from './run-authorization.js';
 import { scopeKind, workStore } from './work-store.js';
+import { CopilotPreferencesRepository } from "../../db/repositories/copilot-preferences-repository.js";
 export interface TurnInput {
     /** Server-derived conversation project scope plus optional channel authority; historical JSON field name, never accepted from HTTP/model JSON. */
     channelScope?: ChannelRunScope;
     executionMode?: 'research' | 'coding';
+    mode?: 'plan' | 'execute';
     delegateTaskId?: string;
+    /** Server-only per-run step budget override (clamped 1..64); never accepted from HTTP/model JSON. */
+    maxSteps?: number;
     parentRunId?: string;
     userId: string;
     conversationId: string;
@@ -76,6 +80,7 @@ function requestDigest(input: TurnInput): string {
     return inputDigest(JSON.stringify({ content: input.userText, modelId: input.modelId ?? null,
         projectId: input.projectId ?? null,
         source: input.source ?? 'user', skipUserMessage: input.skipUserMessage ?? false,
+        ...(input.mode ? { mode: input.mode } : {}),
         ...(input.executionMode ? { executionMode: input.executionMode, parentRunId: input.parentRunId } : {}),
         ...(input.goalId ? { goalId: input.goalId } : {}),
         ...(input.editMessageId ? { editMessageId: input.editMessageId } : {}) }));
@@ -143,7 +148,33 @@ export class CopilotRunLedger {
             throw new AgentError('COPILOT_REQUEST_CONFLICT', 'Client request key was used for a different payload');
         return existing.id;
     }
-    admit(input: TurnInput, maxSteps: number): string {
+    /**
+     * Owner-originated top-level runs own the conversation mode: an explicit
+     * mode is persisted with admission, an omitted one inherits the stored mode.
+     * Plan-mode runs without an explicit modelId prefer the plan role model.
+     * The request digest is computed from the raw input, so retries stay idempotent.
+     */
+    private applyConversationMode(input: TurnInput): TurnInput {
+        if ((input.source ?? 'user') !== 'user' || input.executionMode || input.goalId) return input;
+        if (input.mode) this.log.writeConversationMode(input.conversationId, input.mode);
+        const mode = input.mode ?? this.log.getConversation(input.conversationId)?.mode;
+        if (mode !== 'plan') return input;
+        const planModel = input.modelId ? undefined : new CopilotPreferencesRepository(this.db, this.userId).roleModel('plan');
+        return { ...input, mode, ...(planModel ? { modelId: planModel } : {}) };
+    }
+    /**
+     * enter_plan_mode: persist the effective Plan Mode in the run's input facts
+     * (request_digest is untouched) and the conversation. Called inside the tool
+     * receipt transaction, so crash recovery reloads Plan Mode from input_json.
+     */
+    enterPlanMode(runId: string): void {
+        const run = this.get(runId);
+        if (!run) return;
+        this.db.prepare("UPDATE copilot_runs SET input_json=json_set(input_json,'$.mode','plan') WHERE user_id=? AND id=?").run(this.userId, runId);
+        this.log.writeConversationMode(run.conversation_id, 'plan');
+    }
+    admit(input: TurnInput, defaultMaxSteps: number): string {
+        const maxSteps = input.maxSteps === undefined ? defaultMaxSteps : Math.min(64, Math.max(1, Math.trunc(input.maxSteps)));
         return this.db.transaction(() => {
             input = prepareChannelAdmission(this.db, this.userId, input);
             const existing = this.findRequest(input);
@@ -157,6 +188,7 @@ export class CopilotRunLedger {
             }
             if (this.log.listRuns(input.conversationId).some(r => ACTIVE_RUN_STATES.includes(r.status)))
                 throw new AgentError("COPILOT_CONVERSATION_BUSY", "Conversation already has an active run");
+            input = this.applyConversationMode(input);
             const run = this.log.createRun(input.conversationId, input.modelId ? { model: input.modelId } : {});
             this.db.prepare("UPDATE copilot_runs SET runtime_version=1, input_json=?, source=?, max_steps=?,client_request_id=?,request_digest=? WHERE user_id=? AND id=?")
                 .run(JSON.stringify({ ...input, userText: redactAgentText(input.userText),

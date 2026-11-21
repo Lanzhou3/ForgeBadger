@@ -1,6 +1,7 @@
 import { createNativeLifecycleTools } from '../../mcp/lifecycle-tools.js';
 import { createProjectDiffTools } from './project-diff.js';
 import { createResearchTools } from "./research.js";
+import { createResearchReportTool } from "./research-report.js";
 import { createSourceSearchTools } from "./source-search.js";
 import { createMachineSearchTools } from "./machine-search.js";
 import { createMachineRootTools, createMachineRootListTools } from "./machine-roots.js";
@@ -31,11 +32,14 @@ import { createGoalDelegateTools } from "./goal-delegate.js";
 import { createGoalIntegrateTools } from "./goal-integrate.js";
 import { createGoalReviewTools } from "./goal-review.js";
 import { createFleetTools } from "./fleet.js";
+import { createPlanTools } from "./plan.js";
+import { createModeTools } from "./mode.js";
 
 export function createPlatformTools(): AgentTool[] {
   return [
     ...createProjectDiffTools(),
     ...createResearchTools(),
+    createResearchReportTool(),
     ...createSourceSearchTools(),
     ...createMachineSearchTools(),
     ...createMachineRootTools(),
@@ -59,6 +63,8 @@ export function createPlatformTools(): AgentTool[] {
     ...createGoalDelegateTools(),
     ...createGoalIntegrateTools(),
     ...createGoalReviewTools(),
-    ...createFleetTools()
+    ...createFleetTools(),
+    ...createPlanTools(),
+    ...createModeTools(),
   ];
 }

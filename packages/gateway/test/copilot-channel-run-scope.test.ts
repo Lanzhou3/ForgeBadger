@@ -183,6 +183,49 @@ it('derived research and queued followups inherit the original snapshot, and leg
   } finally { f.cleanup(); }
 });
 
+it('accepts a research child report within its inherited channel authority and rejects it after revocation', async () => {
+  const f = fixture();
+  try {
+    const childConversation = f.ledger.log.createConversation();
+    const child = f.ledger.admit({ userId: f.user.id, conversationId: childConversation.id, userText: 'research',
+      executionMode: 'research', parentRunId: f.runId, projectId: f.a.id }, 6);
+    const tool = f.registry.tools.get('submit_research_report')!;
+    const report = { summary: 'Observed project layout', findings: [] };
+    const childContext = { ...f.context(), runId: child, conversationId: childConversation.id,
+      executionMode: 'research', projectId: f.a.id };
+    assert.deepEqual(await executeAgentTool(tool, report, childContext),
+      { ok: true, output: { status: 'research_report_submitted' } });
+    f.service.revokeRoute(f.route.id);
+    const rejected = await executeAgentTool(tool, report, childContext);
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error ?? '', /CHANNEL_AUTHORITY_REJECTED/);
+  } finally { f.cleanup(); }
+});
+
+it('does not offer or execute owner mode tools in a channel conversation', async () => {
+  const f = fixture();
+  let turns = 0;
+  const modeToolsOffered: string[] = [];
+  try {
+    const llm: AgentLlmClient = {
+      async stream(request) {
+        modeToolsOffered.push(...request.tools.map(tool => tool.name)
+          .filter(name => name === 'enter_plan_mode' || name === 'propose_mode_switch'));
+        if (turns++ === 0) request.onEvent({ type: 'tool_call', toolCall: {
+          id: 'model-mode-request', name: 'enter_plan_mode', arguments: JSON.stringify({ reason: 'Investigate' }),
+        } });
+        return { message: turns === 1 ? '' : 'Done' };
+      },
+      async summarize() { return ''; },
+      async generateTitle() { return ''; },
+    };
+    await createCopilotOrchestrator({ db: f.db, masterKey: f.key, toolRegistry: f.registry, llm, eventBus: new ForgeBadgerEventBus() }).executeRun(f.user.id, f.runId);
+    assert.deepEqual(modeToolsOffered, []);
+    assert.match(f.ledger.steps(f.runId).find(step => step.tool_name === 'enter_plan_mode')?.result_json ?? '', /not available in this run/);
+    assert.equal(f.ledger.log.getConversation(f.turn().conversationId)?.mode, 'execute');
+  } finally { f.cleanup(); }
+});
+
 it('scope revocation and canonical root drift reject already admitted reads and queued followups', async () => {
   const f = fixture(); try {
     f.db.prepare('UPDATE projects SET path=? WHERE id=?').run(join(f.root, 'changed'), f.a.id);

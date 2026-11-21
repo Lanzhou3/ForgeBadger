@@ -304,12 +304,18 @@ function summarizeThinking(text: string): string {
   return firstLine.length > max ? `${firstLine.slice(0, max)}…` : firstLine;
 }
 
-/** Pair tool_result rows to their tool_call row by provider toolCallId. */
+export function toolReceiptKey(message: CopilotMessage): string | undefined {
+  if (message.runId && message.stepId) return JSON.stringify([message.runId, message.stepId]);
+  if (message.toolCallId) return JSON.stringify([message.runId ?? null, null, message.toolCallId]);
+}
+
+/** Provider IDs are only a fallback for historical messages without runtime steps. */
 export function indexToolResults(messages: CopilotMessage[]): Map<string, CopilotMessage> {
   const map = new Map<string, CopilotMessage>();
   for (const message of messages) {
-    if (message.kind === "tool_result" && message.toolCallId) {
-      map.set(message.toolCallId, message);
+    const key = message.kind === "tool_result" ? toolReceiptKey(message) : undefined;
+    if (key) {
+      map.set(key, message);
     }
   }
   return map;

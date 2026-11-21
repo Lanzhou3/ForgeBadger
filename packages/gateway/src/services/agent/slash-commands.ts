@@ -185,7 +185,7 @@ function lifecycleGoal(context: SlashCommandContext): string {
   }
   if (action === "resume") {
     if (goal.status !== "paused") return `Goal「${goal.title}」当前为 ${goal.status}，只有 paused 才能恢复。`;
-    store.setStatus(goal.id, "active");
+    store.resume(goal.id);
     context.continueGoal(goal.id);
     return `Goal「${goal.title}」已恢复。`;
   }

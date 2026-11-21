@@ -184,6 +184,7 @@ Authenticated REST endpoints are mounted under the project-scoped prefix
 
 - `GET /api/v1/projects/:projectId/project-manager/goal`
 - `PUT /api/v1/projects/:projectId/project-manager/goal`
+- `DELETE /api/v1/projects/:projectId/project-manager/goal` returns `{deleted}` and preserves work items. Updating or deleting a shared project goal requires `manage`.
 - `GET /api/v1/projects/:projectId/project-manager/work-items`
 - `POST /api/v1/projects/:projectId/project-manager/work-items`
 - `POST /api/v1/projects/:projectId/project-manager/work-items/batch/status`
@@ -495,19 +496,41 @@ All responses use the standard `{code,data,message}` envelope and authenticated 
 
 `POST /copilot/conversations` accepts `{title?,projectId?}`. Conversation create,
 list and detail responses include `project_id`. `PATCH /copilot/conversations/:id`
-accepts `{title?,projectId?}` with at least one field; `projectId: null` clears
+accepts `{title?,projectId?,mode?}` with at least one field; `projectId: null` clears
 the context. Project changes require an owned project and no active run,
-unresolved write or queued follow-up.
+unresolved write or queued follow-up. Conversation objects carry the persisted
+`mode: "plan" | "execute"` (default `execute`). `PATCH {mode}` changes the default
+for future admissions even while a run is active. The active run keeps its
+admitted mode unless it calls `enter_plan_mode`.
+A message/edit/follow-up that sends `mode` persists it as the conversation mode in
+the admission transaction; an omitted `mode` makes owner-originated runs use the
+stored mode (goal, sub-run, scheduled and reactive runs are unaffected). A Plan Mode
+run without an explicit `modelId` uses the `planModelId` preference when it is still
+an active profile. In a direct owner conversation, a Plan Mode run may propose
+Execute Mode. An Execute Mode run may enter Plan Mode or, with a selected
+project, propose a Goal. These tools are unavailable to goal, fleet, subagent,
+scheduled, reactive and channel-scoped runs.
+`enter_plan_mode` switches the conversation and the current run to Plan Mode from the
+next model step (persisted in the run facts, trace event `mode_changed`);
+`propose_mode_switch {target: execute|goal, reason, title?, spec?}` only proposes.
+
+`GET/PUT /copilot/preferences` return and accept `{modelId, thinkingEffort, planModelId, subagentModelId}`.
+PUT fields are optional. Each model field accepts a profile ID or `null` to
+clear it. Unknown or inactive model profiles return 400 `COPILOT_MODEL_INVALID`.
+`thinkingEffort` accepts `off`, `low`, `medium` or `high`.
 
 | Endpoint | Contract |
 |---|---|
-| `POST /api/v1/copilot/conversations/:id/messages` | `{content,modelId?,projectId?,clientRequestId?}`; returns 201 `{runId}` after durable admission, before model completion. `projectId` may initialize an unbound conversation and must match its existing project. A new request during an active run returns 409 `COPILOT_CONVERSATION_BUSY`. Matching request-key retries return the original run, including after completion; conflicting payloads return 409 `COPILOT_REQUEST_CONFLICT`. |
+| `POST /api/v1/copilot/conversations/:id/messages` | `{content,modelId?,projectId?,clientRequestId?,mode?}`. `mode: "plan"` enables read-only planning and `submit_plan`. Omitted mode inherits the stored conversation mode. Returns 201 `{runId}` after durable admission. `projectId` may initialize an unbound conversation and must match its existing project. An active run returns 409 `COPILOT_CONVERSATION_BUSY`. Matching request-key retries return the original run, and conflicting payloads return 409 `COPILOT_REQUEST_CONFLICT`. |
+| `GET /api/v1/copilot/conversations/:id/messages` | Successful Plan Mode proposals include `planProposal: {projectId,previousStepId?,supersededBy?,confirmation?}` on the tool result. `previousStepId` is the prior successful `submit_plan` step of the conversation; `supersededBy` is the next one and is set only while this proposal is unconfirmed (confirmed proposals are never superseded). `submit_plan` TODOs accept optional `dependsOn` (earlier 0-based indexes only, max 10), `files` (relative paths/globs, max 20), `risk` (`low|medium|high`), `parallelizable` and `executor` (`copilot|delegate|cli`). Use its `stepId` to identify the proposal for confirmation. |
+| `POST /api/v1/copilot/conversations/:id/plans/:stepId/confirm` | `{action,todoIndexes,modelId?}`. Actions are `save`, `execute` and `goal`. `todoIndexes` selects tasks by zero-based index. `modelId` applies to `execute`. With a project, `execute` creates a single-run goal (`autoContinue:false`, no grants, board tasks linked like `goal`) and enqueues one run with step budget `min(64, 16+4*selectedTodos)`; without a project it enqueues a plain run. On a subset, `dependsOn` is remapped to the selected order (dependencies on unselected TODOs are dropped and noted in the execution text); dependencies become board work-item dependencies. The board description includes risk and executor and lists as many files as fit. The confirmed plan retains the full file list. Confirming a superseded proposal returns 409 `COPILOT_PLAN_SUPERSEDED`. The stored proposal supplies the project and task content. The first confirmation requires the proposal's original project context. Writes and the receipt commit together. Returns `{confirmation: {action,todoIndexes,runId?,goalId?}}` (`goalId` for `goal`, and for `execute` with a project). Matching retries return this receipt. A different action, selection or model after confirmation returns 409. |
+| `POST /api/v1/copilot/conversations/:id/mode-proposals/:stepId/confirm` | `{decision: "accept"|"dismiss"}`. Applies to a successful `propose_mode_switch` step of this conversation (`modeProposal: {target,receipt?,stale?}` on its tool result in the messages list). `accept` + `execute` sets the conversation to Execute Mode and enqueues an execute run ("The owner approved switching to Execute Mode. Continue the request discussed above.", original model). `accept` + `goal` creates a goal from the proposed `title`/`spec` in the conversation's project (no grants, `autoContinue:true`, same workspace checks as goal creation) and enqueues its first run. `dismiss` only records. Returns `{receipt: {decision,target,mode?,goalId?,runId?}}`. Repeating the same decision returns the stored receipt. A different decision or first acceptance of an Execute proposal after a later turn returns 409 `COPILOT_REQUEST_CONFLICT`. Accepting during an active run returns 409 `COPILOT_CONVERSATION_BUSY` and records nothing. Unknown steps, other users' and other conversations' proposals return 404. |
 | `GET /api/v1/copilot/conversations/:id/runs` | `{runs,activeRun}`; latest 50 runs and current active run, or null. |
 | `GET /api/v1/copilot/runs/:id` | `{run,pendingActions,steps}`; run includes revision and stopReason, actions include full inputJson/inputDigest, stepId and toolCallId. Steps retain execution receipts. |
 | `GET /api/v1/copilot/runs/:id/trace` | `{events}`; tenant-scoped per-run decision timeline ordered by `created_at,seq` (admission, claims/recovery, step start/complete, tool gates, approval parking/decisions, sub-run admissions, follow-up promotions, terminal states). Metadata only: rows carry monotonic `seq` (UNIQUE per run), the run-instance `fence`, optional `step_id` and whitelisted scalar `detail_json`; message contents, tool input plaintext and secrets are never stored. Unknown or foreign runs return 404. |
 | `POST /api/v1/copilot/runs/:id/pending-actions/:actionId/decide` | `{approved}`; persists a single decision and returns `{resumed,runId}`. The original run continues asynchronously, including after rejection. |
 | `POST /api/v1/copilot/runs/:id/cancel` | Awaits durable cancellation; returns `{cancelled,runId}`. It does not undo effects already sent to a CLI. |
-| `POST /api/v1/copilot/conversations/:id/edit-message` | Accepts `{messageId,content,clientRequestId?,modelId?,projectId?}`. Validates a user text in the URL conversation. Active or unresolved writes return 409. Clears summary, preserves run/step receipts and admits the edit atomically. Matching request-key retries return the original run before truncation; changed targets or context return 409 `COPILOT_REQUEST_CONFLICT`. |
+| `POST /api/v1/copilot/conversations/:id/edit-message` | Accepts `{messageId,content,clientRequestId?,modelId?,projectId?,mode?}`. Validates a user text in the URL conversation. Active or unresolved writes return 409. Clears summary, preserves run/step receipts and admits the edit atomically. Matching request-key retries return the original run before truncation. Changed targets or context return 409 `COPILOT_REQUEST_CONFLICT`. |
 | `DELETE /api/v1/copilot/conversations/:id` | Hides a conversation while retaining messages, runs, steps and receipts. Only `pending`, `running` or `awaiting_approval` runs return 409 `COPILOT_CONVERSATION_BUSY`; terminal runs (including `indeterminate` or cancelled unknown writes) can be hidden without replaying effects. Repeated deletion returns 404. |
 
 `GET /api/v1/copilot/machine-roots` lists the caller's local search roots as
@@ -2905,6 +2928,15 @@ row unchanged). Any other transition is `409 COPILOT_GOAL_STATE`. Resuming a
 paused goal immediately re-evaluates continuation: if the latest run is
 settled and the conversation is idle, the next run is enqueued.
 
+Goal objects (list and detail) carry `autoContinue: boolean`. A goal created by
+Plan confirm `execute` has `autoContinue:false`. After its run settles, a
+goal with unresolved tasks pauses and records
+"Single-run plan execution finished; resume to continue." A goal with all
+tasks resolved completes. `resume` records a request for one more run. If the
+conversation, CLI or reviewer is busy, the driver retains the request until it
+can admit the run. Accepting all linked tasks on the board can complete a paused
+single-run goal without starting another run.
+
 Task rows carry machine-verification fields:
 `{verifyCommand,verifiedAt,verifyExitCode}` (all nullable). `goal_add_tasks`
 accepts plain description strings or `{description, verifyCommand}` objects.
@@ -4062,6 +4094,18 @@ listing additionally bounds traversal to 20,000 entries and depth 10. These
 results are not proof that excluded or oversized files have no matches.
 `read_project_file` supports offset slices of permitted files up to 1 MiB;
 controlled patch/test source limits remain 64 KiB per file.
+
+`research_project` accepts a goal, up to eight optional questions and optional
+boundaries. Up to four consecutive investigations from the same model step run
+concurrently. Each gets a separate conversation and a 14-step budget. Research
+and coding delegates use the user's active subagent model when configured and
+otherwise inherit the parent model. Research results include `runId`, `status`,
+`report` (structured findings with file evidence and confidence, or `null`),
+`text` (assistant text fallback), and an `evidence` disclaimer. Only research
+runs can submit a structured report through `submit_research_report`. Reports
+are capped at 40 KiB of serialized, redacted UTF-8 JSON. If the combined
+result reaches the standard tool-output limit, the fallback text is shortened
+to keep the structured report intact.
 
 ### Copilot streaming
 

@@ -12,7 +12,7 @@ import { evaluateGoalContinuation } from './goal-driver.js';
 import { goalGrantForTool } from './goal-grants.js';
 import { isUnsandboxedCheckRequest } from './command-sandbox.js';
 import { clearGoalFailureCooldown } from './goal-driver.js';
-import { bindGoalCommand, resolveLocalCommandReply, type SlashCommandContext } from "./slash-commands.js";
+import { bindGoalCommand, parseSlashInput, resolveLocalCommandReply, type SlashCommandContext } from "./slash-commands.js";
 import { CopilotToolArtifactRepository } from '../../db/repositories/copilot-tool-artifact-repository.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { readSource } from "./project-source.js";
@@ -20,7 +20,7 @@ import { RunGovernance, type RunPhase } from "./run-governance.js";
 import { CopilotModelResponseRepository } from "../../db/repositories/copilot-model-response-repository.js";
 import type { LlmResult } from "./llm-response.js";
 import { listAvailableCopilotSkillSummaries } from "./skills/copilot-skill-service.js";
-import { computeToolSurface, type ToolSurface } from "./tool-surface.js";
+import { computeToolSurface, MODE_TOOLS, type ToolSurface } from "./tool-surface.js";
 import { projectActionReceipt } from "../platform-commands/receipt-projection.js";
 import { agentActions, agentActionInput, TOOL_COMMANDS } from "../platform-commands/agent-actions.js";
 import { checkAgentScope } from "../platform-commands/agent-scope.js";
@@ -29,7 +29,7 @@ import { CopilotMachineRootRepository } from "../../db/repositories/copilot-mach
 import { randomUUID } from "node:crypto";
 import { ForgeBadgerEventBus } from "../event-bus.js";
 import type { AgentToolRegistry, AgentToolContext } from "./tool-registry.js";
-import { executeAgentTool } from "./tool-registry.js";
+import { executeAgentTool, MAX_TOOL_OUTPUT_BYTES } from "./tool-registry.js";
 import type { AgentLlmClient, AgentToolCall } from "./orchestrator-types.js";
 import { CopilotConversationLog } from "./conversation-log.js";
 import { buildCompressedContext } from "./context.js";
@@ -38,12 +38,15 @@ import { listEnabledCopilotPlaybookSummaries } from "./skills/skill-queries.js";
 import { containsSensitiveAgentValue, redactAgentValue, redactAgentText, redactAgentErrorMessage } from "./redaction.js";
 import { createSecurityPolicy, logSecurityDecision } from "./security-policy.js";
 import { AgentError } from "./types.js";
-import { CopilotRunLedger, inputDigest, type TurnInput, type Claim, type RunStep } from "./run-ledger.js";
+import { ACTIVE_RUN_STATES, CopilotRunLedger, inputDigest, type TurnInput, type Claim, type RunStep } from "./run-ledger.js";
 import { loadRunFacts } from "./run-authorization.js";
 import { executionControl } from "./execution-control.js";
 import { PublicTextStream } from './public-text-stream.js';
 import { appendProvisionalText, clearProvisionalText } from './provisional-text.js';
 import { nextReadBatch } from './read-batch.js';
+import { CopilotPreferencesRepository } from '../../db/repositories/copilot-preferences-repository.js';
+import type { ResearchInput } from './tools/research.js';
+import { researchReportFits, researchReportReceipt, researchReportSchema } from './tools/research-report.js';
 import { traceRunEvent } from './run-trace.js';
 export interface CopilotOrchestratorDependencies {
     db: import("../../db/types.js").Database;
@@ -189,7 +192,14 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
      * through the registry and short-circuits with a local reply.
      */
     async function resolveSlashCommand(ledger: CopilotRunLedger, c: Claim, input: TurnInput): Promise<{ command: string | null; input: TurnInput }> {
-        if (ledger.get(c.runId)!.steps !== 1) return { command: null, input };
+        if (input.executionMode || ledger.get(c.runId)!.steps !== 1) return { command: null, input };
+        if (input.mode === 'plan') {
+            const slash = parseSlashInput(input.userText);
+            if (slash && (['goal', 'merge', 'answer', 'stop'].includes(slash.name) ||
+                (slash.name === 'model' && slash.args && slash.args.toLowerCase() !== 'list'))) {
+                return { command: 'This command changes state. Switch to Execute Mode to use it.', input };
+            }
+        }
         const listPlaybooks = () => {
             const availableToolNames = allVisibleTools(input).map(tool => tool.name);
             if (!availableToolNames.includes("list_playbooks")) return [];
@@ -263,11 +273,13 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 }
             }
             ledger.validateScope(input);
-            const pending = nextReadBatch(ledger.steps(c.runId), deps.toolRegistry);
-            if (pending.length) {
-                const results = await Promise.allSettled(pending.map(step => toolStep(ledger, c, step, input, live)));
+            const batch = nextReadBatch(ledger.steps(c.runId), deps.toolRegistry);
+            if (batch) {
+                const results = await Promise.allSettled(batch.steps.map(step => toolStep(ledger, c, step, input, live)));
                 const failed = results.find(result => result.status === 'rejected');
                 if (failed?.status === 'rejected') throw failed.reason;
+                // enter_plan_mode persists the effective mode in the run facts; the next step must see it.
+                input = loadRunFacts(deps.db, ledger.userId, c.runId)?.input ?? input;
                 continue;
             }
             if (!input.goalId && hasNoProgress(ledger.steps(c.runId))) {
@@ -320,7 +332,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 // Volatile per-call context goes after the transcript: it changes
                 // between model calls and must not invalidate the cached prefix.
                 const suffixMessages: import("./orchestrator-types.js").AgentLlmMessage[] = [];
-                if (input.executionMode && input.executionMode !== 'coding') prefixMessages.push({ role: 'user', content: 'This is a bounded read-only investigation. Inspect evidence, cite paths and IDs, and report uncertainty. Never claim tests passed from a CLI completion notice. Do not perform writes or delegate.' });
+                if (input.executionMode === 'research') prefixMessages.push({ role: 'user', content:
+                    'This is a bounded read-only investigation. Inspect evidence, cite paths and IDs, and report uncertainty. Never claim tests passed from a CLI completion notice. Do not perform writes or delegate. '
+                    + 'Finish the investigation by calling submit_research_report with concise findings, supporting file evidence and open questions. Then end the turn.' });
                 if (input.executionMode === 'coding') prefixMessages.push({ role: 'user', content:
                     'This is a delegated coding sub-run. Edit files ONLY through the goal sandbox tools (goal_file_write, goal_file_edit, goal_run_checks); the real project is untouched until the owner merges. '
                     + 'Update only the delegated task. Keep changes minimal and focused on the instructions. '
@@ -328,6 +342,15 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 if (input.goalId) {
                     const goalMessage = scopeContextMessage(deps.db, input.userId, input.goalId);
                     if (goalMessage) suffixMessages.push({ role: 'user', content: goalMessage });
+                }
+                if (input.mode === 'plan') {
+                    suffixMessages.push({ role: 'user', content:
+                        'Active mode: PLAN MODE (read-only exploration and planning). '
+                        + '1) Inspect relevant project files, the code graph, git status, or the current project plan (pm_get_plan) using read-only tools first. '
+                        + '2) Do not modify files, run terminal commands, or mutate board tasks directly. '
+                        + '3) If critical requirements are ambiguous, ask the user concise clarifying questions. '
+                        + '4) Once the strategy is clear, call submit_plan with a concise title, summary, constraints, acceptanceCriteria, and an ordered todos checklist. '
+                        + 'Include verifyCommand where applicable, then briefly explain the architecture and trade-offs.' });
                 }
                 if (input.projectId) {
                     const project = new ProjectRepository(deps.db, input.userId).getById(input.projectId);
@@ -447,7 +470,9 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         if (!tool)
             rejection = `Unknown tool: ${step.tool_name}`;
         else if (surface.excluded(tool.name, 'restricted-mode')) {
-            rejection = 'Read-only project task cannot execute this tool';
+            rejection = tool.name === 'submit_plan' && input.mode !== 'plan' ? 'submit_plan requires Plan Mode'
+                : MODE_TOOLS.has(tool.name) ? `${tool.name} is not available in this run`
+                : input.mode === 'plan' ? 'Plan Mode cannot execute this tool' : 'Read-only project task cannot execute this tool';
             rejectionLayer = 'restricted-mode';
         } else if (surface.unavailableReason(tool.name)) {
             rejection = `Tool unavailable: ${surface.unavailableReason(tool.name)}`;
@@ -471,7 +496,7 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         else if (action?.status === "rejected")
             rejection = "Action rejected by owner";
         const availableToolSchemas = surface.visible;
-        const context: AgentToolContext = { signal: control.active.get(c.runId)?.controller.signal, executionMode: input.executionMode, runResearch: (research: { projectId: string; goal: string }) => runResearch(ledger, c, step, research), runCodingDelegate: (delegate: { goalId: string; projectId: string; taskId: string; instructions: string }) => runCodingDelegate(ledger, c, step, delegate), source: input.source ?? "user", runId: c.runId, stepId: step.id, externalActionId: action?.id, checkExecutionAuthority: live, userId: input.userId, db: deps.db, masterKey: deps.masterKey, conversationId: input.conversationId,
+        const context: AgentToolContext = { signal: control.active.get(c.runId)?.controller.signal, executionMode: input.executionMode, runResearch: (research: { projectId: string; goal: string }) => runResearch(ledger, c, step, research), runCodingDelegate: (delegate: { goalId: string; projectId: string; taskId: string; instructions: string }) => runCodingDelegate(ledger, c, step, delegate), source: input.source ?? "user", runId: c.runId, stepId: step.id, mode: input.mode ?? 'execute', externalActionId: action?.id, checkExecutionAuthority: live, userId: input.userId, db: deps.db, masterKey: deps.masterKey, conversationId: input.conversationId,
             availableToolNames: availableToolSchemas.map(tool => tool.name), availableToolSchemas,
             ...(input.projectId ? { projectId: input.projectId } : {}), ...(input.delegateTaskId ? { delegateTaskId: input.delegateTaskId } : {}), ...(deps.sessionManager ? { sessionManager: deps.sessionManager } : {}), ...(deps.adapterCommandRunner ? { adapterCommandRunner: deps.adapterCommandRunner } : {}), ...(deps.eventBus ? { eventBus: deps.eventBus } : {}) };
         let policyReason: string | null = null;
@@ -541,7 +566,8 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
         const content=platformReceipt?projectActionReceipt(platformReceipt):result.ok?JSON.stringify(redactAgentValue(result.output)):`Tool error: ${result.error??"unknown"}`;
         const intent=platformActions?.intents.get(context.platformIntentId as string);
         const unknownEffect=platformReceipt?platformReceipt.outcome==="unknown":!result.ok&&step.effect==="write"&&(!intent||["executing","indeterminate"].includes(intent.status));
-        ledger.receipt(c,step,content,unknownEffect, result.artifactContent && !platformReceipt ? preview => {
+        const switchesToPlan = tool!.name === 'enter_plan_mode' && result.ok && !platformReceipt;
+        const storeArtifact = result.artifactContent && !platformReceipt ? (preview: string) => {
             try {
                 if (!live()) return preview;
                 const artifact = new CopilotToolArtifactRepository(deps.db, input.userId, deps.masterKey).store({
@@ -549,12 +575,18 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 }, result.artifactContent!);
                 return JSON.stringify({ ...JSON.parse(preview), artifact });
             } catch { return preview; } // Optional storage failure must never replay a completed operation.
-        } : undefined);
+        } : undefined;
+        // The mode switch commits atomically with the tool receipt (owned runs only).
+        ledger.receipt(c, step, content, unknownEffect, switchesToPlan ? preview => {
+            ledger.enterPlanMode(c.runId);
+            traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'mode_changed', { mode: 'plan', toolName: tool!.name }, step.id);
+            return preview;
+        } : storeArtifact);
         traceRunEvent(deps.db, input.userId, c.runId, c.fence, 'step_completed', { kind: 'tool', toolName: step.tool_name! }, step.id);
         if (live())
             emit(ledger, c.runId, { toolName: step.tool_name!, message: result.ok ? "ok" : "error" });
     }
-    async function runResearch(ledger: CopilotRunLedger, claim: Claim, step: RunStep, research: { projectId: string; goal: string }) {
+    async function runResearch(ledger: CopilotRunLedger, claim: Claim, step: RunStep, research: ResearchInput) {
         const key = `research:${claim.runId}:${step.id}`;
         const childId = deps.db.transaction(() => {
             if (!ledger.owns(claim)) throw new Error('Research parent no longer active');
@@ -562,31 +594,54 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 .get(ledger.userId, key) as { child_run_id: string } | undefined;
             if (existing) return existing.child_run_id;
             const origin = JSON.parse(ledger.get(claim.runId)!.input_json) as TurnInput;
+            const modelId = new CopilotPreferencesRepository(deps.db, ledger.userId, deps.masterKey).roleModel('subagent') ?? origin.modelId;
+            const userText = [research.goal];
+            if (research.questions?.length) userText.push('Questions:\n' + research.questions.map(question => `- ${question}`).join('\n'));
+            if (research.boundaries) userText.push('Boundaries:\n' + research.boundaries);
             const conversation = ledger.log.createConversation('项目只读研究');
-            const child = ledger.admit({ userId: ledger.userId, conversationId: conversation.id, userText: research.goal,
-                projectId: research.projectId, executionMode: 'research', parentRunId: claim.runId, ...(origin.modelId ? { modelId: origin.modelId } : {}) }, 6);
+            const child = ledger.admit({ userId: ledger.userId, conversationId: conversation.id, userText: userText.join('\n\n'),
+                projectId: research.projectId, executionMode: 'research', parentRunId: claim.runId, ...(modelId ? { modelId } : {}) }, 14);
             deps.db.prepare('INSERT INTO copilot_research_jobs(id,user_id,origin_run_id,source_key,conversation_id,child_run_id,created_at) VALUES(?,?,?,?,?,?,?)')
                 .run(randomUUID(), ledger.userId, claim.runId, key, conversation.id, child, Date.now());
             return child;
         }).immediate();
         const parentSignal = control.active.get(claim.runId)?.controller.signal;
-        const abortChild = () => control.active.get(childId)?.controller.abort(parentSignal?.reason);
+        const abortChild = () => {
+            control.active.get(childId)?.controller.abort(parentSignal?.reason);
+            if (deps.db.open && !control.stopped) ledger.cancel(childId, 'research_parent_lost');
+        };
         parentSignal?.addEventListener('abort', abortChild, { once: true });
         try {
-            const execution = executeRun(ledger.userId, childId);
-            if (parentSignal?.aborted) abortChild();
-            await execution;
-            while (['pending', 'running', 'awaiting_approval'].includes(ledger.get(childId)?.status ?? '')) {
+            let child = ledger.get(childId);
+            while (child && ACTIVE_RUN_STATES.includes(child.status)) {
                 parentSignal?.throwIfAborted();
                 if (control.stopped || !ledger.owns(claim)) throw new Error('Research parent lost execution authority');
                 ledger.validateScope(JSON.parse(ledger.get(claim.runId)!.input_json) as TurnInput);
-                await delay(200, undefined, { signal: parentSignal });
                 await executeRun(ledger.userId, childId);
+                child = ledger.get(childId);
+                if (child && ACTIVE_RUN_STATES.includes(child.status))
+                    await delay(200, undefined, { signal: parentSignal });
             }
+            parentSignal?.throwIfAborted();
+            if (control.stopped || !ledger.owns(claim)) throw new Error('Research parent lost execution authority');
+            ledger.validateScope(JSON.parse(ledger.get(claim.runId)!.input_json) as TurnInput);
+            if (!child) throw new Error('Research child no longer exists');
+            const receipt = JSON.stringify(researchReportReceipt);
+            const submission = ledger.steps(childId).filter(row => row.kind === 'tool' && row.tool_name === 'submit_research_report'
+                && row.status === 'completed' && row.result_json === receipt).at(-1);
+            const report = submission?.input_json ? researchReportSchema.safeParse(parse(submission.input_json)).data : undefined;
+            const text = ledger.log.listMessages(child.conversation_id).filter(row => row.role === 'assistant' && row.kind === 'text').at(-1)?.content;
+            const result = { runId: childId, status: child.status, report: report && researchReportFits(report) ? report : null,
+                text: text ?? 'Research has no final report yet.',
+                evidence: 'Read-only analysis; not owner acceptance or independent test execution.' };
+            // Keep the structured report intact. Shorten the fallback only when both exceed the tool output budget.
+            if (Buffer.byteLength(JSON.stringify(redactAgentValue(result))) > MAX_TOOL_OUTPUT_BYTES)
+                result.text = result.text.slice(0, 1200) + '…';
+            return result;
+        } catch (error) {
+            abortChild();
+            throw error;
         } finally { parentSignal?.removeEventListener('abort', abortChild); }
-        const child = ledger.get(childId);
-        const report = child ? ledger.log.listMessages(child.conversation_id).filter(row => row.role === 'assistant' && row.kind === 'text').at(-1)?.content : undefined;
-        return { runId: childId, status: child?.status, report: report ?? 'Research has no final report yet.', evidence: 'Read-only analysis; not owner acceptance or independent test execution.' };
     }
     /**
      * Coding delegate sub-run: a write-capable child (executionMode 'coding')
@@ -604,10 +659,11 @@ export function createCopilotOrchestrator(deps: CopilotOrchestratorDependencies)
                 .get(ledger.userId, key) as { child_run_id: string } | undefined;
             if (existing) return existing.child_run_id;
             const origin = JSON.parse(ledger.get(claim.runId)!.input_json) as TurnInput;
+            const modelId = new CopilotPreferencesRepository(deps.db, ledger.userId, deps.masterKey).roleModel('subagent') ?? origin.modelId;
             const conversation = ledger.log.createConversation(`Goal coding: ${delegate.taskId.slice(0, 24)}`);
             const child = ledger.admit({ userId: ledger.userId, conversationId: conversation.id, userText: delegate.instructions,
                 projectId: delegate.projectId, executionMode: 'coding', parentRunId: claim.runId, delegateTaskId: delegate.taskId,
-                ...(origin.modelId ? { modelId: origin.modelId } : {}) }, 24);
+                ...(modelId ? { modelId } : {}) }, 24);
             deps.db.prepare('UPDATE copilot_runs SET goal_id=? WHERE user_id=? AND id=?')
                 .run(delegate.goalId, ledger.userId, child);
             deps.db.prepare('INSERT INTO copilot_research_jobs(id,user_id,origin_run_id,source_key,conversation_id,child_run_id,created_at) VALUES(?,?,?,?,?,?,?)')
